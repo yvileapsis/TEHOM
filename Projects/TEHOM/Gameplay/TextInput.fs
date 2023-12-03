@@ -197,6 +197,7 @@ module TextInputFacetModule =
             define Entity.Focused false
             define Entity.ShiftHeld false
             define Entity.Caret 0
+            // TODO: allow for repeated key events after a short delay
             define Entity.RepeatDelay 500
         ]
 
