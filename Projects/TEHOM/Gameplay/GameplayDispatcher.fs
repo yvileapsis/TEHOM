@@ -14,7 +14,7 @@ module GameplayDispatcher =
     type GameplayMessage =
         | Update
         | SetDisplayedString of string
-        | SetDisplayedStringToEntityDescription of ActorID
+        | SetDisplayedStringToActorDescription of ActorID
         | StartQuitting
         | FinishQuitting
         interface Message
@@ -34,9 +34,6 @@ module GameplayDispatcher =
         override this.Initialize (_, _) = [
             Screen.UpdateEvent => Update
             Screen.DeselectingEvent => FinishQuitting
-
-            // no idea where to put debug test stuff, TODO: remove
-            Screen.RenderEvent => SetDisplayedStringToEntityDescription (ActorID.ID "player")
         ]
 
         // here we handle the above messages
@@ -46,7 +43,7 @@ module GameplayDispatcher =
                 just { gameplay with Time = inc gameplay.Time }
             | SetDisplayedString str ->
                 just { gameplay with Display = str}
-            | SetDisplayedStringToEntityDescription actorID ->
+            | SetDisplayedStringToActorDescription actorID ->
                 let description =
                     match Map.tryFind actorID gameplay.Actors with
                     | Some actor -> actor.getDescription
@@ -75,6 +72,16 @@ module GameplayDispatcher =
                     Entity.Elevation == 10.0f
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Text := gameplay.Display
+                ]
+
+                TextInput.textInput Simulants.GameplayTextInputBox.Name [
+                    Entity.Position == v3 0.0f -100.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    Entity.Text == "Enter your string"
+                    Entity.TextInputChangedEvent =|> fun evt ->
+                        let actorID = ActorID.ID (evt.Data)
+                        SetDisplayedStringToActorDescription actorID
                 ]
 
                 // quit
