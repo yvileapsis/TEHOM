@@ -8,91 +8,14 @@ open Nu
 [<AutoOpen>]
 module TextInputFacetModule =
 
-    // TODO: there got to be a better way
-    let getCharForKeyboardKey key shift =
-        let case char char' = if shift then char' else char
-
-        match key with
-        | KeyboardKey.A -> case 'a' 'A'
-        | KeyboardKey.B -> case 'b' 'B'
-        | KeyboardKey.C -> case 'c' 'C'
-        | KeyboardKey.D -> case 'd' 'D'
-        | KeyboardKey.E -> case 'e' 'E'
-        | KeyboardKey.F -> case 'f' 'F'
-        | KeyboardKey.G -> case 'g' 'G'
-        | KeyboardKey.H -> case 'h' 'H'
-        | KeyboardKey.J -> case 'j' 'J'
-        | KeyboardKey.I -> case 'i' 'I'
-        | KeyboardKey.K -> case 'k' 'K'
-        | KeyboardKey.L -> case 'l' 'L'
-        | KeyboardKey.M -> case 'm' 'M'
-        | KeyboardKey.N -> case 'n' 'N'
-        | KeyboardKey.O -> case 'o' 'O'
-        | KeyboardKey.P -> case 'p' 'P'
-        | KeyboardKey.Q -> case 'q' 'Q'
-        | KeyboardKey.R -> case 'r' 'R'
-        | KeyboardKey.S -> case 's' 'S'
-        | KeyboardKey.T -> case 't' 'T'
-        | KeyboardKey.U -> case 'u' 'U'
-        | KeyboardKey.V -> case 'v' 'V'
-        | KeyboardKey.W -> case 'w' 'W'
-        | KeyboardKey.X -> case 'x' 'X'
-        | KeyboardKey.Y -> case 'y' 'Y'
-        | KeyboardKey.Z -> case 'z' 'Z'
-
-        | KeyboardKey.Num1 | KeyboardKey.Kp1 -> case '1' '!'
-        | KeyboardKey.Num2 | KeyboardKey.Kp2 -> case '2' '@'
-        | KeyboardKey.Num3 | KeyboardKey.Kp3 -> case '3' '#'
-        | KeyboardKey.Num4 | KeyboardKey.Kp4 -> case '4' '$'
-        | KeyboardKey.Num5 | KeyboardKey.Kp5 -> case '5' '%'
-        | KeyboardKey.Num6 | KeyboardKey.Kp6 -> case '6' '^'
-        | KeyboardKey.Num7 | KeyboardKey.Kp7 -> case '7' '&'
-        | KeyboardKey.Num8 | KeyboardKey.Kp8 -> case '8' '*'
-        | KeyboardKey.Num9 | KeyboardKey.Kp9 -> case '9' '('
-        | KeyboardKey.Num0 | KeyboardKey.Kp0 -> case '0' ')'
-
-        | KeyboardKey.Tab -> '\t'
-        | KeyboardKey.Space -> ' '
-
-        | KeyboardKey.Minus -> case '-' '_'
-        | KeyboardKey.Equals | KeyboardKey.KpEquals -> case '=' '+'
-        | KeyboardKey.Leftbracket -> case '[' '{'
-        | KeyboardKey.Rightbracket -> case ']' '}'
-        | KeyboardKey.Backslash -> case '\\' '|'
-
-//        | KeyboardKey.Nonushash ->
-
-        | KeyboardKey.Semicolon -> ';'
-        | KeyboardKey.Apostrophe -> '''
-        | KeyboardKey.Grave -> case '`' '~'
-        | KeyboardKey.Comma -> case ',' '<'
-        | KeyboardKey.Period | KeyboardKey.KpPeriod -> case '.' '>'
-        | KeyboardKey.Slash -> case '/' '?'
-
-        | KeyboardKey.KpMultiply -> '*'
-        | KeyboardKey.KpMinus -> '-'
-        | KeyboardKey.KpPlus -> '+'
-        | KeyboardKey.KpDivide -> '/'
-
-        | _ -> Char.MinValue
-
-
     type Entity with
         member this.GetFocused world : bool = this.Get (nameof this.Focused) world
         member this.SetFocused (value : bool) world = this.Set (nameof this.Focused) value world
         member this.Focused = lens (nameof this.Focused) this this.GetFocused this.SetFocused
 
-        member this.GetShiftHeld world : bool = this.Get (nameof this.ShiftHeld) world
-        member this.SetShiftHeld (value : bool) world = this.Set (nameof this.ShiftHeld) value world
-        member this.ShiftHeld = lens (nameof this.ShiftHeld) this this.GetShiftHeld this.SetShiftHeld
-
         member this.GetCaret world : int = this.Get (nameof this.Caret) world
         member this.SetCaret (value : int) world = this.Set (nameof this.Caret) value world
         member this.Caret = lens (nameof this.Caret) this this.GetCaret this.SetCaret
-
-        member this.GetRepeatDelay world : int = this.Get (nameof this.RepeatDelay) world
-        member this.SetRepeatDelay (value : int) world = this.Set (nameof this.Caret) value world
-        member this.RepeatDelay = lens (nameof this.RepeatDelay) this this.GetRepeatDelay this.SetRepeatDelay
 
         member this.TextInputChangedEvent = stoa<string> "Changed/Event" --> this
 
@@ -118,7 +41,7 @@ module TextInputFacetModule =
         static let handleKeyboardKeyDown evt world =
             let entity = evt.Subscriber : Entity
 
-            if not evt.Data.Repeated && entity.GetFocused world then
+            if entity.GetFocused world then
 
                 let publishEvent world =
                     let text = entity.GetText world
@@ -136,20 +59,6 @@ module TextInputFacetModule =
                     let caret = if caret > length then length else caret
 
                     let world = entity.SetCaret caret world
-                    world
-
-                let addKeyToInput world =
-                    let caret = entity.GetCaret world
-
-                    let addCharToString char (string: String) =
-                        String (Array.insertAt caret char (Array.ofSeq string))
-
-                    let shift = entity.GetShiftHeld world
-                    let key = getCharForKeyboardKey evt.Data.KeyboardKey shift
-                    let text = addCharToString key (entity.GetText world)
-
-                    let world = entity.SetText text world
-                    let world = moveCaret false world
                     world
 
                 let removeKeyFromInput backspace world =
@@ -170,43 +79,66 @@ module TextInputFacetModule =
                     world
 
                 match evt.Data.KeyboardKey with
-                | KeyboardKey.Lshift -> Cascade, entity.SetShiftHeld true world
                 | KeyboardKey.Backspace -> Resolve, publishEvent (removeKeyFromInput true world)
                 | KeyboardKey.Delete -> Resolve, publishEvent (removeKeyFromInput false world)
                 | KeyboardKey.Left -> Resolve, moveCaret true world
                 | KeyboardKey.Right -> Resolve, moveCaret false world
-                | x ->
-                    // TODO: there got to be a better way
-                    if x < KeyboardKey.KpDivide then
-                        let world = addKeyToInput world
-
-                        Resolve, publishEvent world
-                    else
-                        Resolve, world
+                | _ -> Resolve, world
             else
                 Resolve, world
 
-        static let handleKeyboardKeyUp evt world =
+        static let handleTextInput evt world =
             let entity = evt.Subscriber : Entity
 
-            match evt.Data.KeyboardKey with
-            | KeyboardKey.Lshift -> Cascade, entity.SetShiftHeld false world
-            | _ -> Cascade, world
+            if entity.GetFocused world then
+                let publishEvent world =
+                    let text = entity.GetText world
+                    let eventTrace = EventTrace.debug "TextInputFacet" "handleKeyboardKeyDown" "TextInput" EventTrace.empty
+                    let world = World.publishPlus text entity.TextInputChangedEvent eventTrace entity true false world
+                    world
+
+                let moveCaret left world =
+                    let text = entity.GetText world
+                    let length = String.length text
+                    let caret = entity.GetCaret world
+
+                    let caret = caret + (if left then -1 else 1)
+                    let caret = if caret < 0 then 0 else caret
+                    let caret = if caret > length then length else caret
+
+                    let world = entity.SetCaret caret world
+                    world
+
+                let rec addKeyToInput world =
+                    let caret = entity.GetCaret world
+
+                    let addCharToString char (string: String) =
+                        String (Array.insertAt caret char (Array.ofSeq string))
+
+                    let text = addCharToString evt.Data.TextInput (entity.GetText world)
+
+                    let world = entity.SetText text world
+                    let world = moveCaret false world
+                    world
+
+                let world = addKeyToInput world
+
+                Resolve, publishEvent world
+            else
+                Cascade, world
 
         static member Properties = [
             define Entity.Focused false
-            define Entity.ShiftHeld false
             define Entity.Caret 0
             // TODO: allow for repeated key events after a short delay
-            define Entity.RepeatDelay 500
         ]
 
         override this.Register (entity, world) =
             world
             |> World.sense handleMouseLeftDown Nu.Game.Handle.MouseLeftDownEvent entity (nameof TextInputFacet)
             |> World.sense handleMouseLeftUp Nu.Game.Handle.MouseLeftUpEvent entity (nameof TextInputFacet)
+            |> World.sense handleTextInput Nu.Game.Handle.TextInputEvent entity (nameof TextInputFacet)
             |> World.sense handleKeyboardKeyDown Nu.Game.Handle.KeyboardKeyDownEvent entity (nameof TextInputFacet)
-            |> World.sense handleKeyboardKeyUp Nu.Game.Handle.KeyboardKeyUpEvent entity (nameof TextInputFacet)
 
         override this.Render (entity, world) =
 
