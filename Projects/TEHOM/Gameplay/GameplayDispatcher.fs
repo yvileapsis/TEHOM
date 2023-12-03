@@ -1,4 +1,4 @@
-﻿namespace Tehom
+namespace Tehom
 
 open System
 open Prime
@@ -8,39 +8,13 @@ open Actor
 open Trait
 
 [<AutoOpen>]
-module Gameplay =
-
-    // this represents that state of the simulation during gameplay.
-    type GameplayState =
-        | Playing
-        | Quitting
-        | Quit
-
-    // this is our MMCC model type representing gameplay.
-    // this model representation uses update time, that is, time based on number of engine updates.
-    // if you wish to use clock time instead (https://github.com/bryanedds/Nu/wiki/GameTime-and-its-Polymorphic-Nature),
-    // you could use `Time : single` instead.
-    type Gameplay = {
-        Time : int64
-        State : GameplayState
-
-        // I would like for this model to be possible to save/load and also move between screens
-        Model : Model.Model
-
-        Display : string
-    } with
-        static member makeDefault = {
-            Time = 0
-            State = Playing
-            Model = YamlReader.FillModelWithYaml Model.Model.makeDefault
-            Display = "Hello world!"
-        }
+module GameplayDispatcher =
 
     // this is our MMCC message type.
     type GameplayMessage =
         | Update
         | SetDisplayedString of string
-        | SetDisplayedStringToEntityDescription of EntityID
+        | SetDisplayedStringToEntityDescription of ActorID
         | StartQuitting
         | FinishQuitting
         interface Message
@@ -54,7 +28,7 @@ module Gameplay =
     // this is the screen dispatcher that defines the screen where gameplay takes place. Note that we just use the
     // empty Command type because there are no commands needed for this template.
     type GameplayDispatcher () =
-        inherit ScreenDispatcher<Gameplay, GameplayMessage, Command> ({ Gameplay.makeDefault with State = Quitting })
+        inherit ScreenDispatcher<Gameplay, GameplayMessage, Command> ({ Gameplay.makeDefault.serializeYaml with State = Quitting })
 
         // here we define the screen's properties and event handling
         override this.Initialize (_, _) = [
@@ -62,7 +36,7 @@ module Gameplay =
             Screen.DeselectingEvent => FinishQuitting
 
             // no idea where to put debug test stuff, TODO: remove
-            Screen.RenderEvent => SetDisplayedStringToEntityDescription (EntityID.ID "player")
+            Screen.RenderEvent => SetDisplayedStringToEntityDescription (ActorID.ID "player")
         ]
 
         // here we handle the above messages
@@ -72,14 +46,12 @@ module Gameplay =
                 just { gameplay with Time = inc gameplay.Time }
             | SetDisplayedString str ->
                 just { gameplay with Display = str}
-            | SetDisplayedStringToEntityDescription entityID ->
+            | SetDisplayedStringToEntityDescription actorID ->
                 let description =
-                    match Map.tryFind entityID gameplay.Model.Description with
-                    | Some description ->
-                        match description.Description with
-                        | String x -> x
-                        | _ -> "did not find player description"
-                    | _ -> "did not find player, weird!"
+                    match Map.tryFind actorID gameplay.Actors with
+                    | Some actor -> actor.getDescription
+                    | _ -> $"did not find %A{actorID}, weird!"
+
                 just { gameplay with Display = description }
             | StartQuitting ->
                 just { gameplay with State = Quitting }
@@ -119,3 +91,5 @@ module Gameplay =
             | Playing | Quitting ->
                 Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] []
             | Quit -> ()]
+
+type GameplayDispatcher = GameplayDispatcher.GameplayDispatcher

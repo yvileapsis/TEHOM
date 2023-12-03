@@ -14,5 +14,5 @@ type MyGamePlugin () =
             "Splash", Game.SetModel Splash
             "Title", Game.SetModel Title
             "Credits", Game.SetModel Credits
-            "Gameplay", Game.SetModel (Gameplay Gameplay.makeDefault)
+            "Gameplay", Game.SetModel (Gameplay Gameplay.makeDefault.serializeYaml)
         ]

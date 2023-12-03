@@ -1,0 +1,22 @@
+actors:
+  - guid: table
+    name: Table McTableface
+    description: A normal wooden table for testing non-alive entities.
+    composed:
+      - tableTop
+      - tableLeg1
+      - tableLeg2
+      - tableLeg3
+      - tableLeg4
+    composedType: 100
+
+  - guid: table
+    name: Table McTableface
+    description: A normal wooden table for testing non-alive entities.
+    composed:
+      - tableTop
+      - tableLeg1
+      - tableLeg2
+      - tableLeg3
+      - tableLeg4
+    composedType: 100

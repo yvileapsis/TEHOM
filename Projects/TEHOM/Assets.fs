@@ -14,8 +14,8 @@ module Assets =
     module Gui =
 
         let PackageName = "Gui"
-        let TitleGroupFilePath = "Assets/Gui/Title.nugroup"
-        let CreditsGroupFilePath = "Assets/Gui/Credits.nugroup"
+        let TitleGroupFilePath = "Assets\\Gui\\Title.nugroup"
+        let CreditsGroupFilePath = "Assets\\Gui\\Credits.nugroup"
 
     // these are assets from the Gameplay package.
     [<RequireQualifiedAccess>]
@@ -25,7 +25,11 @@ module Assets =
  
     // these are assets from the Entities package.
     [<RequireQualifiedAccess>]
-    module Entities = 
-        
-        let PackageName = "Entities"
-        let EntitiesDefault = "Assets/Entities/default.yaml"
+    module Actors = 
+
+        let PackageName = "Actors"
+        let ActorsDefault = "Assets\\Actors\\default.yaml"
+
+        let ActorsContent = "Assets\\Actors\\content.yaml"
+
+        let Directory = __SOURCE_DIRECTORY__
