@@ -4,7 +4,7 @@ open System
 open Prime
 open Nu
 
-open Entity
+open Actor
 open Trait
 
 [<AutoOpen>]

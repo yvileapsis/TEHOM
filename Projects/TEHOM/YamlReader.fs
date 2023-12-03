@@ -1,7 +1,7 @@
 ﻿namespace Tehom
 
 open FSharp.Configuration
-open Entity
+open Actor
 open Trait
 
 module YamlReader =

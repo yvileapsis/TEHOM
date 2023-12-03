@@ -30,10 +30,10 @@ module GUI =
         | Stats
         | OtherElements
 
-module Entity =
+module Actor =
 
-    // The only way I can think of tying the entities together without fully including them.
-    type EntityID =
+    // The only way I can think of tying the actors together without fully including them.
+    type ActorID =
         | ID of string
         | GUID of Guid
 
@@ -81,7 +81,7 @@ module Ability =
         | IsWeapon
 
 module Trait =
-    open Entity
+    open Actor
 
     // Some string describing the object, whether defined as is, or to be generated on demand based on entity context.
     type Description =
@@ -132,7 +132,7 @@ module Trait =
     // Point of this list is so that we can get slices of this composition based on children traits,
     // i.e. if we apply filter of HasAbility CanMove _ we can get creature's entire locomotion system.
     type CompositionTrait = {
-        Objects: EntityID list
+        Objects: ActorID list
 
         // So at to define ability of parent entity to control its child entities, 
         // I want to define cohesion of the entity agglomeration
@@ -168,21 +168,21 @@ module Trait =
     // Not used as every trait is its own map in the model.
 
 module Model =
-    open Entity
+    open Actor
     open Trait
 
     type Model = {
         // not sure I even need this
-        Entities: EntityID list
+        Entities: ActorID list
 
-        ComposedOf: Map<EntityID, CompositionTrait>
-        AttachedTo: List<Set<EntityID> * Attached>
+        ComposedOf: Map<ActorID, CompositionTrait>
+        AttachedTo: List<Set<ActorID> * Attached>
 
-        Description: Map<EntityID, DescriptionTrait>
-        Volume: Map<EntityID, VolumeTrait>
-        Mass: Map<EntityID, MassTrait>
-        Health: Map<EntityID, HealthTrait>
-        Abilities: Map<EntityID, AbilitiesTrait>
+        Description: Map<ActorID, DescriptionTrait>
+        Volume: Map<ActorID, VolumeTrait>
+        Mass: Map<ActorID, MassTrait>
+        Health: Map<ActorID, HealthTrait>
+        Abilities: Map<ActorID, AbilitiesTrait>
 
     } with
 
