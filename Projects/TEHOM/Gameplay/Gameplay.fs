@@ -8,7 +8,7 @@ open Actor
 open Trait
 open FSharp.Configuration
 
-type ActorsData = YamlConfig<"Assets\\Actors\\default.yaml">
+type ActorsData = YamlConfig<"Assets/Actors/default.yaml">
 
 [<AutoOpen>]
 module Gameplay =
