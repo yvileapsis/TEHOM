@@ -52,7 +52,6 @@ module Texture =
         OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMagFilter, int magFilter)
         OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureWrapS, int TextureWrapMode.Repeat)
         OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureWrapT, int TextureWrapMode.Repeat)
-        Hl.Assert ()
         if generateMipmaps then Gl.GenerateMipmap TextureTarget.Texture2d
         texture
 
@@ -64,27 +63,20 @@ module Texture =
     let CreateTextureUnfiltered (internalFormat, width, height, pixelFormat, pixelType, textureData) =
         CreateTexture (internalFormat, width, height, pixelFormat, pixelType, TextureMinFilter.Nearest, TextureMagFilter.Nearest, false, textureData)
 
-    let private CreateTextureFromDataInternal (internalFormat, generateMipmaps, metadata, textureData) =
+    /// Create a texture from existing texture data.
+    let CreateTextureFromData (internalFormat, minFilter, magFilter, generateMipmaps, metadata, textureData) =
 
-        // upload the texture data to gl
+        // update the texture data to gl, creating mip maps if desired
         let texture = Gl.GenTexture ()
         Gl.BindTexture (TextureTarget.Texture2d, texture)
         Gl.TexImage2D (TextureTarget.Texture2d, 0, internalFormat, metadata.TextureWidth, metadata.TextureHeight, 0, PixelFormat.Bgra, PixelType.UnsignedByte, textureData)
-        if generateMipmaps then Gl.GenerateMipmap TextureTarget.Texture2d
-        Hl.Assert ()
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        texture
-
-    /// Create a texture from existing texture data.
-    let CreateTextureFromData (internalFormat, minFilter, magFilter, generateMipmaps, metadata, textureData) =
-        let texture = CreateTextureFromDataInternal (internalFormat, generateMipmaps, metadata, textureData)
-        Gl.BindTexture (TextureTarget.Texture2d, texture)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMinFilter, int minFilter)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMagFilter, int magFilter)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureWrapS, int TextureWrapMode.Repeat)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureWrapT, int TextureWrapMode.Repeat)
-        Gl.TexParameter (TextureTarget.Texture2d, LanguagePrimitives.EnumOfValue Gl.TEXTURE_MAX_ANISOTROPY, Constants.Render.TextureAnisotropyMax) // NOTE: tho an extension, this one's considered ubiquitous.
-        if generateMipmaps then Gl.GenerateMipmap TextureTarget.Texture2d
+        if generateMipmaps then
+            Gl.TexParameter (TextureTarget.Texture2d, LanguagePrimitives.EnumOfValue Gl.TEXTURE_MAX_ANISOTROPY, Constants.Render.TextureAnisotropyMax) // NOTE: tho an extension, this one's considered ubiquitous.
+            Gl.GenerateMipmap TextureTarget.Texture2d
         texture
 
     /// Create a filtered texture from existing texture data.
@@ -113,7 +105,8 @@ module Texture =
                           TextureTexelHeight = 1.0f / single bitmap.Height
                           TextureInternalFormat = internalFormat
                           TextureGenerateMipmaps = generateMipmaps }
-                    Some (metadata, data.Scan0, { new IDisposable with member this.Dispose () = bitmap.UnlockBits data; bitmap.Dispose () }) // NOTE: calling UnlockBits explicitly since I can't fiture out if Dispose does.
+                    let scan0 = data.Scan0
+                    Some (metadata, scan0, { new IDisposable with member this.Dispose () = bitmap.UnlockBits data; bitmap.Dispose () }) // NOTE: calling UnlockBits explicitly since I can't fiture out if Dispose does.
                 with _ -> None
             else
                 // NOTE: System.Drawing.Bitmap is not, AFAIK, available on non-Windows platforms, so we use a slower path here.
@@ -138,27 +131,29 @@ module Texture =
                 else None
         else None
 
-    let private TryCreateTextureInternal (internalFormat, generateMipmaps, filePath : string) =
-        match TryCreateTextureData (internalFormat, generateMipmaps, filePath) with
-        | Some (metadata, textureData, disposer) ->
-            use _ = disposer
-            let texture = CreateTextureFromDataInternal (internalFormat, generateMipmaps, metadata, textureData)
-            Right (metadata, texture)
-        | None -> Left ("Missing file or unloadable texture data '" + filePath + "'.")
-
     /// Attempt to create a texture from a file.
     let TryCreateTexture (internalFormat, minFilter, magFilter, generateMipmaps, filePath) =
-        match TryCreateTextureInternal (internalFormat, generateMipmaps, filePath) with
-        | Right (metadata, texture) ->
+    
+        // ensure we can create texture data
+        match TryCreateTextureData (internalFormat, generateMipmaps, filePath) with
+        | Some (metadata, textureData, disposer) ->
+
+            // upload the texture data to gl
+            use _ = disposer
+            let texture = Gl.GenTexture ()
             Gl.BindTexture (TextureTarget.Texture2d, texture)
+            Gl.TexImage2D (TextureTarget.Texture2d, 0, internalFormat, metadata.TextureWidth, metadata.TextureHeight, 0, PixelFormat.Bgra, PixelType.UnsignedByte, textureData)
             Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMinFilter, int minFilter)
             Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMagFilter, int magFilter)
             Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureWrapS, int TextureWrapMode.Repeat)
             Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureWrapT, int TextureWrapMode.Repeat)
-            Gl.TexParameter (TextureTarget.Texture2d, LanguagePrimitives.EnumOfValue Gl.TEXTURE_MAX_ANISOTROPY, Constants.Render.TextureAnisotropyMax) // NOTE: tho an extension, this one's considered ubiquitous.
-            if generateMipmaps then Gl.GenerateMipmap TextureTarget.Texture2d
+            if generateMipmaps then
+                Gl.TexParameter (TextureTarget.Texture2d, LanguagePrimitives.EnumOfValue Gl.TEXTURE_MAX_ANISOTROPY, Constants.Render.TextureAnisotropyMax) // NOTE: tho an extension, this one's considered ubiquitous.
+                Gl.GenerateMipmap TextureTarget.Texture2d
             Right (metadata, texture)
-        | Left _ as error -> error
+
+        // error
+        | None -> Left ("Missing file or unloadable texture data '" + filePath + "'.")
 
     /// Attempt to create a filtered texture from a file.
     let TryCreateTextureFiltered (internalFormat, filePath) =

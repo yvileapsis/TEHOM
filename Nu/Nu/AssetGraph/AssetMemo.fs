@@ -31,11 +31,14 @@ module AssetMemo =
                 vsync
                     { let internalFormat =
                         if is2d
-                        then Constants.OpenGl.UncompressedTextureFormat
+                        then Constants.OpenGL.UncompressedTextureFormat
                         else AssetTag.inferInternalFormatFromAssetName textureAsset.AssetTag
                       match OpenGL.Texture.TryCreateTextureData (internalFormat, true, textureAsset.FilePath) with
                       | Some (metadata, textureData, disposable) -> return Right (textureAsset.FilePath, metadata, textureData, disposable)
                       | None -> return Left ("Error creating texture data from '" + textureAsset.FilePath + "'") }]
+
+        // run texture data loading ops
+        let textureDataArray = textureDataLoadOps |> Vsync.Parallel |> Vsync.RunSynchronously
 
         // instantiate assimp scene loading ops
         let assimpSceneLoadOps =
@@ -48,16 +51,26 @@ module AssetMemo =
                           return Left ("Could not load assimp scene from '" + assimpSceneAsset.FilePath + "' due to: " + scstring exn) }]
 
         // run texture data loading ops
-        for textureData in textureDataLoadOps |> Vsync.Parallel |> Vsync.RunSynchronously do
+        for textureData in textureDataArray do
             match textureData with
-            | Right (filePath, metadata, textureData, disposer) ->
-                use _ = disposer
+            | Right (filePath, metadata, textureData, _) ->
                 let texture =
                     if is2d
                     then OpenGL.Texture.CreateTextureFromDataUnfiltered (metadata.TextureInternalFormat, metadata, textureData)
                     else OpenGL.Texture.CreateTextureFromDataFiltered (metadata.TextureInternalFormat, metadata, textureData)
                 textureMemo.Textures.[filePath] <- (metadata, texture)
             | Left error -> Log.info error
+
+        // create texture data dispose ops
+        let textureDataDisposeOps =
+            [for textureData in textureDataArray do
+                vsync
+                    { match textureData with
+                      | Right (_, _, _, disposer) -> disposer.Dispose ()
+                      | Left _ -> () }]
+
+        // run texture data dispose ops
+        textureDataDisposeOps |> Vsync.Parallel |> Vsync.RunSynchronously |> ignore<unit array>
 
         // run assimp scene loading op
         for assimpScene in assimpSceneLoadOps |> Vsync.Parallel |> Vsync.RunSynchronously do

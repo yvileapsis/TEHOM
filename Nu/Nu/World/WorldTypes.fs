@@ -42,11 +42,6 @@ type Callback<'a, 's when 's :> Simulant> = Event<'a, 's> -> World -> Handling *
 /// Represents an unsubscription operation for an event.
 and Unsubscription = World -> World
 
-/// Details additional editing behavior for an simulant's properties.
-and AppendProperties =
-    { Snapshot : World -> World
-      UnfocusProperty : World -> World }
-
 /// Details replacement for editing behavior for a simulant property, allowing the user to indicate that a property was
 /// replaced.
 and [<ReferenceEquality>] ReplaceProperty =
@@ -54,6 +49,11 @@ and [<ReferenceEquality>] ReplaceProperty =
       FocusProperty : World -> World
       IndicateReplaced : World -> World
       PropertyDescriptor : PropertyDescriptor }
+
+/// Details additional editing behavior for an simulant's properties.
+and AppendProperties =
+    { Snapshot : World -> World
+      UnfocusProperty : World -> World }
 
 /// Details the additional editing behavior for a simulant in a viewport.
 and [<ReferenceEquality>] OverlayViewport =
@@ -64,8 +64,8 @@ and [<ReferenceEquality>] OverlayViewport =
 
 /// Specifies an aspect of simulant editing to perform.
 and [<ReferenceEquality>] EditOperation =
-    | AppendProperties of AppendProperties
     | ReplaceProperty of ReplaceProperty
+    | AppendProperties of AppendProperties
     | OverlayViewport of OverlayViewport
 
 /// The data for a change in a simulant.
@@ -328,8 +328,8 @@ and GameDispatcher () =
     default this.PostUpdate (_, world) = world
 
     /// Render a game.
-    abstract Render : Game * World -> World
-    default this.Render (_, world) = world
+    abstract Render : Game * World -> unit
+    default this.Render (_, _) = ()
 
     /// Send a signal to a game.
     abstract Signal : obj * Game * World -> World
@@ -380,8 +380,8 @@ and ScreenDispatcher () =
     default this.PostUpdate (_, world) = world
 
     /// Render a screen.
-    abstract Render : Screen * World -> World
-    default this.Render (_, world) = world
+    abstract Render : Screen * World -> unit
+    default this.Render (_, _) = ()
 
     /// Send a signal to a screen.
     abstract Signal : obj * Screen * World -> World
@@ -432,8 +432,8 @@ and GroupDispatcher () =
     default this.PostUpdate (_, world) = world
 
     /// Render a group.
-    abstract Render : Group * World -> World
-    default this.Render (_, world) = world
+    abstract Render : Group * World -> unit
+    default this.Render (_, _) = ()
 
     /// Send a signal to a group.
     abstract Signal : obj * Group * World -> World
@@ -498,7 +498,6 @@ and EntityDispatcher (is2d, centered, physical) =
          Define? PublishPreUpdates false
          Define? PublishUpdates false
          Define? PublishPostUpdates false
-         Define? PublishRenders false
          Define? Persistent true]
 
     /// Register an entity when adding it to a group.
@@ -526,8 +525,8 @@ and EntityDispatcher (is2d, centered, physical) =
 #endif
 
     /// Render an entity.
-    abstract Render : Entity * World -> World
-    default this.Render (_, world) = world
+    abstract Render : Entity * World -> unit
+    default this.Render (_, _) = ()
 
     /// Apply physics changes from a physics engine to an entity.
     abstract ApplyPhysics : Vector3 * Quaternion * Vector3 * Vector3 * Entity * World -> World
@@ -620,8 +619,8 @@ and Facet (physical) =
 #endif
 
     /// Render a facet.
-    abstract Render : Entity * World -> World
-    default this.Render (_, world) = world
+    abstract Render : Entity * World -> unit
+    default this.Render (_, _) = ()
 
     /// Participate in attempting to pick an entity with a ray.
     abstract RayCast : Ray3 * Entity * World -> single array
@@ -1059,7 +1058,6 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     member this.PublishPreUpdates with get () = this.Transform.PublishPreUpdates and set value = this.Transform.PublishPreUpdates <- value
     member this.PublishUpdates with get () = this.Transform.PublishUpdates and set value = this.Transform.PublishUpdates <- value
     member this.PublishPostUpdates with get () = this.Transform.PublishPostUpdates and set value = this.Transform.PublishPostUpdates <- value
-    member this.PublishRenders with get () = this.Transform.PublishRenders and set value = this.Transform.PublishRenders <- value
     member this.Protected with get () = this.Transform.Protected and internal set value = this.Transform.Protected <- value
     member this.Persistent with get () = this.Transform.Persistent and set value = this.Transform.Persistent <- value
     member this.Mounted with get () = this.Transform.Mounted and set value = this.Transform.Mounted <- value
@@ -1094,15 +1092,6 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
           Order = Core.getTimeStampUnique ()
           Id = id
           Surnames = surnames }
-
-    /// Make a new entity state from an existing one.
-    static member makeFromEntityState surnamesOpt (entityStateOrig : EntityState) =
-        let (id, surnames) = Gen.id64AndSurnamesIf surnamesOpt
-        { entityStateOrig with
-            Xtension = Xtension.makeFromXtension entityStateOrig.Xtension
-            Order = Core.getTimeStampUnique ()
-            Id = id
-            Surnames = surnames }
 
     /// Copy an entity state.
     /// This is used when we want to retain an old version of an entity state in face of mutation.

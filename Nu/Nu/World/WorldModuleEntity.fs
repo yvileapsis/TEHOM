@@ -20,10 +20,6 @@ module WorldModuleEntity =
     let internal EntityGetters = Dictionary<string, PropertyGetter> StringComparer.Ordinal
     let internal EntitySetters = Dictionary<string, PropertySetter> StringComparer.Ordinal
 
-    /// Mutable clipboard that allows its state to persist beyond undo / redo.
-    /// TODO: P1: put this in AmbientState instead of leaving it free-floating?
-    let mutable private Clipboard : obj option = None
-
     /// Publishing IDs.
     let internal EntityChangeCountsId = Gen.id
     let internal EntityBindingCountsId = Gen.id
@@ -392,7 +388,6 @@ module WorldModuleEntity =
         static member internal getEntityPublishPreUpdates entity world = (World.getEntityState entity world).PublishPreUpdates
         static member internal getEntityPublishUpdates entity world = (World.getEntityState entity world).PublishUpdates
         static member internal getEntityPublishPostUpdates entity world = (World.getEntityState entity world).PublishPostUpdates
-        static member internal getEntityPublishRenders entity world = (World.getEntityState entity world).PublishRenders
         static member internal getEntityProtected entity world = (World.getEntityState entity world).Protected
         static member internal getEntityPersistent entity world = (World.getEntityState entity world).Persistent
         static member internal getEntityMounted entity world = (World.getEntityState entity world).Mounted
@@ -478,22 +473,6 @@ module WorldModuleEntity =
                 struct (true, world)
             else struct (false, world)
         
-        static member internal setEntityPublishRenders value entity world =
-            let entityState = World.getEntityState entity world
-            let previous = entityState.PublishRenders
-            if value <> previous then
-                let struct (entityState, world) =
-                    if entityState.Imperative then
-                        entityState.PublishRenders <- value
-                        struct (entityState, world)
-                    else
-                        let entityState = EntityState.diverge entityState
-                        entityState.PublishRenders <- value
-                        struct (entityState, World.setEntityState entityState entity world)
-                let world = World.publishEntityChange (nameof entityState.PublishRenders) previous value entityState.PublishChangeEvents entity world
-                struct (true, world)
-            else struct (false, world)
-
         static member internal setEntityProtected value entity world =
             let entityState = World.getEntityState entity world
             let previous = entityState.Protected
@@ -640,9 +619,9 @@ module WorldModuleEntity =
                 World.publishPlus mountData (Events.UnmountEvent --> mountOld) eventTrace entity false false world
             | None -> world
 
-        static member internal propagateEntityAffineMatrix3 mount mounter world =
+        static member internal propagateEntityAffineMatrix3 fromPhysical mount mounter world =
             let mounterState = World.getEntityState mounter world
-            if world.Halted || not mounterState.Physical then
+            if not (fromPhysical && mounterState.Physical) then
                 let affineMatrixWorld = World.getEntityAffineMatrix mount world
                 let affineMatrixLocal = World.getEntityAffineMatrixLocal mounter world
                 let affineMatrix = affineMatrixLocal * affineMatrixWorld
@@ -658,16 +637,18 @@ module WorldModuleEntity =
 
         static member internal propagateEntityProperties3 mountOpt entity world =
             match Option.bind (tryResolve entity) mountOpt with
-            | Some mountNew when World.getEntityExists mountNew world ->
-                let world = World.propagateEntityAffineMatrix3 mountNew entity world
-                let world = World.propagateEntityElevation3 mountNew entity world
-                let world = World.propagateEntityEnabled3 mountNew entity world
-                let world = World.propagateEntityVisible3 mountNew entity world
+            | Some mount when World.getEntityExists mount world ->
+                let fromPhysical = World.getEntityPhysical mount world
+                let world = World.propagateEntityAffineMatrix3 fromPhysical mount entity world
+                let world = World.propagateEntityElevation3 mount entity world
+                let world = World.propagateEntityEnabled3 mount entity world
+                let world = World.propagateEntityVisible3 mount entity world
                 world
             | _ -> world
 
         static member internal propagateEntityAffineMatrix entity world =
-            World.traverseEntityMounters World.propagateEntityAffineMatrix3 entity world
+            let fromPhysical = World.getEntityPhysical entity world
+            World.traverseEntityMounters (World.propagateEntityAffineMatrix3 fromPhysical) entity world
 
         static member internal setEntityMountOpt value entity world =
             let entityState = World.getEntityState entity world
@@ -2107,9 +2088,6 @@ module WorldModuleEntity =
             World.updateEntityPublishEventFlag World.setEntityPublishPostUpdates entity (atooa (Events.PostUpdateEvent --> entity)) world
 #endif
 
-        static member internal updateEntityPublishRenderFlag entity world =
-            World.updateEntityPublishEventFlag World.setEntityPublishRenders entity (atooa (Events.RenderEvent --> entity)) world
-
         static member internal updateEntityPublishFlags entity world =
             let mutable changed = false // bit of funky mutation in the face of #if
 #if !DISABLE_ENTITY_PRE_UPDATE
@@ -2122,8 +2100,6 @@ module WorldModuleEntity =
             let struct (changed', world) = World.updateEntityPublishPostUpdateFlag entity world
             changed <- changed || changed'
 #endif
-            let struct (changed', world) = World.updateEntityPublishRenderFlag entity world
-            changed <- changed || changed'
             struct (changed, world)
 
         static member internal divergeEntity entity world =
@@ -2574,72 +2550,6 @@ module WorldModuleEntity =
             let state = World.getEntityState entity world
             World.viewSimulantStateProperties state
 
-        /// Clear the content of the clipboard.
-        static member clearClipboard (_ : World) =
-            Clipboard <- None
-
-        /// Attempt to get the dispatcher name for an entity currently on the world's clipboard.
-        static member tryGetEntityDispatcherNameOnClipboard (_ : World) =
-            match Clipboard with
-            | Some (:? EntityState as entityState) -> Some (getTypeName entityState.Dispatcher)
-            | _ -> None
-
-        /// Copy an entity to the world's clipboard.
-        static member copyEntityToClipboard entity world =
-            let entityState = EntityState.makeFromEntityState None (World.getEntityState entity world)
-            Clipboard <- Some (entityState :> obj)
-
-        /// Cut an entity to the world's clipboard.
-        static member cutEntityToClipboard (entity : Entity) world =
-            World.copyEntityToClipboard entity world
-            World.destroyEntityImmediate entity world
-
-        /// Paste an entity from the world's clipboard.
-        static member pasteEntityFromClipboard atMouse rightClickPosition snapsEir surnamesOpt (group : Group) world =
-            match Clipboard with
-            | Some entityStateObj ->
-                let entityState = EntityState.makeFromEntityState surnamesOpt (entityStateObj :?> EntityState)
-                entityState.Protected <- false // ensure pasted entity is not protected in case user pastes an MMCC entity
-                let (position, snapsOpt) =
-                    if entityState.Is2d then
-                        let viewport = World.getViewport world
-                        let eyeCenter = World.getEyeCenter2d world
-                        let eyeSize = World.getEyeSize2d world
-                        let position =
-                            if atMouse
-                            then (viewport.MouseToWorld2d (entityState.Absolute, rightClickPosition, eyeCenter, eyeSize)).V3
-                            else (viewport.MouseToWorld2d (entityState.Absolute, World.getEyeSize2d world, eyeCenter, eyeSize)).V3
-                        match snapsEir with
-                        | Left (positionSnap, degreesSnap, scaleSnap) -> (position, Some (positionSnap, degreesSnap, scaleSnap))
-                        | Right _ -> (position, None)
-                    else
-                        let eyeCenter = World.getEyeCenter3d world
-                        let eyeRotation = World.getEyeRotation3d world
-                        let position =
-                            if atMouse then
-                                let viewport = Constants.Render.Viewport
-                                let ray = viewport.MouseToWorld3d (entityState.Absolute, rightClickPosition, eyeCenter, eyeRotation)
-                                let forward = Vector3.Transform (v3Forward, eyeRotation)
-                                let plane = plane3 (eyeCenter + forward * Constants.Engine.EyeCenter3dOffset.Z) -forward
-                                let intersectionOpt = ray.Intersection plane
-                                intersectionOpt.Value
-                            else eyeCenter + Vector3.Transform (v3Forward, eyeRotation) * Constants.Engine.EyeCenter3dOffset.Z
-                        match snapsEir with
-                        | Right (positionSnap, degreesSnap, scaleSnap) -> (position, Some (positionSnap, degreesSnap, scaleSnap))
-                        | Left _ -> (position, None)
-                entityState.Transform.Position <- position
-                match snapsOpt with
-                | Some (positionSnap, degreesSnap, scaleSnap) -> entityState.Transform.Snap (positionSnap, degreesSnap, scaleSnap)
-                | None -> ()
-                entityState.PositionLocal <- v3Zero
-                entityState.RotationLocal <- quatIdentity
-                entityState.ScaleLocal <- v3One
-                entityState.MountOpt <- None
-                let entity = Entity (group.GroupAddress <-- rtoa<Entity> entityState.Surnames)
-                let world = World.addEntity false entityState entity world
-                (Some entity, world)
-            | None -> (None, world)
-
     /// Initialize property getters.
     let private initGetters () =
         EntityGetters.["Dispatcher"] <- fun entity world -> { PropertyType = typeof<EntityDispatcher>; PropertyValue = World.getEntityDispatcher entity world }
@@ -2689,7 +2599,6 @@ module WorldModuleEntity =
         EntityGetters.["AlwaysRender"] <- fun entity world -> { PropertyType = typeof<bool>; PropertyValue = World.getEntityAlwaysRender entity world }
         EntityGetters.["PublishUpdates"] <- fun entity world -> { PropertyType = typeof<bool>; PropertyValue = World.getEntityPublishUpdates entity world }
         EntityGetters.["PublishPostUpdates"] <- fun entity world -> { PropertyType = typeof<bool>; PropertyValue = World.getEntityPublishPostUpdates entity world }
-        EntityGetters.["PublishRenders"] <- fun entity world -> { PropertyType = typeof<bool>; PropertyValue = World.getEntityPublishRenders entity world }
         EntityGetters.["Protected"] <- fun entity world -> { PropertyType = typeof<bool>; PropertyValue = World.getEntityProtected entity world }
         EntityGetters.["Persistent"] <- fun entity world -> { PropertyType = typeof<bool>; PropertyValue = World.getEntityPersistent entity world }
         EntityGetters.["Mounted"] <- fun entity world -> { PropertyType = typeof<bool>; PropertyValue = World.getEntityMounted entity world }

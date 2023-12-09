@@ -463,7 +463,6 @@ module TextFacetModule =
                               Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
                               Justification = entity.GetJustification world }}
                     world
-            else world
 
         override this.GetQuickSize (_, _) =
             Constants.Engine.EntitySize2dDefault
@@ -506,7 +505,7 @@ module BackdroppableFacetModule =
                               Emission = Color.Zero
                               Flip = FlipNone }}
                     world
-            | None -> world
+            | None -> ()
 
         override this.GetQuickSize (entity, world) =
             match entity.GetBackdropImageOpt world with
@@ -965,21 +964,20 @@ module FillBarFacetModule =
             let color = if transform.Enabled then Color.White else entity.GetDisabledColor world
             let borderImageColor = entity.GetBorderColor world * color
             let borderImage = entity.GetBorderImage world
-            let world =
-                World.enqueueLayeredOperation2d
-                    { Elevation = borderTransform.Elevation
-                      Horizon = horizon
-                      AssetTag = AssetTag.generalize borderImage
-                      RenderOperation2d =
-                        RenderSprite
-                            { Transform = borderTransform
-                              InsetOpt = ValueNone
-                              Image = borderImage
-                              Color = borderImageColor
-                              Blend = Transparent
-                              Emission = Color.Zero
-                              Flip = FlipNone }}
-                    world
+            World.enqueueLayeredOperation2d
+                { Elevation = borderTransform.Elevation
+                  Horizon = horizon
+                  AssetTag = AssetTag.generalize borderImage
+                  RenderOperation2d =
+                    RenderSprite
+                        { Transform = borderTransform
+                          InsetOpt = ValueNone
+                          Image = borderImage
+                          Color = borderImageColor
+                          Blend = Transparent
+                          Emission = Color.Zero
+                          Flip = FlipNone }}
+                world
 
             // fill sprite
             let fillSize = perimeter.Size
@@ -996,24 +994,20 @@ module FillBarFacetModule =
             fillTransform.Absolute <- transform.Absolute
             let fillImageColor = entity.GetFillColor world * color
             let fillImage = entity.GetFillImage world
-            let world =
-                World.enqueueLayeredOperation2d
-                    { Elevation = fillTransform.Elevation
-                      Horizon = horizon
-                      AssetTag = AssetTag.generalize fillImage
-                      RenderOperation2d =
-                          RenderSprite
-                              { Transform = fillTransform
-                                InsetOpt = ValueNone
-                                Image = fillImage
-                                Color = fillImageColor
-                                Blend = Transparent
-                                Emission = Color.Zero
-                                Flip = FlipNone }}
-                    world
-
-            // fin
-            world
+            World.enqueueLayeredOperation2d
+                { Elevation = fillTransform.Elevation
+                  Horizon = horizon
+                  AssetTag = AssetTag.generalize fillImage
+                  RenderOperation2d =
+                      RenderSprite
+                          { Transform = fillTransform
+                            InsetOpt = ValueNone
+                            Image = fillImage
+                            Color = fillImageColor
+                            Blend = Transparent
+                            Emission = Color.Zero
+                            Flip = FlipNone }}
+                world
 
         override this.GetQuickSize (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetBorderImage world) with
@@ -1589,7 +1583,7 @@ module TileMapFacetModule =
                         tileMapAsset.PackageName
                         tileMap
                 World.enqueueLayeredOperations2d tileMapMessages world
-            | None -> world
+            | None -> ()
 
         override this.GetQuickSize (entity, world) =
             match TmxMap.tryGetTileMap (entity.GetTileMap world) with
@@ -1976,9 +1970,25 @@ module LightProbeFacet3dModule =
         member this.GetProbeBounds world : Box3 = this.Get (nameof this.ProbeBounds) world
         member this.SetProbeBounds (value : Box3) world = this.Set (nameof this.ProbeBounds) value world
         member this.ProbeBounds = lens (nameof this.ProbeBounds) this this.GetProbeBounds this.SetProbeBounds
+        member this.GetProbeStalePrevious world : bool = this.Get (nameof this.ProbeStalePrevious) world
+        member this.SetProbeStalePrevious (value : bool) world = this.Set (nameof this.ProbeStalePrevious) value world
+        member this.ProbeStalePrevious = lens (nameof this.ProbeStalePrevious) this this.GetProbeStalePrevious this.SetProbeStalePrevious
         member this.GetProbeStale world : bool = this.Get (nameof this.ProbeStale) world
         member this.SetProbeStale (value : bool) world = this.Set (nameof this.ProbeStale) value world
         member this.ProbeStale = lens (nameof this.ProbeStale) this this.GetProbeStale this.SetProbeStale
+
+        member this.ResetProbeBounds world =
+            let bounds =
+                box3
+                    (v3Dup Constants.Render.LightProbeSizeDefault * -0.5f + this.GetPosition world)
+                    (v3Dup Constants.Render.LightProbeSizeDefault)
+            this.SetProbeBounds bounds world
+
+        member this.RecenterInProbeBounds world =
+            let probeBounds = this.GetProbeBounds world
+            if Option.isSome (this.GetMountOpt world)
+            then this.SetPositionLocal probeBounds.Center world
+            else this.SetPosition probeBounds.Center world
 
     /// Augments an entity with a 3d light probe.
     type LightProbeFacet3d () =
@@ -1995,19 +2005,27 @@ module LightProbeFacet3dModule =
             [define Entity.LightProbe true
              define Entity.Presence Omnipresent
              define Entity.ProbeBounds (box3 (v3Dup Constants.Render.LightProbeSizeDefault * -0.5f) (v3Dup Constants.Render.LightProbeSizeDefault))
-             define Entity.ProbeStale false]
+             nonPersistent Entity.ProbeStalePrevious false
+             nonPersistent Entity.ProbeStale false]
 
         override this.Register (entity, world) =
             let world = World.sense handleProbeStaleChange (entity.GetChangeEvent (nameof entity.ProbeStale)) entity (nameof LightProbeFacet3d) world
             entity.SetProbeStale true world
+
+        override this.Update (entity, world) =
+            if entity.GetProbeStale world then
+                let world = entity.SetProbeStale false world
+                entity.SetProbeStalePrevious true world
+            elif entity.GetProbeStalePrevious world then
+                entity.SetProbeStalePrevious false world
+            else world
             
         override this.Render (entity, world) =
             let id = entity.GetId world
             let enabled = entity.GetEnabled world
             let position = entity.GetPosition world
             let bounds = entity.GetProbeBounds world
-            let stale = entity.GetProbeStale world
-            let world = if stale then entity.SetProbeStale false world else world
+            let stale = entity.GetProbeStalePrevious world
             World.enqueueRenderMessage3d (RenderLightProbe3d { LightProbeId = id; Enabled = enabled; Origin = position; Bounds = bounds; Stale = stale }) world
 
         override this.RayCast (ray, entity, world) =
@@ -2021,6 +2039,30 @@ module LightProbeFacet3dModule =
         override this.GetQuickSize (_, _) =
             v3Dup 0.5f
 
+        override this.Edit (op, entity, world) =
+            match op with
+            | AppendProperties append ->
+                let world =
+                    if ImGuiNET.ImGui.Button "Rerender Light Map" then
+                        let world = append.Snapshot world
+                        entity.SetProbeStale true world
+                    else world
+                let world =
+                    if ImGuiNET.ImGui.Button "Recenter in Probe Bounds" then
+                        let world = append.Snapshot world
+                        let probeBounds = entity.GetProbeBounds world
+                        if Option.isSome (entity.GetMountOpt world)
+                        then entity.SetPositionLocal probeBounds.Center world
+                        else entity.SetPosition probeBounds.Center world
+                    else world
+                let world =
+                    if ImGuiNET.ImGui.Button "Reset Probe Bounds" then
+                        let world = append.Snapshot world
+                        entity.ResetProbeBounds world
+                    else world
+                world
+            | _ -> world
+
 [<AutoOpen>]
 module LightFacet3dModule =
 
@@ -2031,9 +2073,9 @@ module LightFacet3dModule =
         member this.GetAttenuationQuadratic world : single = this.Get (nameof this.AttenuationQuadratic) world
         member this.SetAttenuationQuadratic (value : single) world = this.Set (nameof this.AttenuationQuadratic) value world
         member this.AttenuationQuadratic = lens (nameof this.AttenuationQuadratic) this this.GetAttenuationQuadratic this.SetAttenuationQuadratic
-        member this.GetCutoff world : single = this.Get (nameof this.Cutoff) world
-        member this.SetCutoff (value : single) world = this.Set (nameof this.Cutoff) value world
-        member this.Cutoff = lens (nameof this.Cutoff) this this.GetCutoff this.SetCutoff
+        member this.GetLightCutoff world : single = this.Get (nameof this.LightCutoff) world
+        member this.SetLightCutoff (value : single) world = this.Set (nameof this.LightCutoff) value world
+        member this.LightCutoff = lens (nameof this.LightCutoff) this this.GetLightCutoff this.SetLightCutoff
         member this.GetLightType world : LightType = this.Get (nameof this.LightType) world
         member this.SetLightType (value : LightType) world = this.Set (nameof this.LightType) value world
         member this.LightType = lens (nameof this.LightType) this this.GetLightType this.SetLightType
@@ -2048,7 +2090,7 @@ module LightFacet3dModule =
              define Entity.Brightness Constants.Render.BrightnessDefault
              define Entity.AttenuationLinear Constants.Render.AttenuationLinearDefault
              define Entity.AttenuationQuadratic Constants.Render.AttenuationQuadraticDefault
-             define Entity.Cutoff Constants.Render.CutoffDefault
+             define Entity.LightCutoff Constants.Render.LightCutoffDefault
              define Entity.LightType PointLight]
 
         override this.Render (entity, world) =
@@ -2059,7 +2101,7 @@ module LightFacet3dModule =
                 let brightness = entity.GetBrightness world
                 let attenuationLinear = entity.GetAttenuationLinear world
                 let attenuationQuadratic = entity.GetAttenuationQuadratic world
-                let cutoff = entity.GetCutoff world
+                let lightCutoff = entity.GetLightCutoff world
                 let lightType = entity.GetLightType world
                 World.enqueueRenderMessage3d
                     (RenderLight3d
@@ -2069,10 +2111,9 @@ module LightFacet3dModule =
                           Brightness = brightness
                           AttenuationLinear = attenuationLinear
                           AttenuationQuadratic = attenuationQuadratic
-                          Cutoff = cutoff
+                          LightCutoff = lightCutoff
                           LightType = lightType })
                     world
-            else world
 
         override this.RayCast (ray, entity, world) =
             let intersectionOpt = ray.Intersects (entity.GetBounds world)
@@ -2087,11 +2128,6 @@ module LightFacet3dModule =
 
 [<AutoOpen>]
 module StaticBillboardFacetModule =
-
-    /// Determines the means by which an entity's surfaces are rendered.
-    type [<StructuralEquality; StructuralComparison>] RenderStyle =
-        | Deferred
-        | Forward of Subsort : single * Sort : single
 
     type Entity with
         // OPTIMIZATION: override allows surface properties to be fetched with a single look-up.
@@ -2543,14 +2579,14 @@ module StaticModelFacetModule =
             let absolute = transform.Absolute
             let affineMatrixOffset = transform.AffineMatrixOffset
             let presence = transform.Presence
-            let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
+            let insetOpt = entity.GetInsetOpt world
             let properties = entity.GetMaterialProperties world
             let renderType =
                 match entity.GetRenderStyle world with
                 | Deferred -> DeferredRenderType
                 | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
             let staticModel = entity.GetStaticModel world
-            World.renderStaticModelFast (absolute, &affineMatrixOffset, presence, insetOpt, &properties, renderType, staticModel, world)
+            World.enqueueRenderMessage3d (RenderStaticModel { Absolute = absolute; ModelMatrix = affineMatrixOffset; Presence = presence; InsetOpt = insetOpt; MaterialProperties = properties; RenderType = renderType; StaticModel = staticModel }) world
 
         override this.GetQuickSize (entity, world) =
             let staticModel = entity.GetStaticModel world
@@ -2623,7 +2659,7 @@ module StaticModelSurfaceFacetModule =
 
         override this.Render (entity, world) =
             match entity.GetSurfaceIndex world with
-            | -1 -> world
+            | -1 -> ()
             | surfaceIndex ->
                 let mutable transform = entity.GetTransform world
                 let absolute = transform.Absolute

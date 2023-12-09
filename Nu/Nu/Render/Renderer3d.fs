@@ -3,6 +3,7 @@
 
 namespace Nu
 open System
+open System.Collections.Concurrent
 open System.Collections.Generic
 open System.IO
 open System.Numerics
@@ -271,7 +272,7 @@ and [<ReferenceEquality>] RenderLight3d =
       Brightness : single
       AttenuationLinear : single
       AttenuationQuadratic : single
-      Cutoff : single
+      LightCutoff : single
       LightType : LightType }
 
 and [<ReferenceEquality>] RenderBillboard =
@@ -768,7 +769,7 @@ type [<ReferenceEquality>] GlRenderer3d =
     static member private tryGetTextureData (assetTag : Image AssetTag) renderer =
         match GlRenderer3d.tryGetFilePath (AssetTag.generalize assetTag) renderer with
         | Some filePath ->
-            match OpenGL.Texture.TryCreateTextureData (Constants.OpenGl.UncompressedTextureFormat, false, filePath) with
+            match OpenGL.Texture.TryCreateTextureData (Constants.OpenGL.UncompressedTextureFormat, false, filePath) with
             | Some (metadata, textureDataPtr, disposer) ->
                 use _ = disposer
                 let bytes = Array.zeroCreate<byte> (metadata.TextureWidth * metadata.TextureHeight * sizeof<uint>)
@@ -885,7 +886,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                 let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedStaticGeometry (true, OpenGL.PrimitiveType.Triangles, vertexData, indexData, surfaceDescriptor.Bounds) // TODO: consider letting user specify primitive drawing type.
 
                 // create surface
-                let surface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface ([||], surfaceDescriptor.ModelMatrix, surfaceDescriptor.Bounds, material, geometry)
+                let surface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, Assimp.MetadataEmpty, surfaceDescriptor.ModelMatrix, surfaceDescriptor.Bounds, material, geometry)
                 surfaces.Add surface
 
             // create user-defined static model
@@ -1191,7 +1192,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                     if skipCulling || Presence.intersects3d frustumEnclosed frustumExposed frustumImposter lightBox false true lightBounds presence then
                         let light =
                             { SortableLightOrigin = lightMatrix.Translation
-                              SortableLightDirection = Vector3.Transform (v3Forward, lightMatrix.Rotation)
+                              SortableLightDirection = Vector3.Transform (v3Up, lightMatrix.Rotation)
                               SortableLightColor = light.LightColor
                               SortableLightBrightness = light.LightBrightness
                               SortableLightAttenuationLinear = light.LightAttenuationLinear
@@ -1203,6 +1204,11 @@ type [<ReferenceEquality>] GlRenderer3d =
                               SortableLightDistanceSquared = Single.MaxValue }
                         renderer.RenderTasks.RenderLights.Add light
                 for surface in modelAsset.Surfaces do
+                    let renderType =
+                        match surface.RenderStyleOpt with
+                        | Some Deferred -> DeferredRenderType
+                        | Some (Forward (subsort, sort)) -> ForwardRenderType (subsort, sort)
+                        | None -> renderType
                     let surfaceMatrix = if surface.SurfaceMatrixIsIdentity then modelMatrix else surface.SurfaceMatrix * modelMatrix
                     let surfaceBounds = surface.SurfaceBounds.Transform surfaceMatrix
                     if skipCulling || Presence.intersects3d frustumEnclosed frustumExposed frustumImposter lightBox false false surfaceBounds presence then
@@ -2068,7 +2074,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                       SortableLightBrightness = rl.Brightness
                       SortableLightAttenuationLinear = rl.AttenuationLinear
                       SortableLightAttenuationQuadratic = rl.AttenuationQuadratic
-                      SortableLightCutoff = rl.Cutoff
+                      SortableLightCutoff = rl.LightCutoff
                       SortableLightDirectional = match rl.LightType with DirectionalLight -> 1 | _ -> 0
                       SortableLightConeInner = match rl.LightType with SpotLight (coneInner, _) -> coneInner | _ -> single (2.0 * Math.PI)
                       SortableLightConeOuter = match rl.LightType with SpotLight (_, coneOuter) -> coneOuter | _ -> single (2.0 * Math.PI)
@@ -2076,11 +2082,11 @@ type [<ReferenceEquality>] GlRenderer3d =
                 renderer.RenderTasks.RenderLights.Add light
             | RenderBillboard rb ->
                 let billboardMaterial = GlRenderer3d.makeBillboardMaterial rb.MaterialProperties rb.AlbedoImage rb.RoughnessImage rb.MetallicImage rb.AmbientOcclusionImage rb.EmissionImage rb.NormalImage rb.HeightImage rb.MinFilterOpt rb.MagFilterOpt renderer
-                let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface ([||], m4Identity, box3 (v3 -0.5f 0.5f -0.5f) v3One, billboardMaterial, renderer.RenderBillboardGeometry)
+                let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, Assimp.MetadataEmpty, m4Identity, box3 (v3 -0.5f 0.5f -0.5f) v3One, billboardMaterial, renderer.RenderBillboardGeometry)
                 GlRenderer3d.categorizeBillboardSurface (rb.Absolute, eyeRotation, rb.ModelMatrix, rb.InsetOpt, billboardMaterial.AlbedoMetadata, true, rb.MaterialProperties, rb.RenderType, billboardSurface, renderer)
             | RenderBillboards rbs ->
                 let billboardMaterial = GlRenderer3d.makeBillboardMaterial rbs.MaterialProperties rbs.AlbedoImage rbs.RoughnessImage rbs.MetallicImage rbs.AmbientOcclusionImage rbs.EmissionImage rbs.NormalImage rbs.HeightImage rbs.MinFilterOpt rbs.MagFilterOpt renderer
-                let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface ([||], m4Identity, box3 (v3 -0.5f -0.5f -0.5f) v3One, billboardMaterial, renderer.RenderBillboardGeometry)
+                let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, Assimp.MetadataEmpty, m4Identity, box3 (v3 -0.5f -0.5f -0.5f) v3One, billboardMaterial, renderer.RenderBillboardGeometry)
                 for (modelMatrix, insetOpt) in rbs.Billboards do
                     GlRenderer3d.categorizeBillboardSurface (rbs.Absolute, eyeRotation, modelMatrix, insetOpt, billboardMaterial.AlbedoMetadata, true, rbs.MaterialProperties, rbs.RenderType, billboardSurface, renderer)
             | RenderBillboardParticles rbps ->
@@ -2093,7 +2099,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                              particle.Transform.Size * particle.Transform.Scale)
                     let billboardMaterialProperties = { billboardMaterial.MaterialProperties with Albedo = billboardMaterial.MaterialProperties.Albedo * particle.Color; Emission = particle.Emission.R }
                     let billboardMaterial = { billboardMaterial with MaterialProperties = billboardMaterialProperties }
-                    let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface ([||], m4Identity, box3Zero, billboardMaterial, renderer.RenderBillboardGeometry)
+                    let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, Assimp.MetadataEmpty, m4Identity, box3Zero, billboardMaterial, renderer.RenderBillboardGeometry)
                     GlRenderer3d.categorizeBillboardSurface (rbps.Absolute, eyeRotation, billboardMatrix, Option.ofValueOption particle.InsetOpt, billboardMaterial.AlbedoMetadata, false, rbps.MaterialProperties, rbps.RenderType, billboardSurface, renderer)
             | RenderStaticModelSurface rsms ->
                 let insetOpt = Option.toValueOption rsms.InsetOpt
@@ -2311,21 +2317,21 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // create white texture
         let whiteTexture =
-            match OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGl.UncompressedTextureFormat, Constants.Paths.WhiteTextureFilePath) with
+            match OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGL.UncompressedTextureFormat, Constants.Paths.WhiteTextureFilePath) with
             | Right (_, texture) -> texture
             | Left error -> failwith ("Could not load white texture due to: " + error)
         OpenGL.Hl.Assert ()
 
         // create black texture
         let blackTexture =
-            match OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGl.UncompressedTextureFormat, Constants.Paths.BlackTextureFilePath) with
+            match OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGL.UncompressedTextureFormat, Constants.Paths.BlackTextureFilePath) with
             | Right (_, texture) -> texture
             | Left error -> failwith ("Could not load black texture due to: " + error)
         OpenGL.Hl.Assert ()
 
         // create brdf texture
         let brdfTexture =
-            match OpenGL.Texture.TryCreateTextureUnfiltered (Constants.OpenGl.UncompressedTextureFormat, Constants.Paths.BrdfTextureFilePath) with
+            match OpenGL.Texture.TryCreateTextureUnfiltered (Constants.OpenGL.UncompressedTextureFormat, Constants.Paths.BrdfTextureFilePath) with
             | Right (_, texture) -> texture
             | Left error -> failwith ("Could not load BRDF texture due to: " + error)
         OpenGL.Hl.Assert ()
@@ -2349,7 +2355,7 @@ type [<ReferenceEquality>] GlRenderer3d =
               InvertRoughness = Constants.Render.InvertRoughnessDefault }
 
         // get albedo metadata and texture
-        let (albedoMetadata, albedoTexture) = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGl.CompressedColorTextureFormat, "Assets/Default/MaterialAlbedo.tiff") |> Either.getRight
+        let (albedoMetadata, albedoTexture) = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGL.CompressedColorTextureFormat, "Assets/Default/MaterialAlbedo.tiff") |> Either.getRight
         OpenGL.Hl.Assert ()
 
         // create default physically-based material
@@ -2357,12 +2363,12 @@ type [<ReferenceEquality>] GlRenderer3d =
             { MaterialProperties = physicallyBasedMaterialProperties
               AlbedoMetadata = albedoMetadata
               AlbedoTexture = albedoTexture
-              RoughnessTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGl.CompressedColorTextureFormat, "Assets/Default/MaterialRoughness.tiff") |> Either.getRight |> snd
-              MetallicTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGl.CompressedColorTextureFormat, "Assets/Default/MaterialMetallic.tiff") |> Either.getRight |> snd
-              AmbientOcclusionTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGl.CompressedColorTextureFormat, "Assets/Default/MaterialAmbientOcclusion.tiff") |> Either.getRight |> snd
-              EmissionTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGl.CompressedColorTextureFormat, "Assets/Default/MaterialEmission.tiff") |> Either.getRight |> snd
-              NormalTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGl.UncompressedTextureFormat, "Assets/Default/MaterialNormal.tiff") |> Either.getRight |> snd
-              HeightTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGl.CompressedColorTextureFormat, "Assets/Default/MaterialHeight.tiff") |> Either.getRight |> snd
+              RoughnessTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGL.CompressedColorTextureFormat, "Assets/Default/MaterialRoughness.tiff") |> Either.getRight |> snd
+              MetallicTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGL.CompressedColorTextureFormat, "Assets/Default/MaterialMetallic.tiff") |> Either.getRight |> snd
+              AmbientOcclusionTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGL.CompressedColorTextureFormat, "Assets/Default/MaterialAmbientOcclusion.tiff") |> Either.getRight |> snd
+              EmissionTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGL.CompressedColorTextureFormat, "Assets/Default/MaterialEmission.tiff") |> Either.getRight |> snd
+              NormalTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGL.UncompressedTextureFormat, "Assets/Default/MaterialNormal.tiff") |> Either.getRight |> snd
+              HeightTexture = OpenGL.Texture.TryCreateTextureFiltered (Constants.OpenGL.CompressedColorTextureFormat, "Assets/Default/MaterialHeight.tiff") |> Either.getRight |> snd
               TextureMinFilterOpt = None
               TextureMagFilterOpt = None
               TwoSided = false }

@@ -521,11 +521,11 @@ module WorldModule2 =
             let world = World.unshelveAmbientState world
 
             // clear existing 3d physics messages and rebuild
-            let world = World.updatePhysicsEngine3d (fun physicsEngine -> physicsEngine.ClearMessages ()) world
+            let world = World.clearPhysicsMessages3d world
             let world = World.enqueuePhysicsMessage3d ClearPhysicsMessageInternal world
 
             // clear existing 2d physics messages and rebuild
-            let world = World.updatePhysicsEngine2d (fun physicsEngine -> physicsEngine.ClearMessages ()) world
+            let world = World.clearPhysicsMessages2d world
             let world = World.enqueuePhysicsMessage2d ClearPhysicsMessageInternal world
 
             // register the physics of entities in the current screen
@@ -1039,13 +1039,13 @@ module WorldModule2 =
                               Emission = Color.Zero
                               Flip = FlipNone }}
                     world
-            | None -> world
+            | None -> ()
 
         static member private renderScreenTransition (screen : Screen) world =
             match screen.GetTransitionState world with
             | IncomingState transitionTime -> World.renderScreenTransition5 transitionTime (World.getEyeCenter2d world) (World.getEyeSize2d world) screen (screen.GetIncoming world) world
             | OutgoingState transitionTime -> World.renderScreenTransition5 transitionTime (World.getEyeCenter2d world) (World.getEyeSize2d world) screen (screen.GetOutgoing world) world
-            | IdlingState _ -> world
+            | IdlingState _ -> ()
 
         static member private renderSimulants skipCulling world =
 
@@ -1056,44 +1056,41 @@ module WorldModule2 =
             let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
             let screens = List.rev screens
             let groups = Seq.concat (List.map (flip World.getGroups world) screens)
+            let groupsInvisible =
+                if world.Accompanied
+                then hashSetPlus HashIdentity.Structural (Seq.filter (fun (group : Group) -> not (group.GetVisible world)) groups)
+                else hashSetPlus HashIdentity.Structural []
             let (elements3d, world) = if skipCulling then World.getElements3d CachedHashSet3d world else World.getElementsInView3d CachedHashSet3d world
             let (elements2d, world) = if skipCulling then World.getElements2d CachedHashSet2d world else World.getElementsInView2d CachedHashSet2d world
             RenderGatherTimer.Stop ()
 
             // render simulants breadth-first
-            let world = World.renderGame game world
-            let world = List.fold (fun world screen -> World.renderScreen screen world) world screens
-            let world = match World.getSelectedScreenOpt world with Some selectedScreen -> World.renderScreenTransition selectedScreen world | None -> world
-            let world = Seq.fold (fun world (group : Group) -> if group.GetVisible world then World.renderGroup group world else world) world groups
+            World.renderGame game world
+            for screen in screens do
+                World.renderScreen screen world
+            match World.getSelectedScreenOpt world with Some selectedScreen -> World.renderScreenTransition selectedScreen world | None -> ()
+            for group in groups do
+                if not (groupsInvisible.Contains group) then
+                    World.renderGroup group world
 
             // render entities
             RenderEntitiesTimer.Start ()
-            let world =
-                if world.Unaccompanied then
-                    Seq.fold (fun world (element : Entity Octelement) ->
-                        if element.Visible
-                        then World.renderEntity element.Entry world
-                        else world)
-                        world elements3d
-                else
-                    Seq.fold (fun world (element : Entity Octelement) ->
-                        if element.Visible && element.Entry.Group.GetVisible world
-                        then World.renderEntity element.Entry world
-                        else world)
-                        world elements3d
-            let world =
-                if world.Unaccompanied then
-                    Seq.fold (fun world (element : Entity Quadelement) ->
-                        if element.Visible
-                        then World.renderEntity element.Entry world
-                        else world)
-                        world elements2d
-                else
-                    Seq.fold (fun world (element : Entity Quadelement) ->
-                        if element.Visible && element.Entry.Group.GetVisible world
-                        then World.renderEntity element.Entry world
-                        else world)
-                        world elements2d
+            if world.Unaccompanied || groupsInvisible.Count = 0 then
+                for element in elements3d do
+                    if element.Visible then
+                        World.renderEntity element.Entry world
+            else
+                for element in elements3d do
+                    if element.Visible && not (groupsInvisible.Contains element.Entry.Group) then
+                        World.renderEntity element.Entry world
+            if world.Unaccompanied || groupsInvisible.Count = 0 then
+                for element in elements2d do
+                    if element.Visible then
+                        World.renderEntity element.Entry world
+            else
+                for element in elements2d do
+                    if element.Visible && not (groupsInvisible.Contains element.Entry.Group) then
+                        World.renderEntity element.Entry world
             RenderEntitiesTimer.Stop ()
 
             // clear cached hash sets
@@ -1117,8 +1114,7 @@ module WorldModule2 =
 
         static member private processPhysics2d world =
             let physicsEngine = World.getPhysicsEngine2d world
-            let (physicsMessages, physicsEngine) = physicsEngine.PopMessages ()
-            let world = World.setPhysicsEngine2d physicsEngine world
+            let physicsMessages = physicsEngine.PopMessages ()
             let integrationMessages = physicsEngine.Integrate world.GameDelta physicsMessages
             let eventTrace = EventTrace.debug "World" "processPhysics2d" "" EventTrace.empty
             let world = World.publishPlus { IntegrationMessages = integrationMessages } Nu.Game.Handle.IntegrationEvent eventTrace Nu.Game.Handle false false world
@@ -1127,8 +1123,7 @@ module WorldModule2 =
 
         static member private processPhysics3d world =
             let physicsEngine = World.getPhysicsEngine3d world
-            let (physicsMessages, physicsEngine) = physicsEngine.PopMessages ()
-            let world = World.setPhysicsEngine3d physicsEngine world
+            let physicsMessages = physicsEngine.PopMessages ()
             let integrationMessages = physicsEngine.Integrate world.GameDelta physicsMessages
             let eventTrace = EventTrace.debug "World" "processPhysics3d" "" EventTrace.empty
             let world = World.publishPlus { IntegrationMessages = integrationMessages } Nu.Game.Handle.IntegrationEvent eventTrace Nu.Game.Handle false false world
@@ -1224,7 +1219,7 @@ module WorldModule2 =
                                                     match World.getLiveness world with
                                                     | Live ->
                                                     
-                                                        // run engine and user-defined per-process callbacks
+                                                        // run engine and user-defined post-process callbacks
                                                         PostProcessTimer.Start ()
                                                         let world = World.postProcess world
                                                         let world = postProcess world
@@ -1383,8 +1378,7 @@ module EntityDispatcherModule2 =
             Signal.processSignals this.Message this.Command (this.Model entity) signals entity world
 
         override this.Render (entity, world) =
-            let view = this.View (this.GetModel entity world, entity, world)
-            World.renderView view world
+            this.View (this.GetModel entity world, entity, world)
 
         override this.Edit (operation, entity, world) =
             let model = entity.GetModelGeneric<'model> world
@@ -1456,9 +1450,9 @@ module EntityDispatcherModule2 =
         abstract Content : 'model * Entity -> EntityContent list
         default this.Content (_, _) = []
 
-        /// Describes how the entity is to be viewed using the View API.
-        abstract View : 'model * Entity * World -> View
-        default this.View (_, _, _) = View.empty
+        /// Render the entity using the given model.
+        abstract View : 'model * Entity * World -> unit
+        default this.View (_, _, _) = ()
 
         /// Truncate the given model.
         abstract TruncateModel : 'model -> 'model
@@ -1670,8 +1664,7 @@ module GroupDispatcherModule =
             World.setGroupModel<'model> true model group world |> snd'
 
         override this.Render (group, world) =
-            let view = this.View (this.GetModel group world, group, world)
-            World.renderView view world
+            this.View (this.GetModel group world, group, world)
 
         override this.Signal (signalObj : obj, group, world) =
             match signalObj with
@@ -1729,9 +1722,9 @@ module GroupDispatcherModule =
         abstract Content : 'model * Group -> EntityContent list
         default this.Content (_, _) = []
 
-        /// Describes how the group is to be viewed using the View API.
-        abstract View : 'model * Group * World -> View
-        default this.View (_, _, _) = View.empty
+        /// Render the group using the given model.
+        abstract View : 'model * Group * World -> unit
+        default this.View (_, _, _) = ()
 
         /// Implements additional editing behavior for a group via the ImGui API.
         abstract Edit : 'model * EditOperation * Group * World -> Signal list * 'model
@@ -1840,8 +1833,7 @@ module ScreenDispatcherModule =
             World.setScreenModel<'model> true model screen world |> snd'
 
         override this.Render (screen, world) =
-            let view = this.View (this.GetModel screen world, screen, world)
-            World.renderView view world
+            this.View (this.GetModel screen world, screen, world)
 
         override this.Signal (signalObj : obj, screen, world) =
             match signalObj with
@@ -1899,9 +1891,9 @@ module ScreenDispatcherModule =
         abstract Content : 'model * Screen -> GroupContent list
         default this.Content (_, _) = []
 
-        /// Describes how the screen is to be viewed using the View API.
-        abstract View : 'model * Screen * World -> View
-        default this.View (_, _, _) = View.empty
+        /// Render the screen using the given model.
+        abstract View : 'model * Screen * World -> unit
+        default this.View (_, _, _) = ()
 
         /// Implements additional editing behavior for a screen via the ImGui API.
         abstract Edit : 'model * EditOperation * Screen * World -> Signal list * 'model
@@ -2017,8 +2009,7 @@ module GameDispatcherModule =
             World.setGameModel<'model> true model game world |> snd'
 
         override this.Render (game, world) =
-            let view = this.View (this.GetModel game world, game, world)
-            World.renderView view world
+            this.View (this.GetModel game world, game, world)
 
         override this.Signal (signalObj : obj, game, world) =
             match signalObj with
@@ -2070,9 +2061,9 @@ module GameDispatcherModule =
         abstract Content : 'model * Game -> ScreenContent list
         default this.Content (_, _) = []
 
-        /// Describes how the game is to be viewed using the View API.
-        abstract View : 'model * Game * World -> View
-        default this.View (_, _, _) = View.empty
+        /// Render the game using the given model.
+        abstract View : 'model * Game * World -> unit
+        default this.View (_, _, _) = ()
 
         /// Implements additional editing behavior for a game via the ImGui API.
         abstract Edit : 'model * EditOperation * Game * World -> Signal list * 'model

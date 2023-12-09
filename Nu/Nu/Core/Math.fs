@@ -20,6 +20,7 @@ module Vector2 =
         member this.Normalized = Vector2.Normalize this
         member this.Magnitude = this.Length ()
         member this.MagnitudeSquared = this.LengthSquared ()
+        member this.Absolute = Vector2 (abs this.X, abs this.Y)
         member this.MapX mapper = Vector2 (mapper this.X, this.Y)
         member this.MapY mapper = Vector2 (this.X, mapper this.Y)
         member this.WithX x = Vector2 (x, this.Y)
@@ -95,6 +96,7 @@ module Vector3 =
         member this.Normalized = Vector3.Normalize this
         member this.Magnitude = this.Length ()
         member this.MagnitudeSquared = this.LengthSquared ()
+        member this.Absolute = Vector3 (abs this.X, abs this.Y, abs this.Z)
         member this.MapX mapper = Vector3 (mapper this.X, this.Y, this.Z)
         member this.MapY mapper = Vector3 (this.X, mapper this.Y, this.Z)
         member this.MapZ mapper = Vector3 (this.X, this.Y, mapper this.Z)
@@ -215,6 +217,7 @@ module Vector4 =
         member this.V4i = Vector4i (int this.X, int this.Y, int this.Z, int this.W)
         member this.Magnitude = this.Magnitude
         member this.MagnitudeSquared = this.LengthSquared ()
+        member this.Absolute = Vector4 (abs this.X, abs this.Y, abs this.Z, abs this.W)
         member this.MapX mapper = Vector4 (mapper this.X, this.Y, this.Z, this.W)
         member this.MapY mapper = Vector4 (this.X, mapper this.Y, this.Z, this.W)
         member this.MapZ mapper = Vector4 (this.X, this.Y, mapper this.Z, this.W)
@@ -523,6 +526,10 @@ module Quaternion =
         /// Normalize the quaternion.
         member this.Normalized =
             Quaternion.Normalize this
+
+        /// The inverted value of a quaternion.
+        member inline this.Inverted =
+            Quaternion.Inverse this
 
     let quatIdentity = Quaternion.Identity
     let inline quat x y z w = Quaternion (x, y, z, w)
@@ -834,11 +841,14 @@ module Matrix4x4 =
             if Matrix4x4.Decompose (this, &scale, &rotation, &position) then rotation
             else quatIdentity
 
+        /// The inverted value of a matrix.
+        /// Throws if no determinant.
         member inline this.Inverted =
             let mutable result = Unchecked.defaultof<_>
             if not (Matrix4x4.Invert (this, &result)) then failwith "Failed to invert matrix."
             result
 
+        /// Create a matrix from an array of 16 single values.
         static member CreateFromArray (arr : single array) =
             Matrix4x4
                 (arr.[00], arr.[01], arr.[02], arr.[03],
@@ -991,7 +1001,7 @@ type ColorConverter () =
 [<AutoOpen>]
 module Plane3 =
 
-    let inline plane3 (min : Vector3) (normal : Vector3) = Plane3 (min, normal)
+    let inline plane3 (pointOnPlane : Vector3) (normal : Vector3) = Plane3 (pointOnPlane, normal)
     let inline plane3Equation (normal : Vector3) (d : single) = Plane3 (normal, d)
     let inline plane3Eq (left : Plane3) (right : Plane3) = left.Equals right
     let inline plane3Neq (left : Plane3) (right : Plane3) = not (left.Equals right)
@@ -1006,7 +1016,7 @@ module Plane3 =
 [<AutoOpen>]
 module Ray3 =
 
-    let inline ray (min : Vector3) (direction : Vector3) = Ray3 (min, direction)
+    let inline ray (origin : Vector3) (direction : Vector3) = Ray3 (origin, direction)
     let inline rayEq (left : Ray3) (right : Ray3) = left.Equals right
     let inline rayNeq (left : Ray3) (right : Ray3) = not (left.Equals right)
 
@@ -1121,3 +1131,37 @@ module Math =
     /// Has a minimum granularity of 0.001f.
     let SnapF3d offset (v3 : Vector3) =
         Vector3 (SnapF offset v3.X, SnapF offset v3.Y, SnapF offset v3.Z)
+
+    /// Snap a degree value to an offset.
+    /// Has a minimum granularity of 1.0f.
+    let SnapDegree (offset : single) (value : single) =
+        single (SnapI (int (round offset)) (int (round value)))
+
+    /// Snap a degree value to an offset.
+    /// Has a minimum granularity of 1.0f.
+    let SnapDegree3d offset (v3 : Vector3) =
+        Vector3 (SnapDegree offset v3.X, SnapDegree offset v3.Y, SnapDegree offset v3.Z)
+
+    /// Find the the union of a line segment and a frustum if one exists.
+    let tryUnionSegmentAndFrustum (beginPoint : Vector3) (endPoint : Vector3) (frustum : Frustum) =
+        let beginContained = frustum.Contains beginPoint <> ContainmentType.Disjoint
+        let endContained = frustum.Contains endPoint <> ContainmentType.Disjoint
+        if beginContained || endContained then
+            let beginPoint =
+                if not beginContained then
+                    let ray = Ray3 (beginPoint, (endPoint - beginPoint).Normalized)
+                    let tOpt = frustum.Intersects ray
+                    if tOpt.HasValue
+                    then Vector3.Lerp (beginPoint, endPoint, tOpt.Value)
+                    else beginPoint // TODO: figure out why intersection could fail here.
+                else beginPoint
+            let endPoint =
+                if not endContained then
+                    let ray = Ray3 (endPoint, (beginPoint - endPoint).Normalized)
+                    let tOpt = frustum.Intersects ray
+                    if tOpt.HasValue
+                    then Vector3.Lerp (endPoint, beginPoint, tOpt.Value)
+                    else endPoint // TODO: figure out why intersection could fail here.
+                else endPoint
+            Some (beginPoint, endPoint)
+        else None

@@ -10,6 +10,9 @@ open Prime
 [<AutoOpen>]
 module WorldEntityModule =
 
+    /// Mutable clipboard that allows its state to persist beyond undo / redo.
+    let mutable private Clipboard : EntityDescriptor option = None
+
     [<RequireQualifiedAccess>]
     module private Cached =
         let mutable Dispatcher = Unchecked.defaultof<Lens<EntityDispatcher, Entity>>
@@ -319,7 +322,6 @@ module WorldEntityModule =
 #if !DISABLE_ENTITY_POST_UPDATE
         member this.PostUpdateEvent = Events.PostUpdateEvent --> this
 #endif
-        member this.RenderEvent = Events.RenderEvent --> this
         member this.MountEvent = Events.MountEvent --> this
         member this.UnmountEvent = Events.UnmountEvent --> this
         member this.BodyCollisionEvent = Events.BodyCollisionEvent --> this
@@ -461,21 +463,24 @@ module WorldEntityModule =
 
         /// Set an entity's mount while adjusting its mount properties such that they do not change.
         member this.SetMountOptWithAdjustment (value : Entity Relation option) world =
-            match
-                (Option.bind (tryResolve this) (this.GetMountOpt world),
-                 Option.bind (tryResolve this) value) with
+            match (Option.bind (tryResolve this) (this.GetMountOpt world), Option.bind (tryResolve this) value) with
             | (Some mountOld, Some mountNew) ->
                 if mountOld.Exists world && mountNew.Exists world then
-                    let affineMatrixMount = World.getEntityAffineMatrix mountNew world
-                    let affineMatrixMounter = World.getEntityAffineMatrix this world
-                    let affineMatrixLocal = affineMatrixMounter * affineMatrixMount.Inverted
-                    let positionLocal = affineMatrixLocal.Translation // TODO: use Matrix4x4.Decompose here.
-                    let rotationLocal = affineMatrixLocal.Rotation
-                    let scaleLocal = affineMatrixLocal.Scale
+                    let world =
+                        if  not (World.getEntityPhysical this world && World.getEntityPhysical mountOld world) &&
+                            not (World.getEntityPhysical this world && World.getEntityPhysical mountNew world) then
+                            let affineMatrixMount = World.getEntityAffineMatrix mountNew world
+                            let affineMatrixMounter = World.getEntityAffineMatrix this world
+                            let affineMatrixLocal = affineMatrixMounter * affineMatrixMount.Inverted
+                            let positionLocal = affineMatrixLocal.Translation // TODO: use Matrix4x4.Decompose here.
+                            let rotationLocal = affineMatrixLocal.Rotation
+                            let scaleLocal = affineMatrixLocal.Scale
+                            let world = this.SetPositionLocal positionLocal world
+                            let world = this.SetRotationLocal rotationLocal world
+                            let world = this.SetScaleLocal scaleLocal world
+                            world
+                        else world
                     let elevationLocal = this.GetElevation world - mountNew.GetElevation world
-                    let world = this.SetPositionLocal positionLocal world
-                    let world = this.SetRotationLocal rotationLocal world
-                    let world = this.SetScaleLocal scaleLocal world
                     let world = this.SetElevationLocal elevationLocal world
                     let world = this.SetEnabled (this.GetEnabledLocal world && mountNew.GetEnabled world) world
                     let world = this.SetVisible (this.GetVisibleLocal world && mountNew.GetVisible world) world
@@ -485,17 +490,21 @@ module WorldEntityModule =
             | (Some mountOld, None) ->
                 if mountOld.Exists world then
                     let world = this.SetMountOpt value world
-                    let position = this.GetPosition world
-                    let rotation = this.GetRotation world
-                    let scale = this.GetScale world
+                    let world =
+                        if not (World.getEntityPhysical this world && World.getEntityPhysical mountOld world) then
+                            let position = this.GetPosition world
+                            let rotation = this.GetRotation world
+                            let scale = this.GetScale world
+                            let world = this.SetPositionLocal v3Zero world
+                            let world = this.SetRotationLocal quatIdentity world
+                            let world = this.SetScaleLocal v3One world
+                            let world = this.SetPosition position world
+                            let world = this.SetRotation rotation world
+                            let world = this.SetScale scale world
+                            world
+                        else world
                     let elevation = this.GetElevation world
-                    let world = this.SetPositionLocal v3Zero world
-                    let world = this.SetRotationLocal quatIdentity world
-                    let world = this.SetScaleLocal v3One world
                     let world = this.SetElevationLocal 0.0f world
-                    let world = this.SetPosition position world
-                    let world = this.SetRotation rotation world
-                    let world = this.SetScale scale world
                     let world = this.SetElevation elevation world
                     let world = this.SetEnabled (this.GetEnabledLocal world) world
                     let world = this.SetVisible (this.GetVisibleLocal world) world
@@ -503,16 +512,20 @@ module WorldEntityModule =
                 else world
             | (None, Some mountNew) ->
                 if mountNew.Exists world then
-                    let affineMatrixMount = World.getEntityAffineMatrix mountNew world
-                    let affineMatrixMounter = World.getEntityAffineMatrix this world
-                    let affineMatrixLocal = affineMatrixMounter * affineMatrixMount.Inverted
-                    let positionLocal = affineMatrixLocal.Translation // TODO: use Matrix4x4.Decompose here.
-                    let rotationLocal = affineMatrixLocal.Rotation
-                    let scaleLocal = affineMatrixLocal.Scale
+                    let world =
+                        if not (World.getEntityPhysical this world && World.getEntityPhysical mountNew world) then
+                            let affineMatrixMount = World.getEntityAffineMatrix mountNew world
+                            let affineMatrixMounter = World.getEntityAffineMatrix this world
+                            let affineMatrixLocal = affineMatrixMounter * affineMatrixMount.Inverted
+                            let positionLocal = affineMatrixLocal.Translation // TODO: use Matrix4x4.Decompose here.
+                            let rotationLocal = affineMatrixLocal.Rotation
+                            let scaleLocal = affineMatrixLocal.Scale
+                            let world = this.SetPositionLocal positionLocal world
+                            let world = this.SetRotationLocal rotationLocal world
+                            let world = this.SetScaleLocal scaleLocal world
+                            world
+                        else world
                     let elevationLocal = this.GetElevation world - mountNew.GetElevation world
-                    let world = this.SetPositionLocal positionLocal world
-                    let world = this.SetRotationLocal rotationLocal world
-                    let world = this.SetScaleLocal scaleLocal world
                     let world = this.SetElevationLocal elevationLocal world
                     let world = this.SetEnabled (this.GetEnabledLocal world && mountNew.GetEnabled world) world
                     let world = this.SetVisible (this.GetVisibleLocal world && mountNew.GetVisible world) world
@@ -613,16 +626,10 @@ module WorldEntityModule =
 
         static member internal renderEntity (entity : Entity) world =
             let dispatcher = entity.GetDispatcher world
-            let world = dispatcher.Render (entity, world)
+            dispatcher.Render (entity, world)
             let facets = entity.GetFacets world
-            let world =
-                if Array.notEmpty facets // OPTIMIZATION: avoid lambda allocation.
-                then Array.fold (fun world (facet : Facet) -> facet.Render (entity, world)) world facets
-                else world
-            if World.getEntityPublishRenders entity world then
-                let eventTrace = EventTrace.debug "World" "renderEntity" "" EventTrace.empty
-                World.publishPlus () entity.RenderEvent eventTrace entity false false world
-            else world
+            for facet in facets do
+                facet.Render (entity, world)
 
         static member internal updateEntity (entity : Entity) world =
             let dispatcher = entity.GetDispatcher world
@@ -972,3 +979,87 @@ module WorldEntityModule =
                         ([], world)
                         entityDescriptors
             (List.rev entitiesRev, world)
+
+        static member private generateEntitySequentialName2 dispatcherName existingEntityNames =
+            let mutable name = Gen.nameForEditor dispatcherName
+            if Set.contains name existingEntityNames
+            then World.generateEntitySequentialName2 dispatcherName existingEntityNames
+            else name
+
+        /// Generate a sequential, editor-friendly entity name.
+        static member generateEntitySequentialName dispatcherName group world =
+            let existingEntityNames =
+                World.getEntitiesFlattened group world |>
+                Seq.map (fun entity -> entity.Name) |>
+                Set.ofSeq
+            World.generateEntitySequentialName2 dispatcherName existingEntityNames
+
+        /// Clear the content of the clipboard.
+        static member clearClipboard (_ : World) =
+            Clipboard <- None
+
+        /// Copy an entity to the world's clipboard.
+        static member copyEntityToClipboard entity world =
+            let entityDescriptor = World.writeEntity entity EntityDescriptor.empty world
+            Clipboard <- Some entityDescriptor
+
+        /// Cut an entity to the world's clipboard.
+        static member cutEntityToClipboard (entity : Entity) world =
+            World.copyEntityToClipboard entity world
+            World.destroyEntityImmediate entity world
+
+        /// Paste an entity from the world's clipboard.
+        static member pasteEntityFromClipboard pasteType (distance : single) rightClickPosition snapsEir (parent : Simulant) world =
+            match Clipboard with
+            | Some entityDescriptor ->
+                let nameOpt =
+                    match entityDescriptor.EntityProperties.TryGetValue Constants.Engine.NamePropertyName with
+                    | (true, nameSymbol) ->
+                        let name = symbolToValue nameSymbol
+                        let entityProposed = parent.Names |> Array.add name |> Entity
+                        if World.getEntityExists entityProposed world
+                        then Some (World.generateEntitySequentialName entityDescriptor.EntityDispatcherName entityProposed.Group world)
+                        else Some name
+                    | (_, _) -> failwithumf () // entity descriptor should always have a name property
+                let (entity, world) = World.readEntity entityDescriptor nameOpt parent world
+                let (position, snapsOpt) =
+                    let absolute = entity.GetAbsolute world
+                    if entity.GetIs2d world then
+                        let viewport = World.getViewport world
+                        let eyeCenter = World.getEyeCenter2d world
+                        let eyeSize = World.getEyeSize2d world
+                        let position =
+                            match pasteType with
+                            | PasteAtMouse -> (viewport.MouseToWorld2d (absolute, rightClickPosition, eyeCenter, eyeSize)).V3
+                            | PasteAtLook -> (viewport.MouseToWorld2d (absolute, World.getEyeSize2d world, eyeCenter, eyeSize)).V3
+                            | PasteAt position -> position
+                        match snapsEir with
+                        | Left (positionSnap, degreesSnap, scaleSnap) -> (position, Some (positionSnap, degreesSnap, scaleSnap))
+                        | Right _ -> (position, None)
+                    else
+                        let eyeCenter = World.getEyeCenter3d world
+                        let eyeRotation = World.getEyeRotation3d world
+                        let position =
+                            match pasteType with
+                            | PasteAtMouse ->
+                                let viewport = Constants.Render.Viewport
+                                let ray = viewport.MouseToWorld3d (absolute, rightClickPosition, eyeCenter, eyeRotation)
+                                let forward = eyeRotation.Forward
+                                let plane = plane3 (eyeCenter + forward * distance) -forward
+                                let intersectionOpt = ray.Intersection plane
+                                intersectionOpt.Value
+                            | PasteAtLook -> eyeCenter + Vector3.Transform (v3Forward, eyeRotation) * distance
+                            | PasteAt position -> position
+                        match snapsEir with
+                        | Right (positionSnap, degreesSnap, scaleSnap) -> (position, Some (positionSnap, degreesSnap, scaleSnap))
+                        | Left _ -> (position, None)
+                let mutable transform = entity.GetTransform world
+                transform.Position <- position
+                match snapsOpt with
+                | Some (positionSnap, degreesSnap, scaleSnap) -> transform.Snap (positionSnap, degreesSnap, scaleSnap)
+                | None -> ()
+                let world = entity.SetTransform transform world
+                let mountOpt = match parent with :? Entity -> Some (Relation.makeParent ()) | _ -> None
+                let world = entity.SetMountOpt mountOpt world
+                (Some entity, world)
+            | None -> (None, world)

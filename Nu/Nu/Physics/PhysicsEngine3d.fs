@@ -15,18 +15,20 @@ type [<ReferenceEquality>] PhysicsEngine3d =
     private
         { PhysicsContext : DynamicsWorld
           Constraints : OrderedDictionary<JointId, TypedConstraint>
-          Bodies : OrderedDictionary<BodyId, Vector3 option * RigidBody>
+          NonStaticBodies : OrderedDictionary<BodyId, Vector3 option * RigidBody>
+          Bodies : OrderedDictionary<BodyId, RigidBody>
           Ghosts : OrderedDictionary<BodyId, GhostObject>
           Objects : OrderedDictionary<BodyId, CollisionObject>
           CollisionsFiltered : SDictionary<BodyId * BodyId, Vector3>
           CollisionsGround : SDictionary<BodyId, Vector3 List>
           CollisionConfiguration : CollisionConfiguration
-          PhysicsDispatcher : Dispatcher
+          CollisionDispatcher : Dispatcher
           BroadPhaseInterface : BroadphaseInterface
+          ConstraintSolverPool : ConstraintSolverPoolMultiThreaded
           ConstraintSolver : ConstraintSolver
           TryGetAssetFilePath : obj AssetTag -> string option
           TryGetStaticModelMetadata : StaticModel AssetTag -> OpenGL.PhysicallyBased.PhysicallyBasedModel option
-          PhysicsMessages : PhysicsMessage UList
+          PhysicsMessages : PhysicsMessage List
           IntegrationMessages : IntegrationMessage List }
 
     static member private handleCollision physicsEngine (bodyId : BodyId) (bodyId2 : BodyId) normal =
@@ -279,8 +281,9 @@ type [<ReferenceEquality>] PhysicsEngine3d =
             body.UserIndex <- userIndex
             PhysicsEngine3d.configureBodyProperties bodyProperties body physicsEngine.PhysicsContext.Gravity
             physicsEngine.PhysicsContext.AddRigidBody (body, bodyProperties.CollisionCategories, bodyProperties.CollisionMask)
-            if physicsEngine.Bodies.TryAdd (bodyId, (bodyProperties.GravityOverride, body))
-            then physicsEngine.Objects.Add (bodyId, body)
+            if physicsEngine.Bodies.TryAdd (bodyId, body) then
+                if not body.IsStaticObject then physicsEngine.NonStaticBodies.Add (bodyId, (bodyProperties.GravityOverride, body))
+                physicsEngine.Objects.Add (bodyId, body)
             else Log.debug ("Could not add body for '" + scstring bodyId + "'.")
         else
             let ghost = new GhostObject ()
@@ -320,6 +323,7 @@ type [<ReferenceEquality>] PhysicsEngine3d =
             match object with
             | :? RigidBody as body ->
                 physicsEngine.Objects.Remove bodyId |> ignore
+                physicsEngine.NonStaticBodies.Remove bodyId |> ignore
                 physicsEngine.Bodies.Remove bodyId |> ignore
                 physicsEngine.PhysicsContext.RemoveRigidBody body
                 let userObject = body.UserObject :?> BodyUserObject
@@ -345,7 +349,7 @@ type [<ReferenceEquality>] PhysicsEngine3d =
         | JointEmpty -> ()
         | JointAngle jointAngle ->
             match (physicsEngine.Bodies.TryGetValue jointAngle.TargetId, physicsEngine.Bodies.TryGetValue jointAngle.TargetId2) with
-            | ((true, (_, body)), (true, (_, body2))) ->
+            | ((true, body), (true, body2)) ->
                 let hinge = new HingeConstraint (body, body2, jointAngle.Anchor, jointAngle.Anchor2, jointAngle.Axis, jointAngle.Axis2)
                 hinge.SetLimit (jointAngle.AngleMin, jointAngle.AngleMax, jointAngle.Softness, jointAngle.BiasFactor, jointAngle.RelaxationFactor)
                 hinge.BreakingImpulseThreshold <- jointAngle.BreakImpulseThreshold
@@ -454,7 +458,7 @@ type [<ReferenceEquality>] PhysicsEngine3d =
 
     static member private setBodyObservable (setBodyObservableMessage : SetBodyObservableMessage) physicsEngine =
         match physicsEngine.Bodies.TryGetValue setBodyObservableMessage.BodyId with
-        | (true, (_, body)) -> body.UserIndex <- if setBodyObservableMessage.Observable then 1 else -1
+        | (true, body) -> body.UserIndex <- if setBodyObservableMessage.Observable then 1 else -1
         | (false, _) ->
             match physicsEngine.Ghosts.TryGetValue setBodyObservableMessage.BodyId with
             | (true, ghost) -> ghost.UserIndex <- if setBodyObservableMessage.Observable then 1 else -1
@@ -482,9 +486,9 @@ type [<ReferenceEquality>] PhysicsEngine3d =
         | SetBodyObservableMessage setBodyObservableMessage -> PhysicsEngine3d.setBodyObservable setBodyObservableMessage physicsEngine
         | SetGravityMessage gravity ->
 
-            // set gravity of ALL bodies
+            // set gravity of all non-static bodies
             physicsEngine.PhysicsContext.Gravity <- gravity
-            for bodyEntry in physicsEngine.Bodies do
+            for bodyEntry in physicsEngine.NonStaticBodies do
                 let (gravityOverride, body) = bodyEntry.Value
                 match gravityOverride with
                 | Some gravity -> body.Gravity <- gravity
@@ -511,9 +515,12 @@ type [<ReferenceEquality>] PhysicsEngine3d =
                 physicsEngine.PhysicsContext.RemoveCollisionObject ghost
             physicsEngine.Ghosts.Clear ()
 
+            // clear non-static bodies
+            physicsEngine.NonStaticBodies.Clear ()
+
             // destroy bodies
             for body in physicsEngine.Bodies.Values do
-                physicsEngine.PhysicsContext.RemoveRigidBody (snd body)
+                physicsEngine.PhysicsContext.RemoveRigidBody body
             physicsEngine.Bodies.Clear ()
 
             // dispose body user objects
@@ -528,14 +535,15 @@ type [<ReferenceEquality>] PhysicsEngine3d =
         | (StaticFrameRate frameRate, UpdateTime frames) ->
             let physicsStepAmount = 1.0f / single frameRate * single frames
             if physicsStepAmount > 0.0f then
-                let stepsTaken = physicsEngine.PhysicsContext.StepSimulation (physicsStepAmount, 32, 1.0f / single (frameRate * 2L))
+                let stepsTaken = physicsEngine.PhysicsContext.StepSimulation (physicsStepAmount, 16, 1.0f / single (frameRate * 2L))
                 ignore stepsTaken
         | (DynamicFrameRate _, ClockTime physicsStepAmount) ->
             if physicsStepAmount > 0.0f then
                 // The following line is what Bullet seems to recommend (https://pybullet.org/Bullet/phpBB3/viewtopic.php?t=2438) -
-                //let stepsTaken = physicsEngine.PhysicsContext.StepSimulation (physicsStepAmount, 32, 1.0f / 120.0f)
+                //let stepsTaken = physicsEngine.PhysicsContext.StepSimulation (physicsStepAmount, 16, 1.0f / 120.0f)
                 // However, the following line of code seems to give smoother results -
-                let stepsTaken = physicsEngine.PhysicsContext.StepSimulation (physicsStepAmount, 4, physicsStepAmount / 4.0f - 0.0001f)
+                let stepsTaken = physicsEngine.PhysicsContext.StepSimulation (physicsStepAmount, 2, physicsStepAmount / 2.0f - 0.0001f)
+                // TODO: see if we can't just use a smoothed average of time to get the dynamic frame rate physics running more smoothly.
                 ignore stepsTaken
         | (_, _) -> failwithumf ()
 
@@ -608,7 +616,7 @@ type [<ReferenceEquality>] PhysicsEngine3d =
                 PhysicsEngine3d.handleSeparation physicsEngine bodySourceB bodySourceA
 
         // create transform messages
-        for bodyEntry in physicsEngine.Bodies do
+        for bodyEntry in physicsEngine.NonStaticBodies do
             let (_, body) = bodyEntry.Value
             if body.IsActive then
                 let bodyTransformMessage =
@@ -624,36 +632,44 @@ type [<ReferenceEquality>] PhysicsEngine3d =
         for physicsMessage in physicsMessages do
             PhysicsEngine3d.handlePhysicsMessage physicsEngine physicsMessage
 
-    static member make imperative gravity tryGetAssetFilePath tryGetStaticModelMetadata =
-        let config = if imperative then Imperative else Functional
-        let physicsMessages = UList.makeEmpty config
-        let collisionConfiguration = new DefaultCollisionConfiguration ()
-        let physicsDispatcher = new CollisionDispatcher (collisionConfiguration)
+    static member make gravity tryGetAssetFilePath tryGetStaticModelMetadata =
+        let taskScheduler = Threads.GetSequentialTaskScheduler () // NOTE: we're just using the non-threaded schedular since none of the others are available (perhaps because I didn't enable them when I previously built bullet).
+        taskScheduler.NumThreads <- taskScheduler.MaxNumThreads
+        Threads.TaskScheduler <- taskScheduler
+        use collisionConfigurationInfo = new DefaultCollisionConstructionInfo (DefaultMaxPersistentManifoldPoolSize = 80000, DefaultMaxCollisionAlgorithmPoolSize = 80000)
+        let collisionConfiguration = new DefaultCollisionConfiguration (collisionConfigurationInfo)
+        let collisionDispatcher = new CollisionDispatcherMultiThreaded (collisionConfiguration)
         let broadPhaseInterface = new DbvtBroadphase ()
-        let constraintSolver = new SequentialImpulseConstraintSolver ()
-        let world = new DiscreteDynamicsWorld (physicsDispatcher, broadPhaseInterface, constraintSolver, collisionConfiguration)
+        let constraintSolverPool = new ConstraintSolverPoolMultiThreaded (Constants.Physics.ThreadCount)
+        let constraintSolver = new SequentialImpulseConstraintSolverMultiThreaded ()
+        let world = new DiscreteDynamicsWorldMultiThreaded (collisionDispatcher, broadPhaseInterface, constraintSolverPool, constraintSolver, collisionConfiguration)
         world.Gravity <- gravity
-        { PhysicsContext = world
-          Constraints = OrderedDictionary HashIdentity.Structural
-          Bodies = OrderedDictionary HashIdentity.Structural
-          Ghosts = OrderedDictionary HashIdentity.Structural
-          Objects = OrderedDictionary HashIdentity.Structural
-          CollisionsFiltered = SDictionary.make HashIdentity.Structural
-          CollisionsGround = SDictionary.make HashIdentity.Structural
-          CollisionConfiguration = collisionConfiguration
-          PhysicsDispatcher = physicsDispatcher
-          BroadPhaseInterface = broadPhaseInterface
-          ConstraintSolver = constraintSolver
-          TryGetAssetFilePath = tryGetAssetFilePath
-          TryGetStaticModelMetadata = tryGetStaticModelMetadata
-          PhysicsMessages = physicsMessages
-          IntegrationMessages = List () }
+        let physicsEngine =
+            { PhysicsContext = world
+              Constraints = OrderedDictionary HashIdentity.Structural
+              NonStaticBodies = OrderedDictionary HashIdentity.Structural
+              Bodies = OrderedDictionary HashIdentity.Structural
+              Ghosts = OrderedDictionary HashIdentity.Structural
+              Objects = OrderedDictionary HashIdentity.Structural
+              CollisionsFiltered = SDictionary.make HashIdentity.Structural
+              CollisionsGround = SDictionary.make HashIdentity.Structural
+              CollisionConfiguration = collisionConfiguration
+              CollisionDispatcher = collisionDispatcher
+              BroadPhaseInterface = broadPhaseInterface
+              ConstraintSolverPool = constraintSolverPool
+              ConstraintSolver = constraintSolver
+              TryGetAssetFilePath = tryGetAssetFilePath
+              TryGetStaticModelMetadata = tryGetStaticModelMetadata
+              PhysicsMessages = List ()
+              IntegrationMessages = List () }
+        physicsEngine
 
     static member cleanUp physicsEngine =
         physicsEngine.PhysicsContext.Dispose ()
         physicsEngine.ConstraintSolver.Dispose ()
+        physicsEngine.ConstraintSolverPool.Dispose ()
         physicsEngine.BroadPhaseInterface.Dispose ()
-        physicsEngine.PhysicsDispatcher.Dispose ()
+        physicsEngine.CollisionDispatcher.Dispose ()
         physicsEngine.CollisionConfiguration.Dispose ()
 
     interface PhysicsEngine with
@@ -669,14 +685,14 @@ type [<ReferenceEquality>] PhysicsEngine3d =
 
         member physicsEngine.GetBodyLinearVelocity bodyId =
             match physicsEngine.Bodies.TryGetValue bodyId with
-            | (true, (_, body)) -> body.LinearVelocity
+            | (true, body) -> body.LinearVelocity
             | (false, _) ->
                 if physicsEngine.Ghosts.ContainsKey bodyId then v3Zero
                 else failwith ("No body with BodyId = " + scstring bodyId + ".")
 
         member physicsEngine.GetBodyAngularVelocity bodyId =
             match physicsEngine.Bodies.TryGetValue bodyId with
-            | (true, (_, body)) -> body.AngularVelocity
+            | (true, body) -> body.AngularVelocity
             | (false, _) ->
                 if physicsEngine.Ghosts.ContainsKey bodyId then v3Zero
                 else failwith ("No body with BodyId = " + scstring bodyId + ".")
@@ -708,22 +724,18 @@ type [<ReferenceEquality>] PhysicsEngine3d =
                 inspect message
 
         member physicsEngine.PopMessages () =
-            let messages = physicsEngine.PhysicsMessages
-            let physicsEngine = { physicsEngine with PhysicsMessages = UList.makeEmpty (UList.getConfig physicsEngine.PhysicsMessages) }
-            (messages, physicsEngine :> PhysicsEngine)
+            let messages = List physicsEngine.PhysicsMessages
+            physicsEngine.PhysicsMessages.Clear ()
+            messages
 
         member physicsEngine.ClearMessages () =
-            let physicsEngine = { physicsEngine with PhysicsMessages = UList.makeEmpty (UList.getConfig physicsEngine.PhysicsMessages) }
-            physicsEngine :> PhysicsEngine
+            physicsEngine.PhysicsMessages.Clear ()
 
         member physicsEngine.EnqueueMessage physicsMessage =
 #if HANDLE_PHYSICS_MESSAGES_DEFERRED
-            let physicsMessages = UList.add physicsMessage physicsEngine.PhysicsMessages
-            let physicsEngine = { physicsEngine with PhysicsMessages = physicsMessages }
-            physicsEngine :> PhysicsEngine
+            physicsEngine.PhysicsMessages.Add physicsMessage
 #else
             PhysicsEngine3d.handlePhysicsMessage physicsEngine physicsMessage
-            physicsEngine
 #endif
 
         member physicsEngine.Integrate stepTime physicsMessages =

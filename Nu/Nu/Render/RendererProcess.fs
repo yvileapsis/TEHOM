@@ -3,6 +3,7 @@
 
 namespace Nu
 open System
+open System.Collections.Concurrent
 open System.Collections.Generic
 open System.Numerics
 open System.Threading
@@ -439,19 +440,19 @@ type RendererThread () =
         member this.EnqueueMessage3d message =
             if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
             match message with
-            | RenderStaticModel rsm ->
-                let cachedStaticModelMessage = allocStaticModelMessage ()
-                match cachedStaticModelMessage with
-                | RenderCachedStaticModel cachedMessage ->
-                    cachedMessage.CachedStaticModelAbsolute <- rsm.Absolute
-                    cachedMessage.CachedStaticModelMatrix <- rsm.ModelMatrix
-                    cachedMessage.CachedStaticModelPresence <- rsm.Presence
-                    cachedMessage.CachedStaticModelInsetOpt <- ValueOption.ofOption rsm.InsetOpt
-                    cachedMessage.CachedStaticModelMaterialProperties <- rsm.MaterialProperties
-                    cachedMessage.CachedStaticModelRenderType <- rsm.RenderType
-                    cachedMessage.CachedStaticModel <- rsm.StaticModel
-                    messageBuffers3d.[messageBufferIndex].Add cachedStaticModelMessage
-                | _ -> failwithumf ()
+            //| RenderStaticModel rsm ->
+            //    let cachedStaticModelMessage = allocStaticModelMessage ()
+            //    match cachedStaticModelMessage with
+            //    | RenderCachedStaticModel cachedMessage ->
+            //        cachedMessage.CachedStaticModelAbsolute <- rsm.Absolute
+            //        cachedMessage.CachedStaticModelMatrix <- rsm.ModelMatrix
+            //        cachedMessage.CachedStaticModelPresence <- rsm.Presence
+            //        cachedMessage.CachedStaticModelInsetOpt <- ValueOption.ofOption rsm.InsetOpt
+            //        cachedMessage.CachedStaticModelMaterialProperties <- rsm.MaterialProperties
+            //        cachedMessage.CachedStaticModelRenderType <- rsm.RenderType
+            //        cachedMessage.CachedStaticModel <- rsm.StaticModel
+            //        messageBuffers3d.[messageBufferIndex].Add cachedStaticModelMessage
+            //    | _ -> failwithumf ()
             | RenderStaticModelSurface rsms ->
                 let cachedStaticModelSurfaceMessage = allocStaticModelSurfaceMessage ()
                 match cachedStaticModelSurfaceMessage with

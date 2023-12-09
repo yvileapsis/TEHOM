@@ -46,11 +46,10 @@ module Engine =
     let [<Uniform>] ParticleSize2dDefault = Vector3 (12.0f, 12.0f, 0.0f)
     let [<Uniform>] ParticleSize3dDefault = Vector3 (0.1f, 0.1f, 0.1f)
     let [<Uniform>] EyeCenter3dDefault = Vector3 (0.0f, 1.0f, 4.0f)
-    let [<Uniform>] EyeCenter3dOffset = Vector3 (0.0f, 0.0f, 1.5f)
     let [<Uniform>] mutable QuadnodeSize = match ConfigurationManager.AppSettings.["QuadnodeSize"] with null -> 512.0f | size -> scvalue<single> size
     let [<Uniform>] mutable QuadtreeDepth = match ConfigurationManager.AppSettings.["QuadtreeDepth"] with null -> 7 | depth -> scvalue<int> depth
     let [<Uniform>] QuadtreeSize = Vector2 (QuadnodeSize * single (pown 2 QuadtreeDepth))
-    let [<Uniform>] mutable OctnodeSize = match ConfigurationManager.AppSettings.["OctnodeSize"] with null -> 16.0f | size -> scvalue<single> size
+    let [<Uniform>] mutable OctnodeSize = match ConfigurationManager.AppSettings.["OctnodeSize"] with null -> 32.0f | size -> scvalue<single> size
     let [<Uniform>] mutable OctreeDepth = match ConfigurationManager.AppSettings.["OctreeDepth"] with null -> 6 | depth -> scvalue<int> depth
     let [<Uniform>] OctreeSize = Vector3 (OctnodeSize * single (pown 2 OctreeDepth))
     let [<Uniform>] mutable EventTracing = match ConfigurationManager.AppSettings.["EventTracing"] with null -> false | tracing -> scvalue<bool> tracing
@@ -60,6 +59,8 @@ module Engine =
 [<RequireQualifiedAccess>]
 module Render =
 
+    let [<Literal>] DeferredName = "Deferred"
+    let [<Literal>] ForwardName = "Forward"
     let [<Uniform>] mutable Vsync = match ConfigurationManager.AppSettings.["Vsync"] with null -> true | vsync -> scvalue<bool> vsync
     let [<Literal>] VirtualResolutionX = 960
     let [<Literal>] VirtualResolutionY = 540
@@ -74,7 +75,7 @@ module Render =
     let [<Literal>] NearPlaneDistanceEnclosed = 0.0625f
     let [<Literal>] FarPlaneDistanceEnclosed = 32.0f
     let [<Literal>] NearPlaneDistanceExposed = FarPlaneDistanceEnclosed
-    let [<Literal>] FarPlaneDistanceExposed = 256.0f
+    let [<Literal>] FarPlaneDistanceExposed = 512.0f
     let [<Literal>] NearPlaneDistanceImposter = FarPlaneDistanceExposed
     let [<Literal>] FarPlaneDistanceImposter = 16384.0f // TODO: see if this being large makes SSAO rather less accurate.
     let [<Literal>] NearPlaneDistanceOmnipresent = NearPlaneDistanceEnclosed
@@ -126,11 +127,11 @@ module Render =
     let [<Literal>] SsaoSampleCountMax = 128
     let [<Literal>] SsaoSampleCountDefault = 16
     let [<Literal>] FxaaEnabledDefault = true
-    let [<Literal>] LightProbeSizeDefault = 16.0f
+    let [<Literal>] LightProbeSizeDefault = 3.0f
     let [<Literal>] BrightnessDefault = 16.0f
     let [<Literal>] AttenuationLinearDefault = 0.7f
     let [<Literal>] AttenuationQuadraticDefault = 1.8f
-    let [<Literal>] CutoffDefault = 16.0f
+    let [<Literal>] LightCutoffDefault = 3.0f
     let [<Uniform>] AlbedoDefault = Color.White
     let [<Uniform>] RoughnessDefault = 1.0f
     let [<Literal>] MetallicDefault = 1.0f
@@ -139,7 +140,7 @@ module Render =
     let [<Literal>] HeightDefault = 1.0f
     let [<Literal>] InvertRoughnessDefault = false
 
-module OpenGl =
+module OpenGL =
 
     let [<Literal>] VersionMajor = 4
     let [<Literal>] VersionMinor = 1
@@ -147,6 +148,7 @@ module OpenGl =
     let [<Uniform>] GlslVersionPragma = "#version " + string VersionMajor + string VersionMinor + "0 " + if CoreProfile then "core" else ""
     let [<Literal>] CompressedColorTextureFormat = OpenGL.InternalFormat.CompressedRgbaS3tcDxt5Ext
     let [<Literal>] UncompressedTextureFormat = OpenGL.InternalFormat.Rgba8
+    let [<Uniform>] mutable HlAssert = match ConfigurationManager.AppSettings.["HlAssert"] with null -> false | vsync -> scvalue<bool> vsync
 
 [<RequireQualifiedAccess>]
 module Assimp =
