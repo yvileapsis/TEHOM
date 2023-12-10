@@ -88,8 +88,8 @@ module internal Octnode =
     let inline internal isIntersectingFrustum (frustum : Frustum) (node : 'e Octnode) =
         frustum.Intersects node.Bounds_
 
-    let inline internal containsBox (bounds : Box3) (node : 'e Octnode) =
-        node.Bounds_.Contains bounds = ContainmentType.Contains
+    let inline internal containsBoxExclusive (bounds : Box3) (node : 'e Octnode) =
+        node.Bounds_.ContainsExclusive bounds = ContainmentType.Contains
 
     let rec internal addElement bounds (element : 'e Octelement inref) (node : 'e Octnode) : int =
         let delta =
@@ -203,16 +203,44 @@ module internal Octnode =
                     if bounds.Intersects box then
                         set.Add element |> ignore
 
-    let rec internal getLightProbesInBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
+    let rec internal getLightProbesInPlayBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
         | ValueLeft nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingBox box node then
-                    getLightProbesInBox box set node
+                    getLightProbesInPlayBox box set node
         | ValueRight elements ->
             for element in elements do
-                if element.LightProbe then
+                if element.LightProbe && not element.Static then
+                    let bounds = element.Bounds
+                    if bounds.Intersects box then
+                        set.Add element |> ignore
+
+    let rec internal getLightsInPlayBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
+        match node.Children_ with
+        | ValueLeft nodes ->
+            for i in 0 .. dec nodes.Length do
+                let node = nodes.[i]
+                if node.ElementsCount_ > 0 && isIntersectingBox box node then
+                    getLightsInPlayBox box set node
+        | ValueRight elements ->
+            for element in elements do
+                if element.Light && not element.Static then
+                    let bounds = element.Bounds
+                    if bounds.Intersects box then
+                        set.Add element |> ignore
+
+    let rec internal getLightsInViewBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
+        match node.Children_ with
+        | ValueLeft nodes ->
+            for i in 0 .. dec nodes.Length do
+                let node = nodes.[i]
+                if node.ElementsCount_ > 0 && isIntersectingBox box node then
+                    getLightsInViewBox box set node
+        | ValueRight elements ->
+            for element in elements do
+                if element.Light && element.Visible then
                     let bounds = element.Bounds
                     if bounds.Intersects box then
                         set.Add element |> ignore
@@ -256,11 +284,11 @@ module internal Octnode =
             for element in elements do
                 if enclosed then
                     if element.Enclosed || element.Exposed then
-                        if frustum.Intersects element.Bounds then
+                        if element.Visible && frustum.Intersects element.Bounds then
                             set.Add element |> ignore
                 elif exposed then
                     if element.Exposed then
-                        if frustum.Intersects element.Bounds then
+                        if element.Visible && frustum.Intersects element.Bounds then
                             set.Add element |> ignore
 
     let rec internal getElementsInView frustumEnclosed frustumExposed lightBox (set : 'e Octelement HashSet) (node : 'e Octnode) =
@@ -275,7 +303,7 @@ module internal Octnode =
                         if intersectingEnclosed then getElementsInViewFrustum true false frustumEnclosed set node
                         if intersectingExposed then getElementsInViewFrustum false true frustumExposed set node
                     if isIntersectingBox lightBox node then
-                        getLightsInBox lightBox set node
+                        getLightsInViewBox lightBox set node
         | ValueRight _ -> ()
 
     let rec internal getElementsInPlay playBox playFrustum (set : 'e Octelement HashSet) (node : 'e Octnode) =
@@ -402,7 +430,7 @@ module Octree =
         let evens = v3 (divs.X |> int |> single) (divs.Y |> int |> single) (divs.Z |> int |> single)
         let leafKey = evens * tree.LeafSize - offset
         match tree.Leaves.TryGetValue leafKey with
-        | (true, leaf) when Octnode.containsBox bounds leaf -> Some leaf
+        | (true, leaf) when Octnode.containsBoxExclusive bounds leaf -> Some leaf
         | (_, _) -> None
 
     /// Add an element with the given presence and bounds to the tree.
@@ -505,13 +533,13 @@ module Octree =
 
     /// Get all of the light probe elements in the given light box.
     let getLightProbesInPlay lightBox (set : _ HashSet) tree =
-        Octnode.getLightProbesInBox lightBox set tree.Node
+        Octnode.getLightProbesInPlayBox lightBox set tree.Node
         let omnipresent = tree.Omnipresent |> Seq.filter (fun element -> element.LightProbe)
         new OctreeEnumerable<'e> (new OctreeEnumerator<'e> (omnipresent, set)) :> 'e Octelement IEnumerable
 
     /// Get all of the light elements in the given light box.
     let getLightsInPlay lightBox (set : _ HashSet) tree =
-        Octnode.getLightsInBox lightBox set tree.Node
+        Octnode.getLightsInPlayBox lightBox set tree.Node
         let omnipresent = tree.Omnipresent |> Seq.filter (fun element -> element.Light)
         new OctreeEnumerable<'e> (new OctreeEnumerator<'e> (omnipresent, set)) :> 'e Octelement IEnumerable
 
@@ -533,14 +561,14 @@ module Octree =
         if  not (Math.IsPowerOfTwo size.X) ||
             not (Math.IsPowerOfTwo size.Y) ||
             not (Math.IsPowerOfTwo size.Z) then
-            failwith "InvaliIsd size for Octtree. Expected value whose components are a power of two."
+            failwith "Invalid size for Octtree. Expected value whose components are a power of two."
         let leafComparer = // OPTIMIZATION: avoid allocation on Equals calls.
             { new IEqualityComparer<Vector3> with
                 member this.Equals (left, right) = left.Equals right
                 member this.GetHashCode v = v.GetHashCode () }
         let leaves = dictPlus leafComparer []
         let mutable leafSize = size
-        for _ in 1 .. dec depth do leafSize <- leafSize * 0.5f
+        for _ in 0 .. dec depth do leafSize <- leafSize * 0.5f
         let elementComparer = OctelementEqualityComparer<'e> ()
         let min = size * -0.5f + leafSize * 0.5f // OPTIMIZATION: offset min by half leaf size to minimize margin hits at origin.
         let bounds = box3 min size
@@ -548,7 +576,7 @@ module Octree =
           LeafSize = leafSize
           Imposter = HashSet elementComparer
           Omnipresent = HashSet elementComparer
-          Node = Octnode.make<'e> elementComparer depth bounds leaves
+          Node = Octnode.make<'e> elementComparer (inc depth) bounds leaves
           Depth = depth
           Bounds = bounds }
 

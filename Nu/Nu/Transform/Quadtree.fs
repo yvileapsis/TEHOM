@@ -13,6 +13,7 @@ module QuadelementMasks =
 
     // OPTIMIZATION: Quadelement flag bit-masks for performance.
     let [<Literal>] VisibleMask =   0b00000001u
+    let [<Literal>] StaticMask =    0b00000010u
 
 // NOTE: opening this in order to make the Quadelement property implementations reasonably succinct.
 open QuadelementMasks
@@ -28,12 +29,15 @@ module Quadelement =
               Flags_ : uint
               Entry_ : 'e }
         member this.Visible = this.Flags_ &&& VisibleMask <> 0u
+        member this.Static = this.Flags_ &&& StaticMask <> 0u
         member this.Entry = this.Entry_
         override this.GetHashCode () = this.HashCode_
         override this.Equals that = match that with :? Quadelement<'e> as that -> this.Entry_.Equals that.Entry_ | _ -> false
-        static member make visible (entry : 'e) =
+        static member make visible static_ (entry : 'e) =
             let hashCode = entry.GetHashCode ()
-            let flags = if visible then VisibleMask else 0u
+            let flags =
+                (if visible then VisibleMask else 0u) |||
+                (if static_ then StaticMask else 0u)
             { HashCode_ = hashCode; Flags_ = flags; Entry_ = entry }
 
 /// An element in a quadree.
@@ -64,8 +68,8 @@ module internal Quadnode =
     let internal isIntersectingBounds (bounds : Box2) (node : 'e Quadnode) =
         node.Bounds_.Intersects bounds
 
-    let inline internal containsBounds (bounds : Box2) (node : 'e Quadnode) =
-        node.Bounds_.Contains bounds = ContainmentType.Contains
+    let inline internal containsBoundsExclusive (bounds : Box2) (node : 'e Quadnode) =
+        node.Bounds_.ContainsExclusive bounds = ContainmentType.Contains
 
     let rec internal addElement bounds (element : 'e Quadelement inref) (node : 'e Quadnode) : int =
         let delta =
@@ -147,6 +151,30 @@ module internal Quadnode =
         | ValueRight elements ->
             for element in elements do
                 set.Add element |> ignore
+
+    let rec internal getElementsInView bounds (set : 'e Quadelement HashSet) (node : 'e Quadnode) =
+        match node.Children_ with
+        | ValueLeft nodes ->
+            for i in 0 .. dec nodes.Length do
+                let node = &nodes.[i]
+                if node.ElementsCount_ > 0 && isIntersectingBounds bounds node then
+                    getElementsInView bounds set node
+        | ValueRight elements ->
+            for element in elements do
+                if element.Visible then
+                    set.Add element |> ignore
+
+    let rec internal getElementsInPlay bounds (set : 'e Quadelement HashSet) (node : 'e Quadnode) =
+        match node.Children_ with
+        | ValueLeft nodes ->
+            for i in 0 .. dec nodes.Length do
+                let node = &nodes.[i]
+                if node.ElementsCount_ > 0 && isIntersectingBounds bounds node then
+                    getElementsInView bounds set node
+        | ValueRight elements ->
+            for element in elements do
+                if not element.Static then
+                    set.Add element |> ignore
 
     let rec internal getElements (set : 'e Quadelement HashSet) (node : 'e Quadnode) =
         match node.Children_ with
@@ -255,7 +283,7 @@ module Quadtree =
         let evens = v2 (divs.X |> int |> single) (divs.Y |> int |> single)
         let leafKey = evens * tree.LeafSize - offset
         match tree.Leaves.TryGetValue leafKey with
-        | (true, leaf) when Quadnode.containsBounds bounds leaf -> Some leaf
+        | (true, leaf) when Quadnode.containsBoundsExclusive bounds leaf -> Some leaf
         | (_, _) -> None
 
     /// Add an element with the given presence and bounds to the tree.
@@ -321,12 +349,12 @@ module Quadtree =
 
     /// Get all of the elements in a tree that are in a node intersected by the given bounds.
     let getElementsInView bounds set tree =
-        Quadnode.getElementsInBounds bounds set tree.Node
+        Quadnode.getElementsInView bounds set tree.Node
         new QuadtreeEnumerable<'e> (new QuadtreeEnumerator<'e> (tree.Ubiquitous, set)) :> 'e Quadelement IEnumerable
 
     /// Get all of the elements in a tree that are in a node intersected by the given bounds.
     let getElementsInPlay bounds set tree =
-        Quadnode.getElementsInBounds bounds set tree.Node
+        Quadnode.getElementsInPlay bounds set tree.Node
         new QuadtreeEnumerable<'e> (new QuadtreeEnumerator<'e> (tree.Ubiquitous, set)) :> 'e Quadelement IEnumerable
 
     /// Get all of the elements in a tree.
@@ -354,14 +382,14 @@ module Quadtree =
             failwith "Invalid size for Quadtree. Expected value whose components are a power of two."
         let leaves = dictPlus HashIdentity.Structural []
         let mutable leafSize = size
-        for _ in 1 .. dec depth do leafSize <- leafSize * 0.5f
+        for _ in 0 .. dec depth do leafSize <- leafSize * 0.5f
         let comparer = QuadelementEqualityComparer<'e> ()
         let min = size * -0.5f + leafSize * 0.5f // OPTIMIZATION: offset min by half leaf size to minimize margin hits at origin.
         let bounds = box2 min size
         { Leaves = leaves
           LeafSize = leafSize
           Ubiquitous = HashSet comparer
-          Node = Quadnode.make<'e> comparer depth bounds leaves
+          Node = Quadnode.make<'e> comparer (inc depth) bounds leaves
           Depth = depth
           Bounds = bounds }
 
