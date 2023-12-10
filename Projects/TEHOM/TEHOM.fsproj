@@ -37,6 +37,8 @@
 		<Compile Include="Gameplay\TextInput.fs" />
 		<Compile Include="Gameplay\Model.fs" />
 		<Compile Include="Gameplay\Gameplay.fs" />
+		<Compile Include="Gameplay\Serialization.fs" />
+		<Compile Include="Gameplay\GameplayGui.fs" />
 		<Compile Include="Gameplay\GameplayDispatcher.fs" />
 		<Compile Include="Tehom.fs" />
 		<Compile Include="TehomPlugin.fs" />
@@ -54,6 +56,7 @@
 		<Content Include="Assets\Gameplay\Jump.wav" />
 		<Content Include="Assets\Actors\default.yaml" />
 		<Content Include="Assets\Actors\content.yaml" />
+		<Content Include="Assets\Actors\content.tehom" />
 		<Content Include="Assets\Default\White.bmp" />
 		<Content Include="Assets\Default\TileSet.bmp" />
 		<Content Include="Assets\Default\TileMapEmpty.tmx" />

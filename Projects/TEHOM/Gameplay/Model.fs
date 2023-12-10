@@ -44,6 +44,13 @@ module Ability =
         | Human
         | Beyond
 
+    type SenseLevel =
+        | Self
+        | SameParent
+        | Parent
+        | Grandparent
+        | Anylevel
+
     // TODO: come up with what metric should be those based on
     type SenseType =
         | See of int
@@ -54,6 +61,7 @@ module Ability =
         | AllKnowing
 
     type LocomotionType =
+        | Balancing
         | Walking
         | Climbing
         | Flying
@@ -128,7 +136,7 @@ module Actor =
         Volume: VolumeTrait option
         Mass: MassTrait option
         Health: HealthTrait option
-        Abilities: Ability list
+        Abilities: Set<Ability>
 
     } with
 
@@ -137,7 +145,7 @@ module Actor =
             Volume = None
             Mass = None
             Health = None
-            Abilities = List.empty
+            Abilities = Set.empty
         }
 
         member this.getDescription =
@@ -164,14 +172,93 @@ module Actor =
     // Point of this list is so that we can get slices of this composition based on children traits,
     // i.e. if we apply filter of HasAbility CanMove _ we can get creature's entire locomotion system.
     type Composed =
+        | Simple
         // So at to define ability of parent entity to control its child entities,
         // I want to define cohesion of the entity agglomeration
         // Low cohesion -> actions are less of orders and more of suggestions
         // i.e. low cohesion party of NPCs will disobey player character
-        | Cohesion of int
+        | Controls of int
 
+    type Composition = Map<ActorID, Composed>
+    type Attachment = Attached * Set<ActorID>
 
 module Actions =
+
+    open Actor
+    open Ability
+
+    type System = Map<ActorID, Set<Ability> * Composed>
+
+    let getChildren (actor: ActorID) (compositions: Map<ActorID, Composition>) =
+        compositions[actor]
+        |> Map.keys
+        |> Set.ofSeq
+        |> Set.map (fun actorID ->
+            compositions[actorID]
+            |> Map.keys
+            |> Set.ofSeq
+            )
+        |> Set.unionMany
+
+    let getSelf (actor: ActorID) (compositions: Map<ActorID, Composition>) =
+        compositions[actor]
+        |> Map.keys
+        |> Set.ofSeq
+
+    let getParent (actor: ActorID) (compositions: Map<ActorID, Composition>) =
+        compositions
+        |> Map.filter (fun key composition ->
+            composition
+            |> Map.keys
+            |> Seq.contains actor)
+        |> Map.values
+        |> Seq.map (fun composition ->
+            composition
+            |> Map.keys
+            |> Set.ofSeq)
+        |> Set.ofSeq
+        |> Set.unionMany
+
+
+
+    let system (composition: Composition) (actors: Map<ActorID, Actor>) : System =
+        let filter key value = not value.Abilities.IsEmpty
+
+        let keys filter =
+            let compositionKeys = Set.ofSeq (Map.keys composition)
+            let actorKeys = Set.ofSeq (Map.keys (Map.filter filter actors))
+            Set.intersect compositionKeys actorKeys
+
+        let folder map key = Map.add key (actors[key].Abilities, composition[key]) map
+
+        Set.fold folder Map.empty (keys filter)
+
+    let systemOfAbility filter system =
+        let folder map key (abilities, composed) =
+            let abilities = Set.fold filter Set.empty abilities
+            Map.add key (abilities, composed) map
+        Map.fold folder Map.empty system
+
+    let systemSense system =
+        let senses set = function CanSense x -> Set.add x set | _ -> set
+        systemOfAbility senses system
+
+    let canSense actor (compositions: Map<ActorID, Composition>) actors =
+        if Map.containsKey actor compositions then
+            let composition = compositions[actor]
+            let system = system composition actors
+            let senses = systemSense system
+            if not senses.IsEmpty
+            then getParent actor compositions
+            else Set.empty
+        else Set.empty
+
+    let systemThinking system =
+        let senses set = function CanThink x -> Set.add x set | _ -> set
+        systemOfAbility senses system
+
+
+
     // Rough list of actions 'alive' entities should be capable of, each action should require a certain 'Ability'.
     type EntityActions =
         | Look

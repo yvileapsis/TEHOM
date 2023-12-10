@@ -49,8 +49,8 @@ module Tehom =
                 | Credits -> Desire Simulants.Credits
                 | Gameplay gameplay ->
                     match gameplay.State with
-                    | Playing -> Desire Simulants.Gameplay
-                    | Quitting | Quit -> Desire Simulants.Title
+                    | Gameplay.Playing -> Desire Simulants.Gameplay
+                    | Gameplay.Quitting | Gameplay.Quit -> Desire Simulants.Title
             match model with Gameplay gameplay -> Simulants.Gameplay.Gameplay := gameplay | _ -> ()
             Game.UpdateEvent => Update
             Simulants.Splash.DeselectingEvent => ShowTitle
@@ -65,7 +65,7 @@ module Tehom =
             match message with
             | ShowTitle -> just Title
             | ShowCredits -> just Credits
-            | ShowGameplay -> just (Gameplay Gameplay.makeDefault.serializeYaml)
+            | ShowGameplay -> just (Gameplay (Serialization.loadFromFile Gameplay.makeDefault))
             | Update ->
                 match model with
                 | Gameplay gameplay ->

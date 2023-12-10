@@ -32,4 +32,6 @@ module Simulants =
     let GameplayTextBox = GameplayGui / "TextBox"
     let GameplayTextInputBox = GameplayGui / "TextInputBox"
     let GameplayQuit = GameplayGui / "Quit"
+    let GameplaySave = GameplayGui / "Save"
+    let GameplayLoad = GameplayGui / "Load"
     let GameplayScene = Gameplay / "Scene"

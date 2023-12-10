@@ -30,6 +30,10 @@ module Assets =
         let PackageName = "Actors"
         let ActorsDefault = "Assets\\Actors\\default.yaml"
 
-        let ActorsContent = "Assets\\Actors\\content.yaml"
+        let ActorsContentYaml = "Assets\\Actors\\content.yaml"
+
+        let ActorsContentTehom = "Assets\\Actors\\content.tehom"
+
+        let ActorsContent = "Assets\\Actors\\"
 
         let Directory = __SOURCE_DIRECTORY__

@@ -175,7 +175,6 @@ module TextInputFacetModule =
                               Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
                               Justification = entity.GetJustification world }}
                     world
-            else world
 
 
 [<AutoOpen>]

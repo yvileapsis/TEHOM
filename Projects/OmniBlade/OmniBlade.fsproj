@@ -122,7 +122,7 @@
 	</ItemGroup>
 
 	<PropertyGroup>
-		<MagickCopyNativeLinux>true<MagickCopyNativeLinux>
+		<MagickCopyNativeLinux>true</MagickCopyNativeLinux>
 	</PropertyGroup>
 
 </Project>
