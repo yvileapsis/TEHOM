@@ -9,7 +9,7 @@ open Prime
 open Nu
 
 /// Logical operations that can be applied to an effect behavior.
-type [<StructuralEquality; StructuralComparison>] LogicApplicator =
+type LogicApplicator =
     | Or
     | Nor
     | Xor
@@ -18,7 +18,7 @@ type [<StructuralEquality; StructuralComparison>] LogicApplicator =
     | Equal
 
 /// Algorithms for tweening (interpolating) effect behavior.
-type [<StructuralEquality; StructuralComparison>] TweenAlgorithm =
+type TweenAlgorithm =
     | Constant
     | Linear
     | Random
@@ -32,7 +32,7 @@ type [<StructuralEquality; StructuralComparison>] TweenAlgorithm =
     | CosScaled of single
 
 /// The manners in which to apply tweening to effect values.
-type [<StructuralEquality; StructuralComparison>] TweenApplicator =
+type TweenApplicator =
     | Sum
     | Delta
     | Scalar
@@ -61,7 +61,7 @@ type Slice =
       LightCutoff : single
       Volume : single
       Enabled : bool
-      Centered : bool }
+      PerimeterCentered : bool }
 
 /// An effect key frame with abstract properties.
 type KeyFrame =
@@ -131,22 +131,22 @@ type Tween2IKeyFrame =
         member this.KeyFrameLength = this.TweenLength
 
 /// Represents different playback modes for an effect behavior.
-type [<StructuralEquality; StructuralComparison>] Playback =
+type Playback =
     | Once
     | Loop
     | Bounce
 
 /// Represents different repetition modes for an effect behavior.
-type [<StructuralEquality; StructuralComparison>] Repetition =
+type Repetition =
     | Cycle of Cycles : int
     | Iterate of Iterations : int
 
 /// Represents a rate of progress for an effect behavior.
-type [<StructuralEquality; StructuralComparison>] Rate =
+type Rate =
     Rate of single
 
 /// Represents a shift (offset) of an effect value.
-type [<StructuralEquality; StructuralComparison>] Shift =
+type Shift =
     Shift of single
 
 /// Represents a resource used in effect content.
@@ -618,7 +618,7 @@ module EffectSystem =
         // build sprite views
         let effectSystem =
             if slice.Enabled then
-                let mutable transform = Transform.makeIntuitive slice.Position slice.Scale slice.Offset slice.Size slice.Angles slice.Elevation effectSystem.EffectAbsolute slice.Centered
+                let mutable transform = Transform.makeIntuitive slice.Position slice.Scale slice.Offset slice.Size slice.Angles slice.Elevation effectSystem.EffectAbsolute slice.PerimeterCentered
                 let spriteView =
                     Render2d (transform.Elevation, transform.Horizon, AssetTag.generalize image,
                         RenderSprite
@@ -656,7 +656,7 @@ module EffectSystem =
             let effectSystem =
                 if  slice.Enabled &&
                     not (playback = Once && cel >= celCount) then
-                    let mutable transform = Transform.makeIntuitive slice.Position slice.Scale slice.Offset slice.Size slice.Angles slice.Elevation effectSystem.EffectAbsolute slice.Centered
+                    let mutable transform = Transform.makeIntuitive slice.Position slice.Scale slice.Offset slice.Size slice.Angles slice.Elevation effectSystem.EffectAbsolute slice.PerimeterCentered
                     let animatedSpriteView =
                         Render2d (transform.Elevation, transform.Horizon, AssetTag.generalize image,
                             RenderSprite
@@ -687,7 +687,7 @@ module EffectSystem =
         // build text views
         let effectSystem =
             if slice.Enabled then
-                let mutable transform = Transform.makeIntuitive slice.Position slice.Scale slice.Offset slice.Size slice.Angles slice.Elevation effectSystem.EffectAbsolute slice.Centered
+                let mutable transform = Transform.makeIntuitive slice.Position slice.Scale slice.Offset slice.Size slice.Angles slice.Elevation effectSystem.EffectAbsolute slice.PerimeterCentered
                 let textView =
                     Render2d (transform.Elevation, transform.Horizon, font,
                         RenderText

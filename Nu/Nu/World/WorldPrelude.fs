@@ -9,8 +9,22 @@ open SDL2
 open TiledSharp
 open Prime
 
+// The inferred attributes of an entity that are used to construct its bounds.
+type AttributesInferred =
+    { SizeInferred : Vector3
+      OffsetInferred : Vector3 }
+
+    static member make size offset =
+        { SizeInferred = size
+          OffsetInferred = offset }
+
+    static member choose left right =
+        if right.OffsetInferred.MagnitudeSquared >= left.OffsetInferred.MagnitudeSquared // HACK: picking the attribute whose offset is more impactful...
+        then right
+        else left
+
 /// Describes a Tiled tile.
-type [<StructuralEquality; NoComparison; Struct>] TileDescriptor =
+type [<Struct>] TileDescriptor =
     { mutable Tile : TmxLayerTile
       mutable TileI : int
       mutable TileJ : int
@@ -19,7 +33,7 @@ type [<StructuralEquality; NoComparison; Struct>] TileDescriptor =
       mutable TileSetTileOpt : TmxTilesetTile option }
 
 /// Describes a Tiled tile animation.
-type [<StructuralEquality; NoComparison; Struct>] TileAnimationDescriptor =
+type [<Struct>] TileAnimationDescriptor =
     { TileAnimationRun : int
       TileAnimationStride : int
       TileAnimationDelay : GameTime }
@@ -71,12 +85,12 @@ type Layout =
 
 /// The type of a screen transition. Incoming means a new screen is being shown and Outgoing
 /// means an existing screen being hidden.
-type [<StructuralEquality; NoComparison; Struct>] TransitionType =
+type [<Struct>] TransitionType =
     | Incoming
     | Outgoing
 
 /// The state of a screen's transition.
-type [<StructuralEquality; NoComparison>] TransitionState =
+type TransitionState =
     | IncomingState of GameTime
     | OutgoingState of GameTime
     | IdlingState of GameTime
@@ -87,7 +101,7 @@ type [<StructuralEquality; NoComparison>] TransitionState =
         | IdlingState time -> time
 
 /// Describes one of a screen's transition processes.
-type [<StructuralEquality; NoComparison>] Transition =
+type Transition =
     { TransitionType : TransitionType
       TransitionLifeTime : GameTime
       DissolveImageOpt : Image AssetTag option

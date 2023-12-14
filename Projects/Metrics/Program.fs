@@ -7,26 +7,26 @@ open Prime
 open Nu
 open Nu.Ecs
 
-type [<StructuralEquality; NoComparison; Struct>] StaticSpriteComponent =
+type [<Struct>] StaticSpriteComponent =
     { mutable Active : bool
       mutable Entity : Entity
       mutable Sprite : Image AssetTag }
     interface StaticSpriteComponent Component with
         member this.Active with get () = this.Active and set value = this.Active <- value
 
-type [<StructuralEquality; NoComparison; Struct>] Position =
+type [<Struct>] Position =
     { mutable Active : bool
       mutable Position : Vector2 }
     interface Position Component with
         member this.Active with get () = this.Active and set value = this.Active <- value
 
-type [<StructuralEquality; NoComparison; Struct>] Velocity =
+type [<Struct>] Velocity =
     { mutable Active : bool
       mutable Velocity : Vector2 }
     interface Velocity Component with
         member this.Active with get () = this.Active and set value = this.Active <- value
 
-type [<StructuralEquality; NoComparison; Struct>] Shake =
+type [<Struct>] Shake =
     { mutable Active : bool
       mutable Origin : Vector2
       mutable Offset : Vector2 }
@@ -34,7 +34,7 @@ type [<StructuralEquality; NoComparison; Struct>] Shake =
         member this.Active with get () = this.Active and set value = this.Active <- value
 
 type MetricsEntityDispatcher () =
-    inherit EntityDispatcher3d<StaticModel AssetTag, Message, Command> (true, false, Assets.Default.StaticModel)
+    inherit EntityDispatcher3d<StaticModel AssetTag, Message, Command> (false, Assets.Default.StaticModel)
 
 #if !MMCC
     override this.Update (entity, world) =
@@ -44,16 +44,15 @@ type MetricsEntityDispatcher () =
     override this.Render (entity, world) =
         let staticModel = entity.GetModelGeneric world
         let mutable transform = entity.GetTransform world
-        let affineMatrixOffset = transform.AffineMatrixOffset
+        let affineMatrix = transform.AffineMatrix
         let presence = transform.Presence
         let properties = MaterialProperties.empty
-        World.renderStaticModelFast (false, &affineMatrixOffset, presence, ValueNone, &properties, DeferredRenderType, staticModel, world)
+        World.renderStaticModelFast (false, &affineMatrix, presence, ValueNone, &properties, DeferredRenderType, staticModel, world)
 
-    override this.GetQuickSize (entity, world) =
+    override this.GetAttributesInferred (entity, world) =
         let staticModel = entity.GetModelGeneric world
         let bounds = (Metadata.getStaticModelMetadata staticModel).Bounds
-        let boundsExtended = bounds.Combine bounds.Mirror
-        boundsExtended.Size
+        AttributesInferred.make bounds.Size bounds.Center
 
 #if !MMCC
 type MyGameDispatcher () =

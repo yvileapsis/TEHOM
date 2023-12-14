@@ -460,7 +460,7 @@ and GroupDispatcher () =
     default this.TryUntruncateModel (_, _, _) = None
 
 /// The default dispatcher for entities.
-and EntityDispatcher (is2d, centered, physical) =
+and EntityDispatcher (is2d, perimeterCentered, physical) =
     inherit SimulantDispatcher ()
 
     static member Properties =
@@ -489,7 +489,7 @@ and EntityDispatcher (is2d, centered, physical) =
          Define? Visible true
          Define? VisibleLocal true
          Define? Pickable true
-         Define? Centered true
+         Define? PerimeterCentered true
          Define? Static false
          Define? LightProbe false
          Define? Light false
@@ -545,19 +545,15 @@ and EntityDispatcher (is2d, centered, physical) =
     default this.TrySynchronize (_, _, world) = world
 
     /// Get the default size of an entity.
-    abstract GetQuickSize : Entity * World -> Vector3
-    default this.GetQuickSize (_, _) =
+    abstract GetAttributesInferred : Entity * World -> AttributesInferred
+    default this.GetAttributesInferred (_, _) =
         if this.Is2d
-        then Constants.Engine.EntitySize2dDefault
-        else Constants.Engine.EntitySize3dDefault
+        then AttributesInferred.make Constants.Engine.EntitySize2dDefault v3Zero
+        else AttributesInferred.make Constants.Engine.EntitySize3dDefault v3Zero
 
     /// Attempt to pick an entity with a ray.
     abstract RayCast : Ray3 * Entity * World -> single array
     default this.RayCast (_, _, _) = [||]
-
-    /// Attempt to get the highlight bounds of an entity.
-    abstract TryGetHighlightBounds : Entity * World -> Box3 option
-    default this.TryGetHighlightBounds (_, _) = None
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
     abstract Edit : EditOperation * Entity * World -> World
@@ -574,8 +570,8 @@ and EntityDispatcher (is2d, centered, physical) =
     /// Whether the dispatcher participates directly in a physics system (not counting its facets).
     member this.Physical = physical
 
-    /// Whether the dispatcher uses a centered transform by default.
-    member this.Centered = centered
+    /// Whether the dispatcher uses a centered perimeter by default.
+    member this.PerimeterCentered = perimeterCentered
 
     /// Whether the dispatcher has a 2-dimensional transform interpretation.
     member this.Is2d = is2d
@@ -626,16 +622,12 @@ and Facet (physical) =
     abstract RayCast : Ray3 * Entity * World -> single array
     default this.RayCast (_, _, _) = [||]
 
-    /// Attempt to get the highlight bounds of a facet.
-    abstract TryGetHighlightBounds : Entity * World -> Box3 option
-    default this.TryGetHighlightBounds (_, _) = None
-
     /// Participate in getting the default size of an entity.
-    abstract GetQuickSize : Entity * World -> Vector3
-    default this.GetQuickSize (entity, world) =
+    abstract GetAttributesInferred : Entity * World -> AttributesInferred
+    default this.GetAttributesInferred (entity, world) =
         if WorldTypes.getEntityIs2d entity world
-        then Constants.Engine.EntitySize2dDefault
-        else Constants.Engine.EntitySize3dDefault
+        then AttributesInferred.make Constants.Engine.EntitySize2dDefault v3Zero
+        else AttributesInferred.make Constants.Engine.EntitySize3dDefault v3Zero
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
     abstract Edit : EditOperation * Entity * World -> World
@@ -1014,17 +1006,17 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
       Id : uint64
       Surnames : string array }
 
+    member this.PerimeterCenter with get () = this.Transform.PerimeterCenter and set value = this.Transform.PerimeterCenter <- value
+    member this.PerimeterBottom with get () = this.Transform.PerimeterBottom and set value = this.Transform.PerimeterBottom <- value
+    member this.PerimeterBottomLeft with get () = this.Transform.PerimeterBottomLeft and set value = this.Transform.PerimeterBottomLeft <- value
+    member this.PerimeterMin with get () = this.Transform.PerimeterMin and set value = this.Transform.PerimeterMin <- value
+    member this.PerimeterMax with get () = this.Transform.PerimeterMax and set value = this.Transform.PerimeterMax <- value
+    member this.PerimeterCenterLocal with get () = this.PositionLocal + (this.Transform.PerimeterCenter - this.Transform.Position)
+    member this.PerimeterBottomLocal with get () = this.PositionLocal + (this.Transform.PerimeterBottom - this.Transform.Position)
+    member this.PerimeterBottomLeftLocal with get () = this.PositionLocal + (this.Transform.PerimeterBottomLeft - this.Transform.Position)
+    member this.PerimeterMinLocal with get () = this.PositionLocal + (this.Transform.PerimeterMin - this.Transform.Position)
+    member this.PerimeterMaxLocal with get () = this.PositionLocal + (this.Transform.PerimeterMax - this.Transform.Position)
     member this.Position with get () = this.Transform.Position and set value = this.Transform.Position <- value
-    member this.Center with get () = this.Transform.Center and set value = this.Transform.Center <- value
-    member this.Bottom with get () = this.Transform.Bottom and set value = this.Transform.Bottom <- value
-    member this.BottomLeft with get () = this.Transform.BottomLeft and set value = this.Transform.BottomLeft <- value
-    member this.Min with get () = this.Transform.Min and set value = this.Transform.Min <- value
-    member this.Max with get () = this.Transform.Max and set value = this.Transform.Max <- value
-    member this.CenterLocal with get () = this.PositionLocal + (this.Transform.Center - this.Transform.Position)
-    member this.BottomLocal with get () = this.PositionLocal + (this.Transform.Bottom - this.Transform.Position)
-    member this.BottomLeftLocal with get () = this.PositionLocal + (this.Transform.BottomLeft - this.Transform.Position)
-    member this.MinLocal with get () = this.PositionLocal + (this.Transform.Min - this.Transform.Position)
-    member this.MaxLocal with get () = this.PositionLocal + (this.Transform.Max - this.Transform.Position)
     member this.Rotation with get () = this.Transform.Rotation and set value = this.Transform.Rotation <- value
     member this.Scale with get () = this.Transform.Scale and set value = this.Transform.Scale <- value
     member this.Offset with get () = this.Transform.Offset and set value = this.Transform.Offset <- value
@@ -1036,11 +1028,9 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     member this.Elevation with get () = this.Transform.Elevation and set value = this.Transform.Elevation <- value
     member this.Overflow with get () = this.Transform.Overflow and set value = this.Transform.Overflow <- value
     member this.AffineMatrix with get () = this.Transform.AffineMatrix
-    member this.AffineMatrixOffset with get () = this.Transform.AffineMatrixOffset
     member this.PerimeterUnscaled with get () = this.Transform.PerimeterUnscaled and set value = this.Transform.PerimeterUnscaled <- value
     member this.Perimeter with get () = this.Transform.Perimeter and set value = this.Transform.Perimeter <- value
-    member this.PerimeterOriented with get () = this.Transform.PerimeterOriented
-    member this.Bounds with get () = this.Transform.Bounds
+    member this.Bounds with get () = if this.Is2d then this.Transform.Bounds2d else this.Transform.Bounds3d
     member this.Presence with get () = this.Transform.Presence and set value = this.Transform.Presence <- value
     member internal this.Active with get () = this.Transform.Active and set value = this.Transform.Active <- value
     member internal this.Dirty with get () = this.Transform.Dirty and set value = this.Transform.Dirty <- value
@@ -1064,7 +1054,7 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     member this.Is2d with get () = this.Dispatcher.Is2d
     member this.Is3d with get () = this.Dispatcher.Is3d
     member this.Physical with get () = this.Dispatcher.Physical || Array.exists (fun (facet : Facet) -> facet.Physical) this.Facets // TODO: consider using a cache flag to keep from recomputing this.
-    member this.Centered with get () = this.Transform.Centered and set value = this.Transform.Centered <- value
+    member this.PerimeterCentered with get () = this.Transform.PerimeterCentered and set value = this.Transform.PerimeterCentered <- value
     member this.Static with get () = this.Transform.Static and set value = this.Transform.Static <- value
     member this.LightProbe with get () = this.Transform.LightProbe and set value = this.Transform.LightProbe <- value
     member this.Light with get () = this.Transform.Light and set value = this.Transform.Light <- value
@@ -1072,7 +1062,7 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
 
     /// Make an entity state value.
     static member make imperative surnamesOpt overlayNameOpt (dispatcher : EntityDispatcher) =
-        let mutable transform = Transform.makeDefault dispatcher.Centered
+        let mutable transform = Transform.makeDefault dispatcher.PerimeterCentered
         transform.Imperative <- imperative
         let (id, surnames) = Gen.id64AndSurnamesIf surnamesOpt
         { Transform = transform

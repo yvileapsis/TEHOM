@@ -20,7 +20,7 @@ open System.Runtime.InteropServices
 //////////////////////////////////////////////////////////////////////////////////////////
 
 /// Describes a static model surface.
-type [<NoEquality; NoComparison>] SurfaceDescriptor =
+type SurfaceDescriptor =
     { Positions : Vector3 array
       TexCoordses : Vector2 array
       Normals : Vector3 array
@@ -41,7 +41,7 @@ type [<NoEquality; NoComparison>] SurfaceDescriptor =
 
 /// A layer from which a 3d terrain's material is composed.
 /// NOTE: doesn't use metalness for now in order to increase number of total materials per terrain.
-type [<StructuralEquality; NoComparison>] TerrainLayer =
+type TerrainLayer =
     { AlbedoImage : Image AssetTag
       RoughnessImage : Image AssetTag
       AmbientOcclusionImage : Image AssetTag
@@ -49,12 +49,12 @@ type [<StructuralEquality; NoComparison>] TerrainLayer =
       HeightImage : Image AssetTag }
 
 /// Blend-weights for a 3d terrain.
-type [<StructuralEquality; NoComparison>] BlendMap =
+type BlendMap =
     | RgbaMap of Image AssetTag
     | RedsMap of Image AssetTag array
 
 /// A material as projected from images to a 3d terrain.
-type [<StructuralEquality; NoComparison>] FlatMaterial =
+type FlatMaterial =
     { AlbedoImage : Image AssetTag
       RoughnessImage : Image AssetTag
       AmbientOcclusionImage : Image AssetTag
@@ -62,17 +62,17 @@ type [<StructuralEquality; NoComparison>] FlatMaterial =
       HeightImage : Image AssetTag }
 
 /// Blend-weighted material for a 3d terrain.
-type [<StructuralEquality; NoComparison>] BlendMaterial =
+type BlendMaterial =
     { TerrainLayers : TerrainLayer array
       BlendMap : BlendMap }
 
 /// Describes the material of which a 3d terrain is composed.
-type [<StructuralEquality; NoComparison>] TerrainMaterial =
+type TerrainMaterial =
     | FlatMaterial of FlatMaterial
     | BlendMaterial of BlendMaterial
 
 /// Material properties for terrain surfaces.
-type [<StructuralEquality; NoComparison; SymbolicExpansion; Struct>] TerrainMaterialProperties =
+type [<SymbolicExpansion; Struct>] TerrainMaterialProperties =
     { AlbedoOpt : Color voption
       RoughnessOpt : single voption
       AmbientOcclusionOpt : single voption
@@ -89,7 +89,7 @@ type [<StructuralEquality; NoComparison; SymbolicExpansion; Struct>] TerrainMate
 
 /// Material properties for surfaces.
 /// NOTE: this type has to go after TerrainMaterialProperties lest the latter's field names shadow this one's.
-type [<StructuralEquality; NoComparison; SymbolicExpansion; Struct>] MaterialProperties =
+type [<SymbolicExpansion; Struct>] MaterialProperties =
     { AlbedoOpt : Color voption
       RoughnessOpt : single voption
       MetallicOpt : single voption
@@ -109,7 +109,7 @@ type [<StructuralEquality; NoComparison; SymbolicExpansion; Struct>] MaterialPro
         Unchecked.defaultof<MaterialProperties>
 
 /// Describes a static 3d terrain geometry.
-type [<StructuralEquality; NoComparison>] TerrainGeometryDescriptor =
+type TerrainGeometryDescriptor =
     { Bounds : Box3
       Material : TerrainMaterial
       TintImage : Image AssetTag
@@ -119,7 +119,7 @@ type [<StructuralEquality; NoComparison>] TerrainGeometryDescriptor =
       Segments : Vector2i }
 
 /// Describes a static 3d terrain.
-type [<StructuralEquality; NoComparison>] TerrainDescriptor =
+type TerrainDescriptor =
     { Bounds : Box3
       InsetOpt : Box2 option
       MaterialProperties : TerrainMaterialProperties
@@ -140,7 +140,7 @@ type [<StructuralEquality; NoComparison>] TerrainDescriptor =
           Segments = this.Segments }
 
 /// Describes billboard-based particles.
-type [<NoEquality; NoComparison>] BillboardParticlesDescriptor =
+type BillboardParticlesDescriptor =
     { Absolute : bool
       MaterialProperties : MaterialProperties
       AlbedoImage : Image AssetTag
@@ -214,7 +214,7 @@ and [<ReferenceEquality>] SsaoConfig =
       SsaoSampleCount : int }
 
 /// An internally cached static model used to reduce GC promotion or pressure.
-and [<NoEquality; NoComparison>] CachedStaticModelMessage =
+and CachedStaticModelMessage =
     { mutable CachedStaticModelAbsolute : bool
       mutable CachedStaticModelMatrix : Matrix4x4
       mutable CachedStaticModelPresence : Presence
@@ -224,7 +224,7 @@ and [<NoEquality; NoComparison>] CachedStaticModelMessage =
       mutable CachedStaticModel : StaticModel AssetTag }
 
 /// An internally cached static model surface used to reduce GC promotion or pressure.
-and [<NoEquality; NoComparison>] CachedStaticModelSurfaceMessage =
+and CachedStaticModelSurfaceMessage =
     { mutable CachedStaticModelSurfaceAbsolute : bool
       mutable CachedStaticModelSurfaceMatrix : Matrix4x4
       mutable CachedStaticModelSurfaceInsetOpt : Box2 voption
@@ -234,7 +234,7 @@ and [<NoEquality; NoComparison>] CachedStaticModelSurfaceMessage =
       mutable CachedStaticModelSurfaceIndex : int }
 
 /// An internally cached animated model used to reduce GC promotion or pressure.
-and [<NoEquality; NoComparison>] CachedAnimatedModelMessage =
+and CachedAnimatedModelMessage =
     { mutable CachedAnimatedModelTime : GameTime
       mutable CachedAnimatedModelAbsolute : bool
       mutable CachedAnimatedModelMatrix : Matrix4x4
@@ -2094,7 +2094,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                 for particle in rbps.Particles do
                     let billboardMatrix =
                         Matrix4x4.CreateFromTrs
-                            (particle.Transform.Center,
+                            (particle.Transform.Position,
                              particle.Transform.Rotation,
                              particle.Transform.Size * particle.Transform.Scale)
                     let billboardMaterialProperties = { billboardMaterial.MaterialProperties with Albedo = billboardMaterial.MaterialProperties.Albedo * particle.Color; Emission = particle.Emission.R }

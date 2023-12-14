@@ -198,7 +198,7 @@ module Nu =
                         (fun quadtree ->
                             for entity in entities2d do
                                 let entityState = World.getEntityState entity world
-                                let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) entityState.Static entity
+                                let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
                                 Quadtree.addElement entityState.Presence entityState.Bounds.Box2 element quadtree
                             quadtree)
                         (World.getQuadtree world)
@@ -209,7 +209,7 @@ module Nu =
                         (fun octree ->
                             for entity in entities3d do
                                 let entityState = World.getEntityState entity world
-                                let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) entityState.Static entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
+                                let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
                                 Octree.addElement entityState.Presence entityState.Bounds element octree
                             octree)
                         (World.getOctree world)
@@ -227,7 +227,7 @@ module Nu =
                         (fun quadtree ->
                             for entity in entities2d do
                                 let entityState = World.getEntityState entity world
-                                let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) entityState.Static entity
+                                let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
                                 Quadtree.removeElement entityState.Presence entityState.Bounds.Box2 element quadtree
                             quadtree)
                         (World.getQuadtree world)
@@ -238,7 +238,7 @@ module Nu =
                         (fun octree ->
                             for entity in entities3d do
                                 let entityState = World.getEntityState entity world
-                                let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) entityState.Static entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
+                                let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
                                 Octree.removeElement entityState.Presence entityState.Bounds element octree
                             octree)
                         (World.getOctree world)
@@ -313,7 +313,7 @@ module WorldModule3 =
             Map.ofListBy World.pairWithName $
                 [EntityDispatcher (true, false, false)
                  EntityDispatcher2d (false) :> EntityDispatcher
-                 EntityDispatcher3d (true, false) :> EntityDispatcher
+                 EntityDispatcher3d (false) :> EntityDispatcher
                  StaticSpriteDispatcher () :> EntityDispatcher
                  AnimatedSpriteDispatcher () :> EntityDispatcher
                  GuiDispatcher () :> EntityDispatcher
@@ -341,13 +341,13 @@ module WorldModule3 =
                  StaticModelDispatcher () :> EntityDispatcher
                  AnimatedModelDispatcher () :> EntityDispatcher
                  RigidModelDispatcher () :> EntityDispatcher
-                 StaticModelHierarchyDispatcher () :> EntityDispatcher
-                 RigidModelHierarchyDispatcher () :> EntityDispatcher
                  EffectDispatcher3d () :> EntityDispatcher
                  BlockDispatcher3d () :> EntityDispatcher
                  BoxDispatcher3d () :> EntityDispatcher
                  CharacterDispatcher3d () :> EntityDispatcher
-                 TerrainDispatcher () :> EntityDispatcher]
+                 TerrainDispatcher () :> EntityDispatcher
+                 StaticModelHierarchyDispatcher () :> EntityDispatcher
+                 RigidModelHierarchyDispatcher () :> EntityDispatcher]
 
         static member private makeDefaultFacets () =
             // TODO: consider if we should reflectively generate these.
@@ -376,7 +376,8 @@ module WorldModule3 =
                  StaticModelSurfaceFacet () :> Facet
                  StaticModelFacet () :> Facet
                  AnimatedModelFacet () :> Facet
-                 TerrainFacet () :> Facet]
+                 TerrainFacet () :> Facet
+                 FreezerFacet () :> Facet]
 
         /// Update late bindings internally stored by the engine from types found in the given assemblies.
         static member updateLateBindings (assemblies : Assembly array) world =

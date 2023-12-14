@@ -383,7 +383,7 @@ module WorldModule2 =
             let world = slideSprite.SetPersistent false world
             let world = slideSprite.SetSize eyeSize.V3 world
             let world =
-                if not Constants.Engine.EntityCentered2dDefault
+                if not Constants.Engine.EntityPerimeterCentered2dDefault
                 then slideSprite.SetPosition (-eyeSize.V3 * 0.5f) world
                 else world
             let world = slideSprite.SetAbsolute true world
@@ -856,14 +856,12 @@ module WorldModule2 =
             World.getEntities3dBy (Octree.getElementsInView frustumEnclosed frustumExposed frustumImposter lightBox set) world
 
         /// Get all 3d light probe entities in the current 3d light box, including all uncullable light probes.
-        static member getLightProbesInPlay3d set world =
-            let lightBox = World.getLightBox3d world
-            World.getEntities3dBy (Octree.getLightProbesInPlay lightBox set) world
+        static member getLightProbesInFrustum3d frustum set world =
+            World.getEntities3dBy (Octree.getLightProbesInFrustum frustum set) world
 
         /// Get all 3d light entities in the current 3d light box, including all uncullable lights.
-        static member getLightsInPlay3d set world =
-            let lightBox = World.getLightBox3d world
-            World.getEntities3dBy (Octree.getLightsInPlay lightBox set) world
+        static member getLightsInFrustum3d frustum set world =
+            World.getEntities3dBy (Octree.getLightsInFrustum frustum set) world
 
         /// Get all 3d entities in the current selected screen, including all uncullable entities.
         static member getEntities3d set world =
@@ -904,8 +902,18 @@ module WorldModule2 =
             // pre-update entities
             PreUpdateEntitiesTimer.Start ()
             let advancing = world.Advancing
-            let world = Seq.fold (fun world (element : Entity Octelement) -> if not (element.Entry.GetStatic world) && (element.Entry.GetAlwaysUpdate world || advancing) then World.preUpdateEntity element.Entry world else world) world elements3d
-            let world = Seq.fold (fun world (element : Entity Quadelement) -> if not (element.Entry.GetStatic world) && (element.Entry.GetAlwaysUpdate world || advancing) then World.preUpdateEntity element.Entry world else world) world elements2d
+            let world =
+                Seq.fold (fun world (element : Entity Octelement) ->
+                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
+                    then World.preUpdateEntity element.Entry world
+                    else world)
+                    world elements3d
+            let world =
+                Seq.fold (fun world (element : Entity Quadelement) ->
+                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
+                    then World.preUpdateEntity element.Entry world
+                    else world)
+                    world elements2d
             PreUpdateEntitiesTimer.Stop ()
 
             // clear cached hash sets
@@ -947,8 +955,18 @@ module WorldModule2 =
 
             // update entities
             UpdateEntitiesTimer.Start ()
-            let world = Seq.fold (fun world (element : Entity Octelement) -> if not (element.Entry.GetStatic world) && (element.Entry.GetAlwaysUpdate world || advancing) then World.updateEntity element.Entry world else world) world elements3d
-            let world = Seq.fold (fun world (element : Entity Quadelement) -> if not (element.Entry.GetStatic world) && (element.Entry.GetAlwaysUpdate world || advancing) then World.updateEntity element.Entry world else world) world elements2d
+            let world =
+                Seq.fold (fun world (element : Entity Octelement) ->
+                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
+                    then World.updateEntity element.Entry world
+                    else world)
+                    world elements3d
+            let world =
+                Seq.fold (fun world (element : Entity Quadelement) ->
+                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
+                    then World.updateEntity element.Entry world
+                    else world)
+                    world elements2d
             UpdateEntitiesTimer.Stop ()
 
             // clear cached hash sets
@@ -969,8 +987,18 @@ module WorldModule2 =
             let screens = List.rev screens
             let groups = Seq.concat (List.map (flip World.getGroups world) screens)
 #if !DISABLE_ENTITY_POST_UPDATE
-            let (elements3d, world) = World.getElementsInPlay3d CachedHashSet3d world
-            let (elements2d, world) = World.getElementsInPlay2d CachedHashSet2d world
+            let world =
+                Seq.fold (fun world (element : Entity Octelement) ->
+                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
+                    then World.postUpdateEntity element.Entry world
+                    else world)
+                    world elements3d
+            let world =
+                Seq.fold (fun world (element : Entity Quadelement) ->
+                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
+                    then World.postUpdateEntity element.Entry world
+                    else world)
+                    world elements2d
 #endif
             PostUpdateGatherTimer.Stop ()
 
@@ -1340,11 +1368,11 @@ module EntityDispatcherModule2 =
 
     /// The MMCC dispatcher for entities.
     and [<AbstractClass>] EntityDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command>
-        (is2d, centered, physical, makeInitial : World -> 'model) =
-        inherit EntityDispatcher (is2d, centered, physical)
+        (is2d, perimeterCentered, physical, makeInitial : World -> 'model) =
+        inherit EntityDispatcher (is2d, perimeterCentered, physical)
 
-        new (is2d, centered, physical, initial : 'model) =
-            EntityDispatcher<'model, 'message, 'command> (is2d, centered, physical, fun _ -> initial)
+        new (is2d, perimeterCentered, physical, initial : 'model) =
+            EntityDispatcher<'model, 'message, 'command> (is2d, perimeterCentered, physical, fun _ -> initial)
 
         /// Get the entity's model.
         member this.GetModel (entity : Entity) world : 'model =
@@ -1464,25 +1492,25 @@ module EntityDispatcherModule2 =
         default this.UntruncateModel (_, incoming) = incoming
 
     /// A 2d entity dispatcher.
-    and [<AbstractClass>] EntityDispatcher2d<'model, 'message, 'command when 'message :> Message and 'command :> Command> (centered, physical, makeInitial : World -> 'model) =
-        inherit EntityDispatcher<'model, 'message, 'command> (true, centered, physical, makeInitial)
+    and [<AbstractClass>] EntityDispatcher2d<'model, 'message, 'command when 'message :> Message and 'command :> Command> (perimeterCentered, physical, makeInitial : World -> 'model) =
+        inherit EntityDispatcher<'model, 'message, 'command> (true, perimeterCentered, physical, makeInitial)
 
         new (centered, physical, initial : 'model) =
             EntityDispatcher2d<'model, 'message, 'command> (centered, physical, fun _ -> initial)
 
         new (physical, makeInitial : World -> 'model) =
-            EntityDispatcher2d<'model, 'message, 'command> (Constants.Engine.EntityCentered2dDefault, physical, makeInitial)
+            EntityDispatcher2d<'model, 'message, 'command> (Constants.Engine.EntityPerimeterCentered2dDefault, physical, makeInitial)
 
         new (physical, initial : 'model) =
             EntityDispatcher2d<'model, 'message, 'command> (physical, fun _ -> initial)
 
         static member Properties =
             [define Entity.Size Constants.Engine.EntitySize2dDefault
-             define Entity.Centered Constants.Engine.EntityCentered2dDefault]
+             define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCentered2dDefault]
 
     /// A gui entity dispatcher.
     and [<AbstractClass>] GuiDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (makeInitial : World -> 'model) =
-        inherit EntityDispatcher<'model, 'message, 'command> (true, Constants.Engine.EntityCenteredGuiDefault, false, makeInitial)
+        inherit EntityDispatcher<'model, 'message, 'command> (true, Constants.Engine.EntityPerimeterCenteredGuiDefault, false, makeInitial)
 
         new (initial : 'model) =
             GuiDispatcher<'model, 'message, 'command> (fun _ -> initial)
@@ -1492,7 +1520,7 @@ module EntityDispatcherModule2 =
 
         static member Properties =
             [define Entity.Size Constants.Engine.EntitySizeGuiDefault
-             define Entity.Centered Constants.Engine.EntityCenteredGuiDefault
+             define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCenteredGuiDefault
              define Entity.Presence Omnipresent
              define Entity.Absolute true
              define Entity.AlwaysUpdate true
@@ -1504,29 +1532,21 @@ module EntityDispatcherModule2 =
              define Entity.GridPosition v2iZero]
 
     /// A 3d entity dispatcher.
-    and [<AbstractClass>] EntityDispatcher3d<'model, 'message, 'command when 'message :> Message and 'command :> Command> (centered, physical, makeInitial : World -> 'model) =
-        inherit EntityDispatcher<'model, 'message, 'command> (false, centered, physical, makeInitial)
-
-        new (centered, physical, initial : 'model) =
-            EntityDispatcher3d<'model, 'message, 'command> (centered, physical, fun _ -> initial)
-
-        new (physical, makeInitial : World -> 'model) =
-            EntityDispatcher3d<'model, 'message, 'command> (Constants.Engine.EntityCentered3dDefault, physical, makeInitial)
+    and [<AbstractClass>] EntityDispatcher3d<'model, 'message, 'command when 'message :> Message and 'command :> Command> (physical, makeInitial : World -> 'model) =
+        inherit EntityDispatcher<'model, 'message, 'command> (false, true, physical, makeInitial)
 
         new (physical, initial : 'model) =
             EntityDispatcher3d<'model, 'message, 'command> (physical, fun _ -> initial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySize3dDefault
-             define Entity.Centered Constants.Engine.EntityCentered3dDefault]
+            [define Entity.Size Constants.Engine.EntitySize3dDefault]
 
     /// A vui dispatcher (gui in 3d).
     and [<AbstractClass>] VuiDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (makeInitial : World -> 'model) =
-        inherit EntityDispatcher<'model, 'message, 'command> (false, Constants.Engine.EntityCenteredVuiDefault, false, makeInitial)
+        inherit EntityDispatcher<'model, 'message, 'command> (false, true, false, makeInitial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySizeVuiDefault
-             define Entity.Centered Constants.Engine.EntityCenteredVuiDefault]
+            [define Entity.Size Constants.Engine.EntitySizeVuiDefault]
 
 [<RequireQualifiedAccess>]
 module EntityPropertyDescriptor =
