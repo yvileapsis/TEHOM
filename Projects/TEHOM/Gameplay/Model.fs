@@ -1,6 +1,8 @@
 ﻿namespace Tehom
 open System
 open System.ComponentModel
+open System.Configuration.Internal
+open Nu
 
 (*
     To tl;dr the point of the project:
@@ -31,9 +33,41 @@ module GUI =
         | Stats
         | OtherElements
 
+module Time =
+    // Time is a 360-based clock and a day counter.
+    // Day is composed of 12 hours, each separated into 30 minutes
+    // Each hour is named astrologically.
+    // Point is to avoid AM/PM/Military stuff and also distance the world.
+
+    type Clock = Time of int
+
+    type Hours =
+        | Aries = 0
+        | Taurus = 1
+        | Gemini = 2
+        | Cancer = 3
+        | Leo = 4
+        | Virgo = 5
+        | Libra = 6
+        | Scorpio = 7
+        | Sagittarius = 8
+        | Capricorn = 9
+        | Aquarius = 10
+        | Pisces = 11
+
+    type ActionCost = Time of int
+
+    // Most basic time-consuming action costs a minute.
+
 module Ability =
 
-    // Limits what sort of actions are allowed for each level, i.e. rudimentary brain will disallow talking even with a functioning mouth
+    type ActionID =
+    | ID of string
+    with
+        static member makeDefault = ID ""
+
+    // Limits what
+    // sort of actions are allowed for each level, i.e. rudimentary brain will disallow talking even with a functioning mouth
     // TODO: come up with better names
     // Main point of thinking is to distinguish 'dead' entities from 'alive', as well as animalistic entities,
     // from ones of higher reasoning and ones of beyond-human reasoning capabilities
@@ -52,35 +86,18 @@ module Ability =
         | Anylevel
 
     // TODO: come up with what metric should be those based on
-    type SenseType =
-        | See of int
-        | Hear of int
-        | Smell of int
-        | Feel of int
-        | TelepathicallyFeel of int
-        | AllKnowing
-
-    type LocomotionType =
-        | Balancing
-        | Walking
-        | Climbing
-        | Flying
-        | Teleporting
-
-    type GrabType =
-        | Grip of int
-        | Telekinesis of int
+    type Power =
+        | Weak
+        | Normal of int
+        | Godlike
 
     // List of abilities 'alive' entities can have.
     // For composed entities those should be generated based on their structure and are used to filter for actions
     // the combined entity can do.
-    type Ability =
-        | CanThink of ThinkingLevel
-        | CanSense of SenseType
-        | CanGrab of GrabType
-        | CanMove of LocomotionType
-        | CanTalk
-        | IsWeapon
+    type Ability = {
+        Action: ActionID
+        Power: Power
+    }
 
 
 module Trait =
@@ -129,6 +146,10 @@ module Actor =
     type ActorID =
     | ID of string
     | GUID of Guid
+    with
+        static member makeDefault = ID ""
+        static member guid = GUID (Guid.NewGuid())
+
 
     type Actor = {
 
@@ -178,9 +199,84 @@ module Actor =
         // Low cohesion -> actions are less of orders and more of suggestions
         // i.e. low cohesion party of NPCs will disobey player character
         | Controls of int
+    with
+        static member (*) (composed, composed') =
+            match composed with
+            | Simple ->
+                match composed' with
+                | Simple -> Simple
+                | Controls x' -> Controls x'
+            | Controls x ->
+                match composed' with
+                | Simple -> Controls x
+                | Controls x' -> Controls (x * x' / 100)
 
-    type Composition = Map<ActorID, Composed>
+        static member max (composed, composed') =
+            match composed with
+            | Simple ->
+                match composed' with
+                | Simple -> Simple
+                | Controls x' -> Controls x'
+            | Controls x ->
+                match composed' with
+                | Simple -> Controls x
+                | Controls x' -> Controls (max x x')
+
+    type Composition = Composition of Map<ActorID, Composed>
+    with
+        static member internal add key value (Composition map) =
+            match Map.tryFind key map with
+            | Some x -> Map.add key (max x value) map
+            | None -> Map.add key value map
+            |> Composition
+
+        static member internal join func1 func2 actor compositions : Composition =
+
+            let (Composition func1) : Composition = func1 actor compositions
+            let func2 : Composition = func2 actor compositions
+
+            Map.foldBack Composition.add func1 func2
+
+        static member internal multiply func1 func2 actor compositions : Composition =
+
+            let func1 actor : Composition = func1 actor compositions
+            let func2 actor : Composition = func2 actor compositions
+
+            Map.foldBack (fun key value (Composition map) ->
+                Map.foldBack (fun key value' ->
+                    Composition.add key (value * value')
+                ) map (func2 key)
+            ) Map.empty (func1 actor)
+
+        static member unwrap (Composition x) = x
+
+        static member children (actor: ActorID) compositions : Composition =
+            Map.find actor compositions
+
+        static member parents (actor: ActorID) compositions : Composition =
+            compositions
+            |> Map.map (fun _ -> Composition.unwrap)
+            |> Map.filter (fun _ -> Map.containsKey actor)
+            |> Map.fold (fun map key value -> Map.add key value[actor] map) Map.empty // Inverse the map.
+            |> Composition
+
+        static member grandChildren =
+            Composition.multiply Composition.children Composition.children
+        static member childrenAndGrandChildren =
+            Composition.join Composition.grandChildren Composition.children
+        static member grandParents =
+            Composition.multiply Composition.parents Composition.parents
+        static member siblings =
+            Composition.multiply Composition.parents Composition.children
+
+        // TODO:: implement as recursive
+        static member childrenAll =
+            Composition.childrenAndGrandChildren
+
+
     type Attachment = Attached * Set<ActorID>
+
+open Actor
 
 module Actions =
 
@@ -189,75 +285,68 @@ module Actions =
 
     type System = Map<ActorID, Set<Ability> * Composed>
 
-    let getChildren (actor: ActorID) (compositions: Map<ActorID, Composition>) =
-        compositions[actor]
-        |> Map.keys
-        |> Set.ofSeq
-        |> Set.map (fun actorID ->
-            compositions[actorID]
-            |> Map.keys
-            |> Set.ofSeq
-            )
-        |> Set.unionMany
-
-    let getSelf (actor: ActorID) (compositions: Map<ActorID, Composition>) =
-        compositions[actor]
+    let getChildrenSet actor (compositions: Map<ActorID, Composition>) =
+        let (Composition composition) = compositions[actor]
+        composition
         |> Map.keys
         |> Set.ofSeq
 
-    let getParent (actor: ActorID) (compositions: Map<ActorID, Composition>) =
+    let getParentsSet actor compositions =
         compositions
-        |> Map.filter (fun key composition ->
-            composition
-            |> Map.keys
-            |> Seq.contains actor)
         |> Map.values
-        |> Seq.map (fun composition ->
-            composition
-            |> Map.keys
-            |> Set.ofSeq)
-        |> Set.ofSeq
+        |> Seq.map Map.keys
+        |> Seq.filter (Seq.contains actor)
+        |> Seq.map Set.ofSeq
         |> Set.unionMany
 
+    let concat func1 func2 actor (compositions: Map<ActorID, Composition>) =
+        let func1 actor = func1 actor compositions
+        let func2 actor = func2 actor compositions
 
-
+        func1 actor
+        |> Set.map func2
+        |> Set.unionMany
     let system (composition: Composition) (actors: Map<ActorID, Actor>) : System =
-        let filter key value = not value.Abilities.IsEmpty
 
-        let keys filter =
-            let compositionKeys = Set.ofSeq (Map.keys composition)
-            let actorKeys = Set.ofSeq (Map.keys (Map.filter filter actors))
-            Set.intersect compositionKeys actorKeys
+        let filterActors key _ = Map.containsKey key actors
+        let filterAbilities key _ = not actors[key].Abilities.IsEmpty
+        let mapSystem key value = actors[key].Abilities, value
 
-        let folder map key = Map.add key (actors[key].Abilities, composition[key]) map
+        composition
+        |> Composition.unwrap
+        |> Map.filter filterActors
+        |> Map.filter filterAbilities
+        |> Map.map mapSystem
 
-        Set.fold folder Map.empty (keys filter)
-
-    let systemOfAbility filter system =
-        let folder map key (abilities, composed) =
-            let abilities = Set.fold filter Set.empty abilities
-            Map.add key (abilities, composed) map
-        Map.fold folder Map.empty system
-
-    let systemSense system =
-        let senses set = function CanSense x -> Set.add x set | _ -> set
-        systemOfAbility senses system
-
-    let canSense actor (compositions: Map<ActorID, Composition>) actors =
-        if Map.containsKey actor compositions then
-            let composition = compositions[actor]
-            let system = system composition actors
-            let senses = systemSense system
-            if not senses.IsEmpty
-            then getParent actor compositions
-            else Set.empty
-        else Set.empty
-
-    let systemThinking system =
-        let senses set = function CanThink x -> Set.add x set | _ -> set
-        systemOfAbility senses system
+    let systemOfAbility filter state (system: System) =
+        Map.fold (fun map key (abilities, composed) ->
+            match Set.fold filter state abilities with
+            | Some x -> Map.add key (x, composed) map
+            | None -> map
+        ) Map.empty system
 
 
+    type ThinkingCost = Cost of int
+    type TimeCost = Cost of int
+
+    type Action = {
+        Target: ActorID
+        Type: ActionID
+        ThinkingCost: ThinkingCost
+        TimeCost: TimeCost
+        ChanceToFail: int
+    }
+
+    let getLookActions (actor: ActorID) (actors: Map<ActorID, Actor>) (compositions: Map<ActorID, Composition>) =
+        let composition = Composition.childrenAll actor compositions
+        let system = system composition actors
+        let actionString = ID "look"
+        let senseLook state = function
+            | { Action = action; Power = power } when action = actionString ->
+                if Some power > state then Some power else state
+            | _ -> None
+        let looks = systemOfAbility senseLook None system
+        looks
 
     // Rough list of actions 'alive' entities should be capable of, each action should require a certain 'Ability'.
     type EntityActions =
