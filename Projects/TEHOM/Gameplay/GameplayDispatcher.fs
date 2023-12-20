@@ -33,8 +33,8 @@ module GameplayDispatcher =
             | SetDisplayedString str ->
                 just { gameplay with Display = str}
             | SetDisplayedStringToActorDescription actorID ->
-                let description =
-                    $"{Actions.canSense actorID gameplay.Compositions gameplay.Actors}"
+                let description = ""
+//                    $"{Actions.canSense actorID gameplay.Compositions gameplay.Actors}"
 (*                    match Map.tryFind actorID gameplay.Actors with
                     | Some actor -> actor.getDescription
                     | _ -> $"did not find %A{actorID}, weird!"

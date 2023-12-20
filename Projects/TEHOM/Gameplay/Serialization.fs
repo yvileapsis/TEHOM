@@ -72,12 +72,6 @@ module Serialization =
                 let stringToAbility set (ability: YamlStructure.actors_Item_Type.abilities_Item_Type) =
                     // TODO: all types
                     match ability.ability with
-                    | "locomotion" ->
-                        match ability.subtype with
-                        | "walking" -> Set.add (CanMove Walking) set
-                        | _ -> set
-                    | "thinking" -> Set.add (CanThink Rudimentary) set
-                    | "sensing" -> Set.add (CanSense (Smell 0)) set
                     | _ -> set
 
                 Seq.fold stringToAbility Set.empty yamlActor.abilities
