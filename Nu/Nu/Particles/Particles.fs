@@ -149,7 +149,6 @@ type [<NoEquality; NoComparison>] ParticlesDescriptor =
 /// The output of a behavior.
 type [<ReferenceEquality>] Output =
     | OutputEmitter of string * Emitter
-    | OutputSound of single * Sound AssetTag
     | Outputs of Output SArray
 
     /// Combine two outputs.
@@ -915,7 +914,7 @@ module BasicStaticSpriteEmitter =
             { Life = Life.make GameTime.zero (GameTime.ofSeconds 2.0f)
               Body = Body.defaultBody
               Offset = v3Zero
-              Size = Constants.Engine.ParticleSize2dDefault
+              Size = Constants.Engine.Particle2dSizeDefault
               Inset = box2Zero
               Color = Color.One
               Emission = Color.Zero
@@ -1156,8 +1155,8 @@ module BasicStaticBillboardEmitter =
               HeightImage = emitter.HeightImage
               MinFilterOpt = emitter.MinFilterOpt
               MagFilterOpt = emitter.MagFilterOpt
-              RenderType = emitter.RenderType
-              Particles = particles' }
+              Particles = particles'
+              RenderType = emitter.RenderType }
         descriptor
 
     /// Resize the emitter.
@@ -1207,7 +1206,7 @@ module BasicStaticBillboardEmitter =
             { Life = Life.make GameTime.zero (GameTime.ofSeconds 2.0f)
               Body = Body.defaultBody
               Offset = v3Zero
-              Size = Constants.Engine.ParticleSize3dDefault
+              Size = Constants.Engine.Particle3dSizeDefault
               Inset = box2Zero
               Color = Color.One
               Emission = Color.Zero

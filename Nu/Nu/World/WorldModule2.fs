@@ -63,8 +63,9 @@ module WorldModule2 =
     let private ScreenTransitionKeyboardKeyId = Gen.id
 
     (* Cached HashSets *)
-    let private CachedHashSet2d = HashSet (QuadelementEqualityComparer ())
-    let private CachedHashSet3d = HashSet (OctelementEqualityComparer ())
+    let private CachedHashSet2dNormal = HashSet (QuadelementEqualityComparer ())
+    let private CachedHashSet3dNormal = HashSet (OctelementEqualityComparer ())
+    let private CachedHashSet3dShadow = HashSet (OctelementEqualityComparer ())
 
     type World with
 
@@ -371,7 +372,7 @@ module WorldModule2 =
             let world = World.destroyGroupImmediate slideGroup world
 
             // create slide group
-            let eyeSize = World.getEyeSize2d world
+            let eyeSize = World.getEye2dSize world
             let world = screen.SetSlideOpt (Some { IdlingTime = slideDescriptor.IdlingTime; Destination = destination }) world
             let world = World.createGroup<GroupDispatcher> (Some slideGroup.Name) screen world |> snd
             let world = World.setGroupProtected true slideGroup world |> snd'
@@ -502,7 +503,7 @@ module WorldModule2 =
         /// locked by the engine's subsystems.
         static member tryReloadAssets world =
             let targetDir = AppDomain.CurrentDomain.BaseDirectory
-            let assetSourceDir = Pathf.GetFullPath (targetDir + "../../..")
+            let assetSourceDir = PathF.GetFullPath (targetDir + "../../..")
             match World.tryReloadAssetGraph assetSourceDir targetDir Constants.Engine.RefinementDir world with
             | (Right _, world) -> (true, world)
             | (Left _, world) -> (false, world)
@@ -764,11 +765,11 @@ module WorldModule2 =
             let elements = getElementsFromQuadree quadtree
             (elements, world)
 
-        static member private getElementsInView2d set world =
+        static member private getElements2dInView set world =
             let viewBounds = World.getViewBounds2dRelative world
             World.getElements2dBy (Quadtree.getElementsInView viewBounds set) world
 
-        static member private getElementsInPlay2d set world =
+        static member private getElements2dInPlay set world =
             let playBounds = World.getPlayBounds2dRelative world
             World.getElements2dBy (Quadtree.getElementsInPlay playBounds set) world
 
@@ -784,20 +785,20 @@ module WorldModule2 =
             (entities, world)
 
         /// Get all 2d entities in the given bounds, including all uncullable entities.
-        static member getEntitiesInBounds2d bounds set world =
+        static member getEntities2dInBounds bounds set world =
             World.getEntities2dBy (Quadtree.getElementsInBounds bounds set) world
 
         /// Get all 2d entities at the given point, including all uncullable entities.
-        static member getEntitiesAtPoint2d point set world =
+        static member getEntities2dAtPoint point set world =
             World.getEntities2dBy (Quadtree.getElementsAtPoint point set) world
 
         /// Get all 2d entities in the current 2d view, including all uncullable entities.
-        static member getEntitiesInView2d set world =
+        static member getEntities2dInView set world =
             let viewBounds = World.getViewBounds2dRelative world
             World.getEntities2dBy (Quadtree.getElementsInView viewBounds set) world
 
         /// Get all 2d entities needing to update for the current 2d play zone, including all uncullable entities.
-        static member getEntitiesInPlay2d set world =
+        static member getEntities2dInPlay set world =
             let playBounds = World.getPlayBounds2dRelative world
             World.getEntities2dBy (Quadtree.getElementsInPlay playBounds set) world
 
@@ -812,15 +813,18 @@ module WorldModule2 =
             let elements = getElementsFromOctree octree
             (elements, world)
 
-        static member private getElementsInPlay3d set world =
+        static member private getElements3dInPlay set world =
             let struct (playBox, playFrustum) = World.getPlayBounds3d world
             World.getElements3dBy (Octree.getElementsInPlay playBox playFrustum set) world
 
-        static member private getElementsInView3d set world =
-            let frustumEnclosed = World.getEyeFrustum3dEnclosed world
-            let frustumExposed = World.getEyeFrustum3dExposed world
-            let frustumImposter = World.getEyeFrustum3dImposter world
-            let lightBox = World.getLightBox3d world
+        static member private getElements3dInViewFrustum enclosed exposed frustum set world =
+            World.getElements3dBy (Octree.getElementsInViewFrustum enclosed exposed frustum set) world
+
+        static member private getElements3dInView set world =
+            let frustumEnclosed = World.getEye3dFrustumEnclosed world
+            let frustumExposed = World.getEye3dFrustumExposed world
+            let frustumImposter = World.getEye3dFrustumImposter world
+            let lightBox = World.getLight3dBox world
             World.getElements3dBy (Octree.getElementsInView frustumEnclosed frustumExposed frustumImposter lightBox set) world
 
         static member private getElements3d set world =
@@ -835,33 +839,41 @@ module WorldModule2 =
             (entities, world)
 
         /// Get all 3d entities in the given bounds, including all uncullable entities.
-        static member getEntitiesInBounds3d bounds set world =
+        static member getEntities3dInBounds bounds set world =
             World.getEntities3dBy (Octree.getElementsInBounds bounds set) world
 
         /// Get all 3d entities at the given point, including all uncullable entities.
-        static member getEntitiesAtPoint3d point set world =
+        static member getEntities3dAtPoint point set world =
             World.getEntities3dBy (Octree.getElementsAtPoint point set) world
 
         /// Get all 3d entities in the current 3d play zone, including all uncullable entities.
-        static member getEntitiesInPlay3d set world =
+        static member getEntities3dInPlay set world =
             let struct (playBox, playFrustum) = World.getPlayBounds3d world
             World.getEntities3dBy (Octree.getElementsInPlay playBox playFrustum set) world
 
         /// Get all 3d entities in the current 3d view, including all uncullable entities.
-        static member getEntitiesInView3d set world =
-            let frustumEnclosed = World.getEyeFrustum3dEnclosed world
-            let frustumExposed = World.getEyeFrustum3dExposed world
-            let frustumImposter = World.getEyeFrustum3dImposter world
-            let lightBox = World.getLightBox3d world
+        static member getEntities3dInView set world =
+            let frustumEnclosed = World.getEye3dFrustumEnclosed world
+            let frustumExposed = World.getEye3dFrustumExposed world
+            let frustumImposter = World.getEye3dFrustumImposter world
+            let lightBox = World.getLight3dBox world
             World.getEntities3dBy (Octree.getElementsInView frustumEnclosed frustumExposed frustumImposter lightBox set) world
 
         /// Get all 3d light probe entities in the current 3d light box, including all uncullable light probes.
-        static member getLightProbesInFrustum3d frustum set world =
+        static member getLightProbes3dInFrustum frustum set world =
             World.getEntities3dBy (Octree.getLightProbesInFrustum frustum set) world
 
+        /// Get all 3d light probe entities in the current 3d light box, including all uncullable lights.
+        static member getLightProbes3dInBox box set world =
+            World.getEntities3dBy (Octree.getLightProbesInBox box set) world
+
         /// Get all 3d light entities in the current 3d light box, including all uncullable lights.
-        static member getLightsInFrustum3d frustum set world =
+        static member getLights3dInFrustum frustum set world =
             World.getEntities3dBy (Octree.getLightsInFrustum frustum set) world
+
+        /// Get all 3d light entities in the current 3d light box, including all uncullable lights.
+        static member getLights3dInBox box set world =
+            World.getEntities3dBy (Octree.getLightsInBox box set) world
 
         /// Get all 3d entities in the current selected screen, including all uncullable entities.
         static member getEntities3d set world =
@@ -934,8 +946,8 @@ module WorldModule2 =
             let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
             let screens = List.rev screens
             let groups = Seq.concat (List.map (flip World.getGroups world) screens)
-            let (elements3d, world) = World.getElementsInPlay3d CachedHashSet3d world
-            let (elements2d, world) = World.getElementsInPlay2d CachedHashSet2d world
+            let (elements3d, world) = World.getElements3dInPlay CachedHashSet3dNormal world
+            let (elements2d, world) = World.getElements2dInPlay CachedHashSet2dNormal world
             UpdateGatherTimer.Stop ()
 
             // update game
@@ -970,8 +982,8 @@ module WorldModule2 =
             UpdateEntitiesTimer.Stop ()
 
             // clear cached hash sets
-            CachedHashSet3d.Clear ()
-            CachedHashSet2d.Clear ()
+            CachedHashSet3dNormal.Clear ()
+            CachedHashSet2dNormal.Clear ()
 
             // fin
             world
@@ -1072,11 +1084,11 @@ module WorldModule2 =
 
         static member private renderScreenTransition (screen : Screen) world =
             match screen.GetTransitionState world with
-            | IncomingState transitionTime -> World.renderScreenTransition5 transitionTime (World.getEyeCenter2d world) (World.getEyeSize2d world) screen (screen.GetIncoming world) world
-            | OutgoingState transitionTime -> World.renderScreenTransition5 transitionTime (World.getEyeCenter2d world) (World.getEyeSize2d world) screen (screen.GetOutgoing world) world
+            | IncomingState transitionTime -> World.renderScreenTransition5 transitionTime (World.getEye2dCenter world) (World.getEye2dSize world) screen (screen.GetIncoming world) world
+            | OutgoingState transitionTime -> World.renderScreenTransition5 transitionTime (World.getEye2dCenter world) (World.getEye2dSize world) screen (screen.GetOutgoing world) world
             | IdlingState _ -> ()
 
-        static member private renderSimulants skipCulling world =
+        static member private renderSimulantsInternal skipCulling renderPass world =
 
             // gather simulants
             RenderGatherTimer.Start ()
@@ -1089,45 +1101,122 @@ module WorldModule2 =
                 if world.Accompanied
                 then hashSetPlus HashIdentity.Structural (Seq.filter (fun (group : Group) -> not (group.GetVisible world)) groups)
                 else hashSetPlus HashIdentity.Structural []
-            let (elements3d, world) = if skipCulling then World.getElements3d CachedHashSet3d world else World.getElementsInView3d CachedHashSet3d world
-            let (elements2d, world) = if skipCulling then World.getElements2d CachedHashSet2d world else World.getElementsInView2d CachedHashSet2d world
+            let (elements3d, world) =
+                match renderPass with
+                | NormalPass ->
+                    if skipCulling
+                    then World.getElements3d CachedHashSet3dNormal world
+                    else World.getElements3dInView CachedHashSet3dNormal world
+                | ShadowPass (_, shadowDirectional, shadowFrustum) -> World.getElements3dInViewFrustum (not shadowDirectional) true shadowFrustum CachedHashSet3dNormal world
+                | ReflectionPass _ -> (Seq.empty, world)
+            let (elements2d, world) =
+                match renderPass with
+                | NormalPass ->
+                    if skipCulling
+                    then World.getElements2d CachedHashSet2dNormal world
+                    else World.getElements2dInView CachedHashSet2dNormal world
+                | ShadowPass _ -> (Seq.empty, world)
+                | ReflectionPass _ -> (Seq.empty, world)
             RenderGatherTimer.Stop ()
 
             // render simulants breadth-first
-            World.renderGame game world
+            World.renderGame renderPass game world
             for screen in screens do
-                World.renderScreen screen world
+                World.renderScreen renderPass screen world
             match World.getSelectedScreenOpt world with Some selectedScreen -> World.renderScreenTransition selectedScreen world | None -> ()
             for group in groups do
                 if not (groupsInvisible.Contains group) then
-                    World.renderGroup group world
+                    World.renderGroup renderPass group world
 
             // render entities
             RenderEntitiesTimer.Start ()
             if world.Unaccompanied || groupsInvisible.Count = 0 then
                 for element in elements3d do
                     if element.Visible then
-                        World.renderEntity element.Entry world
+                        World.renderEntity renderPass element.Entry world
             else
                 for element in elements3d do
                     if element.Visible && not (groupsInvisible.Contains element.Entry.Group) then
-                        World.renderEntity element.Entry world
+                        World.renderEntity renderPass element.Entry world
             if world.Unaccompanied || groupsInvisible.Count = 0 then
                 for element in elements2d do
                     if element.Visible then
-                        World.renderEntity element.Entry world
+                        World.renderEntity renderPass element.Entry world
             else
                 for element in elements2d do
                     if element.Visible && not (groupsInvisible.Contains element.Entry.Group) then
-                        World.renderEntity element.Entry world
+                        World.renderEntity renderPass element.Entry world
             RenderEntitiesTimer.Stop ()
 
             // clear cached hash sets
-            CachedHashSet3d.Clear ()
-            CachedHashSet2d.Clear ()
+            CachedHashSet3dNormal.Clear ()
+            CachedHashSet2dNormal.Clear ()
 
             // fin
             world
+
+        static member private renderSimulants skipCulling world =
+
+            // create shadow pass descriptors
+            let lightBox = World.getLight3dBox world
+            let (lights, world) = World.getLights3dInBox lightBox CachedHashSet3dShadow world // NOTE: this may not be the optimal way to query.
+            let eyeCenter = World.getEye3dCenter world
+            let sortableShadowPassDescriptors =
+                [|for light in lights do
+                    if light.GetDesireShadows world then
+                        let (directional, coneOuter) =
+                            match light.GetLightType world with
+                            | PointLight -> (false, MathF.TWO_PI)
+                            | SpotLight (_, coneOuter)-> (false, coneOuter)
+                            | DirectionalLight -> (true, 0.0f)
+                        let (shadowView, shadowProjection) =
+                            if not directional then
+                                let shadowRotation = light.GetRotation world
+                                let mutable shadowView = Matrix4x4.CreateFromYawPitchRoll (0.0f, -MathF.PI_OVER_2, 0.0f) * Matrix4x4.CreateFromQuaternion shadowRotation
+                                shadowView.Translation <- light.GetPosition world
+                                shadowView <- shadowView.Inverted
+                                let shadowFov = max (min coneOuter Constants.Render.ShadowFovMax) 0.01f
+                                let shadowCutoff = max (light.GetLightCutoff world) 0.1f
+                                let shadowProjection = Matrix4x4.CreatePerspectiveFieldOfView (shadowFov, 1.0f, Constants.Render.NearPlaneDistanceEnclosed, shadowCutoff)
+                                (shadowView, shadowProjection)
+                            else
+                                let shadowRotation = light.GetRotation world
+                                let mutable shadowView = Matrix4x4.CreateFromYawPitchRoll (0.0f, -MathF.PI_OVER_2, 0.0f) * Matrix4x4.CreateFromQuaternion shadowRotation
+                                shadowView.Translation <- light.GetPosition world
+                                shadowView <- shadowView.Inverted
+                                let shadowCutoff = light.GetLightCutoff world
+                                let shadowProjection = Matrix4x4.CreateOrthographic (shadowCutoff * 2.0f, shadowCutoff * 2.0f, -shadowCutoff, shadowCutoff)
+                                (shadowView, shadowProjection)
+                        let shadowFrustum =
+                            Frustum (shadowView * shadowProjection)
+                        let shadowInView =
+                            let frustumEnclosed = World.getEye3dFrustumEnclosed world
+                            let frustumExposed = World.getEye3dFrustumExposed world
+                            let frustumImposter = World.getEye3dFrustumImposter world
+                            match light.GetPresence world with
+                            | Enclosed -> frustumEnclosed.Intersects shadowFrustum
+                            | Exposed -> frustumExposed.Intersects shadowFrustum || frustumEnclosed.Intersects shadowFrustum
+                            | Imposter -> frustumImposter.Intersects shadowFrustum
+                            | Omnipresent -> true
+                        if shadowInView then
+                            let directionalSort = if not directional then 1 else 0
+                            let distanceSquared = Vector3.DistanceSquared (eyeCenter, light.GetPosition world)
+                            struct (struct (directionalSort, distanceSquared), struct (shadowFrustum, light))|]
+
+            // render simulant shadows in descriptor sort order
+            let world =
+                sortableShadowPassDescriptors |>
+                Array.sortBy fst' |>
+                Array.tryTake Constants.Render.ShadowsMax |>
+                Array.fold (fun world struct (struct (directionalSort, _), struct (shadowFrustum, light)) ->
+                    World.renderSimulantsInternal false (ShadowPass (light.GetId world, isZero directionalSort, shadowFrustum)) world)
+                    world
+
+            // render simulants normally, remember to clear 3d shadow cache
+            let world = World.renderSimulantsInternal skipCulling NormalPass world
+            CachedHashSet3dShadow.Clear ()
+            world
+
 
         static member private processInput world =
             if SDL.SDL_WasInit SDL.SDL_INIT_TIMER <> 0u then
@@ -1304,14 +1393,14 @@ module WorldModule2 =
                                                                 // process rendering (2/2)
                                                                 rendererProcess.SubmitMessages
                                                                     skipCulling
-                                                                    (World.getEyeFrustum3dEnclosed world)
-                                                                    (World.getEyeFrustum3dExposed world)
-                                                                    (World.getEyeFrustum3dImposter world)
-                                                                    (World.getLightBox3d world)
-                                                                    (World.getEyeCenter3d world)
-                                                                    (World.getEyeRotation3d world)
-                                                                    (World.getEyeCenter2d world)
-                                                                    (World.getEyeSize2d world)
+                                                                    (World.getEye3dFrustumEnclosed world)
+                                                                    (World.getEye3dFrustumExposed world)
+                                                                    (World.getEye3dFrustumImposter world)
+                                                                    (World.getLight3dBox world)
+                                                                    (World.getEye3dCenter world)
+                                                                    (World.getEye3dRotation world)
+                                                                    (World.getEye2dCenter world)
+                                                                    (World.getEye2dSize world)
                                                                     (World.getWindowSize world)
                                                                     drawData
 
@@ -1406,8 +1495,8 @@ module EntityDispatcherModule2 =
             let world = this.SetModel model entity world
             Signal.processSignals this.Message this.Command (this.Model entity) signals entity world
 
-        override this.Render (entity, world) =
-            this.View (this.GetModel entity world, entity, world)
+        override this.Render (renderPass, entity, world) =
+            this.Render (this.GetModel entity world, renderPass, entity, world)
 
         override this.Edit (operation, entity, world) =
             let model = entity.GetModelGeneric<'model> world
@@ -1480,8 +1569,8 @@ module EntityDispatcherModule2 =
         default this.Content (_, _) = []
 
         /// Render the entity using the given model.
-        abstract View : 'model * Entity * World -> unit
-        default this.View (_, _, _) = ()
+        abstract Render : 'model * RenderPass * Entity * World -> unit
+        default this.Render (_, _, _, _) = ()
 
         /// Truncate the given model.
         abstract TruncateModel : 'model -> 'model
@@ -1492,20 +1581,20 @@ module EntityDispatcherModule2 =
         default this.UntruncateModel (_, incoming) = incoming
 
     /// A 2d entity dispatcher.
-    and [<AbstractClass>] EntityDispatcher2d<'model, 'message, 'command when 'message :> Message and 'command :> Command> (perimeterCentered, physical, makeInitial : World -> 'model) =
+    and [<AbstractClass>] Entity2dDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (perimeterCentered, physical, makeInitial : World -> 'model) =
         inherit EntityDispatcher<'model, 'message, 'command> (true, perimeterCentered, physical, makeInitial)
 
         new (centered, physical, initial : 'model) =
-            EntityDispatcher2d<'model, 'message, 'command> (centered, physical, fun _ -> initial)
+            Entity2dDispatcher<'model, 'message, 'command> (centered, physical, fun _ -> initial)
 
         new (physical, makeInitial : World -> 'model) =
-            EntityDispatcher2d<'model, 'message, 'command> (Constants.Engine.EntityPerimeterCentered2dDefault, physical, makeInitial)
+            Entity2dDispatcher<'model, 'message, 'command> (Constants.Engine.EntityPerimeterCentered2dDefault, physical, makeInitial)
 
         new (physical, initial : 'model) =
-            EntityDispatcher2d<'model, 'message, 'command> (physical, fun _ -> initial)
+            Entity2dDispatcher<'model, 'message, 'command> (physical, fun _ -> initial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySize2dDefault
+            [define Entity.Size Constants.Engine.Entity2dSizeDefault
              define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCentered2dDefault]
 
     /// A gui entity dispatcher.
@@ -1519,7 +1608,7 @@ module EntityDispatcherModule2 =
             [typeof<LayoutFacet>]
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySizeGuiDefault
+            [define Entity.Size Constants.Engine.EntityGuiSizeDefault
              define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCenteredGuiDefault
              define Entity.Presence Omnipresent
              define Entity.Absolute true
@@ -1532,21 +1621,21 @@ module EntityDispatcherModule2 =
              define Entity.GridPosition v2iZero]
 
     /// A 3d entity dispatcher.
-    and [<AbstractClass>] EntityDispatcher3d<'model, 'message, 'command when 'message :> Message and 'command :> Command> (physical, makeInitial : World -> 'model) =
+    and [<AbstractClass>] Entity3dDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (physical, makeInitial : World -> 'model) =
         inherit EntityDispatcher<'model, 'message, 'command> (false, true, physical, makeInitial)
 
         new (physical, initial : 'model) =
-            EntityDispatcher3d<'model, 'message, 'command> (physical, fun _ -> initial)
+            Entity3dDispatcher<'model, 'message, 'command> (physical, fun _ -> initial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySize3dDefault]
+            [define Entity.Size Constants.Engine.Entity3dSizeDefault]
 
     /// A vui dispatcher (gui in 3d).
     and [<AbstractClass>] VuiDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (makeInitial : World -> 'model) =
         inherit EntityDispatcher<'model, 'message, 'command> (false, true, false, makeInitial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySizeVuiDefault]
+            [define Entity.Size Constants.Engine.EntityVuiSizeDefault]
 
 [<RequireQualifiedAccess>]
 module EntityPropertyDescriptor =
@@ -1684,8 +1773,8 @@ module GroupDispatcherModule =
                         makeInitial world
             World.setGroupModel<'model> true model group world |> snd'
 
-        override this.Render (group, world) =
-            this.View (this.GetModel group world, group, world)
+        override this.Render (renderPass, group, world) =
+            this.Render (this.GetModel group world, renderPass, group, world)
 
         override this.Signal (signalObj : obj, group, world) =
             match signalObj with
@@ -1744,8 +1833,8 @@ module GroupDispatcherModule =
         default this.Content (_, _) = []
 
         /// Render the group using the given model.
-        abstract View : 'model * Group * World -> unit
-        default this.View (_, _, _) = ()
+        abstract Render : 'model * RenderPass * Group * World -> unit
+        default this.Render (_, _, _, _) = ()
 
         /// Implements additional editing behavior for a group via the ImGui API.
         abstract Edit : 'model * EditOperation * Group * World -> Signal list * 'model
@@ -1853,8 +1942,8 @@ module ScreenDispatcherModule =
                         makeInitial world
             World.setScreenModel<'model> true model screen world |> snd'
 
-        override this.Render (screen, world) =
-            this.View (this.GetModel screen world, screen, world)
+        override this.Render (renderPass, screen, world) =
+            this.Render (this.GetModel screen world, renderPass, screen, world)
 
         override this.Signal (signalObj : obj, screen, world) =
             match signalObj with
@@ -1913,8 +2002,8 @@ module ScreenDispatcherModule =
         default this.Content (_, _) = []
 
         /// Render the screen using the given model.
-        abstract View : 'model * Screen * World -> unit
-        default this.View (_, _, _) = ()
+        abstract Render : 'model * RenderPass * Screen * World -> unit
+        default this.Render (_, _, _, _) = ()
 
         /// Implements additional editing behavior for a screen via the ImGui API.
         abstract Edit : 'model * EditOperation * Screen * World -> Signal list * 'model
@@ -2029,8 +2118,8 @@ module GameDispatcherModule =
                         makeInitial world
             World.setGameModel<'model> true model game world |> snd'
 
-        override this.Render (game, world) =
-            this.View (this.GetModel game world, game, world)
+        override this.Render (renderPass, game, world) =
+            this.Render (this.GetModel game world, renderPass, game, world)
 
         override this.Signal (signalObj : obj, game, world) =
             match signalObj with
@@ -2083,8 +2172,8 @@ module GameDispatcherModule =
         default this.Content (_, _) = []
 
         /// Render the game using the given model.
-        abstract View : 'model * Game * World -> unit
-        default this.View (_, _, _) = ()
+        abstract Render : 'model * RenderPass * Game * World -> unit
+        default this.Render (_, _, _, _) = ()
 
         /// Implements additional editing behavior for a game via the ImGui API.
         abstract Edit : 'model * EditOperation * Game * World -> Signal list * 'model
@@ -2111,7 +2200,7 @@ module GamePropertyDescriptor =
         let propertyName = propertyDescriptor.PropertyName
         if propertyName = "Name" ||  propertyName.EndsWith "Model" then "Ambient Properties"
         elif propertyName = "DesiredScreen" || propertyName = "OmniScreenOpt" || propertyName = "ScreenTransitionDestinationOpt" || propertyName = "SelectedScreenOpt" ||
-             propertyName = "EyeCenter2d" || propertyName = "EyeSize2d" || propertyName = "EyeCenter3d" || propertyName = "EyeRotation3d" then
+             propertyName = "Eye2dCenter" || propertyName = "Eye2dSize" || propertyName = "Eye3dCenter" || propertyName = "Eye3dRotation" then
              "Built-In Properties"
         else "Xtension Properties"
 

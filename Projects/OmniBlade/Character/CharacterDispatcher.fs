@@ -15,7 +15,7 @@ module CharacterDispatcher =
         member this.CharacterPlus = this.ModelGeneric<CharacterPlus> ()
 
     type CharacterDispatcher () =
-        inherit EntityDispatcher2d<CharacterPlus, Message, Command> (true, CharacterPlus.empty)
+        inherit Entity2dDispatcher<CharacterPlus, Message, Command> (true, CharacterPlus.empty)
 
         static let getAfflictionInsetOpt time (character : Character) =
             if character.Standing then
@@ -66,7 +66,7 @@ module CharacterDispatcher =
              Entity.Perimeter := character.Perimeter
              Entity.Elevation == Constants.Battle.ForegroundElevation]
 
-        override this.View (characterPlus, entity, world) =
+        override this.Render (characterPlus, _, entity, world) =
             let time = characterPlus.UpdateTime
             let character = characterPlus.Character
             if entity.GetVisible world then

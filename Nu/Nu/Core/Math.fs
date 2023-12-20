@@ -507,9 +507,21 @@ module Quaternion =
         member inline this.Right =
             Vector3.Transform (v3Right, this)
 
+        /// The left vector of the quaternion.
+        member inline this.Left =
+            Vector3.Transform (v3Left, this)
+
         /// The up vector of the quaternion.
         member inline this.Up =
             Vector3.Transform (v3Up, this)
+
+        /// The down vector of the quaternion.
+        member inline this.Down =
+            Vector3.Transform (v3Down, this)
+
+        /// The back vector of the quaternion.
+        member inline this.Back =
+            Vector3.Transform (v3Back, this)
 
         /// The forward vector of the quaternion.
         member inline this.Forward =
@@ -535,6 +547,12 @@ module Quaternion =
     let inline quat x y z w = Quaternion (x, y, z, w)
     let inline quatEq (q : Quaternion) (q2 : Quaternion) = q.Equals q2
     let inline quatNeq (q : Quaternion) (q2 : Quaternion) = not (q.Equals q2)
+
+    /// Create a look-at rotation quaternion.
+    /// NOTE: this might be less efficient since it uses Matrix4x4's look-at function then converts to quaternion.
+    let CreateLookAt (position, direction, up) =
+        Quaternion.CreateFromRotationMatrix
+            (Matrix4x4.CreateLookAt (position, direction, up))
 
 /// Converts Quaternion types.
 type QuaternionConverter () =

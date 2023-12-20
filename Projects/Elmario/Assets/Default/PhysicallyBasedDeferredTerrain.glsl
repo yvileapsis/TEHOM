@@ -35,7 +35,6 @@ layout (location = 10) in vec4 texCoordsOffset;
 layout (location = 11) in vec4 albedo;
 layout (location = 12) in vec4 material;
 layout (location = 13) in float height;
-layout (location = 14) in int invertRoughness;
 
 out vec4 positionOut;
 out vec2 texCoordsOut;
@@ -45,7 +44,6 @@ out vec3 tintOut;
 flat out vec4 albedoOut;
 flat out vec4 materialOut;
 flat out float heightOut;
-flat out int invertRoughnessOut;
 
 void main()
 {
@@ -58,7 +56,6 @@ void main()
     materialOut = material;
     normalOut = transpose(inverse(mat3(model))) * normal;
     heightOut = height;
-    invertRoughnessOut = invertRoughness;
     blendsOut[0] = blends[0];
     blendsOut[1] = blends[1];
     tintOut = tint;
@@ -67,17 +64,18 @@ void main()
 
 #shader fragment
 #version 410 core
+#extension GL_ARB_bindless_texture : require
 
 const float GAMMA = 2.2;
 const int TERRAIN_LAYERS_MAX = 8;
 
 uniform vec3 eyeCenter;
 uniform int layersCount;
-uniform sampler2D albedoTextures[TERRAIN_LAYERS_MAX];
-uniform sampler2D roughnessTextures[TERRAIN_LAYERS_MAX];
-uniform sampler2D ambientOcclusionTextures[TERRAIN_LAYERS_MAX];
-uniform sampler2D normalTextures[TERRAIN_LAYERS_MAX];
-uniform sampler2D heightTextures[TERRAIN_LAYERS_MAX];
+layout (bindless_sampler) uniform sampler2D albedoTextures[TERRAIN_LAYERS_MAX];
+layout (bindless_sampler) uniform sampler2D roughnessTextures[TERRAIN_LAYERS_MAX];
+layout (bindless_sampler) uniform sampler2D ambientOcclusionTextures[TERRAIN_LAYERS_MAX];
+layout (bindless_sampler) uniform sampler2D normalTextures[TERRAIN_LAYERS_MAX];
+layout (bindless_sampler) uniform sampler2D heightTextures[TERRAIN_LAYERS_MAX];
 
 in vec4 positionOut;
 in vec2 texCoordsOut;
@@ -87,7 +85,6 @@ in vec3 tintOut;
 flat in vec4 albedoOut;
 flat in vec4 materialOut;
 flat in float heightOut;
-flat in int invertRoughnessOut;
 
 layout (location = 0) out vec4 position;
 layout (location = 1) out vec3 albedo;
@@ -140,9 +137,12 @@ void main()
         normalBlend += (texture(normalTextures[i], texCoords).xyz * 2.0 - 1.0) * blend;
     }
 
+    // discard on zero alpha
+    if (albedoBlend.a == 0.0f) discard;
+
     // populate albedo, material, and normalAndHeight
     albedo = pow(albedoBlend.rgb, vec3(GAMMA)) * tintOut * albedoOut.rgb;
-    material = vec4((invertRoughnessOut == 0 ? roughnessBlend : 1.0f - roughnessBlend) * materialOut.g, 0.0, ambientOcclusionBlend * materialOut.b, 0.0);
+    material = vec4(roughnessBlend * materialOut.g, 0.0, ambientOcclusionBlend * materialOut.b, 0.0);
     normalAndHeight.xyz = normalize(toWorld * normalize(normalBlend));
     normalAndHeight.a = height;
 }

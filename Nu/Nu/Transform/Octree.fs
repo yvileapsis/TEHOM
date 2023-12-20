@@ -46,7 +46,7 @@ module Octelement =
         override this.Equals that = match that with :? Octelement<'e> as that -> this.Entry_.Equals that.Entry_ | _ -> false
 
     let intersects frustumEnclosed frustumExposed frustumImposter lightBox (element : _ Octelement) =
-        Presence.intersects3d frustumEnclosed frustumExposed frustumImposter lightBox element.LightProbe element.Light element.Bounds_ element.Presence_
+        Presence.intersects3d frustumEnclosed frustumExposed frustumImposter lightBox element.LightProbe element.Light element.Presence_ element.Bounds_
 
     let make visible static_ lightProbe light presence bounds (entry : 'e) =
         let hashCode = entry.GetHashCode ()
@@ -217,6 +217,20 @@ module internal Octnode =
                     if frustum.Intersects bounds then
                         set.Add element |> ignore
 
+    let rec internal getLightProbesInViewBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
+        match node.Children_ with
+        | ValueLeft nodes ->
+            for i in 0 .. dec nodes.Length do
+                let node = nodes.[i]
+                if node.ElementsCount_ > 0 && isIntersectingBox box node then
+                    getLightProbesInViewBox box set node
+        | ValueRight elements ->
+            for element in elements do
+                if element.LightProbe && element.Visible then
+                    let bounds = element.Bounds
+                    if box.Intersects bounds then
+                        set.Add element |> ignore
+
     let rec internal getLightsInViewFrustum frustum (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
         | ValueLeft nodes ->
@@ -347,7 +361,7 @@ module internal Octnode =
             else ValueRight (HashSet<'e Octelement> (comparer : 'e OctelementEqualityComparer))
         let node =
             { ElementsCount_ = 0
-              Id_ = Gen.id64
+              Id_ = Gen.idForInternal
               Depth_ = depth
               Bounds_ = bounds
               Children_ = children }
@@ -513,6 +527,14 @@ module Octree =
                 set.Add imposter |> ignore<bool>
         new OctreeEnumerable<'e> (new OctreeEnumerator<'e> (tree.Omnipresent, set)) :> 'e Octelement IEnumerable
 
+    /// Get all of the elements in a tree that satisfy the given query parameters.
+    let getElementsInViewFrustum enclosed exposed frustum (set : _ HashSet) tree =
+        Octnode.getElementsInViewFrustum enclosed exposed frustum set tree.Node
+        for imposter in tree.Imposter do
+            if frustum.Intersects imposter.Bounds then
+                set.Add imposter |> ignore<bool>
+        new OctreeEnumerable<'e> (new OctreeEnumerator<'e> (tree.Omnipresent, set)) :> 'e Octelement IEnumerable
+
     /// Get all of the elements in a tree that are in a node intersected by one of the given frustums or light box depending on its attributes.
     let getElementsInView frustumEnclosed frustumExposed (frustumImposter : Frustum) lightBox (set : _ HashSet) tree =
         Octnode.getElementsInView frustumEnclosed frustumExposed lightBox set tree.Node
@@ -537,9 +559,21 @@ module Octree =
         let omnipresent = tree.Omnipresent |> Seq.filter (fun element -> element.LightProbe)
         new OctreeEnumerable<'e> (new OctreeEnumerator<'e> (omnipresent, set)) :> 'e Octelement IEnumerable
 
+    /// Get all of the light probe elements in the given box.
+    let getLightProbesInBox box (set : _ HashSet) tree =
+        Octnode.getLightProbesInViewBox box set tree.Node
+        let omnipresent = tree.Omnipresent |> Seq.filter (fun element -> element.LightProbe)
+        new OctreeEnumerable<'e> (new OctreeEnumerator<'e> (omnipresent, set)) :> 'e Octelement IEnumerable
+
     /// Get all of the light elements in the given frustum.
     let getLightsInFrustum frustum (set : _ HashSet) tree =
         Octnode.getLightsInViewFrustum frustum set tree.Node
+        let omnipresent = tree.Omnipresent |> Seq.filter (fun element -> element.Light)
+        new OctreeEnumerable<'e> (new OctreeEnumerator<'e> (omnipresent, set)) :> 'e Octelement IEnumerable
+
+    /// Get all of the light elements in the given box.
+    let getLightsInBox box (set : _ HashSet) tree =
+        Octnode.getLightsInViewBox box set tree.Node
         let omnipresent = tree.Omnipresent |> Seq.filter (fun element -> element.Light)
         new OctreeEnumerable<'e> (new OctreeEnumerator<'e> (omnipresent, set)) :> 'e Octelement IEnumerable
 

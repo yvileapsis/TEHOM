@@ -20,7 +20,7 @@ module BattleDispatcher =
 
         static let displayEffect (delay : int64) size positioning layering descriptor screen world =
             World.schedule delay (fun world ->
-                let (entity, world) = World.createEntity<EffectDispatcher2d> DefaultOverlay None Simulants.BattleScene world
+                let (entity, world) = World.createEntity<Effect2dDispatcher> DefaultOverlay None Simulants.BattleScene world
                 let world = entity.SetSize size world
                 let world =
                     match positioning with
@@ -144,7 +144,7 @@ module BattleDispatcher =
 
             match command with
             | UpdateEye ->
-                let world = World.setEyeCenter2d v2Zero world
+                let world = World.setEye2dCenter v2Zero world
                 just world
 
             | BattleCommand.PlaySound (delay, volume, sound) ->
@@ -161,14 +161,14 @@ module BattleDispatcher =
 
             | DisplayHop (hopStart, hopStop) ->
                 let descriptor = EffectDescriptors.hop hopStart hopStop
-                let (entity, world) = World.createEntity<EffectDispatcher2d> DefaultOverlay (Some Simulants.BattleRide.Surnames) Simulants.BattleScene world
+                let (entity, world) = World.createEntity<Effect2dDispatcher> DefaultOverlay (Some Simulants.BattleRide.Surnames) Simulants.BattleScene world
                 let world = entity.SetSelfDestruct true world
                 let world = entity.SetEffectDescriptor descriptor world
                 just world
 
             | DisplayCircle (position, radius) ->
                 let descriptor = EffectDescriptors.circle radius
-                let (entity, world) = World.createEntity<EffectDispatcher2d> DefaultOverlay (Some Simulants.BattleRide.Surnames) Simulants.BattleScene world
+                let (entity, world) = World.createEntity<Effect2dDispatcher> DefaultOverlay (Some Simulants.BattleRide.Surnames) Simulants.BattleScene world
                 let world = entity.SetPosition position world
                 let world = entity.SetSelfDestruct true world
                 let world = entity.SetEffectDescriptor descriptor world
@@ -177,7 +177,7 @@ module BattleDispatcher =
             | DisplayHitPointsChange (targetIndex, delta) ->
                 match Battle.tryGetCharacter targetIndex battle with
                 | Some target ->
-                    let (entity, world) = World.createEntity<EffectDispatcher2d> DefaultOverlay None Simulants.BattleScene world
+                    let (entity, world) = World.createEntity<Effect2dDispatcher> DefaultOverlay None Simulants.BattleScene world
                     let world = entity.SetPosition target.BottomOriginalOffset4 world
                     let world = entity.SetElevation Constants.Battle.GuiEffectElevation world
                     let world = entity.SetSelfDestruct true world
@@ -188,7 +188,7 @@ module BattleDispatcher =
             | DisplayCancel targetIndex ->
                 match Battle.tryGetCharacter targetIndex battle with
                 | Some target ->
-                    let (entity, world) = World.createEntity<EffectDispatcher2d> DefaultOverlay None Simulants.BattleScene world
+                    let (entity, world) = World.createEntity<Effect2dDispatcher> DefaultOverlay None Simulants.BattleScene world
                     let world = entity.SetPosition target.CenterOffset4 world
                     let world = entity.SetElevation (Constants.Battle.GuiEffectElevation + 1.0f) world
                     let world = entity.SetSelfDestruct true world
@@ -411,7 +411,7 @@ module BattleDispatcher =
                                  Entity.FillColor :=
                                     (let pulseTime = battle.UpdateTime % Constants.Battle.CharacterFillColorPulseDuration
                                      let pulseProgress = single pulseTime / single Constants.Battle.CharacterFillColorPulseDuration
-                                     let pulseIntensity = byte (sin (pulseProgress * single Math.PI) * 127.0f) / byte 2 + byte 32
+                                     let pulseIntensity = byte (sin (pulseProgress * MathF.PI) * 127.0f) / byte 2 + byte 32
                                      match character.AutoBattleOpt with
                                      | Some autoBattle ->
                                         if autoBattle.AutoTechOpt.IsSome then Color.Red.WithA8 pulseIntensity

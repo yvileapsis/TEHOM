@@ -74,9 +74,9 @@ module Gaia =
     let mutable private newGroupName = ""
     let mutable private groupRename = ""
     let mutable private entityRename = ""
-    let mutable private desiredEyeCenter2d = v2Zero
-    let mutable private desiredEyeCenter3d = v3Zero
-    let mutable private desiredEyeRotation3d = quatIdentity
+    let mutable private desiredEye2dCenter = v2Zero
+    let mutable private desiredEye3dCenter = v3Zero
+    let mutable private desiredEye3dRotation = quatIdentity
 
     (* Configuration States *)
 
@@ -176,6 +176,12 @@ Pos=0,56
 Size=282,1024
 Collapsed=0
 DockId=0x0000000C,1
+
+[Window][Metrics]
+Pos=953,854
+Size=669,226
+Collapsed=0
+DockId=0x00000009,6
 
 [Window][Event Tracing]
 Pos=953,854
@@ -357,7 +363,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
           DockNode    ID=0x00000004 Parent=0x00000005 SizeRef=1678,796 CentralNode=1
           DockNode    ID=0x00000003 Parent=0x00000005 SizeRef=1678,226 Split=X Selected=0xD4E24632
             DockNode  ID=0x00000001 Parent=0x00000003 SizeRef=667,205 Selected=0x61D81DE4
-            DockNode  ID=0x00000009 Parent=0x00000003 SizeRef=669,205 Selected=0x004ABF05
+            DockNode  ID=0x00000009 Parent=0x00000003 SizeRef=669,205 Selected=0x8411189D
         DockNode      ID=0x00000006 Parent=0x00000008 SizeRef=346,979 Selected=0x199AB496
     DockNode          ID=0x0000000E Parent=0x0000000F SizeRef=296,1080 Selected=0xD5116FF8
 
@@ -381,7 +387,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
     let private makeGaiaState projectDllPath editModeOpt freshlyLoaded : GaiaState =
         GaiaState.make
             projectDllPath editModeOpt freshlyLoaded openProjectImperativeExecution
-            desiredEyeCenter2d desiredEyeCenter3d desiredEyeRotation3d (World.getMasterSoundVolume world) (World.getMasterSongVolume world)            
+            desiredEye2dCenter desiredEye3dCenter desiredEye3dRotation (World.getMasterSoundVolume world) (World.getMasterSongVolume world)            
             snaps2dSelected snaps2d snaps3d newEntityElevation newEntityDistance alternativeEyeTravelInput
 
     let private printGaiaState gaiaState =
@@ -510,7 +516,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             groups |>
             Seq.map (fun group -> World.getEntitiesFlattened group world) |>
             Seq.concat |>
-            Seq.filter (fun entity -> entity.Has<LightProbeFacet3d> world)
+            Seq.filter (fun entity -> entity.Has<LightProbe3dFacet> world)
         for lightProbe in lightProbes do
             world <- lightProbe.SetProbeStale true world
 
@@ -520,12 +526,12 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         else snaps3d
 
     let private getPickCandidates2d () =
-        let (entities, wtemp) = World.getEntitiesInView2d (HashSet ()) world in world <- wtemp
+        let (entities, wtemp) = World.getEntities2dInView (HashSet ()) world in world <- wtemp
         let entitiesInGroup = entities |> Seq.filter (fun entity -> entity.Group = selectedGroup && entity.GetVisible world) |> Seq.toArray
         entitiesInGroup
 
     let private getPickCandidates3d () =
-        let (entities, wtemp) = World.getEntitiesInView3d (HashSet ()) world in world <- wtemp
+        let (entities, wtemp) = World.getEntities3dInView (HashSet ()) world in world <- wtemp
         let entitiesInGroup = entities |> Seq.filter (fun entity -> entity.Group = selectedGroup && entity.GetVisible world) |> Seq.toArray
         entitiesInGroup
 
@@ -567,36 +573,39 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
 
     let private imGuiRender wtemp =
 
-        // render light probes of the selected group in icon frustum
+        // render light probes of the selected group in light box and view frustum
         world <- wtemp
-        let iconFrustum = World.getEyeFrustum3dEnclosed world
-        let (entities, wtemp) = World.getLightProbesInFrustum3d iconFrustum (HashSet ()) world in world <- wtemp
+        let lightBox = World.getLight3dBox world
+        let viewFrustum = World.getEye3dFrustumView world
+        let (entities, wtemp) = World.getLightProbes3dInBox lightBox (HashSet ()) world in world <- wtemp
         let lightProbeModels =
             entities |>
-            Seq.filter (fun entity -> entity.Group = selectedGroup && entity.GetVisible world) |>
+            Seq.filter (fun entity -> entity.Group = selectedGroup && viewFrustum.Intersects (entity.GetBounds world)) |>
             Seq.map (fun light -> (light.GetAffineMatrix world, Omnipresent, None, MaterialProperties.defaultProperties)) |>
             SList.ofSeq
         World.enqueueRenderMessage3d
             (RenderStaticModels
                 { Absolute = false
                   StaticModels = lightProbeModels
+                  StaticModel = Assets.Default.LightProbeModel
                   RenderType = DeferredRenderType
-                  StaticModel = Assets.Default.LightProbeModel })
+                  RenderPass = NormalPass })
             world
 
         // render lights of the selected group in play
-        let (entities, wtemp) = World.getLightsInFrustum3d iconFrustum (HashSet ()) world in world <- wtemp
+        let (entities, wtemp) = World.getLights3dInBox lightBox (HashSet ()) world in world <- wtemp
         let lightModels =
             entities |>
-            Seq.filter (fun entity -> entity.Group = selectedGroup) |>
+            Seq.filter (fun entity -> entity.Group = selectedGroup && viewFrustum.Intersects (entity.GetBounds world)) |>
             Seq.map (fun light -> (light.GetAffineMatrix world, Omnipresent, None, MaterialProperties.defaultProperties)) |>
             SList.ofSeq
         World.enqueueRenderMessage3d
             (RenderStaticModels
                 { Absolute = false
                   StaticModels = lightModels
+                  StaticModel = Assets.Default.LightbulbModel
                   RenderType = DeferredRenderType
-                  StaticModel = Assets.Default.LightbulbModel })
+                  RenderPass = NormalPass })
             world
 
         // render selection highlights
@@ -635,8 +644,9 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                           Presence = Omnipresent
                           InsetOpt = None
                           MaterialProperties = MaterialProperties.defaultProperties
+                          StaticModel = Assets.Default.HighlightModel
                           RenderType = ForwardRenderType (0.0f, Single.MinValue)
-                          StaticModel = Assets.Default.HighlightModel })
+                          RenderPass = NormalPass })
                     world
         | Some _ | None -> ()
 
@@ -671,12 +681,12 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         let viewport = World.getViewport world
         let mutable entityTransform = entity.GetTransform world
         if entity.GetIs2d world then
-            let eyeCenter = World.getEyeCenter2d world
-            let eyeSize = World.getEyeSize2d world
+            let eyeCenter = World.getEye2dCenter world
+            let eyeSize = World.getEye2dSize world
             let entityPosition =
                 if atMouse
                 then viewport.MouseToWorld2d (entity.GetAbsolute world, rightClickPosition, eyeCenter, eyeSize)
-                else viewport.MouseToWorld2d (entity.GetAbsolute world, World.getEyeSize2d world, eyeCenter, eyeSize)
+                else viewport.MouseToWorld2d (entity.GetAbsolute world, World.getEye2dSize world, eyeCenter, eyeSize)
             let attributes = entity.GetAttributesInferred world
             entityTransform.Position <- entityPosition.V3
             entityTransform.Size <- attributes.SizeInferred
@@ -686,8 +696,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             then world <- entity.SetTransformSnapped positionSnap degreesSnap scaleSnap entityTransform world
             else world <- entity.SetTransform entityTransform world
         else
-            let eyeCenter = World.getEyeCenter3d world
-            let eyeRotation = World.getEyeRotation3d world
+            let eyeCenter = World.getEye3dCenter world
+            let eyeRotation = World.getEye3dRotation world
             let entityPosition =
                 if atMouse then
                     let ray = viewport.MouseToWorld3d (entity.GetAbsolute world, rightClickPosition, eyeCenter, eyeRotation)
@@ -714,8 +724,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
 
     let private trySaveSelectedGroup filePath =
         try World.writeGroupToFile filePath selectedGroup world
-            try let deploymentPath = Pathf.Combine (targetDir, Pathf.GetRelativePath(targetDir, filePath).Replace("../", ""))
-                if Directory.Exists (Pathf.GetDirectoryName deploymentPath) then
+            try let deploymentPath = PathF.Combine (targetDir, PathF.GetRelativePath(targetDir, filePath).Replace("../", ""))
+                if Directory.Exists (PathF.GetDirectoryName deploymentPath) then
                     File.Copy (filePath, deploymentPath, true)
             with exn ->
                 messageBoxOpt <- Some ("Could not deploy file due to: " + scstring exn)
@@ -894,7 +904,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         Array.map (fun line -> line.Replace ("</HintPath>", "")) |>
                         Array.map (fun line -> line.Replace ("=", "")) |>
                         Array.map (fun line -> line.Replace ("\"", "")) |>
-                        Array.map (fun line -> Pathf.Normalize line) |>
+                        Array.map (fun line -> PathF.Normalize line) |>
                         Array.map (fun line -> line.Trim ())
                     let fsprojProjectLines = // TODO: see if we can pull these from the fsproj as well...
                         ["#r \"../../../../../Nu/Nu.Math/bin/" + Constants.Gaia.BuildName + "/netstandard2.0/Nu.Math.dll\""
@@ -909,7 +919,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         Array.map (fun line -> line.Replace ("/>", "")) |>
                         Array.map (fun line -> line.Replace ("=", "")) |>
                         Array.map (fun line -> line.Replace ("\"", "")) |>
-                        Array.map (fun line -> Pathf.Normalize line) |>
+                        Array.map (fun line -> PathF.Normalize line) |>
                         Array.map (fun line -> line.Trim ())
                     let fsxFileString =
                         String.Join ("\n", Array.map (fun (nugetPath : string) -> "#r \"" + nugetPath + "\"") fsprojNugetPaths) + "\n" +
@@ -947,9 +957,9 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         tryReloadCode ()
 
     let private resetEye () =
-        desiredEyeCenter2d <- v2Zero
-        desiredEyeCenter3d <- Constants.Engine.EyeCenter3dDefault
-        desiredEyeRotation3d <- quatIdentity
+        desiredEye2dCenter <- v2Zero
+        desiredEye3dCenter <- Constants.Engine.Eye3dCenterDefault
+        desiredEye3dRotation <- quatIdentity
 
     let private toggleAdvancing () =
         if not world.Advancing then snapshot ()
@@ -960,14 +970,14 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         let filePathAndDirNameAndTypesOpt =
             if not (String.IsNullOrWhiteSpace filePathOpt) then
                 let filePath = filePathOpt
-                try let dirName = Pathf.GetDirectoryName filePath
+                try let dirName = PathF.GetDirectoryName filePath
                     try Directory.SetCurrentDirectory dirName
                         let assembly = Assembly.Load (File.ReadAllBytes filePath)
                         Right (Some (filePath, dirName, assembly.GetTypes ()))
                     with _ ->
                         let assembly = Assembly.LoadFrom filePath
                         Right (Some (filePath, dirName, assembly.GetTypes ()))
-                with _ ->
+                with exn ->
                     Log.info ("Failed to load Nu game project from '" + filePath + "' due to: " + scstring exn)
                     Directory.SetCurrentDirectory gaiaDir
                     Left ()
@@ -1074,8 +1084,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         snapshot ()
                         if World.isKeyboardAltDown world then
                             let viewport = World.getViewport world
-                            let eyeCenter = World.getEyeCenter2d world
-                            let eyeSize = World.getEyeSize2d world
+                            let eyeCenter = World.getEye2dCenter world
+                            let eyeSize = World.getEye2dSize world
                             let mousePositionWorld = viewport.MouseToWorld2d (entity.GetAbsolute world, mousePosition, eyeCenter, eyeSize)
                             let entityDegrees = if entity.MountExists world then entity.GetDegreesLocal world else entity.GetDegrees world
                             dragEntityState <- DragEntityRotation2d (DateTimeOffset.Now, mousePositionWorld, entityDegrees.Z + mousePositionWorld.Y, entity)
@@ -1087,8 +1097,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                     Option.defaultValue entity selectedEntityOpt
                                 else entity
                             let viewport = World.getViewport world
-                            let eyeCenter = World.getEyeCenter2d world
-                            let eyeSize = World.getEyeSize2d world
+                            let eyeCenter = World.getEye2dCenter world
+                            let eyeSize = World.getEye2dSize world
                             let mousePositionWorld = viewport.MouseToWorld2d (entity.GetAbsolute world, mousePosition, eyeCenter, eyeSize)
                             let entityPosition = entity.GetPosition world
                             dragEntityState <- DragEntityPosition2d (DateTimeOffset.Now, mousePositionWorld, entityPosition.V2 + mousePositionWorld, entity)
@@ -1152,25 +1162,25 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
 
             if ImGui.IsMouseClicked ImGuiMouseButton.Middle then
                 let mousePositionScreen = World.getMousePosition2dScreen world
-                let dragState = DragEyeCenter2d (World.getEyeCenter2d world + mousePositionScreen, mousePositionScreen)
+                let dragState = DragEye2dCenter (World.getEye2dCenter world + mousePositionScreen, mousePositionScreen)
                 dragEyeState <- dragState
 
             match dragEyeState with
-            | DragEyeCenter2d (entityDragOffset, mousePositionScreenOrig) ->
+            | DragEye2dCenter (entityDragOffset, mousePositionScreenOrig) ->
                 let mousePositionScreen = World.getMousePosition2dScreen world
-                desiredEyeCenter2d <- (entityDragOffset - mousePositionScreenOrig) + -Constants.Gaia.EyeSpeed * (mousePositionScreen - mousePositionScreenOrig)
-                dragEyeState <- DragEyeCenter2d (entityDragOffset, mousePositionScreenOrig)
+                desiredEye2dCenter <- (entityDragOffset - mousePositionScreenOrig) + -Constants.Gaia.EyeSpeed * (mousePositionScreen - mousePositionScreenOrig)
+                dragEyeState <- DragEye2dCenter (entityDragOffset, mousePositionScreenOrig)
             | DragEyeInactive -> ()
 
         if ImGui.IsMouseReleased ImGuiMouseButton.Middle then
             match dragEyeState with
-            | DragEyeCenter2d _ -> dragEyeState <- DragEyeInactive
+            | DragEye2dCenter _ -> dragEyeState <- DragEyeInactive
             | DragEyeInactive -> ()
 
     let private updateEyeTravel () =
         if canEditWithKeyboard () then
-            let position = World.getEyeCenter3d world
-            let rotation = World.getEyeRotation3d world
+            let position = World.getEye3dCenter world
+            let rotation = World.getEye3dRotation world
             let moveSpeed =
                 if ImGui.IsKeyDown ImGuiKey.Enter && ImGui.IsShiftDown () then 5.0f
                 elif ImGui.IsKeyDown ImGuiKey.Enter then 0.5f
@@ -1180,27 +1190,27 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 if ImGui.IsShiftDown () && not (ImGui.IsKeyDown ImGuiKey.Enter) then 0.025f
                 else 0.05f
             if ImGui.IsKeyDown ImGuiKey.W && ImGui.IsCtrlReleased () then
-                desiredEyeCenter3d <- position + Vector3.Transform (v3Forward, rotation) * moveSpeed
+                desiredEye3dCenter <- position + Vector3.Transform (v3Forward, rotation) * moveSpeed
             if ImGui.IsKeyDown ImGuiKey.S && ImGui.IsCtrlReleased () then
-                desiredEyeCenter3d <- position + Vector3.Transform (v3Back, rotation) * moveSpeed
+                desiredEye3dCenter <- position + Vector3.Transform (v3Back, rotation) * moveSpeed
             if ImGui.IsKeyDown ImGuiKey.A && ImGui.IsCtrlReleased () then
-                desiredEyeCenter3d <- position + Vector3.Transform (v3Left, rotation) * moveSpeed
+                desiredEye3dCenter <- position + Vector3.Transform (v3Left, rotation) * moveSpeed
             if ImGui.IsKeyDown ImGuiKey.D && ImGui.IsCtrlReleased () then
-                desiredEyeCenter3d <- position + Vector3.Transform (v3Right, rotation) * moveSpeed
+                desiredEye3dCenter <- position + Vector3.Transform (v3Right, rotation) * moveSpeed
             if ImGui.IsKeyDown (if alternativeEyeTravelInput then ImGuiKey.UpArrow else ImGuiKey.E) && ImGui.IsCtrlReleased () then
                 let rotation' = rotation * Quaternion.CreateFromAxisAngle (v3Right, turnSpeed)
-                if Vector3.Dot (rotation'.Forward, v3Up) < 0.999f then desiredEyeRotation3d <- rotation'
+                if Vector3.Dot (rotation'.Forward, v3Up) < 0.999f then desiredEye3dRotation <- rotation'
             if ImGui.IsKeyDown (if alternativeEyeTravelInput then ImGuiKey.DownArrow else ImGuiKey.Q) && ImGui.IsCtrlReleased () then
                 let rotation' = rotation * Quaternion.CreateFromAxisAngle (v3Left, turnSpeed)
-                if Vector3.Dot (rotation'.Forward, v3Down) < 0.999f then desiredEyeRotation3d <- rotation'
+                if Vector3.Dot (rotation'.Forward, v3Down) < 0.999f then desiredEye3dRotation <- rotation'
             if ImGui.IsKeyDown (if alternativeEyeTravelInput then ImGuiKey.E else ImGuiKey.UpArrow) && ImGui.IsAltReleased () then
-                desiredEyeCenter3d <- position + Vector3.Transform (v3Up, rotation) * moveSpeed
+                desiredEye3dCenter <- position + Vector3.Transform (v3Up, rotation) * moveSpeed
             if ImGui.IsKeyDown (if alternativeEyeTravelInput then ImGuiKey.Q else ImGuiKey.DownArrow) && ImGui.IsAltReleased () then
-                desiredEyeCenter3d <- position + Vector3.Transform (v3Down, rotation) * moveSpeed
+                desiredEye3dCenter <- position + Vector3.Transform (v3Down, rotation) * moveSpeed
             if ImGui.IsKeyDown ImGuiKey.LeftArrow && ImGui.IsAltReleased () then
-                desiredEyeRotation3d <- Quaternion.CreateFromAxisAngle (v3Up, turnSpeed) * rotation
+                desiredEye3dRotation <- Quaternion.CreateFromAxisAngle (v3Up, turnSpeed) * rotation
             if ImGui.IsKeyDown ImGuiKey.RightArrow && ImGui.IsAltReleased () then
-                desiredEyeRotation3d <- Quaternion.CreateFromAxisAngle (v3Down, turnSpeed) * rotation
+                desiredEye3dRotation <- Quaternion.CreateFromAxisAngle (v3Down, turnSpeed) * rotation
 
     let private updateHotkeys entityHierarchyFocused =
         if not (modal ()) then
@@ -1258,11 +1268,11 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         if ImGui.IsMouseDoubleClicked ImGuiMouseButton.Left && ImGui.IsItemHovered () then
             if not (entity.GetAbsolute world) then
                 if entity.GetIs2d world then
-                    desiredEyeCenter2d <- (entity.GetPerimeterCenter world).V2
+                    desiredEye2dCenter <- (entity.GetPerimeterCenter world).V2
                 else
-                    let eyeRotation = World.getEyeRotation3d world
+                    let eyeRotation = World.getEye3dRotation world
                     let eyeCenterOffset = Vector3.Transform (v3Back * newEntityDistance, eyeRotation)
-                    desiredEyeCenter3d <- entity.GetPosition world + eyeCenterOffset
+                    desiredEye3dCenter <- entity.GetPosition world + eyeCenterOffset
         let popupContextItemTitle = "##popupContextItem"
         let mutable openPopupContextItemWhenUnselected = false
         if ImGui.BeginPopupContextItem popupContextItemTitle then
@@ -1449,22 +1459,6 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 let mutable height = height
                 ImGui.SameLine ()
                 if ImGui.SliderFloat ("HeightOpt", &height, 0.0f, 10.0f) then setPropertyValue { mp with HeightOpt = ValueSome height } propertyDescriptor simulant
-                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
-            | ValueNone -> ()
-        if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
-
-        // edit invert roughness
-        let mutable isSome = ValueOption.isSome mp.InvertRoughnessOpt
-        if ImGui.Checkbox ((if isSome then "##mpInvertRoughnessIsSome" else "InvertRoughnessOpt"), &isSome) then
-            if isSome
-            then setPropertyValue { mp with InvertRoughnessOpt = ValueSome Constants.Render.InvertRoughnessDefault } propertyDescriptor simulant
-            else setPropertyValue { mp with InvertRoughnessOpt = ValueNone } propertyDescriptor simulant
-        else
-            match mp.InvertRoughnessOpt with
-            | ValueSome invertRoughness ->
-                let mutable invertRoughness = invertRoughness
-                ImGui.SameLine ()
-                if ImGui.Checkbox ("InvertRoughnessOpt", &invertRoughness) then setPropertyValue { mp with InvertRoughnessOpt = ValueSome invertRoughness } propertyDescriptor simulant
                 if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
             | ValueNone -> ()
         if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
@@ -1794,13 +1788,13 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         world <- worldOld
 
         // see if sync eyes to editor is desirable
-        let eyeCenter2d = World.getEyeCenter2d world
-        let eyeCenter3d = World.getEyeCenter3d world
-        let eyeRotation3d = World.getEyeRotation3d world
+        let eye2dCenter = World.getEye2dCenter world
+        let eye3dCenter = World.getEye3dCenter world
+        let eye3dRotation = World.getEye3dRotation world
         let eyeChangedElsewhere =
-            eyeCenter2d <> desiredEyeCenter2d ||
-            eyeCenter3d <> desiredEyeCenter3d ||
-            eyeRotation3d <> desiredEyeRotation3d
+            eye2dCenter <> desiredEye2dCenter ||
+            eye3dCenter <> desiredEye3dCenter ||
+            eye3dRotation <> desiredEye3dRotation
 
         // enable global docking
         ImGui.DockSpaceOverViewport (ImGui.GetMainViewport (), ImGuiDockNodeFlags.PassthruCentralNode) |> ignore<uint>
@@ -1831,7 +1825,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                     ImGuizmo.SetDrawlist (ImGui.GetBackgroundDrawList ())
                     match selectedEntityOpt with
                     | Some entity when entity.Exists world && entity.GetIs3d world ->
-                        let viewMatrix = viewport.View3d (entity.GetAbsolute world, World.getEyeCenter3d world, World.getEyeRotation3d world)
+                        let viewMatrix = viewport.View3d (entity.GetAbsolute world, World.getEye3dCenter world, World.getEye3dRotation world)
                         let view = viewMatrix.ToArray ()
                         let affineMatrix = entity.GetAffineMatrix world
                         let affine = affineMatrix.ToArray ()
@@ -1939,25 +1933,25 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
 
                     // view manipulation
                     // NOTE: this code is the current failed attempt to integrate ImGuizmo view manipulation as reported here - https://github.com/CedricGuillemet/ImGuizmo/issues/304
-                    //let eyeCenter = (World.getEyeCenter3d world |> Matrix4x4.CreateTranslation).ToArray ()
-                    //let eyeRotation = (World.getEyeRotation3d world |> Matrix4x4.CreateFromQuaternion).ToArray ()
+                    //let eyeCenter = (World.getEye3dCenter world |> Matrix4x4.CreateTranslation).ToArray ()
+                    //let eyeRotation = (World.getEye3dRotation world |> Matrix4x4.CreateFromQuaternion).ToArray ()
                     //let eyeScale = m4Identity.ToArray ()
                     //let view = m4Identity.ToArray ()
                     //ImGuizmo.RecomposeMatrixFromComponents (&eyeCenter.[0], &eyeRotation.[0], &eyeScale.[0], &view.[0])
                     //ImGuizmo.ViewManipulate (&view.[0], 1.0f, v2 1400.0f 100.0f, v2 150.0f 150.0f, uint 0x10101010)
                     //ImGuizmo.DecomposeMatrixToComponents (&view.[0], &eyeCenter.[0], &eyeRotation.[0], &eyeScale.[0])
-                    //eyeCenter3d <- (eyeCenter |> Matrix4x4.CreateFromArray).Translation
-                    //eyeRotation3d <- (eyeRotation |> Matrix4x4.CreateFromArray |> Quaternion.CreateFromRotationMatrix)
+                    //eye3dCenter <- (eyeCenter |> Matrix4x4.CreateFromArray).Translation
+                    //eye3dRotation <- (eyeRotation |> Matrix4x4.CreateFromArray |> Quaternion.CreateFromRotationMatrix)
 
                     // light probe bounds manipulation
                     match selectedEntityOpt with
-                    | Some entity when entity.Exists world && entity.Has<LightProbeFacet3d> world ->
+                    | Some entity when entity.Exists world && entity.Has<LightProbe3dFacet> world ->
                         let mutable lightProbeBounds = entity.GetProbeBounds world
                         let manipulationResult =
                             ImGuizmo.ManipulateBox3
-                                (World.getEyeCenter3d world,
-                                 World.getEyeRotation3d world,
-                                 World.getEyeFrustumView3d world,
+                                (World.getEye3dCenter world,
+                                 World.getEye3dRotation world,
+                                 World.getEye3dFrustumView world,
                                  entity.GetAbsolute world,
                                  (if not snaps2dSelected && ImGui.IsCtrlReleased () then Triple.fst snaps3d else 0.0f),
                                  &lightProbeBounds)
@@ -1972,7 +1966,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                     match selectedEntityOpt with
                     | Some entity when entity.Exists world && entity.GetIs3d world ->
                         let viewMatrix =
-                            viewport.View3d (entity.GetAbsolute world, World.getEyeCenter3d world, World.getEyeRotation3d world)
+                            viewport.View3d (entity.GetAbsolute world, World.getEye3dCenter world, World.getEye3dRotation world)
                         let operation =
                             OverlayViewport
                                 { Snapshot = fun world -> snapshot (); world
@@ -2315,6 +2309,13 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         | Some _ | None -> ()
                         ImGui.End ()
 
+                    // matrics window
+                    if ImGui.Begin ("Metrics", ImGuiWindowFlags.NoNav) then
+                        ImGui.Text "Draw Calls:"
+                        ImGui.SameLine ()
+                        ImGui.Text (string (OpenGL.Hl.GetDrawCalls ()))
+                        ImGui.End ()
+
                     // asset graph window
                     if ImGui.Begin ("Asset Graph", ImGuiWindowFlags.NoNav) then
                         if ImGui.Button "Save" then
@@ -2323,7 +2324,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                             try let packageDescriptorsStr = assetGraphStr |> scvalue<Map<string, PackageDescriptor>> |> scstring
                                 let prettyPrinter = (SyntaxAttribute.defaultValue typeof<AssetGraph>).PrettyPrinter
                                 File.WriteAllText (assetGraphFilePath, PrettyPrinter.prettyPrint packageDescriptorsStr prettyPrinter)
-                            with exn ->messageBoxOpt <- Some ("Could not save asset graph due to: " + scstring exn)
+                            with exn -> messageBoxOpt <- Some ("Could not save asset graph due to: " + scstring exn)
                         ImGui.SameLine ()
                         if ImGui.Button "Load" then
                             match AssetGraph.tryMakeFromFile (targetDir + "/" + Assets.Global.AssetGraphFilePath) with
@@ -2331,7 +2332,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                 let packageDescriptorsStr = scstring (AssetGraph.getPackageDescriptors assetGraph)
                                 let prettyPrinter = (SyntaxAttribute.defaultValue typeof<AssetGraph>).PrettyPrinter
                                 assetGraphStr <- PrettyPrinter.prettyPrint packageDescriptorsStr prettyPrinter
-                            | Left error ->messageBoxOpt <- Some ("Could not read asset graph due to: " + error + "'.")
+                            | Left error -> messageBoxOpt <- Some ("Could not read asset graph due to: " + error + "'.")
                         ImGui.InputTextMultiline ("##assetGraphStr", &assetGraphStr, 131072u, v2 -1.0f -1.0f) |> ignore<bool>
                         ImGui.End ()
 
@@ -2343,7 +2344,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                             try let overlays = scvalue<Overlay list> overlayerStr
                                 let prettyPrinter = (SyntaxAttribute.defaultValue typeof<Overlay>).PrettyPrinter
                                 File.WriteAllText (overlayerFilePath, PrettyPrinter.prettyPrint (scstring overlays) prettyPrinter)
-                            with exn ->messageBoxOpt <- Some ("Could not save asset graph due to: " + scstring exn)
+                            with exn -> messageBoxOpt <- Some ("Could not save asset graph due to: " + scstring exn)
                         ImGui.SameLine ()
                         if ImGui.Button "Load" then
                             let overlayerFilePath = targetDir + "/" + Assets.Global.OverlayerFilePath
@@ -2352,7 +2353,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                 let extrinsicOverlaysStr = scstring (Overlayer.getExtrinsicOverlays overlayer)
                                 let prettyPrinter = (SyntaxAttribute.defaultValue typeof<Overlay>).PrettyPrinter
                                 overlayerStr <- PrettyPrinter.prettyPrint extrinsicOverlaysStr prettyPrinter
-                            | Left error ->messageBoxOpt <- Some ("Could not read overlayer due to: " + error + "'.")
+                            | Left error -> messageBoxOpt <- Some ("Could not read overlayer due to: " + error + "'.")
                         ImGui.InputTextMultiline ("##overlayerStr", &overlayerStr, 131072u, v2 -1.0f -1.0f) |> ignore<bool>
                         ImGui.End ()
 
@@ -2488,10 +2489,12 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                                     | Some (propertyDescriptor, simulant) when
                                                         World.getExists simulant world &&
                                                         propertyDescriptor.PropertyType <> typeof<ComputedProperty> ->
+                                                        let packageName = if Symbol.shouldBeExplicit package.Key then ("\"" + package.Key + "\"") else package.Key
+                                                        let assetName = if Symbol.shouldBeExplicit assetName then ("\"" + assetName + "\"") else assetName
+                                                        let assetTagStr = "[" + packageName + " " + assetName + "]"
                                                         let converter = SymbolicConverter (false, None, propertyDescriptor.PropertyType)
-                                                        let propertyValueStr = "[" + package.Key + " " + assetName + "]"
-                                                        let propertyValue = converter.ConvertFromString propertyValueStr
-                                                        setPropertyValue propertyValue propertyDescriptor simulant
+                                                        let assetTagObj = converter.ConvertFromString assetTagStr
+                                                        setPropertyValue assetTagObj propertyDescriptor simulant
                                                     | Some _ | None -> ()
                                                     showAssetPickerDialog <- false
                                                 ImGui.TreePop ()
@@ -2503,9 +2506,9 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                     if showNewProjectDialog then
 
                         // ensure template directory exists
-                        let programDir = Pathf.GetDirectoryName (Reflection.Assembly.GetEntryAssembly().Location)
-                        let slnDir = Pathf.GetFullPath (programDir + "/../../../../..")
-                        let templateDir = Pathf.GetFullPath (programDir + "/../../../../Nu.Template")
+                        let programDir = PathF.GetDirectoryName (Reflection.Assembly.GetEntryAssembly().Location)
+                        let slnDir = PathF.GetFullPath (programDir + "/../../../../..")
+                        let templateDir = PathF.GetFullPath (programDir + "/../../../../Nu.Template")
                         if Directory.Exists templateDir then
 
                             // prompt user to create new project
@@ -2516,14 +2519,14 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                 ImGui.SameLine ()
                                 ImGui.InputText ("##newProjectName", &newProjectName, 4096u) |> ignore<bool>
                                 newProjectName <- newProjectName.Replace(" ", "").Replace("\t", "").Replace(".", "")
-                                let templateIdentifier = Pathf.Denormalize templateDir // this is what dotnet knows the template as for uninstall...
+                                let templateIdentifier = PathF.Denormalize templateDir // this is what dotnet knows the template as for uninstall...
                                 let templateFileName = "Nu.Template.fsproj"
-                                let projectsDir = Pathf.GetFullPath (programDir + "/../../../../../Projects")
-                                let newProjectDir = Pathf.GetFullPath (projectsDir + "/" + newProjectName)
+                                let projectsDir = PathF.GetFullPath (programDir + "/../../../../../Projects")
+                                let newProjectDir = PathF.GetFullPath (projectsDir + "/" + newProjectName)
                                 let newProjectDllPath = newProjectDir + "/bin/" + Constants.Gaia.BuildName + "/net7.0/" + newProjectName + ".dll"
                                 let newFileName = newProjectName + ".fsproj"
-                                let newProject = Pathf.GetFullPath (newProjectDir + "/" + newFileName)
-                                let validName = not (String.IsNullOrWhiteSpace newProjectName) && Array.notExists (fun char -> newProjectName.Contains (string char)) (Pathf.GetInvalidPathChars ())
+                                let newProject = PathF.GetFullPath (newProjectDir + "/" + newFileName)
+                                let validName = not (String.IsNullOrWhiteSpace newProjectName) && Array.notExists (fun char -> newProjectName.Contains (string char)) (PathF.GetInvalidPathChars ())
                                 if not validName then ImGui.Text "Invalid project name!"
                                 let validDirectory = not (Directory.Exists newProjectDir)
                                 if not validDirectory then ImGui.Text "Project already exists!"
@@ -2587,7 +2590,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                         // configure editor to open new project then exit
                                         let gaiaState = makeGaiaState newProjectDllPath (Some "Title") true
                                         let gaiaFilePath = (Assembly.GetEntryAssembly ()).Location
-                                        let gaiaDirectory = Pathf.GetDirectoryName gaiaFilePath
+                                        let gaiaDirectory = PathF.GetDirectoryName gaiaFilePath
                                         try File.WriteAllText (gaiaDirectory + "/" + Constants.Gaia.StateFilePath, printGaiaState gaiaState)
                                             Directory.SetCurrentDirectory gaiaDirectory
                                             showRestartDialog <- true
@@ -2633,7 +2636,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                 showOpenProjectDialog <- false
                                 let gaiaState = makeGaiaState openProjectFilePath (Some openProjectEditMode) true
                                 let gaiaFilePath = (Assembly.GetEntryAssembly ()).Location
-                                let gaiaDirectory = Pathf.GetDirectoryName gaiaFilePath
+                                let gaiaDirectory = PathF.GetDirectoryName gaiaFilePath
                                 try File.WriteAllText (gaiaDirectory + "/" + Constants.Gaia.StateFilePath, printGaiaState gaiaState)
                                     Directory.SetCurrentDirectory gaiaDirectory
                                     showRestartDialog <- true
@@ -2659,7 +2662,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                 showCloseProjectDialog <- false
                                 let gaiaState = GaiaState.defaultState
                                 let gaiaFilePath = (Assembly.GetEntryAssembly ()).Location
-                                let gaiaDirectory = Pathf.GetDirectoryName gaiaFilePath
+                                let gaiaDirectory = PathF.GetDirectoryName gaiaFilePath
                                 try File.WriteAllText (gaiaDirectory + "/" + Constants.Gaia.StateFilePath, printGaiaState gaiaState)
                                     Directory.SetCurrentDirectory gaiaDirectory
                                     showRestartDialog <- true
@@ -2711,7 +2714,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         groupFileDialogState.FileDialogType <- ImGuiFileDialogType.Save
                         if ImGui.FileDialog (&showSaveGroupDialog, groupFileDialogState) then
                             snapshot ()
-                            if not (Pathf.HasExtension groupFileDialogState.FilePath) then groupFileDialogState.FilePath <- groupFileDialogState.FilePath + ".nugroup"
+                            if not (PathF.HasExtension groupFileDialogState.FilePath) then groupFileDialogState.FilePath <- groupFileDialogState.FilePath + ".nugroup"
                             showSaveGroupDialog <- not (trySaveSelectedGroup groupFileDialogState.FilePath)
 
                     // rename group dialog
@@ -2771,7 +2774,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                             if ImGui.Button "Okay" || ImGui.IsKeyReleased ImGuiKey.Enter then
                                 let gaiaState = makeGaiaState projectDllPath (Some projectEditMode) false
                                 let gaiaFilePath = (Assembly.GetEntryAssembly ()).Location
-                                let gaiaDirectory = Pathf.GetDirectoryName gaiaFilePath
+                                let gaiaDirectory = PathF.GetDirectoryName gaiaFilePath
                                 try File.WriteAllText (gaiaDirectory + "/" + Constants.Gaia.StateFilePath, printGaiaState gaiaState)
                                     Directory.SetCurrentDirectory gaiaDirectory
                                 with _ -> Log.trace "Could not save gaia state."
@@ -2842,13 +2845,18 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 updateEntityDrag ()
                 updateHotkeys entityHierarchyFocused
                 if not eyeChangedElsewhere then
-                    world <- World.setEyeCenter2d desiredEyeCenter2d world
-                    world <- World.setEyeCenter3d desiredEyeCenter3d world
-                    world <- World.setEyeRotation3d desiredEyeRotation3d world
+                    world <-
+                        World.frame (fun world ->
+                            let world = World.setEye2dCenter desiredEye2dCenter world
+                            let world = World.setEye3dCenter desiredEye3dCenter world
+                            let world = World.setEye3dRotation desiredEye3dRotation world
+                            world)
+                            Game
+                            world
                 else
-                    desiredEyeCenter2d <- World.getEyeCenter2d world
-                    desiredEyeCenter3d <- World.getEyeCenter3d world
-                    desiredEyeRotation3d <- World.getEyeRotation3d world
+                    desiredEye2dCenter <- World.getEye2dCenter world
+                    desiredEye3dCenter <- World.getEye3dCenter world
+                    desiredEye3dRotation <- World.getEye3dRotation world
 
                 // reloading assets dialog
                 if reloadAssetsRequested > 0 then
@@ -2923,12 +2931,12 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         newEntityDistance <- gaiaState.CreationDistance
         alternativeEyeTravelInput <- gaiaState.AlternativeEyeTravelInput
         if not gaiaState.ProjectFreshlyLoaded then
-            desiredEyeCenter2d <- gaiaState.DesiredEyeCenter2d
-            desiredEyeCenter3d <- gaiaState.DesiredEyeCenter3d
-            desiredEyeRotation3d <- gaiaState.DesiredEyeRotation3d
-            world <- World.setEyeCenter2d desiredEyeCenter2d world
-            world <- World.setEyeCenter3d desiredEyeCenter3d world
-            world <- World.setEyeRotation3d desiredEyeRotation3d world
+            desiredEye2dCenter <- gaiaState.DesiredEye2dCenter
+            desiredEye3dCenter <- gaiaState.DesiredEye3dCenter
+            desiredEye3dRotation <- gaiaState.DesiredEye3dRotation
+            world <- World.setEye2dCenter desiredEye2dCenter world
+            world <- World.setEye3dCenter desiredEye3dCenter world
+            world <- World.setEye3dRotation desiredEye3dRotation world
             world <- World.setMasterSoundVolume gaiaState.MasterSoundVolume world
             world <- World.setMasterSongVolume gaiaState.MasterSongVolume world
         targetDir <- targetDir_

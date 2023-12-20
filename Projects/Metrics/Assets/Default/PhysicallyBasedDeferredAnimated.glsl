@@ -37,7 +37,6 @@ layout (location = 9) in vec4 texCoordsOffset;
 layout (location = 10) in vec4 albedo;
 layout (location = 11) in vec4 material;
 layout (location = 12) in float height;
-layout (location = 13) in int invertRoughness;
 
 out vec4 positionOut;
 out vec2 texCoordsOut;
@@ -45,7 +44,6 @@ out vec3 normalOut;
 flat out vec4 albedoOut;
 flat out vec4 materialOut;
 flat out float heightOut;
-flat out int invertRoughnessOut;
 
 void main()
 {
@@ -71,23 +69,23 @@ void main()
     materialOut = material;
     normalOut = transpose(inverse(mat3(model))) * normalBlended.xyz;
     heightOut = height;
-    invertRoughnessOut = invertRoughness;
     gl_Position = projection * view * positionOut;
 }
 
 #shader fragment
 #version 410 core
+#extension GL_ARB_bindless_texture : require
 
 const float GAMMA = 2.2;
 
 uniform vec3 eyeCenter;
-uniform sampler2D albedoTexture;
-uniform sampler2D roughnessTexture;
-uniform sampler2D metallicTexture;
-uniform sampler2D emissionTexture;
-uniform sampler2D ambientOcclusionTexture;
-uniform sampler2D normalTexture;
-uniform sampler2D heightTexture;
+layout (bindless_sampler) uniform sampler2D albedoTexture;
+layout (bindless_sampler) uniform sampler2D roughnessTexture;
+layout (bindless_sampler) uniform sampler2D metallicTexture;
+layout (bindless_sampler) uniform sampler2D emissionTexture;
+layout (bindless_sampler) uniform sampler2D ambientOcclusionTexture;
+layout (bindless_sampler) uniform sampler2D normalTexture;
+layout (bindless_sampler) uniform sampler2D heightTexture;
 
 in vec4 positionOut;
 in vec2 texCoordsOut;
@@ -95,7 +93,6 @@ in vec3 normalOut;
 flat in vec4 albedoOut;
 flat in vec4 materialOut;
 flat in float heightOut;
-flat in int invertRoughnessOut;
 
 layout (location = 0) out vec4 position;
 layout (location = 1) out vec3 albedo;
@@ -132,8 +129,7 @@ void main()
     albedo = pow(albedoSample.rgb, vec3(GAMMA)) * albedoOut.rgb;
 
     // compute material properties
-    vec4 roughnessSample = texture(roughnessTexture, texCoords);
-    float roughness = (invertRoughnessOut == 0 ? roughnessSample.r : 1.0f - roughnessSample.r) * materialOut.r;
+    float roughness = texture(roughnessTexture, texCoords).r * materialOut.r;
     float metallic = texture(metallicTexture, texCoords).g * materialOut.g;
     float ambientOcclusion = texture(ambientOcclusionTexture, texCoords).b * materialOut.b;
     float emission = texture(emissionTexture, texCoords).r * materialOut.a;

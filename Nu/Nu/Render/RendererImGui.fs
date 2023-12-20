@@ -47,7 +47,7 @@ type GlRendererImGui (windowWidth : int, windowHeight : int) =
     let mutable shaderFontTextureUniform = 0
     let mutable fontTextureWidth = 0
     let mutable fontTextureHeight = 0
-    let mutable fontTexture = 0u
+    let mutable fontTexture = OpenGL.Texture.Texture.empty
     do ignore windowWidth
 
     interface RendererImGui with
@@ -133,7 +133,7 @@ type GlRendererImGui (windowWidth : int, windowHeight : int) =
             let mutable bytesPerPixel = Unchecked.defaultof<_>
             fonts.GetTexDataAsRGBA32 (&pixels, &fontTextureWidth, &fontTextureHeight, &bytesPerPixel)
             fontTexture <- OpenGL.Texture.CreateTexture (OpenGL.InternalFormat.Rgba8, fontTextureWidth, fontTextureHeight, OpenGL.PixelFormat.Rgba, OpenGL.PixelType.UnsignedByte, OpenGL.TextureMinFilter.Nearest, OpenGL.TextureMagFilter.Nearest, false, pixels)
-            fonts.SetTexID (nativeint fontTexture)
+            fonts.SetTexID (nativeint fontTexture.TextureId)
             fonts.ClearTexData ()
 
         member this.Render (drawData : ImDrawDataPtr) =
@@ -191,7 +191,7 @@ type GlRendererImGui (windowWidth : int, windowHeight : int) =
                 // setup shader
                 OpenGL.Gl.UseProgram shader
                 OpenGL.Gl.UniformMatrix4 (shaderProjectionMatrixUniform, false, projectionArray)
-                OpenGL.Gl.Uniform1 (shaderFontTextureUniform, 0)
+                OpenGL.Gl.Uniform1 (shaderFontTextureUniform, 0) // TODO: use bindless textures for imgui?
                 OpenGL.Hl.Assert ()
 
                 // draw command lists
@@ -209,6 +209,7 @@ type GlRendererImGui (windowWidth : int, windowHeight : int) =
                             OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, uint pcmd.TextureId)
                             OpenGL.Gl.Scissor (int clip.X, windowHeight - int clip.W, int (clip.Z - clip.X), int (clip.W - clip.Y))
                             OpenGL.Gl.DrawElementsBaseVertex (OpenGL.PrimitiveType.Triangles, int pcmd.ElemCount, OpenGL.DrawElementsType.UnsignedShort, nativeint (indexOffset * sizeof<uint16>), int pcmd.VtxOffset + vertexOffset)
+                            OpenGL.Hl.RegisterDrawCall ()
                             OpenGL.Hl.Assert ()
                         else raise (NotImplementedException ())
                         indexOffset <- indexOffset + int pcmd.ElemCount
@@ -243,7 +244,7 @@ type GlRendererImGui (windowWidth : int, windowHeight : int) =
             OpenGL.Hl.Assert ()
 
             // destroy font texture
-            OpenGL.Gl.DeleteTextures [|fontTexture|]
+            OpenGL.Texture.Texture.destroy fontTexture
 
 [<RequireQualifiedAccess>]
 module GlRendererImGui =

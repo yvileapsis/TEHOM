@@ -34,20 +34,20 @@ type [<Struct>] Shake =
         member this.Active with get () = this.Active and set value = this.Active <- value
 
 type MetricsEntityDispatcher () =
-    inherit EntityDispatcher3d<StaticModel AssetTag, Message, Command> (false, Assets.Default.StaticModel)
+    inherit Entity3dDispatcher<StaticModel AssetTag, Message, Command> (false, Assets.Default.StaticModel)
 
 #if !MMCC
     override this.Update (entity, world) =
         entity.SetAngles (v3 0.0f 0.0f ((entity.GetAngles world).Z + 0.05f)) world
 #endif
 
-    override this.Render (entity, world) =
+    override this.Render (renderPass, entity, world) =
         let staticModel = entity.GetModelGeneric world
         let mutable transform = entity.GetTransform world
         let affineMatrix = transform.AffineMatrix
         let presence = transform.Presence
         let properties = MaterialProperties.empty
-        World.renderStaticModelFast (false, &affineMatrix, presence, ValueNone, &properties, DeferredRenderType, staticModel, world)
+        World.renderStaticModelFast (false, &affineMatrix, presence, ValueNone, &properties, staticModel, DeferredRenderType, renderPass, world)
 
     override this.GetAttributesInferred (entity, world) =
         let staticModel = entity.GetModelGeneric world

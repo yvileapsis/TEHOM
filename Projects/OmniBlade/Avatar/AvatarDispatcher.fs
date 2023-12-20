@@ -16,7 +16,7 @@ module AvatarDispatcher =
         member this.Avatar = this.ModelGeneric<Avatar> ()
 
     type AvatarDispatcher () =
-        inherit EntityDispatcher2d<Avatar, Message, Command>
+        inherit Entity2dDispatcher<Avatar, Message, Command>
             (true, Avatar.make (box3 v3Zero Constants.Gameplay.CharacterSize) Assets.Field.JinnAnimationSheet Downward)
 
         static let getSpriteInset (entity : Entity) world =
@@ -40,7 +40,7 @@ module AvatarDispatcher =
              Entity.BodyShape := bodyShape
              Entity.ModelDriven == true]
 
-        override this.View (avatar, entity, world) =
+        override this.Render (avatar, _, entity, world) =
             if entity.GetVisible world then
                 let mutable transform = entity.GetTransform world
                 World.enqueueLayeredOperation2d

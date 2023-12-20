@@ -21,22 +21,19 @@ module PhysicallyBased =
           Metallic : single
           AmbientOcclusion : single
           Emission : single
-          Height : single
-          InvertRoughness : bool }
+          Height : single }
 
     /// Describes a physically-based material.
     type [<Struct>] PhysicallyBasedMaterial =
         { MaterialProperties : PhysicallyBasedMaterialProperties
           AlbedoMetadata : Texture.TextureMetadata
-          AlbedoTexture : uint
-          RoughnessTexture : uint
-          MetallicTexture : uint
-          AmbientOcclusionTexture : uint
-          EmissionTexture : uint
-          NormalTexture : uint
-          HeightTexture : uint
-          TextureMinFilterOpt : OpenGL.TextureMinFilter option
-          TextureMagFilterOpt : OpenGL.TextureMagFilter option
+          AlbedoTexture : Texture.Texture
+          RoughnessTexture : Texture.Texture
+          MetallicTexture : Texture.Texture
+          AmbientOcclusionTexture : Texture.Texture
+          EmissionTexture : Texture.Texture
+          NormalTexture : Texture.Texture
+          HeightTexture : Texture.Texture
           TwoSided : bool }
 
     /// Describes some physically-based geometry that's loaded into VRAM.
@@ -52,7 +49,6 @@ module PhysicallyBased =
           AlbedoBuffer : uint
           MaterialBuffer : uint
           HeightBuffer : uint
-          InvertRoughnessBuffer : uint
           IndexBuffer : uint
           PhysicallyBasedVao : uint }
 
@@ -71,9 +67,10 @@ module PhysicallyBased =
             if  this.SurfaceMetadata.ContainsKey Constants.Render.DeferredName ||
                 this.SurfaceNames.Length > 0 && (Array.last this.SurfaceNames).EndsWith Constants.Render.DeferredName then
                 Some Deferred
-            elif this.SurfaceMetadata.ContainsKey Constants.Render.ForwardName ||
-                 this.SurfaceNames.Length > 0 && (Array.last this.SurfaceNames).EndsWith Constants.Render.ForwardName then
-                 Some (Forward (0.0f, 0.0f)) // TODO: consider also parsing out the sorting parameters as well?
+            elif 
+                this.SurfaceMetadata.ContainsKey Constants.Render.ForwardName ||
+                this.SurfaceNames.Length > 0 && (Array.last this.SurfaceNames).EndsWith Constants.Render.ForwardName then
+                Some (Forward (0.0f, 0.0f)) // TODO: consider also parsing out the sorting parameters as well?
             else
                 match this.SurfaceMetadata.TryGetValue "RenderStyle" with
                 | (true, entry) ->
@@ -85,29 +82,25 @@ module PhysicallyBased =
                 | (false, _) -> None
 
         static member inline hash surface =
-            (int surface.SurfaceMaterial.AlbedoTexture) ^^^
-            (int surface.SurfaceMaterial.RoughnessTexture <<< 2) ^^^
-            (int surface.SurfaceMaterial.MetallicTexture <<< 4) ^^^
-            (int surface.SurfaceMaterial.AmbientOcclusionTexture <<< 6) ^^^
-            (int surface.SurfaceMaterial.EmissionTexture <<< 8) ^^^
-            (int surface.SurfaceMaterial.NormalTexture <<< 10) ^^^
-            (int surface.SurfaceMaterial.HeightTexture <<< 12) ^^^
-            (hash surface.SurfaceMaterial.TextureMinFilterOpt <<< 14) ^^^
-            (hash surface.SurfaceMaterial.TextureMagFilterOpt <<< 16) ^^^
-            (hash surface.SurfaceMaterial.TwoSided <<< 18) ^^^
-            (int surface.PhysicallyBasedGeometry.PrimitiveType <<< 20) ^^^
-            (int surface.PhysicallyBasedGeometry.PhysicallyBasedVao <<< 22)
+            (int surface.SurfaceMaterial.AlbedoTexture.TextureId) ^^^
+            (int surface.SurfaceMaterial.RoughnessTexture.TextureId <<< 2) ^^^
+            (int surface.SurfaceMaterial.MetallicTexture.TextureId <<< 4) ^^^
+            (int surface.SurfaceMaterial.AmbientOcclusionTexture.TextureId <<< 6) ^^^
+            (int surface.SurfaceMaterial.EmissionTexture.TextureId <<< 8) ^^^
+            (int surface.SurfaceMaterial.NormalTexture.TextureId <<< 10) ^^^
+            (int surface.SurfaceMaterial.HeightTexture.TextureId <<< 12) ^^^
+            (hash surface.SurfaceMaterial.TwoSided <<< 14) ^^^
+            (int surface.PhysicallyBasedGeometry.PrimitiveType <<< 16) ^^^
+            (int surface.PhysicallyBasedGeometry.PhysicallyBasedVao <<< 18)
 
         static member inline equals left right =
-            optEq left.SurfaceMaterial.TextureMinFilterOpt right.SurfaceMaterial.TextureMinFilterOpt &&
-            optEq left.SurfaceMaterial.TextureMagFilterOpt right.SurfaceMaterial.TextureMagFilterOpt &&
-            left.SurfaceMaterial.AlbedoTexture = right.SurfaceMaterial.AlbedoTexture &&
-            left.SurfaceMaterial.RoughnessTexture = right.SurfaceMaterial.RoughnessTexture &&
-            left.SurfaceMaterial.MetallicTexture = right.SurfaceMaterial.MetallicTexture &&
-            left.SurfaceMaterial.AmbientOcclusionTexture = right.SurfaceMaterial.AmbientOcclusionTexture &&
-            left.SurfaceMaterial.EmissionTexture = right.SurfaceMaterial.EmissionTexture &&
-            left.SurfaceMaterial.NormalTexture = right.SurfaceMaterial.NormalTexture &&
-            left.SurfaceMaterial.HeightTexture = right.SurfaceMaterial.HeightTexture &&
+            left.SurfaceMaterial.AlbedoTexture.TextureId = right.SurfaceMaterial.AlbedoTexture.TextureId &&
+            left.SurfaceMaterial.RoughnessTexture.TextureId = right.SurfaceMaterial.RoughnessTexture.TextureId &&
+            left.SurfaceMaterial.MetallicTexture.TextureId = right.SurfaceMaterial.MetallicTexture.TextureId &&
+            left.SurfaceMaterial.AmbientOcclusionTexture.TextureId = right.SurfaceMaterial.AmbientOcclusionTexture.TextureId &&
+            left.SurfaceMaterial.EmissionTexture.TextureId = right.SurfaceMaterial.EmissionTexture.TextureId &&
+            left.SurfaceMaterial.NormalTexture.TextureId = right.SurfaceMaterial.NormalTexture.TextureId &&
+            left.SurfaceMaterial.HeightTexture.TextureId = right.SurfaceMaterial.HeightTexture.TextureId &&
             left.SurfaceMaterial.TwoSided = right.SurfaceMaterial.TwoSided &&
             left.PhysicallyBasedGeometry.PrimitiveType = right.PhysicallyBasedGeometry.PrimitiveType &&
             left.PhysicallyBasedGeometry.PhysicallyBasedVao = right.PhysicallyBasedGeometry.PhysicallyBasedVao
@@ -152,7 +145,8 @@ module PhysicallyBased =
           LightAttenuationLinear : single
           LightAttenuationQuadratic : single
           LightCutoff : single
-          PhysicallyBasedLightType : LightType }
+          LightType : LightType
+          LightDesireShadows : bool }
 
     /// A part of a physically-based hierarchy.
     type PhysicallyBasedPart =
@@ -191,6 +185,7 @@ module PhysicallyBased =
           EnvironmentFilterMapUniform : int
           IrradianceMapsUniforms : int array
           EnvironmentFilterMapsUniforms : int array
+          ShadowTexturesUniforms : int array
           LightMapOriginsUniform : int
           LightMapMinsUniform : int
           LightMapSizesUniform : int
@@ -205,7 +200,9 @@ module PhysicallyBased =
           LightDirectionalsUniform : int
           LightConeInnersUniform : int
           LightConeOutersUniform : int
+          LightShadowIndicesUniform : int
           LightsCountUniform : int
+          ShadowMatricesUniforms : int array
           PhysicallyBasedShader : uint }
 
     /// Describes a physically-based deferred terrain shader that's loaded into GPU.
@@ -280,6 +277,7 @@ module PhysicallyBased =
           IrradianceTextureUniform : int
           EnvironmentFilterTextureUniform : int
           SsaoTextureUniform : int
+          ShadowTexturesUniforms : int array
           LightOriginsUniform : int
           LightDirectionsUniform : int
           LightColorsUniform : int
@@ -290,7 +288,9 @@ module PhysicallyBased =
           LightDirectionalsUniform : int
           LightConeInnersUniform : int
           LightConeOutersUniform : int
+          LightShadowIndicesUniform : int
           LightsCountUniform : int
+          ShadowMatricesUniforms : int array
           PhysicallyBasedDeferredLightingShader : uint }
 
     /// Describes a blur pass of a physically-based shader that's loaded into GPU.
@@ -307,7 +307,7 @@ module PhysicallyBased =
     /// Uses file name-based inferences to look for non-albedo files as well as determining if roughness should be
     /// inverted to smoothness (such as when a model is imported from an fbx exported from a Unity scene).
     /// Thread-safe if renderable = false.
-    let CreatePhysicallyBasedMaterial (renderable, dirPath, defaultMaterial, minFilterOpt, magFilterOpt, textureMemo, material : Assimp.Material) =
+    let CreatePhysicallyBasedMaterial (renderable, dirPath, defaultMaterial, textureMemo, material : Assimp.Material) =
 
         // compute the directory string to prefix to a local asset file path
         let dirPrefix = if dirPath <> "" then dirPath + "/" else ""
@@ -321,7 +321,7 @@ module PhysicallyBased =
         if isNull albedoTextureSlot.FilePath
         then albedoTextureSlot.FilePath <- "" // ensure not null
         else
-            albedoTextureSlot.FilePath <- Pathf.Normalize albedoTextureSlot.FilePath
+            albedoTextureSlot.FilePath <- PathF.Normalize albedoTextureSlot.FilePath
             let individualDirectories = albedoTextureSlot.FilePath.Split "/"
             let possibleFilePaths = [for i in dec individualDirectories.Length .. -1 .. 0 do String.join "/" (Array.skip i individualDirectories)]
             let mutable found = false
@@ -340,8 +340,8 @@ module PhysicallyBased =
             else (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
 
         // infer possible substitute texture names
-        let albedoTextureDirName =              match albedoTextureSlot.FilePath with null -> "" | filePath -> Pathf.GetDirectoryName filePath
-        let albedoTextureFileName =             Pathf.GetFileName albedoTextureSlot.FilePath
+        let albedoTextureDirName =              match albedoTextureSlot.FilePath with null -> "" | filePath -> PathF.GetDirectoryName filePath
+        let albedoTextureFileName =             PathF.GetFileName albedoTextureSlot.FilePath
         let substitutionPrefix =                if albedoTextureDirName <> "" then albedoTextureDirName + "/" else ""
         let has_bc =                            albedoTextureFileName.Contains "_bc"
         let has_d =                             albedoTextureFileName.Contains "_d"
@@ -369,7 +369,6 @@ module PhysicallyBased =
         let heightTextureFilePath =             if hasBaseColor then substitutionPrefix + albedoTextureFileName.Replace ("BaseColor", "Height")             elif hasDiffuse then substitutionPrefix + albedoTextureFileName.Replace ("Diffuse", "Height")           elif hasAlbedo  then substitutionPrefix + albedoTextureFileName.Replace ("Albedo", "Height")            else ""
 
         // attempt to load roughness info
-        let invertRoughness = has_bc || has_d // NOTE: assume texture from Unity export if it has this weird naming.
         let roughness = Constants.Render.RoughnessDefault
         let mutable (_, roughnessTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Roughness, 0)
         if isNull roughnessTextureSlot.FilePath then roughnessTextureSlot.FilePath <- "" // ensure not null
@@ -407,7 +406,7 @@ module PhysicallyBased =
         let mutable (_, metallicTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Metalness, 0)
         if isNull metallicTextureSlot.FilePath
         then metallicTextureSlot.FilePath <- "" // ensure not null
-        else metallicTextureSlot.FilePath <- Pathf.Normalize metallicTextureSlot.FilePath
+        else metallicTextureSlot.FilePath <- PathF.Normalize metallicTextureSlot.FilePath
         let metallicTexture =
             if renderable then
                 match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + metallicTextureSlot.FilePath, textureMemo) with
@@ -441,7 +440,7 @@ module PhysicallyBased =
         let mutable (_, ambientOcclusionTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Ambient, 0)
         if isNull ambientOcclusionTextureSlot.FilePath
         then ambientOcclusionTextureSlot.FilePath <- "" // ensure not null
-        else ambientOcclusionTextureSlot.FilePath <- Pathf.Normalize ambientOcclusionTextureSlot.FilePath
+        else ambientOcclusionTextureSlot.FilePath <- PathF.Normalize ambientOcclusionTextureSlot.FilePath
         let ambientOcclusionTexture =
             if renderable then
                 match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + ambientOcclusionTextureSlot.FilePath, textureMemo) with
@@ -469,7 +468,7 @@ module PhysicallyBased =
         let mutable (_, emissionTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Emissive, 0)
         if isNull emissionTextureSlot.FilePath
         then emissionTextureSlot.FilePath <- "" // ensure not null
-        else emissionTextureSlot.FilePath <- Pathf.Normalize emissionTextureSlot.FilePath
+        else emissionTextureSlot.FilePath <- PathF.Normalize emissionTextureSlot.FilePath
         let emissionTexture =
             if renderable then
                 match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + emissionTextureSlot.FilePath, textureMemo) with
@@ -487,7 +486,7 @@ module PhysicallyBased =
         let mutable (_, normalTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Normals, 0)
         if isNull normalTextureSlot.FilePath
         then normalTextureSlot.FilePath <- "" // ensure not null
-        else normalTextureSlot.FilePath <- Pathf.Normalize normalTextureSlot.FilePath
+        else normalTextureSlot.FilePath <- PathF.Normalize normalTextureSlot.FilePath
         let normalTexture =
             if renderable then
                 match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.UncompressedTextureFormat, dirPrefix + normalTextureSlot.FilePath, textureMemo) with
@@ -506,7 +505,7 @@ module PhysicallyBased =
         let mutable (_, heightTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Height, 0)
         if isNull heightTextureSlot.FilePath
         then heightTextureSlot.FilePath <- "" // ensure not null
-        else heightTextureSlot.FilePath <- Pathf.Normalize heightTextureSlot.FilePath
+        else heightTextureSlot.FilePath <- PathF.Normalize heightTextureSlot.FilePath
         let heightTexture =
             if renderable then
                 match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + heightTextureSlot.FilePath, textureMemo) with
@@ -527,8 +526,7 @@ module PhysicallyBased =
               Metallic = metallic
               AmbientOcclusion = ambientOcclusion
               Emission = emission
-              Height = height
-              InvertRoughness = invertRoughness }
+              Height = height }
 
         // fin
         { MaterialProperties = properties
@@ -540,8 +538,6 @@ module PhysicallyBased =
           EmissionTexture = emissionTexture
           NormalTexture = normalTexture
           HeightTexture = heightTexture
-          TextureMinFilterOpt = minFilterOpt
-          TextureMagFilterOpt = magFilterOpt
           TwoSided = material.IsTwoSided }
 
     /// Attempt to create physically-based static mesh from an assimp mesh.
@@ -824,7 +820,7 @@ module PhysicallyBased =
     let CreatePhysicallyBasedStaticGeometry (renderable, primitiveType, vertexData : single Memory, indexData : int Memory, bounds) =
 
         // make buffers
-        let (vertices, indices, vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, invertRoughnessBuffer, indexBuffer, vao) =
+        let (vertices, indices, vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao) =
 
             // make renderable
             if renderable then
@@ -915,17 +911,6 @@ module PhysicallyBased =
                 Gl.VertexAttribDivisor (10u, 1u)
                 Hl.Assert ()
 
-                // create invert roughness buffer
-                let invertRoughnessBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, invertRoughnessBuffer)
-                let invertRoughnessDataPtr = GCHandle.Alloc ([|0|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (sizeof<int>), invertRoughnessDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally invertRoughnessDataPtr.Free ()
-                Gl.EnableVertexAttribArray 11u
-                Gl.VertexAttribIPointer (11u, 1, VertexAttribIType.Int, sizeof<int>, nativeint 0)
-                Gl.VertexAttribDivisor (11u, 1u)
-                Hl.Assert ()
-
                 // create index buffer
                 let indexBuffer = Gl.GenBuffer ()
                 Gl.BindBuffer (BufferTarget.ElementArrayBuffer, indexBuffer)
@@ -940,7 +925,7 @@ module PhysicallyBased =
                 Hl.Assert ()
 
                 // fin
-                ([||], [||], vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, invertRoughnessBuffer, indexBuffer, vao)
+                ([||], [||], vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao)
 
             // fake buffers
             else
@@ -957,7 +942,7 @@ module PhysicallyBased =
                 let indices = indexData.ToArray ()
 
                 // fin
-                (vertices, indices, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u)
+                (vertices, indices, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u)
 
         // make physically-based geometry
         let geometry =
@@ -972,7 +957,6 @@ module PhysicallyBased =
               AlbedoBuffer = albedoBuffer
               MaterialBuffer = materialBuffer
               HeightBuffer = heightBuffer
-              InvertRoughnessBuffer = invertRoughnessBuffer
               IndexBuffer = indexBuffer
               PhysicallyBasedVao = vao }
 
@@ -989,7 +973,7 @@ module PhysicallyBased =
     let CreatePhysicallyBasedAnimatedGeometry (renderable, primitiveType, vertexData : single Memory, indexData : int Memory, bounds) =
 
         // make buffers
-        let (vertices, indices, vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, invertRoughnessBuffer, indexBuffer, vao) =
+        let (vertices, indices, vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao) =
 
             // make renderable
             if renderable then
@@ -1086,17 +1070,6 @@ module PhysicallyBased =
                 Gl.VertexAttribDivisor (12u, 1u)
                 Hl.Assert ()
 
-                // create invert roughness buffer
-                let invertRoughnessBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, invertRoughnessBuffer)
-                let invertRoughnessDataPtr = GCHandle.Alloc ([|0|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (sizeof<int>), invertRoughnessDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally invertRoughnessDataPtr.Free ()
-                Gl.EnableVertexAttribArray 13u
-                Gl.VertexAttribIPointer (13u, 1, VertexAttribIType.Int, sizeof<int>, nativeint 0)
-                Gl.VertexAttribDivisor (13u, 1u)
-                Hl.Assert ()
-
                 // create index buffer
                 let indexBuffer = Gl.GenBuffer ()
                 Gl.BindBuffer (BufferTarget.ElementArrayBuffer, indexBuffer)
@@ -1111,7 +1084,7 @@ module PhysicallyBased =
                 Hl.Assert ()
 
                 // fin
-                ([||], [||], vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, invertRoughnessBuffer, indexBuffer, vao)
+                ([||], [||], vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao)
 
             // fake buffers
             else
@@ -1128,7 +1101,7 @@ module PhysicallyBased =
                 let indices = indexData.ToArray ()
 
                 // fin
-                (vertices, indices, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u)
+                (vertices, indices, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u)
 
         // make physically-based geometry
         let geometry =
@@ -1143,7 +1116,6 @@ module PhysicallyBased =
               AlbedoBuffer = albedoBuffer
               MaterialBuffer = materialBuffer
               HeightBuffer = heightBuffer
-              InvertRoughnessBuffer = invertRoughnessBuffer
               IndexBuffer = indexBuffer
               PhysicallyBasedVao = vao }
 
@@ -1160,7 +1132,7 @@ module PhysicallyBased =
     let CreatePhysicallyBasedTerrainGeometry (renderable, primitiveType, vertexData : single Memory, indexData : int Memory, bounds) =
 
         // make buffers
-        let (vertices, indices, vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, invertRoughnessBuffer, indexBuffer, vao) =
+        let (vertices, indices, vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao) =
 
             // make renderable
             if renderable then
@@ -1260,17 +1232,6 @@ module PhysicallyBased =
                 Gl.VertexAttribDivisor (13u, 1u)
                 Hl.Assert ()
 
-                // create invert roughness buffer
-                let invertRoughnessBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, invertRoughnessBuffer)
-                let invertRoughnessDataPtr = GCHandle.Alloc ([|0|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (sizeof<int>), invertRoughnessDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally invertRoughnessDataPtr.Free ()
-                Gl.EnableVertexAttribArray 14u
-                Gl.VertexAttribIPointer (14u, 1, VertexAttribIType.Int, sizeof<int>, nativeint 0)
-                Gl.VertexAttribDivisor (14u, 1u)
-                Hl.Assert ()
-
                 // create index buffer
                 let indexBuffer = Gl.GenBuffer ()
                 Gl.BindBuffer (BufferTarget.ElementArrayBuffer, indexBuffer)
@@ -1285,7 +1246,7 @@ module PhysicallyBased =
                 Hl.Assert ()
 
                 // fin
-                ([||], [||], vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, invertRoughnessBuffer, indexBuffer, vao)
+                ([||], [||], vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao)
 
             // fake buffers
             else
@@ -1302,7 +1263,7 @@ module PhysicallyBased =
                 let indices = indexData.ToArray ()
 
                 // fin
-                (vertices, indices, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u)
+                (vertices, indices, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u)
 
         // make physically-based geometry
         let geometry =
@@ -1317,7 +1278,6 @@ module PhysicallyBased =
               AlbedoBuffer = albedoBuffer
               MaterialBuffer = materialBuffer
               HeightBuffer = heightBuffer
-              InvertRoughnessBuffer = invertRoughnessBuffer
               IndexBuffer = indexBuffer
               PhysicallyBasedVao = vao }
 
@@ -1350,21 +1310,41 @@ module PhysicallyBased =
         let materials = Array.zeroCreate scene.Materials.Count
         for i in 0 .. dec scene.Materials.Count do
             if Option.isNone errorOpt then
-                let material = CreatePhysicallyBasedMaterial (renderable, dirPath, defaultMaterial, None, None, textureMemo, scene.Materials.[i])
+                let material = CreatePhysicallyBasedMaterial (renderable, dirPath, defaultMaterial, textureMemo, scene.Materials.[i])
                 materials.[i] <- material
         match errorOpt with
         | Some error -> Left error
         | None -> Right materials
 
     /// Attempt to create physically-based static geometries from an assimp scene.
+    /// OPTIMIZATION: duplicate geometry is detected and de-duplicated here, which does have some run-time cost.
     let TryCreatePhysicallyBasedStaticGeometries (renderable, filePath, scene : Assimp.Scene) =
+        let meshAndGeometryLists = Dictionary<int * int * Assimp.BoundingBox, (Assimp.Mesh * PhysicallyBasedGeometry) List> HashIdentity.Structural
         let mutable errorOpt = None
         let geometries = SList.make ()
         for mesh in scene.Meshes do
             if Option.isNone errorOpt then
-                match TryCreatePhysicallyBasedStaticGeometry (renderable, mesh) with
-                | Right geometry -> geometries.Add geometry
-                | Left error -> errorOpt <- Some ("Could not load static geometries for mesh in file name '" + filePath + "' due to: " + error)
+                let mutable found = false
+                let meshAndGeometryListOpt = Dictionary.tryFind (mesh.VertexCount, mesh.FaceCount, mesh.BoundingBox) meshAndGeometryLists
+                match meshAndGeometryListOpt with
+                | Some (meshAndGeometry : (Assimp.Mesh * PhysicallyBasedGeometry) List) ->
+                    let mutable enr = meshAndGeometry.GetEnumerator ()
+                    while not found && enr.MoveNext () do
+                        let (meshCached, geometryCached) = enr.Current
+                        if  Linq.Enumerable.SequenceEqual (meshCached.Vertices, mesh.Vertices) && 
+                            Linq.Enumerable.SequenceEqual (meshCached.TextureCoordinateChannels.[0], mesh.TextureCoordinateChannels.[0]) && 
+                            Linq.Enumerable.SequenceEqual (meshCached.Normals, mesh.Normals) then
+                            geometries.Add geometryCached
+                            found <- true
+                | None -> ()
+                if not found then
+                    match TryCreatePhysicallyBasedStaticGeometry (renderable, mesh) with
+                    | Right geometry ->
+                        match meshAndGeometryListOpt with
+                        | Some meshesAndGeometries -> meshesAndGeometries.Add (mesh, geometry)
+                        | None -> meshAndGeometryLists.[(mesh.VertexCount, mesh.FaceCount, mesh.BoundingBox)] <- List [(mesh, geometry)]
+                        geometries.Add geometry
+                    | Left error -> errorOpt <- Some ("Could not load static geometries for mesh in file name '" + filePath + "' due to: " + error)
         match errorOpt with
         | Some error -> Left error
         | None -> Right geometries
@@ -1405,7 +1385,7 @@ module PhysicallyBased =
         // attempt to import from assimp scene
         match sceneEir with
         | Right scene ->
-            let dirPath = Pathf.GetDirectoryName filePath
+            let dirPath = PathF.GetDirectoryName filePath
             match TryCreatePhysicallyBasedMaterials (renderable, dirPath, defaultMaterial, textureMemo, scene) with
             | Right materials ->
                 let animated = scene.Animations.Count <> 0
@@ -1472,13 +1452,14 @@ module PhysicallyBased =
                                           LightAttenuationLinear = if light.AttenuationLinear > 0.0f then light.AttenuationLinear else Constants.Render.AttenuationLinearDefault
                                           LightAttenuationQuadratic = if light.AttenuationQuadratic > 0.0f then light.AttenuationQuadratic else Constants.Render.AttenuationQuadraticDefault
                                           LightCutoff = Constants.Render.LightCutoffDefault // TODO: figure out if we can populate this properly.
-                                          PhysicallyBasedLightType = lightType }
+                                          LightType = lightType
+                                          LightDesireShadows = false }
                                     lights.Add physicallyBasedLight
                                     yield PhysicallyBasedLight physicallyBasedLight
 
                               // collect surfaces
                               for i in 0 .. dec node.MeshIndices.Count do
-                                let names = Array.append names [|"Geometry" + if i > 0 then string i else ""|]
+                                let names = Array.append names [|"Geometry" + if i > 0 then string (inc i) else ""|]
                                 let meshIndex = node.MeshIndices.[i]
                                 let materialIndex = scene.Meshes.[meshIndex].MaterialIndex
                                 let material = materials.[materialIndex]
@@ -1535,6 +1516,9 @@ module PhysicallyBased =
         let environmentFilterMapsUniforms =
             Array.init Constants.Render.LightMapsMaxForward $ fun i ->
                 Gl.GetUniformLocation (shader, "environmentFilterMaps[" + string i + "]")
+        let shadowTexturesUniforms =
+            Array.init Constants.Render.ShadowsMax $ fun i ->
+                Gl.GetUniformLocation (shader, "shadowTextures[" + string i + "]")
         let lightMapOriginsUniform = Gl.GetUniformLocation (shader, "lightMapOrigins")
         let lightMapMinsUniform = Gl.GetUniformLocation (shader, "lightMapMins")
         let lightMapSizesUniform = Gl.GetUniformLocation (shader, "lightMapSizes")
@@ -1549,7 +1533,11 @@ module PhysicallyBased =
         let lightDirectionalsUniform = Gl.GetUniformLocation (shader, "lightDirectionals")
         let lightConeInnersUniform = Gl.GetUniformLocation (shader, "lightConeInners")
         let lightConeOutersUniform = Gl.GetUniformLocation (shader, "lightConeOuters")
+        let lightShadowIndicesUniform = Gl.GetUniformLocation (shader, "lightShadowIndices")
         let lightsCountUniform = Gl.GetUniformLocation (shader, "lightsCount")
+        let shadowMatricesUniforms =
+            Array.init Constants.Render.ShadowsMax $ fun i ->
+                Gl.GetUniformLocation (shader, "shadowMatrices[" + string i + "]")
 
         // make shader record
         { ViewUniform = viewUniform
@@ -1570,6 +1558,7 @@ module PhysicallyBased =
           EnvironmentFilterMapUniform = environmentFilterMapUniform
           IrradianceMapsUniforms = irradianceMapsUniforms
           EnvironmentFilterMapsUniforms = environmentFilterMapsUniforms
+          ShadowTexturesUniforms = shadowTexturesUniforms
           LightMapOriginsUniform = lightMapOriginsUniform
           LightMapMinsUniform = lightMapMinsUniform
           LightMapSizesUniform = lightMapSizesUniform
@@ -1584,11 +1573,13 @@ module PhysicallyBased =
           LightDirectionalsUniform = lightDirectionalsUniform
           LightConeInnersUniform = lightConeInnersUniform
           LightConeOutersUniform = lightConeOutersUniform
+          LightShadowIndicesUniform = lightShadowIndicesUniform
           LightsCountUniform = lightsCountUniform
+          ShadowMatricesUniforms = shadowMatricesUniforms
           PhysicallyBasedShader = shader }
 
-    /// Create a physically-based deferred terrain shader.
-    let CreatePhysicallyBasedDeferredTerrainShader (shaderFilePath : string) =
+    /// Create a physically-based terrain shader.
+    let CreatePhysicallyBasedTerrainShader (shaderFilePath : string) =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
@@ -1752,6 +1743,9 @@ module PhysicallyBased =
         let irradianceTextureUniform = Gl.GetUniformLocation (shader, "irradianceTexture")
         let environmentFilterTextureUniform = Gl.GetUniformLocation (shader, "environmentFilterTexture")
         let ssaoTextureUniform = Gl.GetUniformLocation (shader, "ssaoTexture")
+        let shadowTexturesUniforms =
+            Array.init Constants.Render.ShadowsMax $ fun i ->
+                Gl.GetUniformLocation (shader, "shadowTextures[" + string i + "]")
         let lightOriginsUniform = Gl.GetUniformLocation (shader, "lightOrigins")
         let lightDirectionsUniform = Gl.GetUniformLocation (shader, "lightDirections")
         let lightColorsUniform = Gl.GetUniformLocation (shader, "lightColors")
@@ -1762,7 +1756,11 @@ module PhysicallyBased =
         let lightDirectionalsUniform = Gl.GetUniformLocation (shader, "lightDirectionals")
         let lightConeInnersUniform = Gl.GetUniformLocation (shader, "lightConeInners")
         let lightConeOutersUniform = Gl.GetUniformLocation (shader, "lightConeOuters")
+        let lightShadowIndicesUniform = Gl.GetUniformLocation (shader, "lightShadowIndices")
         let lightsCountUniform = Gl.GetUniformLocation (shader, "lightsCount")
+        let shadowMatricesUniforms =
+            Array.init Constants.Render.ShadowsMax $ fun i ->
+                Gl.GetUniformLocation (shader, "shadowMatrices[" + string i + "]")
 
         // make shader record
         { EyeCenterUniform = eyeCenterUniform
@@ -1776,6 +1774,7 @@ module PhysicallyBased =
           IrradianceTextureUniform = irradianceTextureUniform
           EnvironmentFilterTextureUniform = environmentFilterTextureUniform
           SsaoTextureUniform = ssaoTextureUniform
+          ShadowTexturesUniforms = shadowTexturesUniforms
           LightOriginsUniform = lightOriginsUniform
           LightDirectionsUniform = lightDirectionsUniform
           LightColorsUniform = lightColorsUniform
@@ -1786,7 +1785,9 @@ module PhysicallyBased =
           LightDirectionalsUniform = lightDirectionalsUniform
           LightConeInnersUniform = lightConeInnersUniform
           LightConeOutersUniform = lightConeOutersUniform
+          LightShadowIndicesUniform = lightShadowIndicesUniform
           LightsCountUniform = lightsCountUniform
+          ShadowMatricesUniforms = shadowMatricesUniforms
           PhysicallyBasedDeferredLightingShader = shader }
 
     /// Create a physically-based shader for the blur pass of rendering.
@@ -1815,11 +1816,18 @@ module PhysicallyBased =
         { InputTextureUniform = inputTextureUniform
           PhysicallyBasedFxaaShader = shader }
 
+    /// Create the shaders for physically-based shadow rendering.
+    let CreatePhysicallyBasedShadowShaders (shaderStaticShadowFilePath, shaderAnimatedShadowFilePath, shaderTerrainShadowFilePath) =
+        let shaderStaticShadow = CreatePhysicallyBasedShader shaderStaticShadowFilePath
+        let shaderAnimatedShadow = CreatePhysicallyBasedShader shaderAnimatedShadowFilePath
+        let shaderTerrainShadow = CreatePhysicallyBasedTerrainShader shaderTerrainShadowFilePath
+        (shaderStaticShadow, shaderAnimatedShadow, shaderTerrainShadow)
+
     /// Create the shaders for physically-based deferred rendering.
     let CreatePhysicallyBasedDeferredShaders (shaderStaticFilePath, shaderAnimatedFilePath, terrainShaderFilePath, shaderLightMappingFilePath, shaderIrradianceFilePath, shaderEnvironmentFilterFilePath, shaderSsaoFilePath, shaderLightingFilePath) =
         let shaderStatic = CreatePhysicallyBasedShader shaderStaticFilePath
         let shaderAnimated = CreatePhysicallyBasedShader shaderAnimatedFilePath
-        let shaderTerrain = CreatePhysicallyBasedDeferredTerrainShader terrainShaderFilePath
+        let shaderTerrain = CreatePhysicallyBasedTerrainShader terrainShaderFilePath
         let shaderLightMapping = CreatePhysicallyBasedDeferredLightMappingShader shaderLightMappingFilePath
         let shaderIrradiance = CreatePhysicallyBasedDeferredIrradianceShader shaderIrradianceFilePath
         let shaderEnvironmentFilter = CreatePhysicallyBasedDeferredEnvironmentFilterShader shaderEnvironmentFilterFilePath
@@ -1827,9 +1835,86 @@ module PhysicallyBased =
         let shaderLighting = CreatePhysicallyBasedDeferredLightingShader shaderLightingFilePath
         (shaderStatic, shaderAnimated, shaderTerrain, shaderLightMapping, shaderIrradiance, shaderEnvironmentFilter, shaderSsao, shaderLighting)
 
-    /// Draw a batch of physically-based surfaces.
-    let DrawPhysicallyBasedSurfaces
-        (view : single array,
+    /// Draw a batch of physically-based surfaces' shadows.
+    let DrawPhysicallyBasedShadowSurfaces
+        (batchPhase : BatchPhase,
+         view : single array,
+         projection : single array,
+         bones : single array array,
+         surfacesCount : int,
+         modelsFields : single array,
+         albedosFields : single array,
+         material : PhysicallyBasedMaterial,
+         geometry : PhysicallyBasedGeometry,
+         shader : PhysicallyBasedShader) =
+
+        // start batch
+        if batchPhase.Starting then
+
+            // setup state
+            Gl.DepthFunc DepthFunction.Lequal
+            Gl.Enable EnableCap.DepthTest
+            Hl.Assert ()
+
+            // setup shader
+            Gl.UseProgram shader.PhysicallyBasedShader
+            Gl.UniformMatrix4 (shader.ViewUniform, false, view)
+            Gl.UniformMatrix4 (shader.ProjectionUniform, false, projection)
+            for i in 0 .. dec (min Constants.Render.BonesMax bones.Length) do
+                Gl.UniformMatrix4 (shader.BonesUniforms.[i], false, bones.[i])
+            Hl.Assert ()
+
+        // setup textures
+        Gl.UniformHandleARB (shader.AlbedoTextureUniform, material.AlbedoTexture.TextureHandle)
+        Hl.Assert ()
+
+        // update models buffer
+        let modelsFieldsPtr = GCHandle.Alloc (modelsFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.ModelBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 16 * sizeof<single>), modelsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+        finally modelsFieldsPtr.Free ()
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+        Hl.Assert ()
+
+        // update albedos buffer
+        let albedosFieldsPtr = GCHandle.Alloc (albedosFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.AlbedoBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), albedosFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+        finally albedosFieldsPtr.Free ()
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+        Hl.Assert ()
+
+        // setup geometry
+        Gl.BindVertexArray geometry.PhysicallyBasedVao
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.VertexBuffer)
+        Gl.BindBuffer (BufferTarget.ElementArrayBuffer, geometry.IndexBuffer)
+        Hl.Assert ()
+
+        // draw geometry
+        Gl.DrawElementsInstanced (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0, surfacesCount)
+        Hl.RegisterDrawCall ()
+        Hl.Assert ()
+
+        // stop batch
+        if batchPhase.Stopping then
+
+            // teardown geometry
+            Gl.BindVertexArray 0u
+            Hl.Assert ()
+
+            // teardown shader
+            Gl.UseProgram 0u
+            Hl.Assert ()
+
+            // teardown state
+            Gl.DepthFunc DepthFunction.Less
+            Gl.Disable EnableCap.DepthTest
+
+    /// Draw a batch of physically-based deferred surfaces.
+    let DrawPhysicallyBasedDeferredSurfaces
+        (batchPhase : BatchPhase,
+         blending : bool,
+         view : single array,
          projection : single array,
          bones : single array array,
          eyeCenter : Vector3,
@@ -1839,123 +1924,41 @@ module PhysicallyBased =
          albedosFields : single array,
          materialsFields : single array,
          heightsFields : single array,
-         invertRoughnessesFields : int array,
-         blending,
-         lightAmbientColor : single array,
-         lightAmbientBrightness : single,
-         brdfTexture : uint,
-         irradianceMap : uint,
-         environmentFilterMap : uint,
-         irradianceMaps : uint array,
-         environmentFilterMaps : uint array,
-         lightMapOrigins : single array,
-         lightMapMins : single array,
-         lightMapSizes : single array,
-         lightMapsCount : int,
-         lightOrigins : single array,
-         lightDirections : single array,
-         lightColors : single array,
-         lightBrightnesses : single array,
-         lightAttenuationLinears : single array,
-         lightAttenuationQuadratics : single array,
-         lightCutoffs : single array,
-         lightDirectionals : int array,
-         lightConeInners : single array,
-         lightConeOuters : single array,
-         lightsCount : int,
          material : PhysicallyBasedMaterial,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedShader) =
 
-        // setup state
-        Gl.DepthFunc DepthFunction.Lequal
-        Gl.Enable EnableCap.DepthTest
-        if blending then
-            Gl.BlendEquation BlendEquationMode.FuncAdd
-            Gl.BlendFunc (BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha)
-            Gl.Enable EnableCap.Blend
-        if not material.TwoSided then Gl.Enable EnableCap.CullFace
-        Hl.Assert ()
+        // start batch
+        if batchPhase.Starting then
 
-        // setup shader
-        Gl.UseProgram shader.PhysicallyBasedShader
-        Gl.UniformMatrix4 (shader.ViewUniform, false, view)
-        Gl.UniformMatrix4 (shader.ProjectionUniform, false, projection)
-        for i in 0 .. dec bones.Length do
-            Gl.UniformMatrix4 (shader.BonesUniforms.[i], false, bones.[i])
-        Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
-        Gl.Uniform3 (shader.LightAmbientColorUniform, lightAmbientColor)
-        Gl.Uniform1 (shader.LightAmbientBrightnessUniform, lightAmbientBrightness)
-        Gl.Uniform1 (shader.AlbedoTextureUniform, 0)
-        Gl.Uniform1 (shader.RoughnessTextureUniform, 1)
-        Gl.Uniform1 (shader.MetallicTextureUniform, 2)
-        Gl.Uniform1 (shader.AmbientOcclusionTextureUniform, 3)
-        Gl.Uniform1 (shader.EmissionTextureUniform, 4)
-        Gl.Uniform1 (shader.NormalTextureUniform, 5)
-        Gl.Uniform1 (shader.HeightTextureUniform, 6)
-        Gl.Uniform1 (shader.BrdfTextureUniform, 7)
-        Gl.Uniform1 (shader.IrradianceMapUniform, 8)
-        Gl.Uniform1 (shader.EnvironmentFilterMapUniform, 9)
-        for i in 0 .. dec Constants.Render.LightMapsMaxForward do
-            Gl.Uniform1 (shader.IrradianceMapsUniforms.[i], i + 10)
-        for i in 0 .. dec Constants.Render.LightMapsMaxForward do
-            Gl.Uniform1 (shader.EnvironmentFilterMapsUniforms.[i], i + 10 + Constants.Render.LightMapsMaxForward)
-        Gl.Uniform3 (shader.LightMapOriginsUniform, lightMapOrigins)
-        Gl.Uniform3 (shader.LightMapMinsUniform, lightMapMins)
-        Gl.Uniform3 (shader.LightMapSizesUniform, lightMapSizes)
-        Gl.Uniform1 (shader.LightMapsCountUniform, lightMapsCount)
-        Gl.Uniform3 (shader.LightOriginsUniform, lightOrigins)
-        Gl.Uniform3 (shader.LightDirectionsUniform, lightDirections)
-        Gl.Uniform3 (shader.LightColorsUniform, lightColors)
-        Gl.Uniform1 (shader.LightBrightnessesUniform, lightBrightnesses)
-        Gl.Uniform1 (shader.LightAttenuationLinearsUniform, lightAttenuationLinears)
-        Gl.Uniform1 (shader.LightAttenuationQuadraticsUniform, lightAttenuationQuadratics)
-        Gl.Uniform1 (shader.LightCutoffsUniform, lightCutoffs)
-        Gl.Uniform1 (shader.LightDirectionalsUniform, lightDirectionals)
-        Gl.Uniform1 (shader.LightConeInnersUniform, lightConeInners)
-        Gl.Uniform1 (shader.LightConeOutersUniform, lightConeOuters)
-        Gl.Uniform1 (shader.LightsCountUniform, lightsCount)
-        Hl.Assert ()
+            // setup state
+            Gl.DepthFunc DepthFunction.Lequal
+            Gl.Enable EnableCap.DepthTest
+            if blending then
+                Gl.BlendEquation BlendEquationMode.FuncAdd
+                Gl.BlendFunc (BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha)
+                Gl.Enable EnableCap.Blend
+            if not material.TwoSided then Gl.Enable EnableCap.CullFace
+            Hl.Assert ()
+
+            // setup shader
+            Gl.UseProgram shader.PhysicallyBasedShader
+            Gl.UniformMatrix4 (shader.ViewUniform, false, view)
+            Gl.UniformMatrix4 (shader.ProjectionUniform, false, projection)
+            for i in 0 .. dec (min Constants.Render.BonesMax bones.Length) do
+                Gl.UniformMatrix4 (shader.BonesUniforms.[i], false, bones.[i])
+            Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
+            Hl.Assert ()
 
         // setup textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, material.AlbedoTexture)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, material.RoughnessTexture)
-        Gl.ActiveTexture TextureUnit.Texture2
-        Gl.BindTexture (TextureTarget.Texture2d, material.MetallicTexture)
-        Gl.ActiveTexture TextureUnit.Texture3
-        Gl.BindTexture (TextureTarget.Texture2d, material.AmbientOcclusionTexture)
-        Gl.ActiveTexture TextureUnit.Texture4
-        Gl.BindTexture (TextureTarget.Texture2d, material.EmissionTexture)
-        Gl.ActiveTexture TextureUnit.Texture5
-        Gl.BindTexture (TextureTarget.Texture2d, material.NormalTexture)
-        Gl.ActiveTexture TextureUnit.Texture6
-        Gl.BindTexture (TextureTarget.Texture2d, material.HeightTexture)
-        Gl.ActiveTexture TextureUnit.Texture7
-        Gl.BindTexture (TextureTarget.Texture2d, brdfTexture)
-        Gl.ActiveTexture TextureUnit.Texture8
-        Gl.BindTexture (TextureTarget.TextureCubeMap, irradianceMap)
-        Gl.ActiveTexture TextureUnit.Texture9
-        Gl.BindTexture (TextureTarget.TextureCubeMap, environmentFilterMap)
-        for i in 0 .. dec Constants.Render.LightMapsMaxForward do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + 10 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.TextureCubeMap, irradianceMaps.[i])
-        for i in 0 .. dec Constants.Render.LightMapsMaxForward do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + 10 + i + Constants.Render.LightMapsMaxForward |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.TextureCubeMap, environmentFilterMaps.[i])
+        Gl.UniformHandleARB (shader.AlbedoTextureUniform, material.AlbedoTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.RoughnessTextureUniform, material.RoughnessTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.MetallicTextureUniform, material.MetallicTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.AmbientOcclusionTextureUniform, material.AmbientOcclusionTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.EmissionTextureUniform, material.EmissionTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalTextureUniform, material.NormalTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.HeightTextureUniform, material.HeightTexture.TextureHandle)
         Hl.Assert ()
-
-        // setup pbr texture filters
-        for i in 0 .. dec 5 do
-            Gl.ActiveTexture (LanguagePrimitives.EnumOfValue (int TextureUnit.Texture0 + i))
-            match material.TextureMinFilterOpt with
-            | Some minFilter -> Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMinFilter, int minFilter)
-            | None -> ()
-            match material.TextureMagFilterOpt with
-            | Some magFilter -> Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMagFilter, int magFilter)
-            | None -> ()
-            Hl.Assert ()
 
         // update models buffer
         let modelsFieldsPtr = GCHandle.Alloc (modelsFields, GCHandleType.Pinned)
@@ -1997,11 +2000,175 @@ module PhysicallyBased =
         Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
         Hl.Assert ()
 
-        // update invert roughnesses buffer
-        let invertRoughnessesFieldsPtr = GCHandle.Alloc (invertRoughnessesFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InvertRoughnessBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * sizeof<int>), invertRoughnessesFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally invertRoughnessesFieldsPtr.Free ()
+        // setup geometry
+        Gl.BindVertexArray geometry.PhysicallyBasedVao
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.VertexBuffer)
+        Gl.BindBuffer (BufferTarget.ElementArrayBuffer, geometry.IndexBuffer)
+        Hl.Assert ()
+
+        // draw geometry
+        Gl.DrawElementsInstanced (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0, surfacesCount)
+        Hl.RegisterDrawCall ()
+        Hl.Assert ()
+
+        // stop batch
+        if batchPhase.Stopping then
+
+            // teardown geometry
+            Gl.BindVertexArray 0u
+            Hl.Assert ()
+
+            // teardown shader
+            Gl.UseProgram 0u
+            Hl.Assert ()
+
+            // teardown state
+            Gl.DepthFunc DepthFunction.Less
+            Gl.Disable EnableCap.DepthTest
+            if blending then
+                Gl.Disable EnableCap.Blend
+                Gl.BlendFunc (BlendingFactor.One, BlendingFactor.Zero)
+                Gl.BlendEquation BlendEquationMode.FuncAdd
+            if not material.TwoSided then Gl.Disable EnableCap.CullFace
+
+    /// Draw a batch of physically-based forward surfaces.
+    let DrawPhysicallyBasedForwardSurfaces
+        (blending : bool,
+         view : single array,
+         projection : single array,
+         bones : single array array,
+         surfacesCount : int,
+         modelsFields : single array,
+         texCoordsOffsetsFields : single array,
+         albedosFields : single array,
+         materialsFields : single array,
+         heightsFields : single array,
+         eyeCenter : Vector3,
+         lightAmbientColor : single array,
+         lightAmbientBrightness : single,
+         brdfTexture : Texture.Texture,
+         irradianceMap : Texture.Texture,
+         environmentFilterMap : Texture.Texture,
+         irradianceMaps : Texture.Texture array,
+         environmentFilterMaps : Texture.Texture array,
+         shadowTextures : Texture.Texture array,
+         lightMapOrigins : single array,
+         lightMapMins : single array,
+         lightMapSizes : single array,
+         lightMapsCount : int,
+         lightOrigins : single array,
+         lightDirections : single array,
+         lightColors : single array,
+         lightBrightnesses : single array,
+         lightAttenuationLinears : single array,
+         lightAttenuationQuadratics : single array,
+         lightCutoffs : single array,
+         lightDirectionals : int array,
+         lightConeInners : single array,
+         lightConeOuters : single array,
+         lightShadowIndices : int array,
+         lightsCount : int,
+         shadowMatrices : single array array,
+         material : PhysicallyBasedMaterial,
+         geometry : PhysicallyBasedGeometry,
+         shader : PhysicallyBasedShader) =
+
+        // setup state
+        Gl.DepthFunc DepthFunction.Lequal
+        Gl.Enable EnableCap.DepthTest
+        if blending then
+            Gl.BlendEquation BlendEquationMode.FuncAdd
+            Gl.BlendFunc (BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha)
+            Gl.Enable EnableCap.Blend
+        if not material.TwoSided then Gl.Enable EnableCap.CullFace
+        Hl.Assert ()
+
+        // setup shader
+        Gl.UseProgram shader.PhysicallyBasedShader
+        Gl.UniformMatrix4 (shader.ViewUniform, false, view)
+        Gl.UniformMatrix4 (shader.ProjectionUniform, false, projection)
+        for i in 0 .. dec (min Constants.Render.BonesMax bones.Length) do
+            Gl.UniformMatrix4 (shader.BonesUniforms.[i], false, bones.[i])
+        Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
+        if lightAmbientColor.Length = 3 then
+            Gl.Uniform3 (shader.LightAmbientColorUniform, lightAmbientColor)
+        Gl.Uniform1 (shader.LightAmbientBrightnessUniform, lightAmbientBrightness)
+        Gl.Uniform3 (shader.LightMapOriginsUniform, lightMapOrigins)
+        Gl.Uniform3 (shader.LightMapMinsUniform, lightMapMins)
+        Gl.Uniform3 (shader.LightMapSizesUniform, lightMapSizes)
+        Gl.Uniform1 (shader.LightMapsCountUniform, lightMapsCount)
+        Gl.Uniform3 (shader.LightOriginsUniform, lightOrigins)
+        Gl.Uniform3 (shader.LightDirectionsUniform, lightDirections)
+        Gl.Uniform3 (shader.LightColorsUniform, lightColors)
+        Gl.Uniform1 (shader.LightBrightnessesUniform, lightBrightnesses)
+        Gl.Uniform1 (shader.LightAttenuationLinearsUniform, lightAttenuationLinears)
+        Gl.Uniform1 (shader.LightAttenuationQuadraticsUniform, lightAttenuationQuadratics)
+        Gl.Uniform1 (shader.LightCutoffsUniform, lightCutoffs)
+        Gl.Uniform1 (shader.LightDirectionalsUniform, lightDirectionals)
+        Gl.Uniform1 (shader.LightConeInnersUniform, lightConeInners)
+        Gl.Uniform1 (shader.LightConeOutersUniform, lightConeOuters)
+        Gl.Uniform1 (shader.LightShadowIndicesUniform, lightShadowIndices)
+        Gl.Uniform1 (shader.LightsCountUniform, lightsCount)
+        for i in 0 .. dec (min Constants.Render.ShadowsMax shadowMatrices.Length) do
+            Gl.UniformMatrix4 (shader.ShadowMatricesUniforms.[i], false, shadowMatrices.[i])
+        Hl.Assert ()
+
+        // setup textures
+        Gl.UniformHandleARB (shader.AlbedoTextureUniform, material.AlbedoTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.RoughnessTextureUniform, material.RoughnessTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.MetallicTextureUniform, material.MetallicTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.AmbientOcclusionTextureUniform, material.AmbientOcclusionTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.EmissionTextureUniform, material.EmissionTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalTextureUniform, material.NormalTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.HeightTextureUniform, material.HeightTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.BrdfTextureUniform, brdfTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.IrradianceMapUniform, irradianceMap.TextureHandle)
+        Gl.UniformHandleARB (shader.EnvironmentFilterMapUniform, environmentFilterMap.TextureHandle)
+        for i in 0 .. dec (min irradianceMaps.Length Constants.Render.LightMapsMaxForward) do
+            Gl.UniformHandleARB (shader.IrradianceMapsUniforms.[i], irradianceMaps.[i].TextureHandle)
+        for i in 0 .. dec (min environmentFilterMaps.Length Constants.Render.LightMapsMaxForward) do
+            Gl.UniformHandleARB (shader.EnvironmentFilterMapsUniforms.[i], environmentFilterMaps.[i].TextureHandle)
+        for i in 0 .. dec (min shadowTextures.Length Constants.Render.ShadowsMax) do
+            Gl.UniformHandleARB (shader.ShadowTexturesUniforms.[i], shadowTextures.[i].TextureHandle)
+        Hl.Assert ()
+
+        // update models buffer
+        let modelsFieldsPtr = GCHandle.Alloc (modelsFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.ModelBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 16 * sizeof<single>), modelsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+        finally modelsFieldsPtr.Free ()
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+        Hl.Assert ()
+
+        // update texCoordsOffsets buffer
+        let texCoordsOffsetsFieldsPtr = GCHandle.Alloc (texCoordsOffsetsFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.TexCoordsOffsetBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), texCoordsOffsetsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+        finally texCoordsOffsetsFieldsPtr.Free ()
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+        Hl.Assert ()
+
+        // update albedos buffer
+        let albedosFieldsPtr = GCHandle.Alloc (albedosFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.AlbedoBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), albedosFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+        finally albedosFieldsPtr.Free ()
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+        Hl.Assert ()
+
+        // update materials buffer
+        let materialsFieldsPtr = GCHandle.Alloc (materialsFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.MaterialBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), materialsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+        finally materialsFieldsPtr.Free ()
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+        Hl.Assert ()
+
+        // update heights buffer
+        let heightsFieldsPtr = GCHandle.Alloc (heightsFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.HeightBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * sizeof<single>), heightsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+        finally heightsFieldsPtr.Free ()
         Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
         Hl.Assert ()
 
@@ -2013,49 +2180,11 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElementsInstanced (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0, surfacesCount)
+        Hl.RegisterDrawCall ()
         Hl.Assert ()
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown pbr texture filters
-        for i in 0 .. dec 5 do
-            Gl.ActiveTexture (LanguagePrimitives.EnumOfValue (int TextureUnit.Texture0 + i))
-            if material.TextureMinFilterOpt.IsSome then
-                Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMinFilter, int TextureMinFilter.LinearMipmapLinear)
-            if material.TextureMagFilterOpt.IsSome then
-                Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMagFilter, int TextureMagFilter.Linear)
-            Gl.BindTexture (TextureTarget.Texture2d, 0u)
-            Hl.Assert ()
-
-        // teardown textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture2
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture3
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture4
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture5
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture6
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture7
-        Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
-        Gl.ActiveTexture TextureUnit.Texture8
-        Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
-        Gl.ActiveTexture TextureUnit.Texture9
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        for i in 0 .. dec Constants.Render.LightMapsMaxForward do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + 10 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
-        for i in 0 .. dec Constants.Render.LightMapsMaxForward do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + 10 + i + Constants.Render.LightMapsMaxForward |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
         Hl.Assert ()
 
         // teardown shader
@@ -2080,7 +2209,6 @@ module PhysicallyBased =
          albedosFields : single array,
          materialsFields : single array,
          heightsFields : single array,
-         invertRoughnessesFields : int array,
          elementsCount : int,
          materials : PhysicallyBasedMaterial array,
          geometry : PhysicallyBasedGeometry,
@@ -2115,33 +2243,16 @@ module PhysicallyBased =
 
         // setup textures
         for i in 0 .. dec layersCount do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials[i].AlbedoTexture)
+            Gl.UniformHandleARB (shader.AlbedoTexturesUniforms.[i], materials.[i].AlbedoTexture.TextureHandle)
         for i in 0 .. dec layersCount do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials[i].RoughnessTexture)
+            Gl.UniformHandleARB (shader.RoughnessTexturesUniforms.[i], materials.[i].RoughnessTexture.TextureHandle)
         for i in 0 .. dec layersCount do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax * 2 |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials[i].AmbientOcclusionTexture)
+            Gl.UniformHandleARB (shader.AmbientOcclusionTexturesUniforms.[i], materials.[i].AmbientOcclusionTexture.TextureHandle)
         for i in 0 .. dec layersCount do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax * 3 |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials[i].NormalTexture)
+            Gl.UniformHandleARB (shader.NormalTexturesUniforms.[i], materials.[i].NormalTexture.TextureHandle)
         for i in 0 .. dec layersCount do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax * 4 |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials[i].HeightTexture)
+            Gl.UniformHandleARB (shader.AmbientOcclusionTexturesUniforms.[i], materials.[i].AmbientOcclusionTexture.TextureHandle)
         Hl.Assert ()
-
-        // setup pbr texture filters
-        for i in 0 .. dec layersCount do
-            for j in 0 .. dec 5 do
-                Gl.ActiveTexture (LanguagePrimitives.EnumOfValue (int TextureUnit.Texture0 + i * 5 + j))
-                match materials[i].TextureMinFilterOpt with
-                | Some minFilter -> Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMinFilter, int minFilter)
-                | None -> ()
-                match materials[i].TextureMagFilterOpt with
-                | Some magFilter -> Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMagFilter, int magFilter)
-                | None -> ()
-                Hl.Assert ()
 
         // update models buffer
         let modelsFieldsPtr = GCHandle.Alloc (modelsFields, GCHandleType.Pinned)
@@ -2183,14 +2294,6 @@ module PhysicallyBased =
         Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
         Hl.Assert ()
 
-        // update invert roughnesses buffer
-        let invertRoughnessesFieldsPtr = GCHandle.Alloc (invertRoughnessesFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InvertRoughnessBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint sizeof<int>, invertRoughnessesFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally invertRoughnessesFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
         // setup geometry
         Gl.BindVertexArray geometry.PhysicallyBasedVao
         Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.VertexBuffer)
@@ -2199,27 +2302,11 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, elementsCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.RegisterDrawCall ()
         Hl.Assert ()
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown pbr texture filters
-        for i in 0 .. dec layersCount do
-            for j in 0 .. dec 5 do
-                Gl.ActiveTexture (LanguagePrimitives.EnumOfValue (int TextureUnit.Texture0 + i * 5 + j))
-                if materials[i].TextureMinFilterOpt.IsSome then
-                    Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMinFilter, int TextureMinFilter.LinearMipmapLinear)
-                if materials[i].TextureMagFilterOpt.IsSome then
-                    Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMagFilter, int TextureMagFilter.Linear)
-                Gl.BindTexture (TextureTarget.Texture2d, 0u)
-                Hl.Assert ()
-
-        // teardown textures
-        for i in 0 .. dec layersCount * 5 do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, 0u)
         Hl.Assert ()
         
         // teardown shader
@@ -2233,8 +2320,8 @@ module PhysicallyBased =
 
     /// Draw the light mapping pass of a deferred physically-based surface.
     let DrawPhysicallyBasedDeferredLightMappingSurface
-        (positionTexture : uint,
-         normalAndHeightTexture : uint,
+        (positionTexture : Texture.Texture,
+         normalAndHeightTexture : Texture.Texture,
          lightMapOrigins : single array,
          lightMapMins : single array,
          lightMapSizes : single array,
@@ -2244,8 +2331,6 @@ module PhysicallyBased =
 
         // setup shader
         Gl.UseProgram shader.PhysicallyBasedDeferredLightMappingShader
-        Gl.Uniform1 (shader.PositionTextureUniform, 0)
-        Gl.Uniform1 (shader.NormalAndHeightTextureUniform, 1)
         Gl.Uniform3 (shader.LightMapOriginsUniform, lightMapOrigins)
         Gl.Uniform3 (shader.LightMapMinsUniform, lightMapMins)
         Gl.Uniform3 (shader.LightMapSizesUniform, lightMapSizes)
@@ -2253,10 +2338,8 @@ module PhysicallyBased =
         Hl.Assert ()
 
         // setup textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, positionTexture)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, normalAndHeightTexture)
+        Gl.UniformHandleARB (shader.PositionTextureUniform, positionTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalAndHeightTextureUniform, normalAndHeightTexture.TextureHandle)
         Hl.Assert ()
 
         // setup geometry
@@ -2267,17 +2350,11 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.RegisterDrawCall ()
         Hl.Assert ()
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
         Hl.Assert ()
 
         // teardown shader
@@ -2285,32 +2362,23 @@ module PhysicallyBased =
 
     /// Draw the irradiance pass of a deferred physically-based surface.
     let DrawPhysicallyBasedDeferredIrradianceSurface
-        (normalAndHeightTexture : uint,
-         lightMappingTexture : uint,
-         irradianceMap : uint,
-         irradianceMaps : uint array,
+        (normalAndHeightTexture : Texture.Texture,
+         lightMappingTexture : Texture.Texture,
+         irradianceMap : Texture.Texture,
+         irradianceMaps : Texture.Texture array,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedDeferredIrradianceShader) =
 
         // setup shader
         Gl.UseProgram shader.PhysicallyBasedDeferredIrradianceShader
-        Gl.Uniform1 (shader.NormalAndHeightTextureUniform, 0)
-        Gl.Uniform1 (shader.LightMappingTextureUniform, 1)
-        Gl.Uniform1 (shader.IrradianceMapUniform, 2)
-        for i in 0 .. dec Constants.Render.LightMapsMaxDeferred do
-            Gl.Uniform1 (shader.IrradianceMapsUniforms.[i], i + 3)
         Hl.Assert ()
 
         // setup textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, normalAndHeightTexture)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, lightMappingTexture)
-        Gl.ActiveTexture TextureUnit.Texture2
-        Gl.BindTexture (TextureTarget.TextureCubeMap, irradianceMap)
+        Gl.UniformHandleARB (shader.NormalAndHeightTextureUniform, normalAndHeightTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.LightMappingTextureUniform, lightMappingTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.IrradianceMapUniform, irradianceMap.TextureHandle)
         for i in 0 .. dec Constants.Render.LightMapsMaxDeferred do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + 3 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.TextureCubeMap, irradianceMaps.[i])
+            Gl.UniformHandleARB (shader.IrradianceMapsUniforms.[i], irradianceMaps.[i].TextureHandle)
         Hl.Assert ()
 
         // setup geometry
@@ -2321,22 +2389,11 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.RegisterDrawCall ()
         Hl.Assert ()
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture2
-        Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
-        for i in 0 .. dec Constants.Render.LightMapsMaxDeferred do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + 3 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
         Hl.Assert ()
 
         // teardown shader
@@ -2345,12 +2402,12 @@ module PhysicallyBased =
     /// Draw the environment filter pass of a deferred physically-based surface.
     let DrawPhysicallyBasedDeferredEnvironmentFilterSurface
         (eyeCenter : Vector3,
-         positionTexture : uint,
-         materialTexture : uint,
-         normalAndHeightTexture : uint,
-         lightMappingTexture : uint,
-         environmentFilterMap : uint,
-         environmentFilterMaps : uint array,
+         positionTexture : Texture.Texture,
+         materialTexture : Texture.Texture,
+         normalAndHeightTexture : Texture.Texture,
+         lightMappingTexture : Texture.Texture,
+         environmentFilterMap : Texture.Texture,
+         environmentFilterMaps : Texture.Texture array,
          lightMapOrigins : single array,
          lightMapMins : single array,
          lightMapSizes : single array,
@@ -2360,32 +2417,19 @@ module PhysicallyBased =
         // setup shader
         Gl.UseProgram shader.PhysicallyBasedDeferredEnvironmentFilterShader
         Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
-        Gl.Uniform1 (shader.PositionTextureUniform, 0)
-        Gl.Uniform1 (shader.MaterialTextureUniform, 1)
-        Gl.Uniform1 (shader.NormalAndHeightTextureUniform, 2)
-        Gl.Uniform1 (shader.LightMappingTextureUniform, 3)
-        Gl.Uniform1 (shader.EnvironmentFilterMapUniform, 4)
-        for i in 0 .. dec Constants.Render.LightMapsMaxDeferred do
-            Gl.Uniform1 (shader.EnvironmentFilterMapsUniforms.[i], i + 5 + Constants.Render.LightMapsMaxDeferred)
         Gl.Uniform3 (shader.LightMapOriginsUniform, lightMapOrigins)
         Gl.Uniform3 (shader.LightMapMinsUniform, lightMapMins)
         Gl.Uniform3 (shader.LightMapSizesUniform, lightMapSizes)
         Hl.Assert ()
 
         // setup textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, positionTexture)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, materialTexture)
-        Gl.ActiveTexture TextureUnit.Texture2
-        Gl.BindTexture (TextureTarget.Texture2d, normalAndHeightTexture)
-        Gl.ActiveTexture TextureUnit.Texture3
-        Gl.BindTexture (TextureTarget.Texture2d, lightMappingTexture)
-        Gl.ActiveTexture TextureUnit.Texture4
-        Gl.BindTexture (TextureTarget.TextureCubeMap, environmentFilterMap)
+        Gl.UniformHandleARB (shader.PositionTextureUniform, positionTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.MaterialTextureUniform, materialTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalAndHeightTextureUniform, normalAndHeightTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.LightMappingTextureUniform, lightMappingTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.EnvironmentFilterMapUniform, environmentFilterMap.TextureHandle)
         for i in 0 .. dec Constants.Render.LightMapsMaxDeferred do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + 5 + i + Constants.Render.LightMapsMaxDeferred |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.TextureCubeMap, environmentFilterMaps.[i])
+            Gl.UniformHandleARB (shader.EnvironmentFilterMapsUniforms.[i], environmentFilterMaps.[i].TextureHandle)
         Hl.Assert ()
 
         // setup geometry
@@ -2396,26 +2440,11 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.RegisterDrawCall ()
         Hl.Assert ()
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture2
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture3
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture4
-        Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
-        for i in 0 .. dec Constants.Render.LightMapsMaxDeferred do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + 5 + i + Constants.Render.LightMapsMaxDeferred |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
         Hl.Assert ()
 
         // teardown shader
@@ -2425,8 +2454,8 @@ module PhysicallyBased =
     let DrawPhysicallyBasedDeferredSsaoSurface
         (view : single array,
          projection : single array,
-         positionTexture : uint,
-         normalAndHeightTexture : uint,
+         positionTexture : Texture.Texture,
+         normalAndHeightTexture : Texture.Texture,
          ssaoResolution : int array,
          ssaoIntensity : single,
          ssaoBias : single,
@@ -2440,8 +2469,6 @@ module PhysicallyBased =
         Gl.UseProgram shader.PhysicallyBasedDeferredSsaoShader
         Gl.UniformMatrix4 (shader.ViewUniform, false, view)
         Gl.UniformMatrix4 (shader.ProjectionUniform, false, projection)
-        Gl.Uniform1 (shader.PositionTextureUniform, 0)
-        Gl.Uniform1 (shader.NormalAndHeightTextureUniform, 1)
         Gl.Uniform2 (shader.SsaoResolution, ssaoResolution)
         Gl.Uniform1 (shader.SsaoIntensity, ssaoIntensity)
         Gl.Uniform1 (shader.SsaoBias, ssaoBias)
@@ -2451,10 +2478,8 @@ module PhysicallyBased =
         Hl.Assert ()
 
         // setup textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, positionTexture)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, normalAndHeightTexture)
+        Gl.UniformHandleARB (shader.PositionTextureUniform, positionTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalAndHeightTextureUniform, normalAndHeightTexture.TextureHandle)
         Hl.Assert ()
 
         // setup geometry
@@ -2465,17 +2490,11 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.RegisterDrawCall ()
         Hl.Assert ()
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
         Hl.Assert ()
 
         // teardown shader
@@ -2486,14 +2505,15 @@ module PhysicallyBased =
         (eyeCenter : Vector3,
          lightAmbientColor : single array,
          lightAmbientBrightness : single,
-         positionTexture : uint,
-         albedoTexture : uint,
-         materialTexture : uint,
-         normalAndHeightTexture : uint,
-         brdfTexture : uint,
-         irradianceTexture : uint,
-         environmentFilterTexture : uint,
-         ssaoTexture : uint,
+         positionTexture : Texture.Texture,
+         albedoTexture : Texture.Texture,
+         materialTexture : Texture.Texture,
+         normalAndHeightTexture : Texture.Texture,
+         brdfTexture : Texture.Texture,
+         irradianceTexture : Texture.Texture,
+         environmentFilterTexture : Texture.Texture,
+         ssaoTexture : Texture.Texture,
+         shadowTextures : Texture.Texture array,
          lightOrigins : single array,
          lightDirections : single array,
          lightColors : single array,
@@ -2504,7 +2524,9 @@ module PhysicallyBased =
          lightDirectionals : int array,
          lightConeInners : single array,
          lightConeOuters : single array,
+         lightShadowIndices : int array,
          lightsCount : int,
+         shadowMatrices : single array array,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedDeferredLightingShader) =
 
@@ -2513,14 +2535,6 @@ module PhysicallyBased =
         Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
         Gl.Uniform3 (shader.LightAmbientColorUniform, lightAmbientColor)
         Gl.Uniform1 (shader.LightAmbientBrightnessUniform, lightAmbientBrightness)
-        Gl.Uniform1 (shader.PositionTextureUniform, 0)
-        Gl.Uniform1 (shader.AlbedoTextureUniform, 1)
-        Gl.Uniform1 (shader.MaterialTextureUniform, 2)
-        Gl.Uniform1 (shader.NormalAndHeightTextureUniform, 3)
-        Gl.Uniform1 (shader.BrdfTextureUniform, 4)
-        Gl.Uniform1 (shader.IrradianceTextureUniform, 5)
-        Gl.Uniform1 (shader.EnvironmentFilterTextureUniform, 6)
-        Gl.Uniform1 (shader.SsaoTextureUniform, 7)
         Gl.Uniform3 (shader.LightOriginsUniform, lightOrigins)
         Gl.Uniform3 (shader.LightDirectionsUniform, lightDirections)
         Gl.Uniform3 (shader.LightColorsUniform, lightColors)
@@ -2531,26 +2545,23 @@ module PhysicallyBased =
         Gl.Uniform1 (shader.LightDirectionalsUniform, lightDirectionals)
         Gl.Uniform1 (shader.LightConeInnersUniform, lightConeInners)
         Gl.Uniform1 (shader.LightConeOutersUniform, lightConeOuters)
+        Gl.Uniform1 (shader.LightShadowIndicesUniform, lightShadowIndices)
         Gl.Uniform1 (shader.LightsCountUniform, lightsCount)
+        for i in 0 .. dec (min Constants.Render.ShadowsMax shadowMatrices.Length) do
+            Gl.UniformMatrix4 (shader.ShadowMatricesUniforms.[i], false, shadowMatrices.[i])
         Hl.Assert ()
 
         // setup textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, positionTexture)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, albedoTexture)
-        Gl.ActiveTexture TextureUnit.Texture2
-        Gl.BindTexture (TextureTarget.Texture2d, materialTexture)
-        Gl.ActiveTexture TextureUnit.Texture3
-        Gl.BindTexture (TextureTarget.Texture2d, normalAndHeightTexture)
-        Gl.ActiveTexture TextureUnit.Texture4
-        Gl.BindTexture (TextureTarget.Texture2d, brdfTexture)
-        Gl.ActiveTexture TextureUnit.Texture5
-        Gl.BindTexture (TextureTarget.Texture2d, irradianceTexture)
-        Gl.ActiveTexture TextureUnit.Texture6
-        Gl.BindTexture (TextureTarget.Texture2d, environmentFilterTexture)
-        Gl.ActiveTexture TextureUnit.Texture7
-        Gl.BindTexture (TextureTarget.Texture2d, ssaoTexture)
+        Gl.UniformHandleARB (shader.PositionTextureUniform, positionTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.AlbedoTextureUniform, albedoTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.MaterialTextureUniform, materialTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalAndHeightTextureUniform, normalAndHeightTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.BrdfTextureUniform, brdfTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.IrradianceTextureUniform, irradianceTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.EnvironmentFilterTextureUniform, environmentFilterTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.SsaoTextureUniform, ssaoTexture.TextureHandle)
+        for i in 0 .. dec (min shadowTextures.Length Constants.Render.ShadowsMax) do
+            Gl.UniformHandleARB (shader.ShadowTexturesUniforms[i], shadowTextures[i].TextureHandle)
         Hl.Assert ()
 
         // setup geometry
@@ -2561,29 +2572,11 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.RegisterDrawCall ()
         Hl.Assert ()
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture2
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture3
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture4
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture5
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture6
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture7
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
         Hl.Assert ()
 
         // teardown shader
@@ -2591,18 +2584,16 @@ module PhysicallyBased =
 
     /// Draw the blur pass of a physically-based surface.
     let DrawPhysicallyBasedBlurSurface
-        (inputTexture : uint,
+        (inputTexture : Texture.Texture,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedBlurShader) =
 
         // setup shader
         Gl.UseProgram shader.PhysicallyBasedBlurShader
-        Gl.Uniform1 (shader.InputTextureUniform, 0)
         Hl.Assert ()
 
         // setup textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, inputTexture)
+        Gl.UniformHandleARB (shader.InputTextureUniform, inputTexture.TextureHandle)
         Hl.Assert ()
 
         // setup geometry
@@ -2613,15 +2604,11 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.RegisterDrawCall ()
         Hl.Assert ()
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
         Hl.Assert ()
 
         // teardown shader
@@ -2629,18 +2616,16 @@ module PhysicallyBased =
 
     /// Draw the fxaa pass of a physically-based surface.
     let DrawPhysicallyBasedFxaaSurface
-        (inputTexture : uint,
+        (inputTexture : Texture.Texture,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedFxaaShader) =
 
         // setup shader
         Gl.UseProgram shader.PhysicallyBasedFxaaShader
-        Gl.Uniform1 (shader.InputTextureUniform, 0)
         Hl.Assert ()
 
         // setup textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, inputTexture)
+        Gl.UniformHandleARB (shader.InputTextureUniform, inputTexture.TextureHandle)
         Hl.Assert ()
 
         // setup geometry
@@ -2651,15 +2636,11 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.RegisterDrawCall ()
         Hl.Assert ()
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
         Hl.Assert ()
 
         // teardown shader
@@ -2674,7 +2655,6 @@ module PhysicallyBased =
         Gl.DeleteBuffers [|geometry.AlbedoBuffer|]
         Gl.DeleteBuffers [|geometry.MaterialBuffer|]
         Gl.DeleteBuffers [|geometry.HeightBuffer|]
-        Gl.DeleteBuffers [|geometry.InvertRoughnessBuffer|]
         Gl.DeleteBuffers [|geometry.IndexBuffer|]
         Gl.BindVertexArray 0u
         Gl.DeleteVertexArrays [|geometry.PhysicallyBasedVao|]

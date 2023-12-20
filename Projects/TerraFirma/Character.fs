@@ -31,7 +31,7 @@ module CharacterDispatcher =
         interface Command
 
     type CharacterDispatcher () =
-        inherit EntityDispatcher3d<CharacterModel, CharacterMessage, CharacterCommand> (true, CharacterModel.initial)
+        inherit Entity3dDispatcher<CharacterModel, CharacterMessage, CharacterCommand> (true, CharacterModel.initial)
 
         static let [<Literal>] WalkForce = 12.0f
         static let [<Literal>] TurnForce = 8.0f
@@ -145,8 +145,8 @@ module CharacterDispatcher =
             | PostUpdate ->
                 let rotation = entity.GetRotation world
                 let position = entity.GetPosition world
-                let world = World.setEyeRotation3d rotation world
-                let world = World.setEyeCenter3d (position + v3Up * 1.5f - rotation.Forward * 3.0f) world
+                let world = World.setEye3dRotation rotation world
+                let world = World.setEye3dCenter (position + v3Up * 1.5f - rotation.Forward * 3.0f) world
                 just world
 
             | Jump ->

@@ -27,7 +27,7 @@ module WorldEntityHierarchy =
                                 match parent with
                                 | Left group -> (names.Length > 0, names, group)
                                 | Right entity -> (true, Array.append entity.Surnames names, entity.Group)
-                            let (child, world) = World.createEntity<EntityDispatcher3d> DefaultOverlay (Some surnames) group world
+                            let (child, world) = World.createEntity<Entity3dDispatcher> DefaultOverlay (Some surnames) group world
                             let world = child.SetPresence presenceConferred world
                             let world = child.SetStatic true world
                             let world = if mountToParent then child.SetMountOpt (Some (Relation.makeParent ())) world else world
@@ -39,7 +39,7 @@ module WorldEntityHierarchy =
                                 match parent with
                                 | Left group -> (lightProbe.LightProbeNames.Length > 0, lightProbe.LightProbeNames, group)
                                 | Right entity -> (true, Array.append entity.Surnames lightProbe.LightProbeNames, entity.Group)
-                            let (child, world) = World.createEntity<LightProbeDispatcher3d> DefaultOverlay (Some surnames) group world
+                            let (child, world) = World.createEntity<LightProbe3dDispatcher> DefaultOverlay (Some surnames) group world
                             let world = child.SetProbeBounds lightProbe.LightProbeBounds world
                             let world = child.SetPositionLocal lightProbe.LightProbeMatrix.Translation world
                             let world = child.SetStatic true world
@@ -52,9 +52,9 @@ module WorldEntityHierarchy =
                                 match parent with
                                 | Left group -> (light.LightNames.Length > 0, light.LightNames, group)
                                 | Right entity -> (true, Array.append entity.Surnames light.LightNames, entity.Group)
-                            let (child, world) = World.createEntity<LightDispatcher3d> DefaultOverlay (Some surnames) group world
+                            let (child, world) = World.createEntity<Light3dDispatcher> DefaultOverlay (Some surnames) group world
                             let world = child.SetColor light.LightColor world
-                            let world = child.SetLightType light.PhysicallyBasedLightType world
+                            let world = child.SetLightType light.LightType world
                             let (position, rotation, world) =
                                 let transform = light.LightMatrix
                                 let mutable (scale, rotation, position) = (v3One, quatIdentity, v3Zero)
@@ -100,8 +100,7 @@ module WorldEntityHierarchy =
                                   MetallicOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.Metallic
                                   AmbientOcclusionOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.AmbientOcclusion
                                   EmissionOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.Emission
-                                  HeightOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.Height
-                                  InvertRoughnessOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.InvertRoughness }
+                                  HeightOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.Height }
                             let world = child.SetMaterialProperties materialProperties world
                             let world = child.SetRenderStyle renderStyle world
                             let world = child.AutoBounds world
@@ -116,7 +115,7 @@ module WorldEntityHierarchy =
             let mutable (world, boundsOpt) = (wtemp, Option<Box3>.None) // using mutation because I was in a big hurry when I wrote this
             let rec getFrozenArtifacts (entity : Entity) =
                 [|if entity <> parent then
-                    if entity.Has<LightProbeFacet3d> world then
+                    if entity.Has<LightProbe3dFacet> world then
                         let id = entity.GetId world
                         let enabled = entity.GetEnabled world
                         let position = entity.GetPosition world
@@ -126,17 +125,20 @@ module WorldEntityHierarchy =
                         let probeBounds = entity.GetProbeBounds world
                         boundsOpt <- match boundsOpt with Some bounds -> Some (bounds.Combine probeBounds) | None -> Some probeBounds
                         world <- entity.SetVisibleLocal false world
-                    if entity.Has<LightFacet3d> world then
+                    if entity.Has<Light3dFacet> world then
                         if entity.GetEnabled world then
+                            let lightId = entity.GetId world
                             let position = entity.GetPosition world
                             let rotation = entity.GetRotation world
+                            let direction = rotation.Down
                             let color = entity.GetColor world
                             let brightness = entity.GetBrightness world
                             let attenuationLinear = entity.GetAttenuationLinear world
                             let attenuationQuadratic = entity.GetAttenuationQuadratic world
                             let lightCutoff = entity.GetLightCutoff world
                             let lightType = entity.GetLightType world
-                            Choice2Of3 { Origin = position; Direction = Vector3.Transform (v3Up, rotation); Color = color; Brightness = brightness; AttenuationLinear = attenuationLinear; AttenuationQuadratic = attenuationQuadratic; LightCutoff = lightCutoff; LightType = lightType }
+                            let desireShadows = entity.GetDesireShadows world
+                            Choice2Of3 { LightId = lightId; Origin = position; Rotation = rotation; Direction = direction; Color = color; Brightness = brightness; AttenuationLinear = attenuationLinear; AttenuationQuadratic = attenuationQuadratic; LightCutoff = lightCutoff; LightType = lightType; DesireShadows = desireShadows }
                             let lightCutoff = entity.GetLightCutoff world
                             let lightBounds = box3 (entity.GetPosition world - lightCutoff * v3One * 0.5f) (lightCutoff * v3One)
                             boundsOpt <- match boundsOpt with Some bounds -> Some (bounds.Combine lightBounds) | None -> Some lightBounds
@@ -144,13 +146,15 @@ module WorldEntityHierarchy =
                         let mutable transform = entity.GetTransform world
                         let absolute = transform.Absolute
                         let affineMatrix = transform.AffineMatrix
+                        let entityBounds = transform.Bounds3d
                         let insetOpt = match entity.GetInsetOpt world with Some inset -> Some inset | None -> None // OPTIMIZATION: localize boxed value in memory.
                         let properties = entity.GetMaterialProperties world
-                        let renderType = match entity.GetRenderStyle world with Deferred -> DeferredRenderType | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
                         let staticModel = entity.GetStaticModel world
                         let surfaceIndex = entity.GetSurfaceIndex world
-                        Choice3Of3 { Absolute = absolute; ModelMatrix = affineMatrix; InsetOpt = insetOpt; MaterialProperties = properties; RenderType = renderType; SurfaceIndex = surfaceIndex; StaticModel = staticModel }
-                        boundsOpt <- match boundsOpt with Some bounds -> Some (bounds.Combine (entity.GetBounds world)) | None -> Some (entity.GetBounds world)
+                        let renderType = match entity.GetRenderStyle world with Deferred -> DeferredRenderType | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
+                        let surface = { Absolute = absolute; ModelMatrix = affineMatrix; InsetOpt = insetOpt; MaterialProperties = properties; SurfaceIndex = surfaceIndex; StaticModel = staticModel; RenderType = renderType }
+                        Choice3Of3 (PairValue.make entityBounds surface)
+                        boundsOpt <- match boundsOpt with Some bounds -> Some (bounds.Combine entityBounds) | None -> Some entityBounds
                         world <- entity.SetVisibleLocal false world
                     if entity <> parent then
                         world <- entity.SetVisibleLocal false world
@@ -193,14 +197,14 @@ module WorldEntityHierarchy =
 module FreezeFacetModule =
 
     type Entity with
-        member this.GetFrozenRenderLightProbe3ds world : RenderLightProbe3d array = this.Get (nameof this.FrozenRenderLightProbe3ds) world
-        member this.SetFrozenRenderLightProbe3ds (value : RenderLightProbe3d array) world = this.Set (nameof this.FrozenRenderLightProbe3ds) value world
-        member this.FrozenRenderLightProbe3ds = lens (nameof this.FrozenRenderLightProbe3ds) this this.GetFrozenRenderLightProbe3ds this.SetFrozenRenderLightProbe3ds
-        member this.GetFrozenRenderLight3ds world : RenderLight3d array = this.Get (nameof this.FrozenRenderLight3ds) world
-        member this.SetFrozenRenderLight3ds (value : RenderLight3d array) world = this.Set (nameof this.FrozenRenderLight3ds) value world
-        member this.FrozenRenderLight3ds = lens (nameof this.FrozenRenderLight3ds) this this.GetFrozenRenderLight3ds this.SetFrozenRenderLight3ds
-        member this.GetFrozenRenderStaticModelSurfaces world : RenderStaticModelSurface array = this.Get (nameof this.FrozenRenderStaticModelSurfaces) world
-        member this.SetFrozenRenderStaticModelSurfaces (value : RenderStaticModelSurface array) world = this.Set (nameof this.FrozenRenderStaticModelSurfaces) value world
+        member this.GetFrozenRenderLightProbes3d world : LightProbe3dValue array = this.Get (nameof this.FrozenRenderLightProbes3d) world
+        member this.SetFrozenRenderLightProbes3d (value : LightProbe3dValue array) world = this.Set (nameof this.FrozenRenderLightProbes3d) value world
+        member this.FrozenRenderLightProbes3d = lens (nameof this.FrozenRenderLightProbes3d) this this.GetFrozenRenderLightProbes3d this.SetFrozenRenderLightProbes3d
+        member this.GetFrozenRenderLights3d world : Light3dValue array = this.Get (nameof this.FrozenRenderLights3d) world
+        member this.SetFrozenRenderLights3d (value : Light3dValue array) world = this.Set (nameof this.FrozenRenderLights3d) value world
+        member this.FrozenRenderLights3d = lens (nameof this.FrozenRenderLights3d) this this.GetFrozenRenderLights3d this.SetFrozenRenderLights3d
+        member this.GetFrozenRenderStaticModelSurfaces world : PairValue<Box3, StaticModelSurfaceValue> array = this.Get (nameof this.FrozenRenderStaticModelSurfaces) world
+        member this.SetFrozenRenderStaticModelSurfaces (value : PairValue<Box3, StaticModelSurfaceValue> array) world = this.Set (nameof this.FrozenRenderStaticModelSurfaces) value world
         member this.FrozenRenderStaticModelSurfaces = lens (nameof this.FrozenRenderStaticModelSurfaces) this this.GetFrozenRenderStaticModelSurfaces this.SetFrozenRenderStaticModelSurfaces
         member this.GetFrozen world : bool = this.Get (nameof this.Frozen) world
         member this.SetFrozen (value : bool) world = this.Set (nameof this.Frozen) value world
@@ -211,13 +215,13 @@ module FreezeFacetModule =
         member this.UpdateFrozenHierarchy world =
             if this.GetFrozen world then
                 let (frozenProbes, frozenLights, frozenSurfaces, world) = World.freezeEntityHierarchy this world
-                let world = this.SetFrozenRenderLightProbe3ds frozenProbes world
-                let world = this.SetFrozenRenderLight3ds frozenLights world
+                let world = this.SetFrozenRenderLightProbes3d frozenProbes world
+                let world = this.SetFrozenRenderLights3d frozenLights world
                 let world = this.SetFrozenRenderStaticModelSurfaces frozenSurfaces world
                 world
             else
-                let world = this.SetFrozenRenderLightProbe3ds [||] world
-                let world = this.SetFrozenRenderLight3ds [||] world
+                let world = this.SetFrozenRenderLightProbes3d [||] world
+                let world = this.SetFrozenRenderLights3d [||] world
                 let world = this.SetFrozenRenderStaticModelSurfaces [||] world
                 let world = World.thawEntityHierarchy (this.GetPresenceConferred world) this world
                 world
@@ -233,8 +237,8 @@ module FreezeFacetModule =
 
         static member Properties =
             [define Entity.StaticModel Assets.Default.StaticModel
-             nonPersistent Entity.FrozenRenderLightProbe3ds [||]
-             nonPersistent Entity.FrozenRenderLight3ds [||]
+             nonPersistent Entity.FrozenRenderLightProbes3d [||]
+             nonPersistent Entity.FrozenRenderLights3d [||]
              nonPersistent Entity.FrozenRenderStaticModelSurfaces [||]
              define Entity.Frozen false
              define Entity.PresenceConferred Exposed]
@@ -245,27 +249,45 @@ module FreezeFacetModule =
             let world = World.monitor handleUpdateFrozenHierarchy (entity.ChangeEvent (nameof entity.Frozen)) entity world
             world
 
-        override this.Render (entity, world) =
+        override this.Render (renderPass, entity, world) =
 
-            // render probes, clearing staleness when appropriate
+            // compute intersection function based on render pass
+            let intersects =
+                let enclosedOpt = Some (World.getGameEye3dFrustumEnclosed Game world)
+                let exposed = World.getGameEye3dFrustumExposed Game world
+                let imposter = World.getGameEye3dFrustumImposter Game world
+                let lightBoxOpt = Some (World.getLight3dBox world)
+                fun probe light presence bounds ->
+                    match renderPass with
+                    | NormalPass -> Presence.intersects3d enclosedOpt exposed imposter lightBoxOpt probe light presence bounds
+                    | ShadowPass (_, _, frustum) -> not probe && not light && frustum.Intersects bounds
+                    | ReflectionPass _ -> false
+
+            // render all probes, clearing staleness when appropriate
+            let probes = entity.GetFrozenRenderLightProbes3d world
+            for i in 0 .. dec probes.Length do
+                let probe = &probes.[i]
+                let renderProbe = { LightProbeId = probe.LightProbeId; Enabled = probe.Enabled; Origin = probe.Origin; Bounds = probe.Bounds; Stale = probe.Stale; RenderPass = renderPass }
+                World.enqueueRenderMessage3d (RenderLightProbe3d renderProbe) world
+                probe.Stale <- false
+
+            // render unculled lights
             let bounds = entity.GetBounds world
             let presenceConferred = entity.GetPresenceConferred world
-            if World.boundsInView3d true false presenceConferred bounds world then
-                let probes = entity.GetFrozenRenderLightProbe3ds world
-                for i in 0 .. dec probes.Length do
-                    let probe = probes.[i]
-                    World.enqueueRenderMessage3d (RenderLightProbe3d probe) world
-                    if probe.Stale then probes.[i] <- { probe with Stale = false }
+            if intersects false true presenceConferred bounds then
+                for light in entity.GetFrozenRenderLights3d world do
+                    let renderLight = { LightId = light.LightId; Origin = light.Origin; Rotation = light.Rotation; Direction = light.Direction; Color = light.Color; Brightness = light.Brightness; AttenuationLinear = light.AttenuationLinear; AttenuationQuadratic = light.AttenuationQuadratic; LightCutoff = light.LightCutoff; LightType = light.LightType; DesireShadows = light.DesireShadows; RenderPass = renderPass }
+                    World.enqueueRenderMessage3d (RenderLight3d renderLight) world
 
-            // render lights
-            if World.boundsInView3d false true presenceConferred bounds world then
-                for light in entity.GetFrozenRenderLight3ds world do
-                    World.enqueueRenderMessage3d (RenderLight3d light) world
-
-            // render surfaces
-            if World.boundsInView3d false false presenceConferred bounds world then
-                for message in entity.GetFrozenRenderStaticModelSurfaces world do
-                    World.renderStaticModelSurfaceFast (message.Absolute, &message.ModelMatrix, Option.toValueOption message.InsetOpt, &message.MaterialProperties, message.RenderType, message.StaticModel, message.SurfaceIndex, world)
+            // render unculled surfaces
+            if intersects false false presenceConferred bounds then
+                let staticModelSurfaces = entity.GetFrozenRenderStaticModelSurfaces world
+                for i in 0 .. dec staticModelSurfaces.Length do
+                    let boundsAndSurface = &staticModelSurfaces.[i]
+                    let bounds = &boundsAndSurface.Fst
+                    let surface = &boundsAndSurface.Snd
+                    if intersects false false presenceConferred bounds then
+                        World.renderStaticModelSurfaceFast (surface.Absolute, &surface.ModelMatrix, Option.toValueOption surface.InsetOpt, &surface.MaterialProperties, surface.StaticModel, surface.SurfaceIndex, surface.RenderType, renderPass, world)
 
 [<AutoOpen>]
 module StaticModelHierarchyDispatcherModule =
@@ -277,7 +299,7 @@ module StaticModelHierarchyDispatcherModule =
 
     /// Gives an entity the base behavior of hierarchy of indexed static models.
     type StaticModelHierarchyDispatcher () =
-        inherit EntityDispatcher3d (false)
+        inherit Entity3dDispatcher (false)
 
         static let updateLoadedHierarchy (entity : Entity) world =
             let world =
@@ -324,7 +346,7 @@ module RigidModelHierarchyDispatcherModule =
 
     /// Gives an entity the base behavior of a hierarchy of indexed, physics-driven rigid models.
     type RigidModelHierarchyDispatcher () =
-        inherit EntityDispatcher3d (true)
+        inherit Entity3dDispatcher (true)
 
         static let updateLoadedHierarchy (entity : Entity) world =
             let world =

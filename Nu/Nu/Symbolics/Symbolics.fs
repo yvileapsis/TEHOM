@@ -24,7 +24,7 @@ module Symbolics =
 
     let private tryLoadSymbol3 metadata packageName (asset : Symbol Asset) =
         try let text = File.ReadAllText asset.FilePath
-            match Pathf.GetExtensionLower asset.FilePath with
+            match PathF.GetExtensionLower asset.FilePath with
             | ".csv" ->
                 try let symbol = Symbol.ofStringCsv metadata.StripCsvHeader text (Some asset.FilePath)
                     Some (metadata, symbol)
@@ -41,7 +41,7 @@ module Symbolics =
                 with exn ->
                     Log.info ("Failed to convert text in file '" + asset.FilePath + "' for package '" + packageName + "' to symbol due to: " + scstring exn)
                     None
-        with _ ->
+        with exn ->
             Log.info ("Failed to load symbol file '" + asset.FilePath + "' for package '" + packageName + "' due to: " + scstring exn)
             None
 

@@ -35,7 +35,7 @@ type [<Struct>] JustificationV =
     | JustifyMiddle
     | JustifyBottom
 
-/// Justification (such as for text alignement).
+/// Justification (such as for text alignment).
 [<Syntax
     ("Justified Unjustified", "", "", "", "",
      Constants.PrettyPrinter.DefaultThresholdMin,
@@ -52,19 +52,42 @@ type [<Struct>] Particle =
       mutable Emission : Color
       mutable Flip : Flip }
 
-/// An asset that is used for rendering.
-type RenderAsset =
-    | RawAsset
-    | TextureAsset of TextureMetadata : OpenGL.Texture.TextureMetadata * Texture : uint
-    | FontAsset of PointSize : int * Font : nativeint
-    | CubeMapAsset of FilePaths : OpenGL.CubeMap.CubeMapMemoKey * CubeMap : uint * IrradianceAndEnvironmentMapOptRef : (uint * uint) option ref
-    | StaticModelAsset of UserDefined : bool * Model : OpenGL.PhysicallyBased.PhysicallyBasedModel
-    | AnimatedModelAsset of OpenGL.PhysicallyBased.PhysicallyBasedModel
-
 /// The type of rendering used on a surface (for use by the lower-level renderer API).
 type [<Struct>] RenderType =
     | DeferredRenderType
     | ForwardRenderType of Subsort : single * Sort : single
+
+/// Desribes the render pass at play.
+/// OPTIMIZATION: uses partial hashing for speed.
+type [<CustomEquality; NoComparison>] RenderPass =
+    | NormalPass
+    | ShadowPass of LightId : uint64 * ShadowDirectional : bool * ShadowFrustum : Frustum
+    | ReflectionPass of ReflectorId : int64 * ShadowFrustum : Frustum
+
+    override this.Equals thatObj =
+        match thatObj with
+        | :? RenderPass as that ->
+            match (this, that) with
+            | (NormalPass, NormalPass) -> true
+            | (ShadowPass (lightId, _, _), ShadowPass (lightId2, _, _)) -> lightId = lightId2
+            | (ReflectionPass (lightId, _), ReflectionPass (lightId2, _)) -> lightId = lightId2
+            | (_, _) -> false
+        | _ -> false
+
+    override this.GetHashCode () =
+        match this with
+        | NormalPass -> 0
+        | ShadowPass (lightId, _, _) -> hash lightId
+        | ReflectionPass (reflectorId, _) -> hash reflectorId
+
+/// An asset that is used for rendering.
+type RenderAsset =
+    | RawAsset
+    | TextureAsset of TextureMetadata : OpenGL.Texture.TextureMetadata * Texture : OpenGL.Texture.Texture
+    | FontAsset of PointSize : int * Font : nativeint
+    | CubeMapAsset of FilePaths : OpenGL.CubeMap.CubeMapMemoKey * CubeMap : OpenGL.Texture.Texture * IrradianceAndEnvironmentMapOptRef : (OpenGL.Texture.Texture * OpenGL.Texture.Texture) option ref
+    | StaticModelAsset of UserDefined : bool * StaticModel : OpenGL.PhysicallyBased.PhysicallyBasedModel
+    | AnimatedModelAsset of AnimatedModel : OpenGL.PhysicallyBased.PhysicallyBasedModel
 
 /// A renderer tag interface.
 type Renderer = interface end
