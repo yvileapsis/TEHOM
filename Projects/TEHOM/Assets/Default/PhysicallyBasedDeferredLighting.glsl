@@ -14,24 +14,27 @@ void main()
 
 #shader fragment
 #version 410 core
+#extension GL_ARB_bindless_texture : require
 
 const float PI = 3.141592654;
 const float REFLECTION_LOD_MAX = 5.0;
 const float GAMMA = 2.2;
 const float ATTENUATION_CONSTANT = 1.0;
 const int LIGHTS_MAX = 64;
+const int SHADOWS_MAX = 16;
 
 uniform vec3 eyeCenter;
 uniform vec3 lightAmbientColor;
 uniform float lightAmbientBrightness;
-uniform sampler2D positionTexture;
-uniform sampler2D albedoTexture;
-uniform sampler2D materialTexture;
-uniform sampler2D normalAndHeightTexture;
-uniform sampler2D brdfTexture;
-uniform sampler2D irradianceTexture;
-uniform sampler2D environmentFilterTexture;
-uniform sampler2D ssaoTexture;
+layout (bindless_sampler) uniform sampler2D positionTexture;
+layout (bindless_sampler) uniform sampler2D albedoTexture;
+layout (bindless_sampler) uniform sampler2D materialTexture;
+layout (bindless_sampler) uniform sampler2D normalAndHeightTexture;
+layout (bindless_sampler) uniform sampler2D brdfTexture;
+layout (bindless_sampler) uniform sampler2D irradianceTexture;
+layout (bindless_sampler) uniform sampler2D environmentFilterTexture;
+layout (bindless_sampler) uniform sampler2D ssaoTexture;
+layout (bindless_sampler) uniform sampler2D shadowTextures[SHADOWS_MAX];
 uniform vec3 lightOrigins[LIGHTS_MAX];
 uniform vec3 lightDirections[LIGHTS_MAX];
 uniform vec3 lightColors[LIGHTS_MAX];
@@ -42,7 +45,9 @@ uniform float lightCutoffs[LIGHTS_MAX];
 uniform int lightDirectionals[LIGHTS_MAX];
 uniform float lightConeInners[LIGHTS_MAX];
 uniform float lightConeOuters[LIGHTS_MAX];
+uniform int lightShadowIndices[LIGHTS_MAX];
 uniform int lightsCount;
+uniform mat4 shadowMatrices[SHADOWS_MAX];
 
 in vec2 texCoordsOut;
 
@@ -80,12 +85,12 @@ float geometrySchlick(vec3 n, vec3 v, vec3 l, float roughness)
 
 vec3 fresnelSchlick(float cosTheta, vec3 f0)
 {
-    return f0 + (1.0 - f0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), REFLECTION_LOD_MAX);
+    return f0 + (1.0 - f0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
 vec3 fresnelSchlickRoughness(float cosTheta, vec3 f0, float roughness)
 {
-    return f0 + (max(vec3(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), REFLECTION_LOD_MAX);
+    return f0 + (max(vec3(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
 void main()
@@ -105,8 +110,8 @@ void main()
     float ssao = texture(ssaoTexture, texCoordsOut).r;
 
     // compute materials
-    float metallic = material.r;
-    float roughness = material.g;
+    float roughness = material.r;
+    float metallic = material.g;
     float ambientOcclusion = material.b * ssao;
     vec3 emission = vec3(material.a);
 
@@ -117,30 +122,49 @@ void main()
     for (int i = 0; i < lightsCount; ++i)
     {
         // per-light radiance
-        vec3 d = lightOrigins[i] - position;
-        float distanceSquared = dot(d, d);
-        float distance = sqrt(distanceSquared);
-        float inRange = distance < lightCutoffs[i] ? 1.0 : 0.0;
         vec3 l, h, radiance;
         if (lightDirectionals[i] == 0)
         {
+            vec3 d = lightOrigins[i] - position;
             l = normalize(d);
             h = normalize(v + l);
+            float distanceSquared = dot(d, d);
+            float distance = sqrt(distanceSquared);
+            float cutoff = lightCutoffs[i];
+            float cutoffScalar = 1.0f - smoothstep(cutoff * 0.75, cutoff, distance);
             float attenuation = 1.0f / (ATTENUATION_CONSTANT + lightAttenuationLinears[i] * distance + lightAttenuationQuadratics[i] * distanceSquared);
-            float angle = acos(dot(lightDirections[i], l));
+            float angle = acos(dot(l, -lightDirections[i]));
             float halfConeInner = lightConeInners[i] * 0.5f;
             float halfConeOuter = lightConeOuters[i] * 0.5f;
             float halfConeDelta = halfConeOuter - halfConeInner;
             float halfConeBetween = angle - halfConeInner;
             float halfConeScalar = clamp(1.0f - halfConeBetween / halfConeDelta, 0.0f, 1.0);
             float intensity = attenuation * halfConeScalar;
-            radiance = lightColors[i] * lightBrightnesses[i] * intensity * inRange;
+            radiance = lightColors[i] * lightBrightnesses[i] * intensity * cutoffScalar;
         }
         else
         {
-            l = lightDirections[i];
+            l = -lightDirections[i];
             h = normalize(v + l);
-            radiance = lightColors[i] * lightBrightnesses[i] * inRange;
+            radiance = lightColors[i] * lightBrightnesses[i];
+        }
+
+        // shadow scalar
+        int shadowIndex = lightShadowIndices[i];
+        float shadowScalar = 1.0;
+        if (shadowIndex >= 0)
+        {
+            vec4 positionShadow = shadowMatrices[shadowIndex] * vec4(position, 1.0);
+            vec3 shadowTexCoordsProj = positionShadow.xyz / positionShadow.w;
+            vec2 shadowTexCoords = vec2(shadowTexCoordsProj.x, shadowTexCoordsProj.y) * 0.5 + 0.5;
+            float shadowZ = shadowTexCoordsProj.z * 0.5 + 0.5;
+            if (shadowZ < 1.0f && shadowTexCoords.x >= 0.0 && shadowTexCoords.x <= 1.0 && shadowTexCoords.y >= 0.0 && shadowTexCoords.y <= 1.0)
+            {
+                float depth = texture(shadowTextures[shadowIndex], shadowTexCoords).r;
+                float biasFloor = lightDirectionals[i] == 0 ? 0.0005 : 0.002;
+                float bias = max(biasFloor * (1.0 - dot(normal, l)), biasFloor);
+                shadowScalar = depth + bias < shadowZ ? 0.0 : 1.0;
+            }
         }
 
         // cook-torrance brdf
@@ -162,10 +186,12 @@ void main()
         float nDotL = max(dot(normal, l), 0.0);
 
         // add to outgoing lightAccum
-        lightAccum += (kD * albedo / PI + specular) * radiance * nDotL;
+        lightAccum += (kD * albedo / PI + specular) * radiance * nDotL * shadowScalar;
     }
 
     // compute light ambient terms
+    // NOTE: lightAmbientSpecular gets an additional ao multiply for some specular occlusion.
+    // TODO: use a better means of computing specular occlusion as this one isn't very effective.
     vec3 lightAmbientDiffuse = lightAmbientColor * lightAmbientBrightness * ambientOcclusion;
     vec3 lightAmbientSpecular = lightAmbientDiffuse * ambientOcclusion;
 
@@ -174,14 +200,14 @@ void main()
     vec3 kS = f;
     vec3 kD = 1.0 - kS;
     kD *= 1.0 - metallic;
-    vec3 diffuse = irradiance * albedo * lightAmbientDiffuse;
+    vec3 diffuse = kD * irradiance * albedo * lightAmbientDiffuse;
 
     // compute specular term
     vec2 environmentBrdf = texture(brdfTexture, vec2(max(dot(normal, v), 0.0), roughness)).rg;
     vec3 specular = environmentFilter * (f * environmentBrdf.x + environmentBrdf.y) * lightAmbientSpecular;
 
     // compute ambient term
-    vec3 ambient = kD * diffuse + specular;
+    vec3 ambient = diffuse + specular;
 
     // compute color w/ tone mapping, gamma correction, and emission
     vec3 color = lightAccum + ambient;

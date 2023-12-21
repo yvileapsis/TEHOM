@@ -20,7 +20,7 @@ module Serialization =
         Volumes: Map<ActorID, VolumeTrait>
         Masses: Map<ActorID, MassTrait>
         Health: Map<ActorID, HealthTrait>
-        Abilities: Map<ActorID, Set<Ability>>
+        Abilities: Map<ActorID, Set<ActionID>>
         Composed: Map<ActorID, Composition>
         Attached: Set<Attachment>
 

@@ -36,6 +36,7 @@
 		<Compile Include="Simulants.fs" />
 		<Compile Include="Gameplay\TextInput.fs" />
 		<Compile Include="Gameplay\Model.fs" />
+		<Compile Include="Gameplay\InputParser.fs" />
 		<Compile Include="Gameplay\Gameplay.fs" />
 		<Compile Include="Gameplay\Serialization.fs" />
 		<Compile Include="Gameplay\GameplayGui.fs" />
@@ -155,6 +156,16 @@
 		<Content Include="Assets\Default\AnimatedModelAlbedo.tiff" />
 		<Content Include="Assets\Default\AnimatedModelAlbedo.png" />
 		<Content Include="Assets\Default\AnimatedModel.fbx" />
+		<Content Include="Assets\Default\HeightMap.raw" />
+		<Content Include="Assets\Default\LightProbeModel.mtl" />
+		<Content Include="Assets\Default\LightProbeModel.obj" />
+		<Content Include="Assets\Default\LightProbeModelAlbedo.tiff" />
+		<Content Include="Assets\Default\LightProbeModelMetallic.tiff" />
+		<Content Include="Assets\Default\LightProbeModelRoughness.tiff" />
+		<Content Include="Assets\Default\PhysicallyBasedForwardStatic.glsl" />
+		<Content Include="Assets\Default\PhysicallyBasedShadowAnimated.glsl" />
+		<Content Include="Assets\Default\PhysicallyBasedShadowStatic.glsl" />
+		<Content Include="Assets\Default\PhysicallyBasedShadowTerrain.glsl" />
 	</ItemGroup>
 
 	<ItemGroup>

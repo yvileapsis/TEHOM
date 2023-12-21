@@ -140,7 +140,7 @@ module TextInputFacetModule =
             |> World.sense handleTextInput Nu.Game.Handle.TextInputEvent entity (nameof TextInputFacet)
             |> World.sense handleKeyboardKeyDown Nu.Game.Handle.KeyboardKeyDownEvent entity (nameof TextInputFacet)
 
-        override this.Render (entity, world) =
+        override this.Render (_, entity, world) =
 
             if (entity.GetFocused world) then
 
@@ -192,13 +192,6 @@ module TextInputDispatcherModule =
         static member Properties =
             [define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))]
 
-        override this.GetQuickSize (entity, world) =
-            match entity.GetBackdropImageOpt world with
-            | Some image ->
-                match Metadata.tryGetTextureSizeF image with
-                | Some size -> size.V3
-                | None -> Constants.Engine.EntitySizeGuiDefault
-            | None -> Constants.Engine.EntitySizeGuiDefault
 
 [<AutoOpen>]
 module TextInput =

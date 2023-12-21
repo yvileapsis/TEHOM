@@ -157,7 +157,7 @@ module Actor =
         Volume: VolumeTrait option
         Mass: MassTrait option
         Health: HealthTrait option
-        Abilities: Set<Ability>
+        Abilities: Set<ActionID>
 
     } with
 
@@ -283,7 +283,7 @@ module Actions =
     open Actor
     open Ability
 
-    type System = Map<ActorID, Set<Ability> * Composed>
+    type System = Map<ActorID, Set<ActionID> * Composed>
 
     let getChildrenSet actor (compositions: Map<ActorID, Composition>) =
         let (Composition composition) = compositions[actor]
@@ -342,8 +342,8 @@ module Actions =
         let system = system composition actors
         let actionString = ID "look"
         let senseLook state = function
-            | { Action = action; Power = power } when action = actionString ->
-                if Some power > state then Some power else state
+            | action when action = actionString -> None
+//                if Some power > state then Some power else state
             | _ -> None
         let looks = systemOfAbility senseLook None system
         looks

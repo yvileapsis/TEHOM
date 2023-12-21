@@ -6,10 +6,6 @@
  [[SkyBoxDispatcher
    [[Name SkyBox]]
    []]
-  [LightDispatcher3d
-   [[Name Light3d]
-    [Position [0 3 -0.1]]]
-   []]
   [StaticModelDispatcher
    [[Name StaticModelLeft]
     [Position [-2 1.5 0]]

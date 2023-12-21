@@ -14,18 +14,19 @@ void main()
 
 #shader fragment
 #version 410 core
+#extension GL_ARB_bindless_texture : require
 
 const float PI = 3.141592654;
 const float REFLECTION_LOD_MAX = 5.0;
 const int LIGHT_MAPS_MAX = 27;
 
 uniform vec3 eyeCenter;
-uniform sampler2D positionTexture;
-uniform sampler2D materialTexture;
-uniform sampler2D normalAndHeightTexture;
-uniform sampler2D lightMappingTexture;
-uniform samplerCube environmentFilterMap;
-uniform samplerCube environmentFilterMaps[LIGHT_MAPS_MAX];
+layout (bindless_sampler) uniform sampler2D positionTexture;
+layout (bindless_sampler) uniform sampler2D materialTexture;
+layout (bindless_sampler) uniform sampler2D normalAndHeightTexture;
+layout (bindless_sampler) uniform sampler2D lightMappingTexture;
+layout (bindless_sampler) uniform samplerCube environmentFilterMap;
+layout (bindless_sampler) uniform samplerCube environmentFilterMaps[LIGHT_MAPS_MAX];
 uniform vec3 lightMapOrigins[LIGHT_MAPS_MAX];
 uniform vec3 lightMapMins[LIGHT_MAPS_MAX];
 uniform vec3 lightMapSizes[LIGHT_MAPS_MAX];
@@ -54,7 +55,7 @@ void main()
 
     // retrieve remaining data from geometry buffers
     vec3 position = texture(positionTexture, texCoordsOut).rgb;
-    float roughness = texture(materialTexture, texCoordsOut).g;
+    float roughness = texture(materialTexture, texCoordsOut).r;
 
     // retrieve light mapping data
     vec4 lmData = texture(lightMappingTexture, texCoordsOut);
@@ -69,12 +70,12 @@ void main()
     if (lm1 == -1 && lm2 == -1)
     {
         vec3 r = reflect(-v, normal);
-        environmentFilter = textureLod(environmentFilterMap, r, roughness * (REFLECTION_LOD_MAX - 1.0)).rgb;
+        environmentFilter = textureLod(environmentFilterMap, r, roughness * REFLECTION_LOD_MAX).rgb;
     }
     else if (lm2 == -1)
     {
         vec3 r = parallaxCorrection(environmentFilterMaps[lm1], lightMapOrigins[lm1], lightMapMins[lm1], lightMapSizes[lm1], position, normal);
-        environmentFilter = textureLod(environmentFilterMaps[lm1], r, roughness * (REFLECTION_LOD_MAX - 1.0)).rgb;
+        environmentFilter = textureLod(environmentFilterMaps[lm1], r, roughness * REFLECTION_LOD_MAX).rgb;
     }
     else
     {
@@ -85,8 +86,8 @@ void main()
         float scalar2 = (distanceTotal - lm2Distance) * distanceTotalInverse;
         vec3 r1 = parallaxCorrection(environmentFilterMaps[lm1], lightMapOrigins[lm1], lightMapMins[lm1], lightMapSizes[lm1], position, normal);
         vec3 r2 = parallaxCorrection(environmentFilterMaps[lm2], lightMapOrigins[lm2], lightMapMins[lm2], lightMapSizes[lm2], position, normal);
-        vec3 environmentFilter1 = textureLod(environmentFilterMaps[lm1], r1, roughness * (REFLECTION_LOD_MAX - 1.0)).rgb;
-        vec3 environmentFilter2 = textureLod(environmentFilterMaps[lm2], r2, roughness * (REFLECTION_LOD_MAX - 1.0)).rgb;
+        vec3 environmentFilter1 = textureLod(environmentFilterMaps[lm1], r1, roughness * REFLECTION_LOD_MAX).rgb;
+        vec3 environmentFilter2 = textureLod(environmentFilterMaps[lm2], r2, roughness * REFLECTION_LOD_MAX).rgb;
         environmentFilter = environmentFilter1 * scalar1 + environmentFilter2 * scalar2;
     }
 
