@@ -28,7 +28,7 @@ type RenderStyle =
     | Deferred
     | Forward of Subsort : single * Sort : single
 
-// TODO: P1: figure out where this goes. It sure don't belong here!
+/// The batch phasing such involved in persisting OpenGL state.
 type BatchPhase =
     | StartingPhase
     | ResumingPhase
@@ -41,10 +41,6 @@ type BatchPhase =
 /// Intentionally prevents the original Assimp namespace from being opened.
 [<RequireQualifiedAccess>]
 module Assimp =
-
-    /// The empty metadata dictionary.
-    let MetadataEmpty =
-        readOnlyDict<string, Assimp.Metadata.Entry> Seq.empty
 
     /// Convert a matrix from an Assimp representation to Nu's.
     let ExportMatrix (m : Assimp.Matrix4x4) =
@@ -145,7 +141,11 @@ module Assimp =
 [<AutoOpen>]
 module AssimpExtensions =
 
-    let private AnimationChannelsDict = dictPlus HashIdentity.Reference []
+    let private AnimationChannelsDict =
+        dictPlus HashIdentity.Reference []
+
+    let private NodeEmpty =
+        Assimp.Node ()
 
     type [<Struct>] private BoneInfo =
         { BoneTransformOffset : Assimp.Matrix4x4
@@ -195,6 +195,36 @@ module AssimpExtensions =
               Rotation = rotation
               Scaling = scaling
               Weight = weight }
+
+    type Assimp.Material with
+
+        member this.RenderStyleOpt =
+            match this.GetNonTextureProperty (Constants.Assimp.RawPropertyPrefix + nameof RenderStyle) with
+            | null -> None
+            | property ->
+                if property.PropertyType = Assimp.PropertyType.String then
+                    try property.GetStringValue () |> scvalueMemo<RenderStyle> |> Some
+                    with _ -> None
+                else None
+
+        member this.PresenceOpt =
+            match this.GetNonTextureProperty (Constants.Assimp.RawPropertyPrefix + nameof Presence) with
+            | null -> None
+            | property ->
+                if property.PropertyType = Assimp.PropertyType.String then
+                    try property.GetStringValue () |> scvalueMemo<Presence> |> Some
+                    with _ -> None
+                else None
+
+        member this.TwoSidedOpt =
+            match this.GetNonTextureProperty (Constants.Assimp.RawPropertyPrefix + Constants.Render.TwoSidedName) with
+            | null -> None
+            | property ->
+                if property.PropertyType = Assimp.PropertyType.String then
+                    try property.GetStringValue () |> scvalueMemo<bool> |> Some
+                    with _ -> None
+                else Some true
+        
 
     /// Mesh extensions.
     type Assimp.Mesh with
@@ -313,6 +343,10 @@ module AssimpExtensions =
     /// Node extensions.
     type Assimp.Node with
 
+        /// The empty assimp node.
+        /// NOTE: Do NOT modify this as it is a globally shared stand-in for unavailble assimp nodes!
+        static member Empty = NodeEmpty
+
         /// Get the world transform of the node.
         member this.TransformWorld =
             let mutable parentOpt = this.Parent
@@ -347,3 +381,33 @@ module AssimpExtensions =
                 let child = child.Map<'a> (worldNames, worldTransform, mapper)
                 node.Add child
             node
+
+        member this.RenderStyleOpt =
+            match this.Metadata.TryGetValue "RenderStyle" with
+            | (true, entry) ->
+                match entry.DataType with
+                | Assimp.MetaDataType.String ->
+                    try entry.Data :?> string |> scvalueMemo<RenderStyle> |> Some
+                    with _ -> None
+                | _ -> None
+            | (false, _) -> None
+
+        member this.PresenceOpt =
+            match this.Metadata.TryGetValue "Presence" with
+            | (true, entry) ->
+                match entry.DataType with
+                | Assimp.MetaDataType.String ->
+                    try entry.Data :?> string |> scvalueMemo<Presence> |> Some
+                    with _ -> None
+                | _ -> None
+            | (false, _) -> None
+
+    type Assimp.Scene with
+
+        member this.IndexDatasToMetadata () =
+            for i in 0 .. dec this.Meshes.Count do
+                let mesh = this.Meshes.[i]
+                let indices = mesh.GetIndices ()
+                this.Metadata.Add ("IndexData" + string i, Assimp.Metadata.Entry (Assimp.MetaDataType.Int32, indices))
+                mesh.Faces.Clear ()
+                mesh.Faces.Capacity <- 0

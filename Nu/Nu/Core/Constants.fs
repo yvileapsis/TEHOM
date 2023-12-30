@@ -59,6 +59,7 @@ module Render =
 
     let [<Literal>] DeferredName = "Deferred"
     let [<Literal>] ForwardName = "Forward"
+    let [<Literal>] TwoSidedName = "TwoSided"
     let [<Uniform>] mutable Vsync = match ConfigurationManager.AppSettings.["Vsync"] with null -> true | vsync -> scvalue<bool> vsync
     let [<Literal>] VirtualResolutionX = 960
     let [<Literal>] VirtualResolutionY = 540
@@ -70,13 +71,13 @@ module Render =
     let [<Uniform>] VirtualScalar2 = Vector2 (single VirtualScalar2i.X, single VirtualScalar2i.Y)
     let [<Uniform>] Play3dBoxSize = Vector3 64.0f
     let [<Uniform>] Light3dBoxSize = Vector3 64.0f
-    let [<Uniform>] mutable NearPlaneDistanceEnclosed = match ConfigurationManager.AppSettings.["NearPlaneDistanceEnclosed"] with null -> 0.0625f | scalar -> scvalue<single> scalar
-    let [<Uniform>] mutable FarPlaneDistanceEnclosed = match ConfigurationManager.AppSettings.["FarPlaneDistanceEnclosed"] with null -> 16.0f (* NOTE: remember to update OPAQUING_DISTANCE in shader when changing this!*) | scalar -> scvalue<single> scalar
-    let [<Uniform>] mutable NearPlaneDistanceExposed = match ConfigurationManager.AppSettings.["NearPlaneDistanceExposed"] with null -> FarPlaneDistanceEnclosed | scalar -> scvalue<single> scalar
-    let [<Uniform>] mutable FarPlaneDistanceExposed = match ConfigurationManager.AppSettings.["FarPlaneDistanceExposed"] with null -> 128.0f | scalar -> scvalue<single> scalar
-    let [<Uniform>] mutable NearPlaneDistanceImposter = match ConfigurationManager.AppSettings.["NearPlaneDistanceImposter"] with null -> FarPlaneDistanceExposed | scalar -> scvalue<single> scalar
+    let [<Uniform>] mutable NearPlaneDistanceInterior = match ConfigurationManager.AppSettings.["NearPlaneDistanceInterior"] with null -> 0.0625f | scalar -> scvalue<single> scalar
+    let [<Uniform>] mutable FarPlaneDistanceInterior = match ConfigurationManager.AppSettings.["FarPlaneDistanceInterior"] with null -> 16.0f (* NOTE: remember to update OPAQUING_DISTANCE in shader when changing this!*) | scalar -> scvalue<single> scalar
+    let [<Uniform>] mutable NearPlaneDistanceExterior = match ConfigurationManager.AppSettings.["NearPlaneDistanceExterior"] with null -> FarPlaneDistanceInterior | scalar -> scvalue<single> scalar
+    let [<Uniform>] mutable FarPlaneDistanceExterior = match ConfigurationManager.AppSettings.["FarPlaneDistanceExterior"] with null -> 128.0f | scalar -> scvalue<single> scalar
+    let [<Uniform>] mutable NearPlaneDistanceImposter = match ConfigurationManager.AppSettings.["NearPlaneDistanceImposter"] with null -> FarPlaneDistanceExterior | scalar -> scvalue<single> scalar
     let [<Uniform>] mutable FarPlaneDistanceImposter = match ConfigurationManager.AppSettings.["FarPlaneDistanceImposter"] with null -> 16384.0f (* TODO: see if this being large makes SSAO rather less accurate. *)| scalar -> scvalue<single> scalar
-    let [<Uniform>] NearPlaneDistanceOmnipresent = NearPlaneDistanceEnclosed
+    let [<Uniform>] NearPlaneDistanceOmnipresent = NearPlaneDistanceInterior
     let [<Uniform>] FarPlaneDistanceOmnipresent = FarPlaneDistanceImposter
     let [<Uniform>] ResolutionX = VirtualResolutionX * VirtualScalar
     let [<Uniform>] ResolutionY = VirtualResolutionY * VirtualScalar
@@ -109,8 +110,7 @@ module Render =
     let [<Literal>] BonesInfluenceMax = 4
     let [<Literal>] AnimatedModelRateScalar = 30.0f // some arbitrary scale that mixamo fbx exported from blender seems to like...
     let [<Literal>] AnimatedModelMessagesPrealloc = 128
-    let [<Literal>] GeometryBatchPrealloc = 1024
-    let [<Literal>] TerrainLayersMaxSafe = 6
+    let [<Literal>] InstanceBatchPrealloc = 1024
     let [<Literal>] TerrainLayersMax = 8
     let [<Literal>] LightMapsMaxDeferred = 27
     let [<Literal>] LightMapsMaxForward = 2
@@ -118,7 +118,7 @@ module Render =
     let [<Literal>] LightsMaxForward = 8
     let [<Literal>] ShadowsShaderMax = 16 // NOTE: remember to update SHADOWS_MAX in shaders when changing this!
     let [<Uniform>] mutable ShadowFovMax = match ConfigurationManager.AppSettings.["ShadowFovMax"] with null -> MathF.TWO_PI / 3.0f (* NOTE: this can construct a pretty wide frustum far plane. *) | shadowFovMax -> scvalue<single> shadowFovMax
-    let [<Uniform>] mutable ShadowsMax = match ConfigurationManager.AppSettings.["ShadowsMax"] with null -> 5 | shadowsMax -> min (scvalue<int> shadowsMax) ShadowsShaderMax
+    let [<Uniform>] mutable ShadowsMax = match ConfigurationManager.AppSettings.["ShadowsMax"] with null -> 8 | shadowsMax -> min (scvalue<int> shadowsMax) ShadowsShaderMax
     let [<Literal>] ReflectionMapResolution = 512
     let [<Literal>] IrradianceMapResolution = 32
     let [<Literal>] EnvironmentFilterResolution = 128
@@ -158,6 +158,7 @@ module OpenGL =
 module Assimp =
 
     let [<Literal>] PostProcessSteps = Assimp.PostProcessSteps.Triangulate ||| Assimp.PostProcessSteps.GlobalScale
+    let [<Literal>] RawPropertyPrefix = "$raw."
 
 [<RequireQualifiedAccess>]
 module Audio =
@@ -200,6 +201,11 @@ module Associations =
     let [<Literal>] Render2d = "Render2d"
     let [<Literal>] Render3d = "Render3d"
     let [<Literal>] Audio = "Audio"
+
+[<RequireQualifiedAccess>]
+module Gui =
+
+    let [<Uniform>] DisabledColor = Color (0.75f, 0.75f, 0.75f, 0.75f)
 
 [<RequireQualifiedAccess>]
 module TileMap =

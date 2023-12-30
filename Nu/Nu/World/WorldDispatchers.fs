@@ -34,7 +34,7 @@ module EntityDispatcherModule =
              define Entity.Absolute true
              define Entity.AlwaysUpdate true
              define Entity.Presence Omnipresent
-             define Entity.DisabledColor (Color (0.75f, 0.75f, 0.75f, 0.75f))
+             define Entity.DisabledColor Constants.Gui.DisabledColor
              define Entity.Layout Manual
              define Entity.LayoutMargin v2Zero
              define Entity.LayoutOrder 0
@@ -93,11 +93,11 @@ module AnimatedSpriteDispatcherModule =
             [typeof<AnimatedSpriteFacet>]
 
         static member Properties =
-            [define Entity.CelSize (Vector2 (12.0f, 12.0f))
+            [define Entity.CelSize (Vector2 (48.0f, 48.0f))
              define Entity.CelCount 16
              define Entity.CelRun 4
              define Entity.AnimationDelay (GameTime.ofSeconds (1.0f / 15.0f))
-             define Entity.AnimationSheet Assets.Default.Block // TODO: use proper animated sheet.
+             define Entity.AnimationSheet Assets.Default.AnimatedSprite
              define Entity.Color Color.One
              define Entity.Emission Color.Zero
              define Entity.Flip FlipNone]
@@ -365,7 +365,7 @@ module Character2dDispatcherModule =
             World.enqueueLayeredOperation2d
                 { Elevation = transform.Elevation
                   Horizon = transform.Horizon
-                  AssetTag = AssetTag.generalize image
+                  AssetTag = image
                   RenderOperation2d =
                     RenderSprite
                         { Transform = transform
@@ -493,13 +493,7 @@ module StaticBillboardDispatcherModule =
         static member Properties =
             [define Entity.InsetOpt None
              define Entity.MaterialProperties MaterialProperties.defaultProperties
-             define Entity.AlbedoImage Assets.Default.MaterialAlbedo
-             define Entity.RoughnessImage Assets.Default.MaterialRoughness
-             define Entity.MetallicImage Assets.Default.MaterialMetallic
-             define Entity.AmbientOcclusionImage Assets.Default.MaterialAmbientOcclusion
-             define Entity.EmissionImage Assets.Default.MaterialEmission
-             define Entity.NormalImage Assets.Default.MaterialNormal
-             define Entity.HeightImage Assets.Default.MaterialHeight
+             define Entity.Material Material.defaultMaterial
              define Entity.RenderStyle Deferred]
 
 // TODO: AnimatedBillboardDispatcher.
@@ -516,7 +510,7 @@ module StaticModelDispatcherModule =
 
         static member Properties =
             [define Entity.InsetOpt None
-             define Entity.MaterialProperties MaterialProperties.defaultProperties
+             define Entity.MaterialProperties MaterialProperties.empty
              define Entity.StaticModel Assets.Default.StaticModel
              define Entity.RenderStyle Deferred]
 
@@ -532,7 +526,7 @@ module AnimatedModelDispatcherModule =
 
         static member Properties =
             [define Entity.InsetOpt None
-             define Entity.MaterialProperties MaterialProperties.defaultProperties
+             define Entity.MaterialProperties MaterialProperties.empty
              define Entity.AnimatedModel Assets.Default.AnimatedModel]
 
 [<AutoOpen>]
@@ -559,7 +553,7 @@ module RigidModelDispatcherModule =
         static member Properties =
             [define Entity.BodyType Dynamic
              define Entity.BodyShape (BodyStaticModel { StaticModel = Assets.Default.StaticModel; TransformOpt = None; PropertiesOpt = None })
-             define Entity.MaterialProperties MaterialProperties.defaultProperties
+             define Entity.MaterialProperties MaterialProperties.empty
              define Entity.StaticModel Assets.Default.StaticModel
              define Entity.RenderStyle Deferred]
 
@@ -580,7 +574,7 @@ module StaticModelSurfaceDispatcherModule =
 
         static member Properties =
             [define Entity.InsetOpt None
-             define Entity.MaterialProperties MaterialProperties.defaultProperties
+             define Entity.MaterialProperties MaterialProperties.empty
              define Entity.SurfaceIndex 0
              define Entity.StaticModel Assets.Default.StaticModel
              define Entity.RenderStyle Deferred]
@@ -611,7 +605,7 @@ module RigidModelSurfaceDispatcherModule =
             [define Entity.InsetOpt None
              define Entity.BodyType Dynamic
              define Entity.BodyShape (BodyStaticModelSurface { SurfaceIndex = 0; StaticModel = Assets.Default.StaticModel; TransformOpt = None; PropertiesOpt = None })
-             define Entity.MaterialProperties MaterialProperties.defaultProperties
+             define Entity.MaterialProperties MaterialProperties.empty
              define Entity.SurfaceIndex 0
              define Entity.StaticModel Assets.Default.StaticModel
              define Entity.RenderStyle Deferred]
@@ -687,7 +681,7 @@ module Character3dDispatcherModule =
              typeof<RigidBodyFacet>]
 
         static member Properties =
-            [define Entity.MaterialProperties MaterialProperties.defaultProperties
+            [define Entity.MaterialProperties MaterialProperties.empty
              define Entity.AnimatedModel Assets.Default.AnimatedModel
              define Entity.BodyType Dynamic
              define Entity.Friction 1.0f

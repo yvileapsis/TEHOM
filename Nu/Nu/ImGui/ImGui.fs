@@ -15,7 +15,7 @@ type ImGuiEditResult =
     | ImGuiEditInactive
 
 /// Wraps ImGui context, state, and calls. Also extends the ImGui interface with static methods.
-/// NOTE: API is primarily object-oriented / mutation-based because it's ported from a port of a port.
+/// NOTE: API is primarily object-oriented / mutation-based because it's ported from a port.
 type ImGui (windowWidth : int, windowHeight : int) =
 
     static let mutable mouseDraggingStarted =
@@ -166,21 +166,21 @@ type ImGui (windowWidth : int, windowHeight : int) =
         ImGui.IsKeyDown ImGuiKey.LeftCtrl ||
         ImGui.IsKeyDown ImGuiKey.RightCtrl
 
-    static member IsCtrlReleased () =
+    static member IsCtrlUp () =
         not (ImGui.IsCtrlDown ())
 
     static member IsAltDown () =
         ImGui.IsKeyDown ImGuiKey.LeftAlt ||
         ImGui.IsKeyDown ImGuiKey.RightAlt
 
-    static member IsAltReleased () =
+    static member IsAltUp () =
         not (ImGui.IsAltDown ())
 
     static member IsShiftDown () =
         ImGui.IsKeyDown ImGuiKey.LeftShift ||
         ImGui.IsKeyDown ImGuiKey.RightShift
 
-    static member IsShiftReleased () =
+    static member IsShiftUp () =
         not (ImGui.IsShiftDown ())
 
     static member IsCtrlPlusKeyPressed (key : ImGuiKey) =

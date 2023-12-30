@@ -24,59 +24,19 @@ module WorldModuleEntity =
     let internal EntityChangeCountsId = Gen.id
     let internal EntityBindingCountsId = Gen.id
 
-    // OPTIMIZATION: avoids closure allocation in tight-loop.
-    type private KeyEquality () =
-        inherit OptimizedClosures.FSharpFunc<
-            KeyValuePair<Entity, SUMap<Entity, EntityState>>,
-            KeyValuePair<Entity, SUMap<Entity, EntityState>>,
-            bool> ()
-        override this.Invoke _ = failwithumf ()
-        override this.Invoke
-            (entityStateKey : KeyValuePair<Entity, SUMap<Entity, EntityState>>,
-             entityStateKey2 : KeyValuePair<Entity, SUMap<Entity, EntityState>>) =
-            refEq entityStateKey.Key entityStateKey2.Key &&
-            refEq entityStateKey.Value entityStateKey2.Value
-    let private keyEquality = KeyEquality ()
-
-    // OPTIMIZATION: avoids closure allocation in tight-loop.
-    let mutable private getFreshKeyAndValueEntity = Unchecked.defaultof<Entity>
-    let mutable private getFreshKeyAndValueWorld = Unchecked.defaultof<World>
-    let private getFreshKeyAndValue () =
-        let mutable entityStateOpt = Unchecked.defaultof<_>
-        let _ = SUMap.tryGetValue (getFreshKeyAndValueEntity, getFreshKeyAndValueWorld.EntityStates, &entityStateOpt)
-        KeyValuePair (KeyValuePair (getFreshKeyAndValueEntity, getFreshKeyAndValueWorld.EntityStates), entityStateOpt)
-    let private getFreshKeyAndValueCached =
-        getFreshKeyAndValue
-
     // OPTIMIZATION: cache one entity change address to reduce allocation where possible.
     let mutable changeEventNamesFree = true
     let changeEventNamesCached = [|Constants.Lens.ChangeName; ""; Constants.Lens.EventName; ""; ""; ""; ""|]
 
     type World with
 
-        // OPTIMIZATION: a ton of optimization has gone down in here...!
-        static member private entityStateRefresher (entity : Entity) world =
-            getFreshKeyAndValueEntity <- entity
-            getFreshKeyAndValueWorld <- world
-            let entityStateOpt =
-                KeyedCache.getValueFast
-                    keyEquality
-                    getFreshKeyAndValueCached
-                    (KeyValuePair (entity, world.EntityStates))
-                    (World.getEntityCachedOpt world)
-            getFreshKeyAndValueEntity <- Unchecked.defaultof<Entity>
-            getFreshKeyAndValueWorld <- Unchecked.defaultof<World>
-            match entityStateOpt :> obj with
-            | null ->
-                Unchecked.defaultof<EntityState>
-            | _ ->
-                if entityStateOpt.Imperative then entity.EntityStateOpt <- entityStateOpt
-                entityStateOpt
-
         static member private entityStateFinder (entity : Entity) world =
             let entityStateOpt = entity.EntityStateOpt
-            if isNull (entityStateOpt :> obj) || entityStateOpt.Invalidated
-            then World.entityStateRefresher entity world
+            if isNull (entityStateOpt :> obj) || entityStateOpt.Invalidated then
+                let mutable entityStateOpt = Unchecked.defaultof<_>
+                let _ = SUMap.tryGetValue (entity, world.EntityStates, &entityStateOpt)
+                if notNull (entityStateOpt :> obj) && entityStateOpt.Imperative then entity.EntityStateOpt <- entityStateOpt
+                entityStateOpt
             else entityStateOpt
 
         static member private entityStateAdder entityState (entity : Entity) world =
@@ -567,6 +527,16 @@ module WorldModuleEntity =
             transform.CleanRotationMatrix () // OPTIMIZATION: ensure rotation matrix is clean so that redundant cleans don't happen when transform is handed out.
             transform
 
+        /// Check that an entity has any children.
+        static member getEntityHasChildren (entity : Entity) world =
+            let simulants = World.getSimulants world
+            match simulants.TryGetValue (entity :> Simulant) with
+            | (true, entitiesOpt) ->
+                match entitiesOpt with
+                | Some entities -> Seq.notEmpty entities 
+                | None -> false
+            | (false, _) -> false
+
         /// Get all of the entities directly parented by an entity.
         static member getEntityChildren (entity : Entity) world =
             let simulants = World.getSimulants world
@@ -581,6 +551,12 @@ module WorldModuleEntity =
         static member traverseEntityChildren effect (entity : Entity) (world : World) =
             let mounters = World.getEntityChildren entity world
             Seq.fold (fun world mounter -> effect entity mounter world) world mounters
+
+        /// Check than an entity has any other entitiese mounted on it.
+        static member getEntityHasMounters entity world =
+            match world.EntityMounts.TryGetValue entity with
+            | (true, mounters) -> Seq.exists (flip World.getEntityExists world) mounters
+            | (false, _) -> false
 
         /// Get all of the entities directly mounted on an entity.
         static member getEntityMounters entity world =
@@ -2148,7 +2124,7 @@ module WorldModuleEntity =
             let isNew = not (World.getEntityExists entity world)
             if isNew || mayReplace then
 
-                // get old world for entity tree rebuild and change events
+                // get old world for entity tree rebuild
                 let worldOld = world
                 
                 // add entity to world
@@ -2222,9 +2198,9 @@ module WorldModuleEntity =
                         if World.getEntityIs2d entity world then
                             let quadtree =
                                 MutantCache.mutateMutant
-                                    (fun () -> world.WorldExtension.Dispatchers.RebuildQuadtree world)
+                                    (fun () -> worldOld.WorldExtension.Dispatchers.RebuildQuadtree worldOld)
                                     (fun quadtree ->
-                                        let entityState = World.getEntityState entity worldOld
+                                        let entityState = World.getEntityState entity world
                                         let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
                                         Quadtree.removeElement entityState.Presence entityState.Bounds.Box2 element quadtree
                                         quadtree)
@@ -2233,9 +2209,9 @@ module WorldModuleEntity =
                         else
                             let octree =
                                 MutantCache.mutateMutant
-                                    (fun () -> world.WorldExtension.Dispatchers.RebuildOctree world)
+                                    (fun () -> worldOld.WorldExtension.Dispatchers.RebuildOctree worldOld)
                                     (fun octree ->
-                                        let entityState = World.getEntityState entity worldOld
+                                        let entityState = World.getEntityState entity world
                                         let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
                                         Octree.removeElement entityState.Presence entityState.Bounds element octree
                                         octree)

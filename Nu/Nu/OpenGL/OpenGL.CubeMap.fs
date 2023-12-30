@@ -5,7 +5,6 @@ namespace OpenGL
 open System
 open System.Collections.Generic
 open System.Numerics
-open System.IO
 open FSharp.NativeInterop
 open Prime
 open Nu
@@ -54,7 +53,7 @@ module CubeMap =
             Gl.TexParameter (TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapS, int TextureWrapMode.ClampToEdge)
             Gl.TexParameter (TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapT, int TextureWrapMode.ClampToEdge)
             Gl.TexParameter (TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapR, int TextureWrapMode.ClampToEdge)
-            let cubeMap = Texture.Texture.make cubeMapId
+            let cubeMap = Texture.CreateTextureFromId cubeMapId
             Right cubeMap
         | Some error ->
             Gl.DeleteTextures [|cubeMapId|]
@@ -236,6 +235,14 @@ module CubeMap =
         let (vertexData, indexData, bounds) = CreateCubeMapMesh ()
         CreateCubeMapGeometryFromMesh (renderable, vertexData.AsMemory (), indexData.AsMemory (), bounds)
 
+    /// Destroy cube map geometry.
+    let DestroyCubeMapGeometry geometry =
+        OpenGL.Gl.BindVertexArray geometry.CubeMapVao
+        OpenGL.Gl.DeleteBuffers geometry.VertexBuffer
+        OpenGL.Gl.DeleteBuffers geometry.IndexBuffer
+        OpenGL.Gl.BindVertexArray 0u
+        OpenGL.Gl.DeleteVertexArrays [|geometry.CubeMapVao|]
+
     /// Describes a cube map shader that's loaded into GPU.
     type CubeMapShader =
         { ViewUniform : int
@@ -248,6 +255,7 @@ module CubeMap =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
 
         // retrieve uniforms
         let viewUniform = Gl.GetUniformLocation (shader, "view")

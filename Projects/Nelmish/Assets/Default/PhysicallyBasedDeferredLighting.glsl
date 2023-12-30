@@ -29,7 +29,7 @@ uniform float lightAmbientBrightness;
 layout (bindless_sampler) uniform sampler2D positionTexture;
 layout (bindless_sampler) uniform sampler2D albedoTexture;
 layout (bindless_sampler) uniform sampler2D materialTexture;
-layout (bindless_sampler) uniform sampler2D normalAndHeightTexture;
+layout (bindless_sampler) uniform sampler2D normalPlusTexture;
 layout (bindless_sampler) uniform sampler2D brdfTexture;
 layout (bindless_sampler) uniform sampler2D irradianceTexture;
 layout (bindless_sampler) uniform sampler2D environmentFilterTexture;
@@ -96,11 +96,11 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 f0, float roughness)
 void main()
 {
     // retrieve normal value first, allowing for early-out
-    vec3 normal = texture(normalAndHeightTexture, texCoordsOut).rgb;
+    vec3 normal = texture(normalPlusTexture, texCoordsOut).xyz;
     if (normal == vec3(1.0)) discard; // discard if geometry pixel was not written (equal to the buffer clearing color of white)
 
     // retrieve remaining data from geometry buffers
-    vec3 position = texture(positionTexture, texCoordsOut).rgb;
+    vec3 position = texture(positionTexture, texCoordsOut).xyz;
     vec3 albedo = texture(albedoTexture, texCoordsOut).rgb;
     vec4 material = texture(materialTexture, texCoordsOut);
 
@@ -161,7 +161,7 @@ void main()
             if (shadowZ < 1.0f && shadowTexCoords.x >= 0.0 && shadowTexCoords.x <= 1.0 && shadowTexCoords.y >= 0.0 && shadowTexCoords.y <= 1.0)
             {
                 float depth = texture(shadowTextures[shadowIndex], shadowTexCoords).r;
-                float biasFloor = lightDirectionals[i] == 0 ? 0.0005 : 0.002;
+                float biasFloor = lightDirectionals[i] == 0 ? 0.0001 : 0.001;
                 float bias = max(biasFloor * (1.0 - dot(normal, l)), biasFloor);
                 shadowScalar = depth + bias < shadowZ ? 0.0 : 1.0;
             }

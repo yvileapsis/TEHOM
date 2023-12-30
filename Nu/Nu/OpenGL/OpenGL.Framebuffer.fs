@@ -35,14 +35,14 @@ module Framebuffer =
 
         // ensure framebuffer is complete
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-            let texture = Texture.Texture.make textureId
+            let texture = Texture.CreateTextureFromId textureId
             Right (texture, framebuffer)
         else Left ("Could not create complete texture 2d framebuffer.")
 
     /// Destroy texture buffers.
     let DestroyTextureBuffers (position, framebuffer) =
         Gl.DeleteFramebuffers [|framebuffer|]
-        Texture.Texture.destroy position
+        Texture.DestroyTexture position
 
     /// Attempt to create hdr buffers.
     let TryCreateHdrBuffers () =
@@ -70,14 +70,14 @@ module Framebuffer =
 
         // ensure framebuffer is complete
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-            let position = Texture.Texture.make positionId
+            let position = Texture.CreateTextureFromId positionId
             Right (position, framebuffer)
         else Left ("Could not create complete HDR framebuffer.")
 
     /// Destroy hdr buffers.
     let DestroyHdrFrameBuffers (position, framebuffer) =
         Gl.DeleteFramebuffers [|framebuffer|]
-        Texture.Texture.destroy position
+        Texture.DestroyTexture position
 
     /// Create shadow buffers.
     let TryCreateShadowBuffers () =
@@ -90,7 +90,7 @@ module Framebuffer =
         // create shadow texture
         let shadowTextureId = Gl.GenTexture ()
         Gl.BindTexture (TextureTarget.Texture2d, shadowTextureId)
-        Gl.TexImage2D (TextureTarget.Texture2d, 0, InternalFormat.DepthComponent, Constants.Render.ShadowResolutionX, Constants.Render.ShadowResolutionY, 0, PixelFormat.DepthComponent, PixelType.Float, nativeint 0)
+        Gl.TexImage2D (TextureTarget.Texture2d, 0, InternalFormat.DepthComponent32f, Constants.Render.ShadowResolutionX, Constants.Render.ShadowResolutionY, 0, PixelFormat.DepthComponent, PixelType.Float, nativeint 0)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMinFilter, int TextureMinFilter.Nearest)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMagFilter, int TextureMagFilter.Nearest)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureWrapS, int TextureWrapMode.ClampToEdge)
@@ -102,19 +102,23 @@ module Framebuffer =
         Gl.FramebufferTexture2D (FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, TextureTarget.Texture2d, shadowTextureId, 0)
         Gl.DrawBuffer DrawBufferMode.None
         Gl.ReadBuffer ReadBufferMode.None
-        Gl.BindFramebuffer (FramebufferTarget.Framebuffer, 0u)
         Hl.Assert ()
 
         // ensure framebuffer is complete
-        if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-            let shadowTexture = Texture.Texture.make shadowTextureId
-            Right (shadowTexture, framebuffer)
-        else Left "Could not create complete shadow mapping framebuffer."
+        let result =
+            if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
+                let shadowTexture = Texture.CreateTextureFromId shadowTextureId
+                Right (shadowTexture, framebuffer)
+            else Left "Could not create complete shadow mapping framebuffer."
+
+        // unbind buffer after checking completeness
+        Gl.BindFramebuffer (FramebufferTarget.Framebuffer, 0u)
+        result
 
     /// Destroy shadow buffers.
     let DestroyShadowBuffers (shadowTexture : Texture.Texture, framebuffer) =
         Gl.DeleteFramebuffers [|framebuffer|]
-        Texture.Texture.destroy shadowTexture
+        Texture.DestroyTexture shadowTexture
 
     /// Create a geometry buffers.
     let TryCreateGeometryBuffers () =
@@ -157,15 +161,15 @@ module Framebuffer =
         Gl.FramebufferTexture2D (FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment2, TextureTarget.Texture2d, materialId, 0)
         Hl.Assert ()
 
-        // create normal and height buffer
-        let normalAndHeightId = Gl.GenTexture ()
-        Gl.BindTexture (TextureTarget.Texture2d, normalAndHeightId)
+        // create normal plus buffer
+        let normalPlusId = Gl.GenTexture ()
+        Gl.BindTexture (TextureTarget.Texture2d, normalPlusId)
         Gl.TexImage2D (TextureTarget.Texture2d, 0, InternalFormat.Rgba32f, Constants.Render.ResolutionX, Constants.Render.ResolutionY, 0, PixelFormat.Rgba, PixelType.Float, nativeint 0)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMinFilter, int TextureMinFilter.Nearest)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMagFilter, int TextureMagFilter.Nearest)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureWrapS, int TextureWrapMode.ClampToEdge)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureWrapT, int TextureWrapMode.ClampToEdge)
-        Gl.FramebufferTexture2D (FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment3, TextureTarget.Texture2d, normalAndHeightId, 0)
+        Gl.FramebufferTexture2D (FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment3, TextureTarget.Texture2d, normalPlusId, 0)
         Hl.Assert ()
 
         // associate draw buffers
@@ -184,21 +188,21 @@ module Framebuffer =
 
         // ensure framebuffer is complete
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-            let position = Texture.Texture.make positionId
-            let albedo = Texture.Texture.make albedoId
-            let material = Texture.Texture.make materialId
-            let normalAndHeight = Texture.Texture.make normalAndHeightId
-            Right (position, albedo, material, normalAndHeight, renderbuffer, framebuffer)
+            let position = Texture.CreateTextureFromId positionId
+            let albedo = Texture.CreateTextureFromId albedoId
+            let material = Texture.CreateTextureFromId materialId
+            let normalPlus = Texture.CreateTextureFromId normalPlusId
+            Right (position, albedo, material, normalPlus, renderbuffer, framebuffer)
         else Left "Could not create complete geometry framebuffer."
 
     /// Destroy geometry buffers.
-    let DestroyGeometryBuffers (position : Texture.Texture, albedo : Texture.Texture, material : Texture.Texture, normalAndHeight : Texture.Texture, renderbuffer, framebuffer) =
+    let DestroyGeometryBuffers (position : Texture.Texture, albedo : Texture.Texture, material : Texture.Texture, normalPlus : Texture.Texture, renderbuffer, framebuffer) =
         Gl.DeleteRenderbuffers [|renderbuffer|]
         Gl.DeleteFramebuffers [|framebuffer|]
-        Texture.Texture.destroy position
-        Texture.Texture.destroy albedo
-        Texture.Texture.destroy material
-        Texture.Texture.destroy normalAndHeight
+        Texture.DestroyTexture position
+        Texture.DestroyTexture albedo
+        Texture.DestroyTexture material
+        Texture.DestroyTexture normalPlus
 
     /// Create light mapping buffers.
     let TryCreateLightMappingBuffers () =
@@ -231,7 +235,7 @@ module Framebuffer =
 
         // ensure framebuffer is complete
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-            let lightMapping = Texture.Texture.make lightMappingId
+            let lightMapping = Texture.CreateTextureFromId lightMappingId
             Right (lightMapping, renderbuffer, framebuffer)
         else Left "Could not create complete light mapping framebuffer."
 
@@ -239,7 +243,7 @@ module Framebuffer =
     let DestroyLightMappingBuffers (lightMapping : Texture.Texture, renderbuffer, framebuffer) =
         Gl.DeleteRenderbuffers [|renderbuffer|]
         Gl.DeleteFramebuffers [|framebuffer|]
-        Texture.Texture.destroy lightMapping
+        Texture.DestroyTexture lightMapping
 
     /// Create irradiance buffers.
     let TryCreateIrradianceBuffers () =
@@ -272,7 +276,7 @@ module Framebuffer =
 
         // ensure framebuffer is complete
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-            let irradiance = Texture.Texture.make irradianceId
+            let irradiance = Texture.CreateTextureFromId irradianceId
             Right (irradiance, renderbuffer, framebuffer)
         else Left "Could not create complete irradiance framebuffer."
 
@@ -280,7 +284,7 @@ module Framebuffer =
     let DestroyIrradianceBuffers (irradiance : Texture.Texture, renderbuffer, framebuffer) =
         Gl.DeleteRenderbuffers [|renderbuffer|]
         Gl.DeleteFramebuffers [|framebuffer|]
-        Texture.Texture.destroy irradiance
+        Texture.DestroyTexture irradiance
 
     /// Create environment filter buffers.
     let TryCreateEnvironmentFilterBuffers () =
@@ -313,7 +317,7 @@ module Framebuffer =
 
         // ensure framebuffer is complete
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-            let environmentFilter = Texture.Texture.make environmentFilterId
+            let environmentFilter = Texture.CreateTextureFromId environmentFilterId
             Right (environmentFilter, renderbuffer, framebuffer)
         else Left "Could not create complete environment filter framebuffer."
 
@@ -321,7 +325,7 @@ module Framebuffer =
     let DestroyEnvironmentFilterBuffers (environmentFilter : Texture.Texture, renderbuffer, framebuffer) =
         Gl.DeleteRenderbuffers [|renderbuffer|]
         Gl.DeleteFramebuffers [|framebuffer|]
-        Texture.Texture.destroy environmentFilter
+        Texture.DestroyTexture environmentFilter
 
     /// Create ssao buffers.
     let TryCreateSsaoBuffers () =
@@ -354,7 +358,7 @@ module Framebuffer =
 
         // ensure framebuffer is complete
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-            let ssao = Texture.Texture.make ssaoId
+            let ssao = Texture.CreateTextureFromId ssaoId
             Right (ssao, renderbuffer, framebuffer)
         else Left "Could not create complete ssao framebuffer."
 
@@ -362,7 +366,7 @@ module Framebuffer =
     let DestroySsaoBuffers (ssao : Texture.Texture, renderbuffer, framebuffer) =
         Gl.DeleteRenderbuffers [|renderbuffer|]
         Gl.DeleteFramebuffers [|framebuffer|]
-        Texture.Texture.destroy ssao
+        Texture.DestroyTexture ssao
 
     /// Create ssao blur buffers.
     let TryCreateSsaoBlurBuffers () =
@@ -395,7 +399,7 @@ module Framebuffer =
 
         // ensure framebuffer is complete
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-            let blur = Texture.Texture.make blurId
+            let blur = Texture.CreateTextureFromId blurId
             Right (blur, renderbuffer, framebuffer)
         else Left "Could not create complete blur framebuffer."
 
@@ -403,7 +407,7 @@ module Framebuffer =
     let DestroySsaoBlurBuffers (blurTexture : Texture.Texture, renderbuffer, framebuffer) =
         Gl.DeleteRenderbuffers [|renderbuffer|]
         Gl.DeleteFramebuffers [|framebuffer|]
-        Texture.Texture.destroy blurTexture
+        Texture.DestroyTexture blurTexture
 
     /// Create filter buffers.
     let TryCreateFilterBuffers () =
@@ -436,7 +440,7 @@ module Framebuffer =
 
         // ensure framebuffer is complete
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-            let filter = Texture.Texture.make filterId
+            let filter = Texture.CreateTextureFromId filterId
             Right (filter, renderbuffer, framebuffer)
         else Left "Could not create complete filter framebuffer."
 
@@ -444,4 +448,4 @@ module Framebuffer =
     let DestroyFilterBuffers (filter : Texture.Texture, renderbuffer, framebuffer) =
         Gl.DeleteRenderbuffers [|renderbuffer|]
         Gl.DeleteFramebuffers [|framebuffer|]
-        Texture.Texture.destroy filter
+        Texture.DestroyTexture filter

@@ -54,6 +54,7 @@ module WorldGameModule =
         member this.PostUpdateEvent = Events.PostUpdateEvent --> Game.Handle
         member this.MouseMoveEvent = Events.MouseMoveEvent --> Game.Handle
         member this.MouseDragEvent = Events.MouseDragEvent --> Game.Handle
+        member this.MouseWheelEvent = Events.MouseWheelEvent --> Game.Handle
         member this.MouseLeftChangeEvent = Events.MouseLeftChangeEvent --> Game.Handle
         member this.MouseLeftDownEvent = Events.MouseLeftDownEvent --> Game.Handle
         member this.MouseLeftUpEvent = Events.MouseLeftUpEvent --> Game.Handle

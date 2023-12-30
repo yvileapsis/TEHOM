@@ -85,23 +85,24 @@ module WorldEntityHierarchy =
                                 if Matrix4x4.Decompose (transform, &scale, &rotation, &position)
                                 then (position, rotation, scale, world)
                                 else (transform.Translation, quatIdentity, transform.Scale, world) // use translation and scale, even from invalid transform
-                            let renderStyle = match surface.RenderStyleOpt with Some rs -> rs | None -> Deferred
+                            let presence = OpenGL.PhysicallyBased.PhysicallyBasedSurfaceFns.extractPresence presenceConferred staticModelMetadata.SceneOpt surface
+                            let renderStyle = OpenGL.PhysicallyBased.PhysicallyBasedSurfaceFns.extractRenderStyle Deferred staticModelMetadata.SceneOpt surface
                             let world = child.SetPositionLocal position world
                             let world = child.SetRotationLocal rotation world
                             let world = child.SetScaleLocal scale world
-                            let world = child.SetPresence presenceConferred world
+                            let world = child.SetPresence presence world
                             let world = child.SetStatic true world
                             let world = if mountToParent then child.SetMountOpt (Some (Relation.makeParent ())) world else world
                             let world = child.SetSurfaceIndex i world
                             let world = child.SetStaticModel staticModel world
-                            let materialProperties =
-                                { AlbedoOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.Albedo
-                                  RoughnessOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.Roughness
-                                  MetallicOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.Metallic
-                                  AmbientOcclusionOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.AmbientOcclusion
-                                  EmissionOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.Emission
-                                  HeightOpt = ValueSome surface.SurfaceMaterial.MaterialProperties.Height }
-                            let world = child.SetMaterialProperties materialProperties world
+                            let properties =
+                                { AlbedoOpt = ValueSome surface.SurfaceMaterialProperties.Albedo
+                                  RoughnessOpt = ValueSome surface.SurfaceMaterialProperties.Roughness
+                                  MetallicOpt = ValueSome surface.SurfaceMaterialProperties.Metallic
+                                  AmbientOcclusionOpt = ValueSome surface.SurfaceMaterialProperties.AmbientOcclusion
+                                  EmissionOpt = ValueSome surface.SurfaceMaterialProperties.Emission
+                                  HeightOpt = ValueSome surface.SurfaceMaterialProperties.Height }
+                            let world = child.SetMaterialProperties properties world
                             let world = child.SetRenderStyle renderStyle world
                             let world = child.AutoBounds world
                             world' <- world
@@ -149,10 +150,12 @@ module WorldEntityHierarchy =
                         let entityBounds = transform.Bounds3d
                         let insetOpt = match entity.GetInsetOpt world with Some inset -> Some inset | None -> None // OPTIMIZATION: localize boxed value in memory.
                         let properties = entity.GetMaterialProperties world
+                        let presence = entity.GetPresence world
+                        let ignoreLightMaps = presence.IgnoreLightMaps
                         let staticModel = entity.GetStaticModel world
                         let surfaceIndex = entity.GetSurfaceIndex world
                         let renderType = match entity.GetRenderStyle world with Deferred -> DeferredRenderType | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-                        let surface = { Absolute = absolute; ModelMatrix = affineMatrix; InsetOpt = insetOpt; MaterialProperties = properties; SurfaceIndex = surfaceIndex; StaticModel = staticModel; RenderType = renderType }
+                        let surface = { Absolute = absolute; ModelMatrix = affineMatrix; InsetOpt = insetOpt; MaterialProperties = properties; IgnoreLightMaps = ignoreLightMaps; SurfaceIndex = surfaceIndex; StaticModel = staticModel; RenderType = renderType }
                         Choice3Of3 (PairValue.make entityBounds surface)
                         boundsOpt <- match boundsOpt with Some bounds -> Some (bounds.Combine entityBounds) | None -> Some entityBounds
                         world <- entity.SetVisibleLocal false world
@@ -241,7 +244,7 @@ module FreezeFacetModule =
              nonPersistent Entity.FrozenRenderLights3d [||]
              nonPersistent Entity.FrozenRenderStaticModelSurfaces [||]
              define Entity.Frozen false
-             define Entity.PresenceConferred Exposed]
+             define Entity.PresenceConferred Exterior]
 
         override this.Register (entity, world) =
             let world = entity.SetOffset v3Zero world
@@ -253,13 +256,13 @@ module FreezeFacetModule =
 
             // compute intersection function based on render pass
             let intersects =
-                let enclosedOpt = Some (World.getGameEye3dFrustumEnclosed Game world)
-                let exposed = World.getGameEye3dFrustumExposed Game world
+                let interiorOpt = Some (World.getGameEye3dFrustumInterior Game world)
+                let exterior = World.getGameEye3dFrustumExterior Game world
                 let imposter = World.getGameEye3dFrustumImposter Game world
                 let lightBoxOpt = Some (World.getLight3dBox world)
                 fun probe light presence bounds ->
                     match renderPass with
-                    | NormalPass -> Presence.intersects3d enclosedOpt exposed imposter lightBoxOpt probe light presence bounds
+                    | NormalPass skipCulling -> skipCulling || Presence.intersects3d interiorOpt exterior imposter lightBoxOpt probe light presence bounds
                     | ShadowPass (_, _, frustum) -> not probe && not light && frustum.Intersects bounds
                     | ReflectionPass _ -> false
 
@@ -287,7 +290,7 @@ module FreezeFacetModule =
                     let bounds = &boundsAndSurface.Fst
                     let surface = &boundsAndSurface.Snd
                     if intersects false false presenceConferred bounds then
-                        World.renderStaticModelSurfaceFast (surface.Absolute, &surface.ModelMatrix, Option.toValueOption surface.InsetOpt, &surface.MaterialProperties, surface.StaticModel, surface.SurfaceIndex, surface.RenderType, renderPass, world)
+                        World.renderStaticModelSurfaceFast (surface.Absolute, &surface.ModelMatrix, Option.toValueOption surface.InsetOpt, &surface.MaterialProperties, surface.IgnoreLightMaps, surface.StaticModel, surface.SurfaceIndex, surface.RenderType, renderPass, world)
 
 [<AutoOpen>]
 module StaticModelHierarchyDispatcherModule =

@@ -4,6 +4,7 @@
 namespace Nu
 open System
 open System.Collections.Generic
+open System.IO
 open System.Numerics
 open System.Runtime.InteropServices
 open SDL2
@@ -94,7 +95,7 @@ type [<ReferenceEquality>] RenderOperation2d =
 and [<ReferenceEquality>] LayeredOperation2d =
     { mutable Elevation : single
       mutable Horizon : single
-      mutable AssetTag : obj AssetTag
+      mutable AssetTag : AssetTag
       mutable RenderOperation2d : RenderOperation2d }
 
 /// A message to a 2d rendering subsystem.
@@ -156,7 +157,8 @@ type [<ReferenceEquality>] GlRenderer2d =
           SpriteBatchEnv : OpenGL.SpriteBatch.SpriteBatchEnv
           RenderPackages : Packages<RenderAsset, GlPackageState2d>
           mutable RenderPackageCachedOpt : string * Package<RenderAsset, GlPackageState2d> // OPTIMIZATION: nullable for speed.
-          mutable RenderAssetCachedOpt : obj AssetTag * RenderAsset
+          mutable RenderAssetCachedOpt : AssetTag * RenderAsset
+          mutable ReloadAssetsRequested : bool
           LayeredOperations : LayeredOperation2d List }
 
     static member private invalidateCaches renderer =
@@ -167,13 +169,13 @@ type [<ReferenceEquality>] GlRenderer2d =
         GlRenderer2d.invalidateCaches renderer
         match renderAsset with
         | RawAsset _ -> ()
-        | TextureAsset (_, texture) -> OpenGL.Texture.Texture.destroy texture
+        | TextureAsset (_, texture) -> OpenGL.Texture.DestroyTexture texture
         | FontAsset (_, font) -> SDL_ttf.TTF_CloseFont font
         | CubeMapAsset _ -> ()
         | StaticModelAsset _ -> ()
         | AnimatedModelAsset _ -> ()
 
-    static member private tryLoadRenderAsset packageState (asset : obj Asset) renderer =
+    static member private tryLoadRenderAsset packageState (asset : Asset) renderer =
         GlRenderer2d.invalidateCaches renderer
         match PathF.GetExtensionLower asset.FilePath with
         | ".bmp" | ".png" | ".jpg" | ".jpeg" | ".tga" | ".tif" | ".tiff" ->
@@ -197,13 +199,13 @@ type [<ReferenceEquality>] GlRenderer2d =
             else Log.info ("Could not load font '" + asset.FilePath + "'."); None
         | _ -> None
 
-    static member private tryLoadRenderPackage reloading packageName renderer =
+    static member private tryLoadRenderPackage packageName renderer =
 
         // attempt to make new asset graph and load its assets
         match AssetGraph.tryMakeFromFile Assets.Global.AssetGraphFilePath with
         | Right assetGraph ->
             match AssetGraph.tryCollectAssetsFromPackage (Some Constants.Associations.Render2d) packageName assetGraph with
-            | Right assets ->
+            | Right assetsCollected ->
 
                 // find or create render package
                 let renderPackage =
@@ -215,32 +217,58 @@ type [<ReferenceEquality>] GlRenderer2d =
                         renderer.RenderPackages.[packageName] <- renderPackage
                         renderPackage
 
-                // free assets if specified
-                if reloading then
+                // categorize existing assets based on the required action
+                let assetsExisting = renderPackage.Assets
+                let assetsToFree = Dictionary ()
+                let assetsToKeep = Dictionary ()
+                for assetEntry in assetsExisting do
+                    let assetName = assetEntry.Key
+                    let (lastWriteTime, filePath, renderAsset) = assetEntry.Value
+                    let lastWriteTime' =
+                        try File.GetLastWriteTime filePath
+                        with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTime ()
+                    if lastWriteTime < lastWriteTime'
+                    then assetsToFree.Add (filePath, renderAsset)
+                    else assetsToKeep.Add (assetName, (lastWriteTime, filePath, renderAsset))
 
-                    // clear package
-                    renderPackage.Assets.Clear ()
+                // free assets, including memo entries
+                for assetEntry in assetsToFree do
+                    let filePath = assetEntry.Key
+                    let renderAsset = assetEntry.Value
+                    match renderAsset with
+                    | RawAsset -> ()
+                    | TextureAsset _ -> renderPackage.PackageState.TextureMemo.Textures.Remove filePath |> ignore<bool>
+                    | FontAsset _ -> ()
+                    | CubeMapAsset (cubeMapKey, _, _) -> renderPackage.PackageState.CubeMapMemo.CubeMaps.Remove cubeMapKey |> ignore<bool>
+                    | StaticModelAsset _ | AnimatedModelAsset _ -> renderPackage.PackageState.AssimpSceneMemo.AssimpScenes.Remove filePath |> ignore<bool>
+                    GlRenderer2d.freeRenderAsset renderAsset renderer
 
-                    // clear memos
-                    renderPackage.PackageState.TextureMemo.Textures.Clear ()
-                    renderPackage.PackageState.CubeMapMemo.CubeMaps.Clear ()
-                    renderPackage.PackageState.AssimpSceneMemo.AssimpScenes.Clear ()
-
-                    // free assets
-                    for asset in assets do
-                        match renderPackage.Assets.TryGetValue asset.AssetTag.AssetName with
-                        | (true, (_, renderAsset)) -> GlRenderer2d.freeRenderAsset renderAsset renderer
-                        | (false, _) -> ()
+                // categorize assets to load
+                let assetsToLoad = HashSet ()
+                for asset in assetsCollected do
+                    if not (assetsToKeep.ContainsKey asset.AssetTag.AssetName) then
+                        assetsToLoad.Add asset |> ignore<bool>
 
                 // memoize assets in parallel
                 AssetMemo.memoizeParallel
-                    true assets renderPackage.PackageState.TextureMemo renderPackage.PackageState.CubeMapMemo renderPackage.PackageState.AssimpSceneMemo
+                    true assetsToLoad renderPackage.PackageState.TextureMemo renderPackage.PackageState.CubeMapMemo renderPackage.PackageState.AssimpSceneMemo
 
                 // load assets
-                for asset in assets do
+                let assetsLoaded = Dictionary ()
+                for asset in assetsToLoad do
                     match GlRenderer2d.tryLoadRenderAsset renderPackage.PackageState asset renderer with
-                    | Some renderAsset -> renderPackage.Assets.[asset.AssetTag.AssetName] <- (asset.FilePath, renderAsset)
+                    | Some renderAsset ->
+                        let lastWriteTime =
+                            try File.GetLastWriteTime asset.FilePath
+                            with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTime ()
+                        assetsLoaded.[asset.AssetTag.AssetName] <- (lastWriteTime, asset.FilePath, renderAsset)
                     | None -> ()
+
+                // insert assets into package
+                for assetEntry in Seq.append assetsToKeep assetsLoaded do
+                    let assetName = assetEntry.Key
+                    let (lastWriteTime, filePath, renderAsset) = assetEntry.Value
+                    renderPackage.Assets.[assetName] <- (lastWriteTime, filePath, renderAsset)
 
             // handle error cases
             | Left failedAssetNames ->
@@ -248,7 +276,7 @@ type [<ReferenceEquality>] GlRenderer2d =
         | Left error ->
             Log.info ("Render package load failed due to unloadable asset graph due to: '" + error)
 
-    static member tryGetRenderAsset (assetTag : obj AssetTag) renderer =
+    static member tryGetRenderAsset (assetTag : AssetTag) renderer =
         if  renderer.RenderAssetCachedOpt :> obj |> notNull &&
             assetEq assetTag (fst renderer.RenderAssetCachedOpt) then
             ValueSome (snd renderer.RenderAssetCachedOpt)
@@ -257,7 +285,7 @@ type [<ReferenceEquality>] GlRenderer2d =
             fst renderer.RenderPackageCachedOpt = assetTag.PackageName then
             let package = snd renderer.RenderPackageCachedOpt
             match package.Assets.TryGetValue assetTag.AssetName with
-            | (true, (_, asset)) ->
+            | (true, (_, _, asset)) ->
                 renderer.RenderAssetCachedOpt <- (assetTag, asset)
                 ValueSome asset
             | (false, _) -> ValueNone
@@ -266,18 +294,18 @@ type [<ReferenceEquality>] GlRenderer2d =
             | Some package ->
                 renderer.RenderPackageCachedOpt <- (assetTag.PackageName, package)
                 match package.Assets.TryGetValue assetTag.AssetName with
-                | (true, (_, asset)) ->
+                | (true, (_, _, asset)) ->
                     renderer.RenderAssetCachedOpt <- (assetTag, asset)
                     ValueSome asset
                 | (false, _) -> ValueNone
             | None ->
                 Log.info ("Loading Render2d package '" + assetTag.PackageName + "' for asset '" + assetTag.AssetName + "' on the fly.")
-                GlRenderer2d.tryLoadRenderPackage false assetTag.PackageName renderer
+                GlRenderer2d.tryLoadRenderPackage assetTag.PackageName renderer
                 match renderer.RenderPackages.TryGetValue assetTag.PackageName with
                 | (true, package) ->
                     renderer.RenderPackageCachedOpt <- (assetTag.PackageName, package)
                     match package.Assets.TryGetValue assetTag.AssetName with
-                    | (true, (_, asset)) ->
+                    | (true, (_, _, asset)) ->
                         renderer.RenderAssetCachedOpt <- (assetTag, asset)
                         ValueSome asset
                     | (false, _) -> ValueNone
@@ -290,7 +318,7 @@ type [<ReferenceEquality>] GlRenderer2d =
         GlRenderer2d.invalidateCaches renderer
         match Dictionary.tryFind hintPackageName renderer.RenderPackages with
         | Some package ->
-            for asset in package.Assets do GlRenderer2d.freeRenderAsset (snd asset.Value) renderer
+            for asset in package.Assets do GlRenderer2d.freeRenderAsset (__c asset.Value) renderer
             renderer.RenderPackages.Remove hintPackageName |> ignore
         | None -> ()
 
@@ -298,14 +326,14 @@ type [<ReferenceEquality>] GlRenderer2d =
         GlRenderer2d.invalidateCaches renderer
         let packageNames = renderer.RenderPackages |> Seq.map (fun entry -> entry.Key) |> Array.ofSeq
         for packageName in packageNames do
-            GlRenderer2d.tryLoadRenderPackage true packageName renderer
+            GlRenderer2d.tryLoadRenderPackage packageName renderer
 
     static member private handleRenderMessage renderMessage renderer =
         match renderMessage with
         | LayeredOperation2d operation -> renderer.LayeredOperations.Add operation
-        | LoadRenderPackage2d hintPackageUse -> GlRenderer2d.handleLoadRenderPackage false hintPackageUse renderer
+        | LoadRenderPackage2d hintPackageUse -> GlRenderer2d.handleLoadRenderPackage hintPackageUse renderer
         | UnloadRenderPackage2d hintPackageDisuse -> GlRenderer2d.handleUnloadRenderPackage hintPackageDisuse renderer
-        | ReloadRenderAssets2d -> GlRenderer2d.handleReloadRenderAssets renderer
+        | ReloadRenderAssets2d -> renderer.ReloadAssetsRequested <- true
 
     static member private handleRenderMessages renderMessages renderer =
         for renderMessage in renderMessages do
@@ -414,7 +442,6 @@ type [<ReferenceEquality>] GlRenderer2d =
         let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2
         let pivot = transform.PerimeterPivot.V2 * Constants.Render.VirtualScalar2
         let rotation = -transform.Angles.Z
-        let image = AssetTag.generalize image
         match GlRenderer2d.tryGetRenderAsset image renderer with
         | ValueSome renderAsset ->
             match renderAsset with
@@ -425,7 +452,6 @@ type [<ReferenceEquality>] GlRenderer2d =
 
     /// Render sprite particles.
     static member renderSpriteParticles (blend : Blend, image : Image AssetTag, particles : Particle SArray, renderer) =
-        let image = AssetTag.generalize image
         match GlRenderer2d.tryGetRenderAsset image renderer with
         | ValueSome renderAsset ->
             match renderAsset with
@@ -475,7 +501,7 @@ type [<ReferenceEquality>] GlRenderer2d =
         let (allFound, tileSetTextures) =
             tileAssets |>
             Array.map (fun (tileSet, tileSetImage) ->
-                match GlRenderer2d.tryGetRenderAsset (AssetTag.generalize tileSetImage) renderer with
+                match GlRenderer2d.tryGetRenderAsset tileSetImage renderer with
                 | ValueSome (TextureAsset (tileSetTexture, tileSetTextureMetadata)) -> Some (tileSet, tileSetImage, tileSetTexture, tileSetTextureMetadata)
                 | ValueSome _ -> None
                 | ValueNone -> None) |>
@@ -568,7 +594,6 @@ type [<ReferenceEquality>] GlRenderer2d =
                 let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2
                 let viewport = Constants.Render.Viewport
                 let viewProjection = viewport.ViewProjection2d (absolute, eyeCenter, eyeSize)
-                let font = AssetTag.generalize font
                 match GlRenderer2d.tryGetRenderAsset font renderer with
                 | ValueSome renderAsset ->
                     match renderAsset with
@@ -641,7 +666,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                             OpenGL.Hl.Assert ()
 
                             // make texture drawable
-                            let textTexture = OpenGL.Texture.Texture.make textTextureId
+                            let textTexture = OpenGL.Texture.CreateTextureFromId textTextureId
                             OpenGL.Hl.Assert ()
 
                             // draw text sprite
@@ -653,7 +678,7 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                             // destroy texture
                             SDL.SDL_FreeSurface textSurfacePtr
-                            OpenGL.Texture.Texture.destroy textTexture
+                            OpenGL.Texture.DestroyTexture textTexture
                             OpenGL.Hl.Assert ()
 
                     // fin
@@ -721,6 +746,12 @@ type [<ReferenceEquality>] GlRenderer2d =
         OpenGL.SpriteBatch.EndSpriteBatchFrame renderer.SpriteBatchEnv
         OpenGL.Hl.Assert ()
 
+        // reload render assets upon request
+        if renderer.ReloadAssetsRequested then
+            GlRenderer2d.handleReloadRenderAssets renderer
+            OpenGL.Hl.Assert ()
+            renderer.ReloadAssetsRequested <- false
+
     /// Make a GlRenderer2d.
     static member make window =
 
@@ -744,6 +775,7 @@ type [<ReferenceEquality>] GlRenderer2d =
               RenderPackages = dictPlus StringComparer.Ordinal []
               RenderPackageCachedOpt = Unchecked.defaultof<_>
               RenderAssetCachedOpt = Unchecked.defaultof<_>
+              ReloadAssetsRequested = false
               LayeredOperations = List () }
 
         // fin
@@ -763,5 +795,5 @@ type [<ReferenceEquality>] GlRenderer2d =
             OpenGL.Hl.Assert ()
             let renderPackages = renderer.RenderPackages |> Seq.map (fun entry -> entry.Value)
             let renderAssets = renderPackages |> Seq.map (fun package -> package.Assets.Values) |> Seq.concat
-            for (_, renderAsset) in renderAssets do GlRenderer2d.freeRenderAsset renderAsset renderer
+            for (_, _, renderAsset) in renderAssets do GlRenderer2d.freeRenderAsset renderAsset renderer
             renderer.RenderPackages.Clear ()

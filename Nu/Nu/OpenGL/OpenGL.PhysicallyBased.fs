@@ -25,8 +25,7 @@ module PhysicallyBased =
 
     /// Describes a physically-based material.
     type [<Struct>] PhysicallyBasedMaterial =
-        { MaterialProperties : PhysicallyBasedMaterialProperties
-          AlbedoMetadata : Texture.TextureMetadata
+        { AlbedoMetadata : Texture.TextureMetadata
           AlbedoTexture : Texture.Texture
           RoughnessTexture : Texture.Texture
           MetallicTexture : Texture.Texture
@@ -44,11 +43,7 @@ module PhysicallyBased =
           Vertices : Vector3 array
           Indices : int array
           VertexBuffer : uint
-          ModelBuffer : uint
-          TexCoordsOffsetBuffer : uint
-          AlbedoBuffer : uint
-          MaterialBuffer : uint
-          HeightBuffer : uint
+          InstanceBuffer : uint
           IndexBuffer : uint
           PhysicallyBasedVao : uint }
 
@@ -56,44 +51,39 @@ module PhysicallyBased =
     type [<CustomEquality; NoComparison>] PhysicallyBasedSurface =
         { HashCode : int
           SurfaceNames : string array
-          SurfaceMetadata : IReadOnlyDictionary<string, Assimp.Metadata.Entry>
           SurfaceMatrixIsIdentity : bool // OPTIMIZATION: avoid matrix multiply when unnecessary.
           SurfaceMatrix : Matrix4x4
           SurfaceBounds : Box3
+          SurfaceMaterialProperties : PhysicallyBasedMaterialProperties
           SurfaceMaterial : PhysicallyBasedMaterial
+          SurfaceMaterialIndex : int
+          SurfaceNode : Assimp.Node
           PhysicallyBasedGeometry : PhysicallyBasedGeometry }
 
-        member this.RenderStyleOpt =
-            if  this.SurfaceMetadata.ContainsKey Constants.Render.DeferredName ||
-                this.SurfaceNames.Length > 0 && (Array.last this.SurfaceNames).EndsWith Constants.Render.DeferredName then
-                Some Deferred
-            elif 
-                this.SurfaceMetadata.ContainsKey Constants.Render.ForwardName ||
-                this.SurfaceNames.Length > 0 && (Array.last this.SurfaceNames).EndsWith Constants.Render.ForwardName then
-                Some (Forward (0.0f, 0.0f)) // TODO: consider also parsing out the sorting parameters as well?
-            else
-                match this.SurfaceMetadata.TryGetValue "RenderStyle" with
-                | (true, entry) ->
-                    match entry.DataType with
-                    | Assimp.MetaDataType.String ->
-                        try entry.Data :?> string |> scvalueMemo |> Some
-                        with _ -> None
-                    | _ -> None
-                | (false, _) -> None
+        static member extractPresence presenceDefault (sceneOpt : Assimp.Scene option) surface =
+            match surface.SurfaceNode.PresenceOpt with
+            | None ->
+                match sceneOpt with
+                | Some scene when surface.SurfaceMaterialIndex < scene.Materials.Count ->
+                    let material = scene.Materials.[surface.SurfaceMaterialIndex]
+                    Option.defaultValue presenceDefault material.PresenceOpt
+                | Some _ | None -> presenceDefault
+            | Some presence -> presence
+
+        static member extractRenderStyle renderStyleDefault (sceneOpt : Assimp.Scene option) surface =
+            match surface.SurfaceNode.RenderStyleOpt with
+            | None ->
+                match sceneOpt with
+                | Some scene when surface.SurfaceMaterialIndex < scene.Materials.Count ->
+                    let material = scene.Materials.[surface.SurfaceMaterialIndex]
+                    Option.defaultValue renderStyleDefault material.RenderStyleOpt
+                | Some _ | None -> renderStyleDefault
+            | Some renderStyle -> renderStyle
 
         static member inline hash surface =
-            (int surface.SurfaceMaterial.AlbedoTexture.TextureId) ^^^
-            (int surface.SurfaceMaterial.RoughnessTexture.TextureId <<< 2) ^^^
-            (int surface.SurfaceMaterial.MetallicTexture.TextureId <<< 4) ^^^
-            (int surface.SurfaceMaterial.AmbientOcclusionTexture.TextureId <<< 6) ^^^
-            (int surface.SurfaceMaterial.EmissionTexture.TextureId <<< 8) ^^^
-            (int surface.SurfaceMaterial.NormalTexture.TextureId <<< 10) ^^^
-            (int surface.SurfaceMaterial.HeightTexture.TextureId <<< 12) ^^^
-            (hash surface.SurfaceMaterial.TwoSided <<< 14) ^^^
-            (int surface.PhysicallyBasedGeometry.PrimitiveType <<< 16) ^^^
-            (int surface.PhysicallyBasedGeometry.PhysicallyBasedVao <<< 18)
+            surface.HashCode
 
-        static member inline equals left right =
+        static member equals left right =
             left.SurfaceMaterial.AlbedoTexture.TextureId = right.SurfaceMaterial.AlbedoTexture.TextureId &&
             left.SurfaceMaterial.RoughnessTexture.TextureId = right.SurfaceMaterial.RoughnessTexture.TextureId &&
             left.SurfaceMaterial.MetallicTexture.TextureId = right.SurfaceMaterial.MetallicTexture.TextureId &&
@@ -105,17 +95,28 @@ module PhysicallyBased =
             left.PhysicallyBasedGeometry.PrimitiveType = right.PhysicallyBasedGeometry.PrimitiveType &&
             left.PhysicallyBasedGeometry.PhysicallyBasedVao = right.PhysicallyBasedGeometry.PhysicallyBasedVao
 
-        static member internal make names metadata (surfaceMatrix : Matrix4x4) bounds material geometry =
-            let result =
-                { HashCode = 0
-                  SurfaceNames = names
-                  SurfaceMetadata = metadata
-                  SurfaceMatrixIsIdentity = surfaceMatrix.IsIdentity
-                  SurfaceMatrix = surfaceMatrix
-                  SurfaceBounds = bounds
-                  SurfaceMaterial = material
-                  PhysicallyBasedGeometry = geometry }
-            { result with HashCode = PhysicallyBasedSurface.hash result }
+        static member make names (surfaceMatrix : Matrix4x4) bounds properties material materialIndex surfaceNode geometry =
+            let hashCode =
+                (int material.AlbedoTexture.TextureId) ^^^
+                (int material.RoughnessTexture.TextureId <<< 2) ^^^
+                (int material.MetallicTexture.TextureId <<< 4) ^^^
+                (int material.AmbientOcclusionTexture.TextureId <<< 6) ^^^
+                (int material.EmissionTexture.TextureId <<< 8) ^^^
+                (int material.NormalTexture.TextureId <<< 10) ^^^
+                (int material.HeightTexture.TextureId <<< 12) ^^^
+                (hash material.TwoSided <<< 14) ^^^
+                (int geometry.PrimitiveType <<< 16) ^^^
+                (int geometry.PhysicallyBasedVao <<< 18)
+            { HashCode = hashCode
+              SurfaceNames = names
+              SurfaceMatrixIsIdentity = surfaceMatrix.IsIdentity
+              SurfaceMatrix = surfaceMatrix
+              SurfaceBounds = bounds
+              SurfaceMaterialProperties = properties
+              SurfaceMaterial = material
+              SurfaceMaterialIndex = materialIndex
+              SurfaceNode = surfaceNode
+              PhysicallyBasedGeometry = geometry }
 
         member this.Equals that =
             PhysicallyBasedSurface.equals this that
@@ -127,6 +128,13 @@ module PhysicallyBased =
 
         override this.GetHashCode () =
             this.HashCode
+
+    module internal PhysicallyBasedSurfaceFns =
+        let extractPresence = PhysicallyBasedSurface.extractPresence
+        let extractRenderStyle = PhysicallyBasedSurface.extractRenderStyle
+        let hash = PhysicallyBasedSurface.hash
+        let equals = PhysicallyBasedSurface.equals
+        let comparer = HashIdentity.FromFunctions hash equals
 
     /// A light probe inside a physically-based static model.
     type PhysicallyBasedLightProbe =
@@ -221,7 +229,7 @@ module PhysicallyBased =
     /// Describes a light mapping pass of a deferred physically-based shader that's loaded into GPU.
     type PhysicallyBasedDeferredLightMappingShader =
         { PositionTextureUniform : int
-          NormalAndHeightTextureUniform : int
+          NormalPlusTextureUniform : int
           LightMapOriginsUniform : int
           LightMapMinsUniform : int
           LightMapSizesUniform : int
@@ -230,7 +238,7 @@ module PhysicallyBased =
 
     /// Describes an irradiance pass of a deferred physically-based shader that's loaded into GPU.
     type PhysicallyBasedDeferredIrradianceShader =
-        { NormalAndHeightTextureUniform : int
+        { NormalPlusTextureUniform : int
           LightMappingTextureUniform : int
           IrradianceMapUniform : int
           IrradianceMapsUniforms : int array
@@ -241,7 +249,7 @@ module PhysicallyBased =
         { EyeCenterUniform : int
           PositionTextureUniform : int
           MaterialTextureUniform : int
-          NormalAndHeightTextureUniform : int
+          NormalPlusTextureUniform : int
           LightMappingTextureUniform : int
           EnvironmentFilterMapUniform : int
           EnvironmentFilterMapsUniforms : int array
@@ -255,7 +263,7 @@ module PhysicallyBased =
         { ViewUniform : int
           ProjectionUniform : int
           PositionTextureUniform : int
-          NormalAndHeightTextureUniform : int
+          NormalPlusTextureUniform : int
           SsaoResolution : int
           SsaoIntensity : int
           SsaoBias : int
@@ -272,7 +280,7 @@ module PhysicallyBased =
           PositionTextureUniform : int
           AlbedoTextureUniform : int
           MaterialTextureUniform : int
-          NormalAndHeightTextureUniform : int
+          NormalPlusTextureUniform : int
           BrdfTextureUniform : int
           IrradianceTextureUniform : int
           EnvironmentFilterTextureUniform : int
@@ -519,6 +527,12 @@ module PhysicallyBased =
                         | Left _ -> defaultMaterial.HeightTexture
             else defaultMaterial.HeightTexture
 
+        // compute two-sidedness
+        let twoSided =
+            match material.TwoSidedOpt with
+            | Some twoSided -> twoSided
+            | None -> material.IsTwoSided
+
         // make properties
         let properties =
             { Albedo = color albedo.R albedo.G albedo.B albedo.A
@@ -528,20 +542,23 @@ module PhysicallyBased =
               Emission = emission
               Height = height }
 
+        // make material
+        let material =
+            { AlbedoMetadata = albedoMetadata
+              AlbedoTexture = albedoTexture
+              RoughnessTexture = roughnessTexture
+              MetallicTexture = metallicTexture
+              AmbientOcclusionTexture = ambientOcclusionTexture
+              EmissionTexture = emissionTexture
+              NormalTexture = normalTexture
+              HeightTexture = heightTexture
+              TwoSided = twoSided }
+
         // fin
-        { MaterialProperties = properties
-          AlbedoMetadata = albedoMetadata
-          AlbedoTexture = albedoTexture
-          RoughnessTexture = roughnessTexture
-          MetallicTexture = metallicTexture
-          AmbientOcclusionTexture = ambientOcclusionTexture
-          EmissionTexture = emissionTexture
-          NormalTexture = normalTexture
-          HeightTexture = heightTexture
-          TwoSided = material.IsTwoSided }
+        (properties, material)
 
     /// Attempt to create physically-based static mesh from an assimp mesh.
-    let TryCreatePhysicallyBasedStaticMesh (mesh : Assimp.Mesh) =
+    let TryCreatePhysicallyBasedStaticMesh (indexData, mesh : Assimp.Mesh) =
 
         // ensure required data is available
         if  mesh.HasVertices &&
@@ -576,16 +593,6 @@ module PhysicallyBased =
                     positionMax.Z <- max positionMax.Z position.Z
                 let bounds = box3 positionMin (positionMax - positionMin)
 
-                // populate triangle index data
-                let indexList = SList.make ()
-                for face in mesh.Faces do
-                    let indices = face.Indices
-                    if indices.Count = 3 then
-                        indexList.Add indices.[0]
-                        indexList.Add indices.[1]
-                        indexList.Add indices.[2]
-                let indexData = Seq.toArray indexList
-
                 // fin
                 Right (vertexData, indexData, bounds)
                     
@@ -596,7 +603,7 @@ module PhysicallyBased =
         else Left "Mesh is missing vertices, normals, or texCoords."
 
     /// Attempt to create physically-based animated mesh from an assimp mesh.
-    let TryCreatePhysicallyBasedAnimatedMesh (mesh : Assimp.Mesh) =
+    let TryCreatePhysicallyBasedAnimatedMesh (indexData, mesh : Assimp.Mesh) =
 
         // ensure required data is available
         if  mesh.HasVertices &&
@@ -658,16 +665,6 @@ module PhysicallyBased =
                                     vertexData.[v+12+i] <- weight
                                     found <- true
                                 else i <- inc i
-
-                // populate triangle index data
-                let indexList = SList.make ()
-                for face in mesh.Faces do
-                    let indices = face.Indices
-                    if indices.Count = 3 then
-                        indexList.Add indices.[0]
-                        indexList.Add indices.[1]
-                        indexList.Add indices.[2]
-                let indexData = Seq.toArray indexList
 
                 // fin
                 Right (vertexData, indexData, bounds)
@@ -820,7 +817,7 @@ module PhysicallyBased =
     let CreatePhysicallyBasedStaticGeometry (renderable, primitiveType, vertexData : single Memory, indexData : int Memory, bounds) =
 
         // make buffers
-        let (vertices, indices, vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao) =
+        let (vertices, indices, vertexBuffer, instanceBuffer, indexBuffer, vao) =
 
             // make renderable
             if renderable then
@@ -847,67 +844,36 @@ module PhysicallyBased =
                 Gl.VertexAttribPointer (2u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint normalOffset)
                 Hl.Assert ()
 
-                // create model buffer
-                let modelBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, modelBuffer)
-                let modelDataPtr = GCHandle.Alloc (m4Identity.ToArray (), GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (16 * sizeof<single>), modelDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally modelDataPtr.Free ()
+                // create instance buffer
+                let instanceBuffer = Gl.GenBuffer ()
+                let strideSize = 30 * sizeof<single>
+                Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
+                let instanceDataPtr = GCHandle.Alloc (m4Identity.ToArray (), GCHandleType.Pinned)
+                try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+                finally instanceDataPtr.Free ()
                 Gl.EnableVertexAttribArray 3u
-                Gl.VertexAttribPointer (3u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (3u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint 0)
                 Gl.VertexAttribDivisor (3u, 1u)
                 Gl.EnableVertexAttribArray 4u
-                Gl.VertexAttribPointer (4u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint (4 * sizeof<single>))
+                Gl.VertexAttribPointer (4u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (4 * sizeof<single>))
                 Gl.VertexAttribDivisor (4u, 1u)
                 Gl.EnableVertexAttribArray 5u
-                Gl.VertexAttribPointer (5u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint (8 * sizeof<single>))
+                Gl.VertexAttribPointer (5u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (8 * sizeof<single>))
                 Gl.VertexAttribDivisor (5u, 1u)
                 Gl.EnableVertexAttribArray 6u
-                Gl.VertexAttribPointer (6u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint (12 * sizeof<single>))
+                Gl.VertexAttribPointer (6u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (12 * sizeof<single>))
                 Gl.VertexAttribDivisor (6u, 1u)
-                Hl.Assert ()
-
-                // create tex coords offset buffer
-                let texCoordsOffsetBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, texCoordsOffsetBuffer)
-                let texCoordsOffsetDataPtr = GCHandle.Alloc ([|0.0f; 0.0f; 0.0f; 0.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), texCoordsOffsetDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally texCoordsOffsetDataPtr.Free ()
                 Gl.EnableVertexAttribArray 7u
-                Gl.VertexAttribPointer (7u, 4, VertexAttribPointerType.Float, false, 4 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (7u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (16 * sizeof<single>))
                 Gl.VertexAttribDivisor (7u, 1u)
-                Hl.Assert ()
-
-                // create albedo buffer
-                let albedoBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, albedoBuffer)
-                let albedoDataPtr = GCHandle.Alloc ([|1.0f; 1.0f; 1.0f; 1.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), albedoDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally albedoDataPtr.Free ()
                 Gl.EnableVertexAttribArray 8u
-                Gl.VertexAttribPointer (8u, 4, VertexAttribPointerType.Float, false, 4 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (8u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (20 * sizeof<single>))
                 Gl.VertexAttribDivisor (8u, 1u)
-                Hl.Assert ()
-
-                // create material buffer (used for roughness, metallic, ambient occlusion, and emission in that order)
-                let materialBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, materialBuffer)
-                let materialDataPtr = GCHandle.Alloc ([|1.0f; 1.0f; 1.0f; 1.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), materialDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally materialDataPtr.Free ()
                 Gl.EnableVertexAttribArray 9u
-                Gl.VertexAttribPointer (9u, 4, VertexAttribPointerType.Float, false, 4 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (9u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (24 * sizeof<single>))
                 Gl.VertexAttribDivisor (9u, 1u)
-                Hl.Assert ()
-
-                // create height buffer
-                let heightBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, heightBuffer)
-                let heightDataPtr = GCHandle.Alloc ([|1.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (sizeof<single>), heightDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally heightDataPtr.Free ()
                 Gl.EnableVertexAttribArray 10u
-                Gl.VertexAttribPointer (10u, 1, VertexAttribPointerType.Float, false, sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (10u, 2, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
                 Gl.VertexAttribDivisor (10u, 1u)
                 Hl.Assert ()
 
@@ -925,7 +891,7 @@ module PhysicallyBased =
                 Hl.Assert ()
 
                 // fin
-                ([||], [||], vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao)
+                ([||], [||], vertexBuffer, instanceBuffer, indexBuffer, vao)
 
             // fake buffers
             else
@@ -942,7 +908,7 @@ module PhysicallyBased =
                 let indices = indexData.ToArray ()
 
                 // fin
-                (vertices, indices, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u)
+                (vertices, indices, 0u, 0u, 0u, 0u)
 
         // make physically-based geometry
         let geometry =
@@ -952,11 +918,7 @@ module PhysicallyBased =
               Vertices = vertices
               Indices = indices
               VertexBuffer = vertexBuffer
-              ModelBuffer = modelBuffer
-              TexCoordsOffsetBuffer = texCoordsOffsetBuffer
-              AlbedoBuffer = albedoBuffer
-              MaterialBuffer = materialBuffer
-              HeightBuffer = heightBuffer
+              InstanceBuffer = instanceBuffer
               IndexBuffer = indexBuffer
               PhysicallyBasedVao = vao }
 
@@ -964,8 +926,8 @@ module PhysicallyBased =
         geometry
 
     /// Attempt to create physically-based static geometry from an assimp mesh.
-    let TryCreatePhysicallyBasedStaticGeometry (renderable, mesh : Assimp.Mesh) =
-        match TryCreatePhysicallyBasedStaticMesh mesh with
+    let TryCreatePhysicallyBasedStaticGeometry (renderable, indexData, mesh : Assimp.Mesh) =
+        match TryCreatePhysicallyBasedStaticMesh (indexData, mesh) with
         | Right (vertexData, indexData, bounds) -> Right (CreatePhysicallyBasedStaticGeometry (renderable, PrimitiveType.Triangles, vertexData.AsMemory (), indexData.AsMemory (), bounds))
         | Left error -> Left error
 
@@ -973,7 +935,7 @@ module PhysicallyBased =
     let CreatePhysicallyBasedAnimatedGeometry (renderable, primitiveType, vertexData : single Memory, indexData : int Memory, bounds) =
 
         // make buffers
-        let (vertices, indices, vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao) =
+        let (vertices, indices, vertexBuffer, instanceBuffer, indexBuffer, vao) =
 
             // make renderable
             if renderable then
@@ -1006,67 +968,36 @@ module PhysicallyBased =
                 Gl.VertexAttribPointer (4u, 4, VertexAttribPointerType.Float, false, vertexSize, nativeint weightsOffset)
                 Hl.Assert ()
 
-                // create model buffer
-                let modelBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, modelBuffer)
-                let modelDataPtr = GCHandle.Alloc (m4Identity.ToArray (), GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (16 * sizeof<single>), modelDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally modelDataPtr.Free ()
+                // create instance buffer
+                let instanceBuffer = Gl.GenBuffer ()
+                let strideSize = 30 * sizeof<single>
+                Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
+                let instanceDataPtr = GCHandle.Alloc (m4Identity.ToArray (), GCHandleType.Pinned)
+                try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+                finally instanceDataPtr.Free ()
                 Gl.EnableVertexAttribArray 5u
-                Gl.VertexAttribPointer (5u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (5u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint 0)
                 Gl.VertexAttribDivisor (5u, 1u)
                 Gl.EnableVertexAttribArray 6u
-                Gl.VertexAttribPointer (6u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint (4 * sizeof<single>))
+                Gl.VertexAttribPointer (6u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (4 * sizeof<single>))
                 Gl.VertexAttribDivisor (6u, 1u)
                 Gl.EnableVertexAttribArray 7u
-                Gl.VertexAttribPointer (7u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint (8 * sizeof<single>))
+                Gl.VertexAttribPointer (7u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (8 * sizeof<single>))
                 Gl.VertexAttribDivisor (7u, 1u)
                 Gl.EnableVertexAttribArray 8u
-                Gl.VertexAttribPointer (8u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint (12 * sizeof<single>))
+                Gl.VertexAttribPointer (8u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (12 * sizeof<single>))
                 Gl.VertexAttribDivisor (8u, 1u)
-                Hl.Assert ()
-
-                // create tex coords offset buffer
-                let texCoordsOffsetBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, texCoordsOffsetBuffer)
-                let texCoordsOffsetDataPtr = GCHandle.Alloc ([|0.0f; 0.0f; 0.0f; 0.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), texCoordsOffsetDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally texCoordsOffsetDataPtr.Free ()
                 Gl.EnableVertexAttribArray 9u
-                Gl.VertexAttribPointer (9u, 4, VertexAttribPointerType.Float, false, 4 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (9u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (16 * sizeof<single>))
                 Gl.VertexAttribDivisor (9u, 1u)
-                Hl.Assert ()
-
-                // create albedo buffer
-                let albedoBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, albedoBuffer)
-                let albedoDataPtr = GCHandle.Alloc ([|1.0f; 1.0f; 1.0f; 1.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), albedoDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally albedoDataPtr.Free ()
                 Gl.EnableVertexAttribArray 10u
-                Gl.VertexAttribPointer (10u, 4, VertexAttribPointerType.Float, false, 4 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (10u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (20 * sizeof<single>))
                 Gl.VertexAttribDivisor (10u, 1u)
-                Hl.Assert ()
-
-                // create material buffer (used for roughness, metallic, ambient occlusion, and emission in that order)
-                let materialBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, materialBuffer)
-                let materialDataPtr = GCHandle.Alloc ([|1.0f; 1.0f; 1.0f; 1.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), materialDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally materialDataPtr.Free ()
                 Gl.EnableVertexAttribArray 11u
-                Gl.VertexAttribPointer (11u, 4, VertexAttribPointerType.Float, false, 4 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (11u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (24 * sizeof<single>))
                 Gl.VertexAttribDivisor (11u, 1u)
-                Hl.Assert ()
-
-                // create height buffer
-                let heightBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, heightBuffer)
-                let heightDataPtr = GCHandle.Alloc ([|1.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (sizeof<single>), heightDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally heightDataPtr.Free ()
                 Gl.EnableVertexAttribArray 12u
-                Gl.VertexAttribPointer (12u, 1, VertexAttribPointerType.Float, false, sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (12u, 2, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
                 Gl.VertexAttribDivisor (12u, 1u)
                 Hl.Assert ()
 
@@ -1084,7 +1015,7 @@ module PhysicallyBased =
                 Hl.Assert ()
 
                 // fin
-                ([||], [||], vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao)
+                ([||], [||], vertexBuffer, instanceBuffer, indexBuffer, vao)
 
             // fake buffers
             else
@@ -1101,7 +1032,7 @@ module PhysicallyBased =
                 let indices = indexData.ToArray ()
 
                 // fin
-                (vertices, indices, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u)
+                (vertices, indices, 0u, 0u, 0u, 0u)
 
         // make physically-based geometry
         let geometry =
@@ -1111,11 +1042,7 @@ module PhysicallyBased =
               Vertices = vertices
               Indices = indices
               VertexBuffer = vertexBuffer
-              ModelBuffer = modelBuffer
-              TexCoordsOffsetBuffer = texCoordsOffsetBuffer
-              AlbedoBuffer = albedoBuffer
-              MaterialBuffer = materialBuffer
-              HeightBuffer = heightBuffer
+              InstanceBuffer = instanceBuffer
               IndexBuffer = indexBuffer
               PhysicallyBasedVao = vao }
 
@@ -1123,8 +1050,8 @@ module PhysicallyBased =
         geometry
 
     /// Attempt to create physically-based animated geometry from an assimp mesh.
-    let TryCreatePhysicallyBasedAnimatedGeometry (renderable, mesh : Assimp.Mesh) =
-        match TryCreatePhysicallyBasedAnimatedMesh mesh with
+    let TryCreatePhysicallyBasedAnimatedGeometry (renderable, indexData, mesh : Assimp.Mesh) =
+        match TryCreatePhysicallyBasedAnimatedMesh (indexData, mesh) with
         | Right (vertexData, indexData, bounds) -> Right (CreatePhysicallyBasedAnimatedGeometry (renderable, PrimitiveType.Triangles, vertexData.AsMemory (), indexData.AsMemory (), bounds))
         | Left error -> Left error
 
@@ -1132,7 +1059,7 @@ module PhysicallyBased =
     let CreatePhysicallyBasedTerrainGeometry (renderable, primitiveType, vertexData : single Memory, indexData : int Memory, bounds) =
 
         // make buffers
-        let (vertices, indices, vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao) =
+        let (vertices, indices, vertexBuffer, instanceBuffer, indexBuffer, vao) =
 
             // make renderable
             if renderable then
@@ -1168,67 +1095,36 @@ module PhysicallyBased =
                 Gl.VertexAttribPointer (5u, 4, VertexAttribPointerType.Float, false, vertexSize, nativeint blends2Offset)
                 Hl.Assert ()
 
-                // create model buffer
-                let modelBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, modelBuffer)
-                let modelDataPtr = GCHandle.Alloc (m4Identity.ToArray (), GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (16 * sizeof<single>), modelDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally modelDataPtr.Free ()
+                // create instance buffer
+                let instanceBuffer = Gl.GenBuffer ()
+                let strideSize = 30 * sizeof<single>
+                Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
+                let instanceDataPtr = GCHandle.Alloc (m4Identity.ToArray (), GCHandleType.Pinned)
+                try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+                finally instanceDataPtr.Free ()
                 Gl.EnableVertexAttribArray 6u
-                Gl.VertexAttribPointer (6u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (6u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint 0) // model fields
                 Gl.VertexAttribDivisor (6u, 1u)
                 Gl.EnableVertexAttribArray 7u
-                Gl.VertexAttribPointer (7u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint (4 * sizeof<single>))
+                Gl.VertexAttribPointer (7u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (4 * sizeof<single>))
                 Gl.VertexAttribDivisor (7u, 1u)
                 Gl.EnableVertexAttribArray 8u
-                Gl.VertexAttribPointer (8u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint (8 * sizeof<single>))
+                Gl.VertexAttribPointer (8u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (8 * sizeof<single>))
                 Gl.VertexAttribDivisor (8u, 1u)
                 Gl.EnableVertexAttribArray 9u
-                Gl.VertexAttribPointer (9u, 4, VertexAttribPointerType.Float, false, 16 * sizeof<single>, nativeint (12 * sizeof<single>))
+                Gl.VertexAttribPointer (9u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (12 * sizeof<single>))
                 Gl.VertexAttribDivisor (9u, 1u)
-                Hl.Assert ()
-
-                // create tex coords offset buffer
-                let texCoordsOffsetBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, texCoordsOffsetBuffer)
-                let texCoordsOffsetDataPtr = GCHandle.Alloc ([|0.0f; 0.0f; 0.0f; 0.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), texCoordsOffsetDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally texCoordsOffsetDataPtr.Free ()
                 Gl.EnableVertexAttribArray 10u
-                Gl.VertexAttribPointer (10u, 4, VertexAttribPointerType.Float, false, 4 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (10u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (16 * sizeof<single>))
                 Gl.VertexAttribDivisor (10u, 1u)
-                Hl.Assert ()
-
-                // create albedo buffer
-                let albedoBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, albedoBuffer)
-                let albedoDataPtr = GCHandle.Alloc ([|1.0f; 1.0f; 1.0f; 1.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), albedoDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally albedoDataPtr.Free ()
                 Gl.EnableVertexAttribArray 11u
-                Gl.VertexAttribPointer (11u, 4, VertexAttribPointerType.Float, false, 4 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (11u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (20 * sizeof<single>))
                 Gl.VertexAttribDivisor (11u, 1u)
-                Hl.Assert ()
-
-                // create material buffer (used for roughness, metallic, ambient occlusion, and emission in that order)
-                let materialBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, materialBuffer)
-                let materialDataPtr = GCHandle.Alloc ([|1.0f; 1.0f; 1.0f; 1.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), materialDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally materialDataPtr.Free ()
                 Gl.EnableVertexAttribArray 12u
-                Gl.VertexAttribPointer (12u, 4, VertexAttribPointerType.Float, false, 4 * sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (12u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (24 * sizeof<single>))
                 Gl.VertexAttribDivisor (12u, 1u)
-                Hl.Assert ()
-
-                // create height buffer
-                let heightBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, heightBuffer)
-                let heightDataPtr = GCHandle.Alloc ([|1.0f|], GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint (sizeof<single>), heightDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally heightDataPtr.Free ()
                 Gl.EnableVertexAttribArray 13u
-                Gl.VertexAttribPointer (13u, 1, VertexAttribPointerType.Float, false, sizeof<single>, nativeint 0)
+                Gl.VertexAttribPointer (13u, 2, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
                 Gl.VertexAttribDivisor (13u, 1u)
                 Hl.Assert ()
 
@@ -1246,7 +1142,7 @@ module PhysicallyBased =
                 Hl.Assert ()
 
                 // fin
-                ([||], [||], vertexBuffer, modelBuffer, texCoordsOffsetBuffer, albedoBuffer, materialBuffer, heightBuffer, indexBuffer, vao)
+                ([||], [||], vertexBuffer, instanceBuffer, indexBuffer, vao)
 
             // fake buffers
             else
@@ -1263,7 +1159,7 @@ module PhysicallyBased =
                 let indices = indexData.ToArray ()
 
                 // fin
-                (vertices, indices, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u)
+                (vertices, indices, 0u, 0u, 0u, 0u)
 
         // make physically-based geometry
         let geometry =
@@ -1273,11 +1169,7 @@ module PhysicallyBased =
               Vertices = vertices
               Indices = indices
               VertexBuffer = vertexBuffer
-              ModelBuffer = modelBuffer
-              TexCoordsOffsetBuffer = texCoordsOffsetBuffer
-              AlbedoBuffer = albedoBuffer
-              MaterialBuffer = materialBuffer
-              HeightBuffer = heightBuffer
+              InstanceBuffer = instanceBuffer
               IndexBuffer = indexBuffer
               PhysicallyBasedVao = vao }
 
@@ -1300,21 +1192,21 @@ module PhysicallyBased =
         CreatePhysicallyBasedStaticGeometry (renderable, PrimitiveType.Triangles, vertexData.AsMemory (), indexData.AsMemory (), bounds)
 
     /// Create a physically-based surface.
-    let CreatePhysicallyBasedSurface (surfaceNames, surfaceMetadata, surfaceMatrix, surfaceBounds, physicallyBasedMaterial, physicallyBasedGeometry) =
-        PhysicallyBasedSurface.make surfaceNames surfaceMetadata surfaceMatrix surfaceBounds physicallyBasedMaterial physicallyBasedGeometry
+    let CreatePhysicallyBasedSurface (surfaceNames, surfaceMetadata, surfaceMatrix, surfaceBounds, properties, material, materialIndex, geometry) =
+        PhysicallyBasedSurface.make surfaceNames surfaceMetadata surfaceMatrix surfaceBounds properties material materialIndex geometry
 
     /// Attempt to create physically-based material from an assimp scene.
     /// Thread-safe if renderable = false.
     let TryCreatePhysicallyBasedMaterials (renderable, dirPath, defaultMaterial, textureMemo, scene : Assimp.Scene) =
         let mutable errorOpt = None
-        let materials = Array.zeroCreate scene.Materials.Count
+        let propertiesAndMaterials = Array.zeroCreate scene.Materials.Count
         for i in 0 .. dec scene.Materials.Count do
             if Option.isNone errorOpt then
-                let material = CreatePhysicallyBasedMaterial (renderable, dirPath, defaultMaterial, textureMemo, scene.Materials.[i])
-                materials.[i] <- material
+                let (properties, material) = CreatePhysicallyBasedMaterial (renderable, dirPath, defaultMaterial, textureMemo, scene.Materials.[i])
+                propertiesAndMaterials.[i] <- (properties, material)
         match errorOpt with
         | Some error -> Left error
-        | None -> Right materials
+        | None -> Right propertiesAndMaterials
 
     /// Attempt to create physically-based static geometries from an assimp scene.
     /// OPTIMIZATION: duplicate geometry is detected and de-duplicated here, which does have some run-time cost.
@@ -1322,7 +1214,10 @@ module PhysicallyBased =
         let meshAndGeometryLists = Dictionary<int * int * Assimp.BoundingBox, (Assimp.Mesh * PhysicallyBasedGeometry) List> HashIdentity.Structural
         let mutable errorOpt = None
         let geometries = SList.make ()
-        for mesh in scene.Meshes do
+        for i in 0 .. dec scene.Meshes.Count do
+            let indexDataEntry = scene.Metadata.["IndexData" + string i]
+            let indexData = indexDataEntry.Data :?> int array
+            let mesh = scene.Meshes.[i]
             if Option.isNone errorOpt then
                 let mutable found = false
                 let meshAndGeometryListOpt = Dictionary.tryFind (mesh.VertexCount, mesh.FaceCount, mesh.BoundingBox) meshAndGeometryLists
@@ -1338,7 +1233,7 @@ module PhysicallyBased =
                             found <- true
                 | None -> ()
                 if not found then
-                    match TryCreatePhysicallyBasedStaticGeometry (renderable, mesh) with
+                    match TryCreatePhysicallyBasedStaticGeometry (renderable, indexData, mesh) with
                     | Right geometry ->
                         match meshAndGeometryListOpt with
                         | Some meshesAndGeometries -> meshesAndGeometries.Add (mesh, geometry)
@@ -1350,12 +1245,16 @@ module PhysicallyBased =
         | None -> Right geometries
 
     /// Attempt to create physically-based animated geometries from an assimp scene.
+    /// TODO: consider deduplicating geometry like in TryCreatePhysicallyBasedStaticGeometries?
     let TryCreatePhysicallyBasedAnimatedGeometries (renderable, filePath, scene : Assimp.Scene) =
         let mutable errorOpt = None
         let geometries = SList.make ()
-        for mesh in scene.Meshes do
+        for i in 0 .. dec scene.Meshes.Count do
+            let indexDataEntry = scene.Metadata.["IndexData" + string i]
+            let indexData = indexDataEntry.Data :?> int array
+            let mesh = scene.Meshes.[i]
             if Option.isNone errorOpt then
-                match TryCreatePhysicallyBasedAnimatedGeometry (renderable, mesh) with
+                match TryCreatePhysicallyBasedAnimatedGeometry (renderable, indexData, mesh) with
                 | Right geometry -> geometries.Add geometry
                 | Left error -> errorOpt <- Some ("Could not load animated geometries for mesh in file name '" + filePath + "' due to: " + error)
         match errorOpt with
@@ -1374,13 +1273,14 @@ module PhysicallyBased =
                 // attempt to create scene
                 use assimp = new Assimp.AssimpContext ()
                 try let scene = assimp.ImportFile (filePath, Constants.Assimp.PostProcessSteps)
+                    scene.IndexDatasToMetadata () // avoid polluting memory with face data
                     assimpSceneMemo.AssimpScenes.[filePath] <- scene
                     Right scene
                 with exn ->
                     Left ("Could not load assimp scene from '" + filePath + "' due to: " + scstring exn)
 
             // already exists
-            | (true, texture) -> Right texture
+            | (true, scene) -> Right scene
 
         // attempt to import from assimp scene
         match sceneEir with
@@ -1462,9 +1362,9 @@ module PhysicallyBased =
                                 let names = Array.append names [|"Geometry" + if i > 0 then string (inc i) else ""|]
                                 let meshIndex = node.MeshIndices.[i]
                                 let materialIndex = scene.Meshes.[meshIndex].MaterialIndex
-                                let material = materials.[materialIndex]
+                                let (properties, material) = materials.[materialIndex]
                                 let geometry = geometries.[meshIndex]
-                                let surface = PhysicallyBasedSurface.make names node.Metadata transform geometry.Bounds material geometry
+                                let surface = PhysicallyBasedSurface.make names transform geometry.Bounds properties material materialIndex node geometry
                                 bounds <- bounds.Combine (geometry.Bounds.Transform transform)
                                 surfaces.Add surface
                                 yield PhysicallyBasedSurface surface|] |>
@@ -1490,6 +1390,7 @@ module PhysicallyBased =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
 
         // retrieve uniforms
         let viewUniform = Gl.GetUniformLocation (shader, "view")
@@ -1583,6 +1484,7 @@ module PhysicallyBased =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
 
         // retrieve uniforms
         let viewUniform = Gl.GetUniformLocation (shader, "view")
@@ -1622,10 +1524,11 @@ module PhysicallyBased =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
 
         // retrieve uniforms
         let positionTextureUniform = Gl.GetUniformLocation (shader, "positionTexture")
-        let normalAndHeightTextureUniform = Gl.GetUniformLocation (shader, "normalAndHeightTexture")
+        let normalPlusTextureUniform = Gl.GetUniformLocation (shader, "normalPlusTexture")
         let lightMapOriginsUniform = Gl.GetUniformLocation (shader, "lightMapOrigins")
         let lightMapMinsUniform = Gl.GetUniformLocation (shader, "lightMapMins")
         let lightMapSizesUniform = Gl.GetUniformLocation (shader, "lightMapSizes")
@@ -1633,7 +1536,7 @@ module PhysicallyBased =
 
         // make shader record
         { PositionTextureUniform = positionTextureUniform
-          NormalAndHeightTextureUniform = normalAndHeightTextureUniform
+          NormalPlusTextureUniform = normalPlusTextureUniform
           LightMapOriginsUniform = lightMapOriginsUniform
           LightMapMinsUniform = lightMapMinsUniform
           LightMapSizesUniform = lightMapSizesUniform
@@ -1645,9 +1548,10 @@ module PhysicallyBased =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
 
         // retrieve uniforms
-        let normalAndHeightTextureUniform = Gl.GetUniformLocation (shader, "normalAndHeightTexture")
+        let normalPlusTextureUniform = Gl.GetUniformLocation (shader, "normalPlusTexture")
         let lightMappingTextureUniform = Gl.GetUniformLocation (shader, "lightMappingTexture")
         let irradianceMapUniform = Gl.GetUniformLocation (shader, "irradianceMap")
         let irradianceMapsUniforms =
@@ -1655,7 +1559,7 @@ module PhysicallyBased =
                 Gl.GetUniformLocation (shader, "irradianceMaps[" + string i + "]")
 
         // make shader record
-        { NormalAndHeightTextureUniform = normalAndHeightTextureUniform
+        { NormalPlusTextureUniform = normalPlusTextureUniform
           LightMappingTextureUniform = lightMappingTextureUniform
           IrradianceMapUniform = irradianceMapUniform
           IrradianceMapsUniforms = irradianceMapsUniforms
@@ -1666,12 +1570,13 @@ module PhysicallyBased =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
 
         // retrieve uniforms
         let eyeCenterUniform = Gl.GetUniformLocation (shader, "eyeCenter")
         let positionTextureUniform = Gl.GetUniformLocation (shader, "positionTexture")
         let materialTextureUniform = Gl.GetUniformLocation (shader, "materialTexture")
-        let normalAndHeightTextureUniform = Gl.GetUniformLocation (shader, "normalAndHeightTexture")
+        let normalPlusTextureUniform = Gl.GetUniformLocation (shader, "normalPlusTexture")
         let lightMappingTextureUniform = Gl.GetUniformLocation (shader, "lightMappingTexture")
         let environmentFilterMapUniform = Gl.GetUniformLocation (shader, "environmentFilterMap")
         let environmentFilterMapsUniforms =
@@ -1685,7 +1590,7 @@ module PhysicallyBased =
         { EyeCenterUniform = eyeCenterUniform
           PositionTextureUniform = positionTextureUniform
           MaterialTextureUniform = materialTextureUniform
-          NormalAndHeightTextureUniform = normalAndHeightTextureUniform
+          NormalPlusTextureUniform = normalPlusTextureUniform
           LightMappingTextureUniform = lightMappingTextureUniform
           EnvironmentFilterMapUniform = environmentFilterMapUniform
           EnvironmentFilterMapsUniforms = environmentFilterMapsUniforms
@@ -1699,12 +1604,13 @@ module PhysicallyBased =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
 
         // retrieve uniforms
         let viewUniform = Gl.GetUniformLocation (shader, "view")
         let projectionUniform = Gl.GetUniformLocation (shader, "projection")
         let positionTextureUniform = Gl.GetUniformLocation (shader, "positionTexture")
-        let normalAndHeightTextureUniform = Gl.GetUniformLocation (shader, "normalAndHeightTexture")
+        let normalPlusTextureUniform = Gl.GetUniformLocation (shader, "normalPlusTexture")
         let ssaoResolution = Gl.GetUniformLocation (shader, "ssaoResolution")
         let ssaoIntensity = Gl.GetUniformLocation (shader, "ssaoIntensity")
         let ssaoBias = Gl.GetUniformLocation (shader, "ssaoBias")
@@ -1716,7 +1622,7 @@ module PhysicallyBased =
         { ViewUniform = viewUniform
           ProjectionUniform = projectionUniform
           PositionTextureUniform = positionTextureUniform
-          NormalAndHeightTextureUniform = normalAndHeightTextureUniform
+          NormalPlusTextureUniform = normalPlusTextureUniform
           SsaoResolution = ssaoResolution
           SsaoIntensity = ssaoIntensity
           SsaoBias = ssaoBias
@@ -1730,6 +1636,7 @@ module PhysicallyBased =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
 
         // retrieve uniforms
         let eyeCenterUniform = Gl.GetUniformLocation (shader, "eyeCenter")
@@ -1738,7 +1645,7 @@ module PhysicallyBased =
         let positionTextureUniform = Gl.GetUniformLocation (shader, "positionTexture")
         let albedoTextureUniform = Gl.GetUniformLocation (shader, "albedoTexture")
         let materialTextureUniform = Gl.GetUniformLocation (shader, "materialTexture")
-        let normalAndHeightTextureUniform = Gl.GetUniformLocation (shader, "normalAndHeightTexture")
+        let normalPlusTextureUniform = Gl.GetUniformLocation (shader, "normalPlusTexture")
         let brdfTextureUniform = Gl.GetUniformLocation (shader, "brdfTexture")
         let irradianceTextureUniform = Gl.GetUniformLocation (shader, "irradianceTexture")
         let environmentFilterTextureUniform = Gl.GetUniformLocation (shader, "environmentFilterTexture")
@@ -1769,7 +1676,7 @@ module PhysicallyBased =
           PositionTextureUniform = positionTextureUniform
           AlbedoTextureUniform = albedoTextureUniform
           MaterialTextureUniform = materialTextureUniform
-          NormalAndHeightTextureUniform = normalAndHeightTextureUniform
+          NormalPlusTextureUniform = normalPlusTextureUniform
           BrdfTextureUniform = brdfTextureUniform
           IrradianceTextureUniform = irradianceTextureUniform
           EnvironmentFilterTextureUniform = environmentFilterTextureUniform
@@ -1795,6 +1702,7 @@ module PhysicallyBased =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
 
         // retrieve uniforms
         let inputTextureUniform = Gl.GetUniformLocation (shader, "inputTexture")
@@ -1808,6 +1716,7 @@ module PhysicallyBased =
 
         // create shader
         let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
 
         // retrieve uniforms
         let inputTextureUniform = Gl.GetUniformLocation (shader, "inputTexture")
@@ -1819,19 +1728,28 @@ module PhysicallyBased =
     /// Create the shaders for physically-based shadow rendering.
     let CreatePhysicallyBasedShadowShaders (shaderStaticShadowFilePath, shaderAnimatedShadowFilePath, shaderTerrainShadowFilePath) =
         let shaderStaticShadow = CreatePhysicallyBasedShader shaderStaticShadowFilePath
+        Hl.Assert ()
         let shaderAnimatedShadow = CreatePhysicallyBasedShader shaderAnimatedShadowFilePath
+        Hl.Assert ()
         let shaderTerrainShadow = CreatePhysicallyBasedTerrainShader shaderTerrainShadowFilePath
         (shaderStaticShadow, shaderAnimatedShadow, shaderTerrainShadow)
 
     /// Create the shaders for physically-based deferred rendering.
     let CreatePhysicallyBasedDeferredShaders (shaderStaticFilePath, shaderAnimatedFilePath, terrainShaderFilePath, shaderLightMappingFilePath, shaderIrradianceFilePath, shaderEnvironmentFilterFilePath, shaderSsaoFilePath, shaderLightingFilePath) =
         let shaderStatic = CreatePhysicallyBasedShader shaderStaticFilePath
+        Hl.Assert ()
         let shaderAnimated = CreatePhysicallyBasedShader shaderAnimatedFilePath
+        Hl.Assert ()
         let shaderTerrain = CreatePhysicallyBasedTerrainShader terrainShaderFilePath
+        Hl.Assert ()
         let shaderLightMapping = CreatePhysicallyBasedDeferredLightMappingShader shaderLightMappingFilePath
+        Hl.Assert ()
         let shaderIrradiance = CreatePhysicallyBasedDeferredIrradianceShader shaderIrradianceFilePath
+        Hl.Assert ()
         let shaderEnvironmentFilter = CreatePhysicallyBasedDeferredEnvironmentFilterShader shaderEnvironmentFilterFilePath
+        Hl.Assert ()
         let shaderSsao = CreatePhysicallyBasedDeferredSsaoShader shaderSsaoFilePath
+        Hl.Assert ()
         let shaderLighting = CreatePhysicallyBasedDeferredLightingShader shaderLightingFilePath
         (shaderStatic, shaderAnimated, shaderTerrain, shaderLightMapping, shaderIrradiance, shaderEnvironmentFilter, shaderSsao, shaderLighting)
 
@@ -1842,8 +1760,7 @@ module PhysicallyBased =
          projection : single array,
          bones : single array array,
          surfacesCount : int,
-         modelsFields : single array,
-         albedosFields : single array,
+         instanceFields : single array,
          material : PhysicallyBasedMaterial,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedShader) =
@@ -1868,21 +1785,13 @@ module PhysicallyBased =
         Gl.UniformHandleARB (shader.AlbedoTextureUniform, material.AlbedoTexture.TextureHandle)
         Hl.Assert ()
 
-        // update models buffer
-        let modelsFieldsPtr = GCHandle.Alloc (modelsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.ModelBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 16 * sizeof<single>), modelsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally modelsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update albedos buffer
-        let albedosFieldsPtr = GCHandle.Alloc (albedosFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.AlbedoBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), albedosFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally albedosFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
+        // update instance buffer
+        let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 30 * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+            Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+            Hl.Assert ()
+        finally instanceFieldsPtr.Free ()
 
         // setup geometry
         Gl.BindVertexArray geometry.PhysicallyBasedVao
@@ -1913,32 +1822,27 @@ module PhysicallyBased =
     /// Draw a batch of physically-based deferred surfaces.
     let DrawPhysicallyBasedDeferredSurfaces
         (batchPhase : BatchPhase,
-         blending : bool,
          view : single array,
          projection : single array,
          bones : single array array,
          eyeCenter : Vector3,
          surfacesCount : int,
-         modelsFields : single array,
-         texCoordsOffsetsFields : single array,
-         albedosFields : single array,
-         materialsFields : single array,
-         heightsFields : single array,
+         instanceFields : single array,
          material : PhysicallyBasedMaterial,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedShader) =
 
+        // setup dynamic state
+        if not material.TwoSided then
+            Gl.Enable EnableCap.CullFace
+        Hl.Assert ()
+
         // start batch
         if batchPhase.Starting then
 
-            // setup state
+            // setup static state
             Gl.DepthFunc DepthFunction.Lequal
             Gl.Enable EnableCap.DepthTest
-            if blending then
-                Gl.BlendEquation BlendEquationMode.FuncAdd
-                Gl.BlendFunc (BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha)
-                Gl.Enable EnableCap.Blend
-            if not material.TwoSided then Gl.Enable EnableCap.CullFace
             Hl.Assert ()
 
             // setup shader
@@ -1960,45 +1864,13 @@ module PhysicallyBased =
         Gl.UniformHandleARB (shader.HeightTextureUniform, material.HeightTexture.TextureHandle)
         Hl.Assert ()
 
-        // update models buffer
-        let modelsFieldsPtr = GCHandle.Alloc (modelsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.ModelBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 16 * sizeof<single>), modelsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally modelsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update texCoordsOffsets buffer
-        let texCoordsOffsetsFieldsPtr = GCHandle.Alloc (texCoordsOffsetsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.TexCoordsOffsetBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), texCoordsOffsetsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally texCoordsOffsetsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update albedos buffer
-        let albedosFieldsPtr = GCHandle.Alloc (albedosFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.AlbedoBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), albedosFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally albedosFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update materials buffer
-        let materialsFieldsPtr = GCHandle.Alloc (materialsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.MaterialBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), materialsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally materialsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update heights buffer
-        let heightsFieldsPtr = GCHandle.Alloc (heightsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.HeightBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * sizeof<single>), heightsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally heightsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
+        // update instance buffer
+        let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 30 * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+            Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+            Hl.Assert ()
+        finally instanceFieldsPtr.Free ()
 
         // setup geometry
         Gl.BindVertexArray geometry.PhysicallyBasedVao
@@ -2014,7 +1886,7 @@ module PhysicallyBased =
         // stop batch
         if batchPhase.Stopping then
 
-            // teardown geometry
+            // teardown geometry in general
             Gl.BindVertexArray 0u
             Hl.Assert ()
 
@@ -2022,14 +1894,14 @@ module PhysicallyBased =
             Gl.UseProgram 0u
             Hl.Assert ()
 
-            // teardown state
+            // teardown static state
             Gl.DepthFunc DepthFunction.Less
             Gl.Disable EnableCap.DepthTest
-            if blending then
-                Gl.Disable EnableCap.Blend
-                Gl.BlendFunc (BlendingFactor.One, BlendingFactor.Zero)
-                Gl.BlendEquation BlendEquationMode.FuncAdd
-            if not material.TwoSided then Gl.Disable EnableCap.CullFace
+            Hl.Assert ()
+
+        // teardown dynamic state
+        if not material.TwoSided then
+            Gl.Disable EnableCap.CullFace
 
     /// Draw a batch of physically-based forward surfaces.
     let DrawPhysicallyBasedForwardSurfaces
@@ -2038,11 +1910,7 @@ module PhysicallyBased =
          projection : single array,
          bones : single array array,
          surfacesCount : int,
-         modelsFields : single array,
-         texCoordsOffsetsFields : single array,
-         albedosFields : single array,
-         materialsFields : single array,
-         heightsFields : single array,
+         instanceFields : single array,
          eyeCenter : Vector3,
          lightAmbientColor : single array,
          lightAmbientBrightness : single,
@@ -2132,45 +2000,13 @@ module PhysicallyBased =
             Gl.UniformHandleARB (shader.ShadowTexturesUniforms.[i], shadowTextures.[i].TextureHandle)
         Hl.Assert ()
 
-        // update models buffer
-        let modelsFieldsPtr = GCHandle.Alloc (modelsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.ModelBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 16 * sizeof<single>), modelsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally modelsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update texCoordsOffsets buffer
-        let texCoordsOffsetsFieldsPtr = GCHandle.Alloc (texCoordsOffsetsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.TexCoordsOffsetBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), texCoordsOffsetsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally texCoordsOffsetsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update albedos buffer
-        let albedosFieldsPtr = GCHandle.Alloc (albedosFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.AlbedoBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), albedosFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally albedosFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update materials buffer
-        let materialsFieldsPtr = GCHandle.Alloc (materialsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.MaterialBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 4 * sizeof<single>), materialsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally materialsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update heights buffer
-        let heightsFieldsPtr = GCHandle.Alloc (heightsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.HeightBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * sizeof<single>), heightsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally heightsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
+        // update instance buffer
+        let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 30 * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+            Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+            Hl.Assert ()
+        finally instanceFieldsPtr.Free ()
 
         // setup geometry
         Gl.BindVertexArray geometry.PhysicallyBasedVao
@@ -2204,11 +2040,7 @@ module PhysicallyBased =
         (view : single array,
          projection : single array,
          eyeCenter : Vector3,
-         modelsFields : single array,
-         texCoordsOffsetsFields : single array,
-         albedosFields : single array,
-         materialsFields : single array,
-         heightsFields : single array,
+         instanceFields : single array,
          elementsCount : int,
          materials : PhysicallyBasedMaterial array,
          geometry : PhysicallyBasedGeometry,
@@ -2254,45 +2086,13 @@ module PhysicallyBased =
             Gl.UniformHandleARB (shader.AmbientOcclusionTexturesUniforms.[i], materials.[i].AmbientOcclusionTexture.TextureHandle)
         Hl.Assert ()
 
-        // update models buffer
-        let modelsFieldsPtr = GCHandle.Alloc (modelsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.ModelBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (16 * sizeof<single>), modelsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally modelsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update texCoordsOffsets buffer
-        let texCoordsOffsetsFieldsPtr = GCHandle.Alloc (texCoordsOffsetsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.TexCoordsOffsetBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), texCoordsOffsetsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally texCoordsOffsetsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update albedos buffer
-        let albedosFieldsPtr = GCHandle.Alloc (albedosFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.AlbedoBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), albedosFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally albedosFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update materials buffer
-        let materialsFieldsPtr = GCHandle.Alloc (materialsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.MaterialBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (4 * sizeof<single>), materialsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally materialsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
-
-        // update heights buffer
-        let heightsFieldsPtr = GCHandle.Alloc (heightsFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.HeightBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint sizeof<single>, heightsFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-        finally heightsFieldsPtr.Free ()
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-        Hl.Assert ()
+        // update instance buffer
+        let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (30 * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+            Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+            Hl.Assert ()
+        finally instanceFieldsPtr.Free ()
 
         // setup geometry
         Gl.BindVertexArray geometry.PhysicallyBasedVao
@@ -2321,7 +2121,7 @@ module PhysicallyBased =
     /// Draw the light mapping pass of a deferred physically-based surface.
     let DrawPhysicallyBasedDeferredLightMappingSurface
         (positionTexture : Texture.Texture,
-         normalAndHeightTexture : Texture.Texture,
+         normalPlusTexture : Texture.Texture,
          lightMapOrigins : single array,
          lightMapMins : single array,
          lightMapSizes : single array,
@@ -2339,7 +2139,7 @@ module PhysicallyBased =
 
         // setup textures
         Gl.UniformHandleARB (shader.PositionTextureUniform, positionTexture.TextureHandle)
-        Gl.UniformHandleARB (shader.NormalAndHeightTextureUniform, normalAndHeightTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalPlusTextureUniform, normalPlusTexture.TextureHandle)
         Hl.Assert ()
 
         // setup geometry
@@ -2362,7 +2162,7 @@ module PhysicallyBased =
 
     /// Draw the irradiance pass of a deferred physically-based surface.
     let DrawPhysicallyBasedDeferredIrradianceSurface
-        (normalAndHeightTexture : Texture.Texture,
+        (normalPlusTexture : Texture.Texture,
          lightMappingTexture : Texture.Texture,
          irradianceMap : Texture.Texture,
          irradianceMaps : Texture.Texture array,
@@ -2374,7 +2174,7 @@ module PhysicallyBased =
         Hl.Assert ()
 
         // setup textures
-        Gl.UniformHandleARB (shader.NormalAndHeightTextureUniform, normalAndHeightTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalPlusTextureUniform, normalPlusTexture.TextureHandle)
         Gl.UniformHandleARB (shader.LightMappingTextureUniform, lightMappingTexture.TextureHandle)
         Gl.UniformHandleARB (shader.IrradianceMapUniform, irradianceMap.TextureHandle)
         for i in 0 .. dec Constants.Render.LightMapsMaxDeferred do
@@ -2404,7 +2204,7 @@ module PhysicallyBased =
         (eyeCenter : Vector3,
          positionTexture : Texture.Texture,
          materialTexture : Texture.Texture,
-         normalAndHeightTexture : Texture.Texture,
+         normalPlusTexture : Texture.Texture,
          lightMappingTexture : Texture.Texture,
          environmentFilterMap : Texture.Texture,
          environmentFilterMaps : Texture.Texture array,
@@ -2425,7 +2225,7 @@ module PhysicallyBased =
         // setup textures
         Gl.UniformHandleARB (shader.PositionTextureUniform, positionTexture.TextureHandle)
         Gl.UniformHandleARB (shader.MaterialTextureUniform, materialTexture.TextureHandle)
-        Gl.UniformHandleARB (shader.NormalAndHeightTextureUniform, normalAndHeightTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalPlusTextureUniform, normalPlusTexture.TextureHandle)
         Gl.UniformHandleARB (shader.LightMappingTextureUniform, lightMappingTexture.TextureHandle)
         Gl.UniformHandleARB (shader.EnvironmentFilterMapUniform, environmentFilterMap.TextureHandle)
         for i in 0 .. dec Constants.Render.LightMapsMaxDeferred do
@@ -2455,7 +2255,7 @@ module PhysicallyBased =
         (view : single array,
          projection : single array,
          positionTexture : Texture.Texture,
-         normalAndHeightTexture : Texture.Texture,
+         normalPlusTexture : Texture.Texture,
          ssaoResolution : int array,
          ssaoIntensity : single,
          ssaoBias : single,
@@ -2479,7 +2279,7 @@ module PhysicallyBased =
 
         // setup textures
         Gl.UniformHandleARB (shader.PositionTextureUniform, positionTexture.TextureHandle)
-        Gl.UniformHandleARB (shader.NormalAndHeightTextureUniform, normalAndHeightTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalPlusTextureUniform, normalPlusTexture.TextureHandle)
         Hl.Assert ()
 
         // setup geometry
@@ -2508,7 +2308,7 @@ module PhysicallyBased =
          positionTexture : Texture.Texture,
          albedoTexture : Texture.Texture,
          materialTexture : Texture.Texture,
-         normalAndHeightTexture : Texture.Texture,
+         normalPlusTexture : Texture.Texture,
          brdfTexture : Texture.Texture,
          irradianceTexture : Texture.Texture,
          environmentFilterTexture : Texture.Texture,
@@ -2555,7 +2355,7 @@ module PhysicallyBased =
         Gl.UniformHandleARB (shader.PositionTextureUniform, positionTexture.TextureHandle)
         Gl.UniformHandleARB (shader.AlbedoTextureUniform, albedoTexture.TextureHandle)
         Gl.UniformHandleARB (shader.MaterialTextureUniform, materialTexture.TextureHandle)
-        Gl.UniformHandleARB (shader.NormalAndHeightTextureUniform, normalAndHeightTexture.TextureHandle)
+        Gl.UniformHandleARB (shader.NormalPlusTextureUniform, normalPlusTexture.TextureHandle)
         Gl.UniformHandleARB (shader.BrdfTextureUniform, brdfTexture.TextureHandle)
         Gl.UniformHandleARB (shader.IrradianceTextureUniform, irradianceTexture.TextureHandle)
         Gl.UniformHandleARB (shader.EnvironmentFilterTextureUniform, environmentFilterTexture.TextureHandle)
@@ -2650,11 +2450,7 @@ module PhysicallyBased =
     let DestroyPhysicallyBasedGeometry geometry =
         Gl.BindVertexArray geometry.PhysicallyBasedVao
         Gl.DeleteBuffers [|geometry.VertexBuffer|]
-        Gl.DeleteBuffers [|geometry.ModelBuffer|]
-        Gl.DeleteBuffers [|geometry.TexCoordsOffsetBuffer|]
-        Gl.DeleteBuffers [|geometry.AlbedoBuffer|]
-        Gl.DeleteBuffers [|geometry.MaterialBuffer|]
-        Gl.DeleteBuffers [|geometry.HeightBuffer|]
+        Gl.DeleteBuffers [|geometry.InstanceBuffer|]
         Gl.DeleteBuffers [|geometry.IndexBuffer|]
         Gl.BindVertexArray 0u
         Gl.DeleteVertexArrays [|geometry.PhysicallyBasedVao|]

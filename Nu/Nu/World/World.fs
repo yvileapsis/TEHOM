@@ -3,7 +3,6 @@
 
 namespace Nu
 open System
-open System.Collections.Generic
 open System.Reflection
 open System.Threading
 open SDL2
@@ -36,7 +35,7 @@ module Nu =
             Vsync.Init nuConfig.RunSynchronously
 
             // init OpenGL assert mechanism
-            OpenGL.Hl.Init
+            OpenGL.Hl.InitAssert
 #if DEBUG
                 Constants.OpenGL.HlAssert
 #else
@@ -449,7 +448,6 @@ module WorldModule3 =
             let worldExtension = { DestructionListRev = []; Dispatchers = dispatchers; Plugin = plugin }
             let world =
                 { EventGraph = eventGraph
-                  EntityCachedOpt = KeyedCache.make (KeyValuePair (Unchecked.defaultof<Entity>, entityStates)) Unchecked.defaultof<EntityState>
                   EntityStates = entityStates
                   GroupStates = groupStates
                   ScreenStates = screenStates

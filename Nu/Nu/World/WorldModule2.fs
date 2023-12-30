@@ -469,7 +469,6 @@ module WorldModule2 =
             let world = World.reloadRenderAssets3d world
             let world = World.reloadAudioAssets world
             let world = World.reloadSymbols world
-            Metadata.regenerateMetadata ()
             world
 
         /// Attempt to reload the asset graph.
@@ -487,9 +486,9 @@ module WorldModule2 =
                 match AssetGraph.tryMakeFromFile (outputDirectory + "/" + Assets.Global.AssetGraphFilePath) with
                 | Right assetGraph ->
 
-                    // build and reload assets
+                    // rebuild and reload assets
                     AssetGraph.buildAssets inputDirectory outputDirectory refinementDirectory false assetGraph
-                    Metadata.generateMetadata (World.getImperative world) assetGraph
+                    Metadata.regenerateMetadata ()
                     let world = World.reloadExistingAssets world
                     let world = World.publishPlus () Nu.Game.Handle.AssetsReloadEvent (EventTrace.debug "World" "publishAssetsReload" "" EventTrace.empty) Nu.Game.Handle false false world
                     (Right assetGraph, world)
@@ -626,9 +625,14 @@ module WorldModule2 =
                     else world
                 | SDL.SDL_EventType.SDL_MOUSEWHEEL ->
                     let imGui = World.getImGui world
-                    if evt.wheel.y <> 0 then imGui.HandleMouseWheelChange (single evt.wheel.y)
-                    // TODO: P1: publish mouse wheel engine events.
-                    world
+                    if evt.wheel.preciseY <> 0.0f then
+                        let flipped = evt.wheel.direction = uint SDL.SDL_MouseWheelDirection.SDL_MOUSEWHEEL_FLIPPED
+                        let travel = evt.wheel.preciseY * if flipped then -1.0f else 1.0f
+                        imGui.HandleMouseWheelChange travel
+                        let eventData = { Travel = travel }
+                        let eventTrace = EventTrace.debug "World" "processInput" "MouseWheel" EventTrace.empty
+                        World.publishPlus eventData Nu.Game.Handle.MouseWheelEvent eventTrace Nu.Game.Handle true true world
+                    else world
                 | SDL.SDL_EventType.SDL_TEXTINPUT ->
                     let io = ImGui.GetIO ()
                     let imGui = World.getImGui world
@@ -817,15 +821,15 @@ module WorldModule2 =
             let struct (playBox, playFrustum) = World.getPlayBounds3d world
             World.getElements3dBy (Octree.getElementsInPlay playBox playFrustum set) world
 
-        static member private getElements3dInViewFrustum enclosed exposed frustum set world =
-            World.getElements3dBy (Octree.getElementsInViewFrustum enclosed exposed frustum set) world
+        static member private getElements3dInViewFrustum interior exterior frustum set world =
+            World.getElements3dBy (Octree.getElementsInViewFrustum interior exterior frustum set) world
 
         static member private getElements3dInView set world =
-            let frustumEnclosed = World.getEye3dFrustumEnclosed world
-            let frustumExposed = World.getEye3dFrustumExposed world
+            let frustumInterior = World.getEye3dFrustumInterior world
+            let frustumExterior = World.getEye3dFrustumExterior world
             let frustumImposter = World.getEye3dFrustumImposter world
             let lightBox = World.getLight3dBox world
-            World.getElements3dBy (Octree.getElementsInView frustumEnclosed frustumExposed frustumImposter lightBox set) world
+            World.getElements3dBy (Octree.getElementsInView frustumInterior frustumExterior frustumImposter lightBox set) world
 
         static member private getElements3d set world =
             World.getElements3dBy (Octree.getElements set) world
@@ -853,11 +857,11 @@ module WorldModule2 =
 
         /// Get all 3d entities in the current 3d view, including all uncullable entities.
         static member getEntities3dInView set world =
-            let frustumEnclosed = World.getEye3dFrustumEnclosed world
-            let frustumExposed = World.getEye3dFrustumExposed world
+            let frustumInterior = World.getEye3dFrustumInterior world
+            let frustumExterior = World.getEye3dFrustumExterior world
             let frustumImposter = World.getEye3dFrustumImposter world
             let lightBox = World.getLight3dBox world
-            World.getEntities3dBy (Octree.getElementsInView frustumEnclosed frustumExposed frustumImposter lightBox set) world
+            World.getEntities3dBy (Octree.getElementsInView frustumInterior frustumExterior frustumImposter lightBox set) world
 
         /// Get all 3d light probe entities in the current 3d light box, including all uncullable light probes.
         static member getLightProbes3dInFrustum frustum set world =
@@ -1069,7 +1073,7 @@ module WorldModule2 =
                 World.enqueueLayeredOperation2d
                     { Elevation = transform.Elevation
                       Horizon = transform.Horizon
-                      AssetTag = AssetTag.generalize dissolveImage
+                      AssetTag = dissolveImage
                       RenderOperation2d =
                         RenderSprite
                             { Transform = transform
@@ -1088,7 +1092,7 @@ module WorldModule2 =
             | OutgoingState transitionTime -> World.renderScreenTransition5 transitionTime (World.getEye2dCenter world) (World.getEye2dSize world) screen (screen.GetOutgoing world) world
             | IdlingState _ -> ()
 
-        static member private renderSimulantsInternal skipCulling renderPass world =
+        static member private renderSimulantsInternal renderPass world =
 
             // gather simulants
             RenderGatherTimer.Start ()
@@ -1103,7 +1107,7 @@ module WorldModule2 =
                 else hashSetPlus HashIdentity.Structural []
             let (elements3d, world) =
                 match renderPass with
-                | NormalPass ->
+                | NormalPass skipCulling ->
                     if skipCulling
                     then World.getElements3d CachedHashSet3dNormal world
                     else World.getElements3dInView CachedHashSet3dNormal world
@@ -1111,7 +1115,7 @@ module WorldModule2 =
                 | ReflectionPass _ -> (Seq.empty, world)
             let (elements2d, world) =
                 match renderPass with
-                | NormalPass ->
+                | NormalPass skipCulling ->
                     if skipCulling
                     then World.getElements2d CachedHashSet2dNormal world
                     else World.getElements2dInView CachedHashSet2dNormal world
@@ -1177,7 +1181,7 @@ module WorldModule2 =
                                 shadowView <- shadowView.Inverted
                                 let shadowFov = max (min coneOuter Constants.Render.ShadowFovMax) 0.01f
                                 let shadowCutoff = max (light.GetLightCutoff world) 0.1f
-                                let shadowProjection = Matrix4x4.CreatePerspectiveFieldOfView (shadowFov, 1.0f, Constants.Render.NearPlaneDistanceEnclosed, shadowCutoff)
+                                let shadowProjection = Matrix4x4.CreatePerspectiveFieldOfView (shadowFov, 1.0f, Constants.Render.NearPlaneDistanceInterior, shadowCutoff)
                                 (shadowView, shadowProjection)
                             else
                                 let shadowRotation = light.GetRotation world
@@ -1190,12 +1194,12 @@ module WorldModule2 =
                         let shadowFrustum =
                             Frustum (shadowView * shadowProjection)
                         let shadowInView =
-                            let frustumEnclosed = World.getEye3dFrustumEnclosed world
-                            let frustumExposed = World.getEye3dFrustumExposed world
+                            let frustumInterior = World.getEye3dFrustumInterior world
+                            let frustumExterior = World.getEye3dFrustumExterior world
                             let frustumImposter = World.getEye3dFrustumImposter world
                             match light.GetPresence world with
-                            | Enclosed -> frustumEnclosed.Intersects shadowFrustum
-                            | Exposed -> frustumExposed.Intersects shadowFrustum || frustumEnclosed.Intersects shadowFrustum
+                            | Interior -> frustumInterior.Intersects shadowFrustum
+                            | Exterior -> frustumExterior.Intersects shadowFrustum || frustumInterior.Intersects shadowFrustum
                             | Imposter -> frustumImposter.Intersects shadowFrustum
                             | Omnipresent -> true
                         if shadowInView then
@@ -1209,11 +1213,11 @@ module WorldModule2 =
                 Array.sortBy fst' |>
                 Array.tryTake Constants.Render.ShadowsMax |>
                 Array.fold (fun world struct (struct (directionalSort, _), struct (shadowFrustum, light)) ->
-                    World.renderSimulantsInternal false (ShadowPass (light.GetId world, isZero directionalSort, shadowFrustum)) world)
+                    World.renderSimulantsInternal (ShadowPass (light.GetId world, isZero directionalSort, shadowFrustum)) world)
                     world
 
             // render simulants normally, remember to clear 3d shadow cache
-            let world = World.renderSimulantsInternal skipCulling NormalPass world
+            let world = World.renderSimulantsInternal (NormalPass skipCulling) world
             CachedHashSet3dShadow.Clear ()
             world
 
@@ -1393,8 +1397,8 @@ module WorldModule2 =
                                                                 // process rendering (2/2)
                                                                 rendererProcess.SubmitMessages
                                                                     skipCulling
-                                                                    (World.getEye3dFrustumEnclosed world)
-                                                                    (World.getEye3dFrustumExposed world)
+                                                                    (World.getEye3dFrustumInterior world)
+                                                                    (World.getEye3dFrustumExterior world)
                                                                     (World.getEye3dFrustumImposter world)
                                                                     (World.getLight3dBox world)
                                                                     (World.getEye3dCenter world)
@@ -1613,7 +1617,7 @@ module EntityDispatcherModule2 =
              define Entity.Presence Omnipresent
              define Entity.Absolute true
              define Entity.AlwaysUpdate true
-             define Entity.DisabledColor (Color (0.75f, 0.75f, 0.75f, 0.75f))
+             define Entity.DisabledColor Constants.Gui.DisabledColor
              define Entity.Layout Manual
              define Entity.LayoutMargin v2Zero
              define Entity.LayoutOrder 0

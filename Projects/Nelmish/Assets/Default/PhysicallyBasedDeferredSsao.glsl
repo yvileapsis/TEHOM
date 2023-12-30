@@ -61,7 +61,7 @@ const vec3[SSAO_SAMPLES_MAX] SSAO_SAMPLING_DIRECTIONS = vec3[](
 uniform mat4 view;
 uniform mat4 projection;
 layout (bindless_sampler) uniform sampler2D positionTexture;
-layout (bindless_sampler) uniform sampler2D normalAndHeightTexture;
+layout (bindless_sampler) uniform sampler2D normalPlusTexture;
 uniform ivec2 ssaoResolution;
 uniform float ssaoIntensity;
 uniform float ssaoBias;
@@ -92,11 +92,11 @@ float randomAngle()
 void main()
 {
     // retrieve normal value first, allowing for early-out
-    vec3 normal = texture(normalAndHeightTexture, texCoordsOut).rgb;
+    vec3 normal = texture(normalPlusTexture, texCoordsOut).xyz;
     if (normal == vec3(1.0)) discard; // discard if geometry pixel was not written (equal to the buffer clearing color of white)
 
     // retrieve remaining data from geometry buffers
-    vec3 position = texture(positionTexture, texCoordsOut).rgb;
+    vec3 position = texture(positionTexture, texCoordsOut).xyz;
 
     // pre-compute resolution inverse
     vec2 ssaoResolutionInverse = vec2(1.0) / vec2(ssaoResolution);
@@ -134,10 +134,10 @@ void main()
 
         // ensure we're not sampling too far from origin and thus blowing the texture cache and that we're not using
         // empty space as indicated by normal sample
-        if (distanceScreen < ssaoDistanceMax && texture(normalAndHeightTexture, samplingPositionScreen).rgb != vec3(1.0))
+        if (distanceScreen < ssaoDistanceMax && texture(normalPlusTexture, samplingPositionScreen).xyz != vec3(1.0))
         {
             // sample position in view space
-            vec3 samplePosition = texture(positionTexture, samplingPositionScreen).rgb;
+            vec3 samplePosition = texture(positionTexture, samplingPositionScreen).xyz;
             vec3 samplePositionView = (view * vec4(samplePosition, 1.0)).xyz;
 
             // perform range check and accumulate if occluded

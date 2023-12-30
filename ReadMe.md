@@ -43,11 +43,14 @@ Directly editing the entire game state in the new editor.
 ![image](https://github.com/bryanedds/Nu/assets/1625560/e52a031c-cbad-4828-bf3f-ab15af9c7787)
 Local light probes allow for efficient localized reflection and image-based lighting.
 
-![image](https://github.com/bryanedds/Nu/assets/1625560/f9945d52-9ab4-4263-ae08-195c31a45c30)
+![image](https://github.com/bryanedds/Nu/assets/1625560/bb8532b6-e749-4892-80dd-579e254a7189)
 Animated 3D model rendering from Mixamo.
 
-![image](https://github.com/bryanedds/Nu/assets/1625560/bb8532b6-e749-4892-80dd-579e254a7189)
-A scene we're still working on importing (please pardon the missing textures!)
+![image](https://github.com/bryanedds/Nu/assets/1625560/2dc896e2-c182-4641-ba50-dd32acc4ea31)
+Scalable rendering thanks to instancing-by-default render technique.
+
+![image](https://github.com/bryanedds/Nu/assets/1625560/b9cb1513-2f8a-4406-993c-05a30aa5c261)
+Another shot. Ya, we need to implement VSM to soften these shadows :)
 
 **Public Sponsors We Wish to Thank**
 ====================================

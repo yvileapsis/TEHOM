@@ -24,9 +24,9 @@ module Hl =
     let mutable private DrawCalls = 0
 
     /// Initialize OpenGL assertion mechanism.
-    let Init assertEnabled =
+    let InitAssert enabled =
         if not Initialized then
-            AssertEnabled <- assertEnabled
+            AssertEnabled <- enabled
             Initialized <- true
 
     /// Assert a lack of Gl error. Has an generic parameter to enable value pass-through.
@@ -50,7 +50,7 @@ module Hl =
         | DebugSeverity.DontCare
         | _ -> ()
 
-    let DebugMessageProc =
+    let private DebugMessageProc =
         Gl.DebugProc DebugMessageListener
 
     /// Listen to the OpenGL error stream.
@@ -73,6 +73,28 @@ module Hl =
         Log.info ("Initialized OpenGL " + version + ".")
         Assert ()
         glContext
+
+    /// Initialize OpenGL context once created.
+    let InitContext () =
+
+        // listen to debug messages
+        AttachDebugMessageCallback ()
+        Assert ()
+        
+        // globally configure opengl for physically-based rendering
+        OpenGL.Gl.Enable OpenGL.EnableCap.TextureCubeMapSeamless
+        Assert ()
+
+        // query extensions
+        let mutable extensionsCount = 0
+        let extensions = hashSetPlus StringComparer.Ordinal []
+        OpenGL.Gl.GetInteger (OpenGL.GetPName.NumExtensions, &extensionsCount)
+        for i in 0 .. dec extensionsCount do
+            extensions.Add (OpenGL.Gl.GetString (OpenGL.StringName.Extensions, uint i)) |> ignore<bool>
+
+        // assert that GL_ARB_bindless_texture is available
+        if not (extensions.Contains "GL_ARB_bindless_texture") then
+            Log.trace "Bindless textures required to run Nu."
 
     /// Begin an OpenGL frame.
     let BeginFrame (viewportOffset : Viewport, windowSize : Vector2i) =
@@ -114,19 +136,20 @@ module Hl =
         if platform = PlatformID.Win32NT || platform = PlatformID.Win32Windows then
             let pixelFloats = Array.zeroCreate<single> (width * height * 4)
             let handle = GCHandle.Alloc (pixelFloats, GCHandleType.Pinned)
-            try let pixelDataPtr = handle.AddrOfPinnedObject ()
-                Gl.ReadPixels (0, 0, width, height, PixelFormat.Rgba, PixelType.Float, pixelDataPtr)
-                use bitmap = new Drawing.Bitmap (width, height, Drawing.Imaging.PixelFormat.Format32bppArgb)
-                let pixelBytes = Array.init pixelFloats.Length (fun i -> byte (pixelFloats.[i] * 255.0f))
-                for i in 0 .. dec (pixelBytes.Length / 4) do // swap red and blue
-                    let j = i * 4
-                    let temp = pixelBytes.[j]
-                    pixelBytes.[j] <- pixelBytes.[j+2]
-                    pixelBytes.[j+2] <- temp
-                let bitmapData = bitmap.LockBits (Drawing.Rectangle (0, 0, width, height), Drawing.Imaging.ImageLockMode.WriteOnly, Drawing.Imaging.PixelFormat.Format32bppArgb)
-                Marshal.Copy (pixelBytes, 0, bitmapData.Scan0, pixelBytes.Length)
-                bitmap.UnlockBits bitmapData
-                bitmap.Save (filePath, Drawing.Imaging.ImageFormat.Bmp)
+            try try let pixelDataPtr = handle.AddrOfPinnedObject ()
+                    Gl.ReadPixels (0, 0, width, height, PixelFormat.Rgba, PixelType.Float, pixelDataPtr)
+                    use bitmap = new Drawing.Bitmap (width, height, Drawing.Imaging.PixelFormat.Format32bppArgb)
+                    let pixelBytes = Array.init pixelFloats.Length (fun i -> byte (pixelFloats.[i] * 255.0f))
+                    for i in 0 .. dec (pixelBytes.Length / 4) do // swap red and blue
+                        let j = i * 4
+                        let temp = pixelBytes.[j]
+                        pixelBytes.[j] <- pixelBytes.[j+2]
+                        pixelBytes.[j+2] <- temp
+                    let bitmapData = bitmap.LockBits (Drawing.Rectangle (0, 0, width, height), Drawing.Imaging.ImageLockMode.WriteOnly, Drawing.Imaging.PixelFormat.Format32bppArgb)
+                    Marshal.Copy (pixelBytes, 0, bitmapData.Scan0, pixelBytes.Length)
+                    bitmap.UnlockBits bitmapData
+                    bitmap.Save (filePath, Drawing.Imaging.ImageFormat.Bmp)
+                with exn -> Log.info (scstring exn)
             finally handle.Free ()
 
     /// Save the current bound framebuffer to an image file.
@@ -135,17 +158,16 @@ module Hl =
     let SaveFramebufferDepthToBitmap width height (filePath : string) =
         let pixelFloats = Array.zeroCreate<single> (width * height)
         let handle = GCHandle.Alloc (pixelFloats, GCHandleType.Pinned)
-        try
-            let pixelDataPtr = handle.AddrOfPinnedObject ()
-            Gl.ReadPixels (0, 0, width, height, PixelFormat.DepthComponent, PixelType.Float, pixelDataPtr)
-            let pixelBytes = pixelFloats |> Array.map (fun depth -> [|0uy; 0uy; byte (depth * 255.0f); 255uy|]) |> Array.concat
-            use bitmap = new Drawing.Bitmap (width, height, Drawing.Imaging.PixelFormat.Format32bppArgb)
-            let bitmapData = bitmap.LockBits (Drawing.Rectangle (0, 0, width, height), Drawing.Imaging.ImageLockMode.WriteOnly, Drawing.Imaging.PixelFormat.Format32bppArgb)
-            Marshal.Copy (pixelBytes, 0, bitmapData.Scan0, pixelBytes.Length)
-            bitmap.UnlockBits bitmapData
-            bitmap.Save (filePath, Drawing.Imaging.ImageFormat.Bmp)
-        finally
-            handle.Free ()
+        try try let pixelDataPtr = handle.AddrOfPinnedObject ()
+                Gl.ReadPixels (0, 0, width, height, PixelFormat.DepthComponent, PixelType.Float, pixelDataPtr)
+                let pixelBytes = pixelFloats |> Array.map (fun depth -> [|0uy; 0uy; byte (depth * 255.0f); 255uy|]) |> Array.concat
+                use bitmap = new Drawing.Bitmap (width, height, Drawing.Imaging.PixelFormat.Format32bppArgb)
+                let bitmapData = bitmap.LockBits (Drawing.Rectangle (0, 0, width, height), Drawing.Imaging.ImageLockMode.WriteOnly, Drawing.Imaging.PixelFormat.Format32bppArgb)
+                Marshal.Copy (pixelBytes, 0, bitmapData.Scan0, pixelBytes.Length)
+                bitmap.UnlockBits bitmapData
+                bitmap.Save (filePath, Drawing.Imaging.ImageFormat.Bmp)
+            with exn -> Log.info (scstring exn)
+        finally handle.Free ()
 
     /// Register the fact that a draw call has just been made.
     let RegisterDrawCall () =

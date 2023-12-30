@@ -3,7 +3,6 @@
 
 namespace Nu.Effects
 open System
-open System.Collections.Generic
 open System.Numerics
 open Prime
 open Nu
@@ -200,7 +199,7 @@ and Content =
     | StaticSprite of Image : Resource * Aspects : Aspect array * Content : Content
     | AnimatedSprite of Image : Resource * Vector2i * CelCount : int * CelRun : int * CelDelay : GameTime * Playback : Playback * Aspects : Aspect array * Content : Content
     | TextSprite of Font : Resource * Text : string * Aspects : Aspect array * Content : Content
-    | Billboard of Albedo : Resource * Roughness : Resource * Metallic : Resource * AmbientOcclusion : Resource * Emission : Resource * Normal : Resource * HeightMap : Resource * MinFilterOpt : OpenGL.TextureMinFilter option * MagFilterOpt : OpenGL.TextureMagFilter option * Aspects : Aspect array * Content : Content
+    | Billboard of Albedo : Resource * Roughness : Resource * Metallic : Resource * AmbientOcclusion : Resource * Emission : Resource * Normal : Resource * HeightMap : Resource * TwoSided : bool * Aspects : Aspect array * Content : Content
     | StaticModel of Resource * Aspects : Aspect array * Content : Content
     | Light3d of LightType * Aspects : Aspect array * Content : Content
     | Mount of Shift : Shift * Aspects : Aspect array * Content : Content
@@ -414,7 +413,7 @@ module EffectSystem =
         | SymbolicCompressionB (SymbolicCompressionB content) ->
             { DefinitionParams = [||]; DefinitionBody = SymbolicCompressionB (SymbolicCompressionB content) }
 
-    let rec private evalResource resource effectSystem : obj AssetTag =
+    let rec private evalResource resource effectSystem : AssetTag =
         match resource with
         | Resource (packageName, assetName) -> AssetTag.make<obj> packageName assetName
         | Resource.Expand (definitionName, _) ->
@@ -626,7 +625,7 @@ module EffectSystem =
                       Blend = slice.Blend
                       Emission = slice.Emission
                       Flip = slice.Flip }
-                let spriteView = SpriteView (transform.Elevation, transform.Horizon, AssetTag.generalize image, sprite)
+                let spriteView = SpriteView (transform.Elevation, transform.Horizon, image, sprite)
                 addView spriteView effectSystem
             else effectSystem
 
@@ -663,7 +662,7 @@ module EffectSystem =
                           Blend = slice.Blend
                           Emission = slice.Emission
                           Flip = slice.Flip }
-                    let spriteView = SpriteView (transform.Elevation, transform.Horizon, AssetTag.generalize image, sprite)
+                    let spriteView = SpriteView (transform.Elevation, transform.Horizon, image, sprite)
                     addView spriteView effectSystem
                 else effectSystem
 
@@ -727,7 +726,7 @@ module EffectSystem =
         // build implicitly mounted content
         evalContent content slice history effectSystem
 
-    and private evalBillboard albedo roughness metallic ambientOcclusion emission normal height minFilterOpt magFilterOpt aspects content (slice : Slice) history effectSystem =
+    and private evalBillboard albedo roughness metallic ambientOcclusion emission normal height twoSided aspects content (slice : Slice) history effectSystem =
 
         // pull image from resource
         let imageAlbedo = evalResource albedo effectSystem
@@ -744,13 +743,6 @@ module EffectSystem =
         // build model views
         let effectSystem =
             if slice.Enabled then
-                let imageAlbedo = AssetTag.specialize<Image> imageAlbedo
-                let imageRoughness = AssetTag.specialize<Image> imageRoughness
-                let imageMetallic = AssetTag.specialize<Image> imageMetallic
-                let imageAmbientOcclusion = AssetTag.specialize<Image> imageAmbientOcclusion
-                let imageEmission = AssetTag.specialize<Image> imageEmission
-                let imageNormal = AssetTag.specialize<Image> imageNormal
-                let imageHeight = AssetTag.specialize<Image> imageHeight
                 let affineMatrix = Matrix4x4.CreateFromTrs (slice.Position, slice.Angles.RollPitchYaw, slice.Scale)
                 let insetOpt = if slice.Inset.Equals box2Zero then None else Some slice.Inset
                 let properties =
@@ -760,21 +752,23 @@ module EffectSystem =
                       AmbientOcclusionOpt = ValueNone
                       EmissionOpt = ValueSome slice.Emission.R
                       HeightOpt = ValueSome slice.Height }
+                let material =
+                    { AlbedoImageOpt = ValueSome (AssetTag.specialize<Image> imageAlbedo)
+                      RoughnessImageOpt = ValueSome (AssetTag.specialize<Image> imageRoughness)
+                      MetallicImageOpt = ValueSome (AssetTag.specialize<Image> imageMetallic)
+                      AmbientOcclusionImageOpt = ValueSome (AssetTag.specialize<Image> imageAmbientOcclusion)
+                      EmissionImageOpt = ValueSome (AssetTag.specialize<Image> imageEmission)
+                      NormalImageOpt = ValueSome (AssetTag.specialize<Image> imageNormal)
+                      HeightImageOpt = ValueSome (AssetTag.specialize<Image> imageHeight)
+                      TwoSidedOpt = ValueSome twoSided }
                 let modelView =
                     BillboardView
                         { Absolute = effectSystem.EffectAbsolute
                           ModelMatrix = affineMatrix
                           InsetOpt = insetOpt
                           MaterialProperties = properties
-                          AlbedoImage = imageAlbedo
-                          RoughnessImage = imageRoughness
-                          MetallicImage = imageMetallic
-                          AmbientOcclusionImage = imageAmbientOcclusion
-                          EmissionImage = imageEmission
-                          NormalImage = imageNormal
-                          HeightImage = imageHeight
-                          MinFilterOpt = minFilterOpt
-                          MagFilterOpt = magFilterOpt
+                          IgnoreLightMaps = effectSystem.EffectPresence.IgnoreLightMaps
+                          Material = material
                           RenderType = effectSystem.EffectRenderType }
                 addView modelView effectSystem
             else effectSystem
@@ -914,8 +908,8 @@ module EffectSystem =
             evalTextSprite resource text aspects content slice history effectSystem
         | Light3d (lightType, aspects, content) ->
             evalLight3d lightType aspects content slice history effectSystem
-        | Billboard (resourceAlbedo, resourceRoughness, resourceMetallic, resourceAmbientOcclusion, resourceEmission, resourceNormal, resourceHeight, minFilterOpt, magFilterOpt, aspects, content) ->
-            evalBillboard resourceAlbedo resourceRoughness resourceMetallic resourceAmbientOcclusion resourceEmission resourceNormal resourceHeight minFilterOpt magFilterOpt aspects content slice history effectSystem
+        | Billboard (resourceAlbedo, resourceRoughness, resourceMetallic, resourceAmbientOcclusion, resourceEmission, resourceNormal, resourceHeight, twoSided, aspects, content) ->
+            evalBillboard resourceAlbedo resourceRoughness resourceMetallic resourceAmbientOcclusion resourceEmission resourceNormal resourceHeight twoSided aspects content slice history effectSystem
         | StaticModel (resource, aspects, content) ->
             evalStaticModel resource aspects content slice history effectSystem
         | Mount (Shift shift, aspects, content) ->
