@@ -77,6 +77,7 @@ module Gaia =
     let mutable private desiredEye2dCenter = v2Zero
     let mutable private desiredEye3dCenter = v3Zero
     let mutable private desiredEye3dRotation = quatIdentity
+    let mutable private eyeChangedElsewhere = false
 
     (* Configuration States *)
 
@@ -901,6 +902,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         fsprojFileLines |>
                         Array.map (fun line -> line.Trim ()) |>
                         Array.filter (fun line -> line.Contains "PackageReference") |>
+                        Array.filter (fun line -> not (line.Contains "PackageReference Update=")) |>
                         Array.map (fun line -> line.Replace ("<PackageReference Include=", "nuget: ")) |>
                         Array.map (fun line -> line.Replace (" Version=", ", ")) |>
                         Array.map (fun line -> line.Replace ("/>", "")) |>
@@ -955,7 +957,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         Log.info "Code updated."
                     with _ ->
                         let error = string errorStream
-                        Log.trace ("Failed to compile code due to (see full output in the console):\n" + error)
+                        Log.info ("Failed to compile code due to (see full output in the console):\n" + error)
                         world <- World.choose worldOld
             with exn ->
                 Log.trace ("Failed to inspect for F# code due to: " + scstring exn)
@@ -1480,6 +1482,22 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             | ValueNone -> ()
         if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
 
+        // edit ignore light maps
+        let mutable isSome = ValueOption.isSome mp.IgnoreLightMapsOpt
+        if ImGui.Checkbox ((if isSome then "##mpIgnoreLightMapsIsSome" else "IgnoreLightMapsOpt"), &isSome) then
+            if isSome
+            then setPropertyValue { mp with IgnoreLightMapsOpt = ValueSome false } propertyDescriptor simulant
+            else setPropertyValue { mp with IgnoreLightMapsOpt = ValueNone } propertyDescriptor simulant
+        else
+            match mp.IgnoreLightMapsOpt with
+            | ValueSome ignoreLightMaps ->
+                let mutable ignoreLightMaps = ignoreLightMaps
+                ImGui.SameLine ()
+                if ImGui.Checkbox ("IgnoreLightMapsOpt", &ignoreLightMaps) then setPropertyValue { mp with IgnoreLightMapsOpt = ValueSome ignoreLightMaps } propertyDescriptor simulant
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+            | ValueNone -> ()
+        if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+
     let rec private imGuiEditProperty (getProperty : PropertyDescriptor -> Simulant -> obj) (setProperty : obj -> PropertyDescriptor -> Simulant -> unit) (focusProperty : unit -> unit) (propertyLabelPrefix : string) (propertyDescriptor : PropertyDescriptor) (simulant : Simulant) =
         let ty = propertyDescriptor.PropertyType
         let name = propertyDescriptor.PropertyName
@@ -1804,14 +1822,11 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         // transfer to world mutation mode
         world <- worldOld
 
-        // see if sync eyes to editor is desirable
-        let eye2dCenter = World.getEye2dCenter world
-        let eye3dCenter = World.getEye3dCenter world
-        let eye3dRotation = World.getEye3dRotation world
-        let eyeChangedElsewhere =
-            eye2dCenter <> desiredEye2dCenter ||
-            eye3dCenter <> desiredEye3dCenter ||
-            eye3dRotation <> desiredEye3dRotation
+        // detect if eyes were changed somewhere other than in the editor (such as in gameplay code)
+        if  World.getEye2dCenter world <> desiredEye2dCenter ||
+            World.getEye3dCenter world <> desiredEye3dCenter ||
+            World.getEye3dRotation world <> desiredEye3dRotation then
+            eyeChangedElsewhere <- true
 
         // enable global docking
         ImGui.DockSpaceOverViewport (ImGui.GetMainViewport (), ImGuiDockNodeFlags.PassthruCentralNode) |> ignore<uint>
@@ -2875,19 +2890,6 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 updateEntityContext ()
                 updateEntityDrag ()
                 updateHotkeys entityHierarchyFocused
-                if not eyeChangedElsewhere then
-                    world <-
-                        World.frame (fun world ->
-                            let world = World.setEye2dCenter desiredEye2dCenter world
-                            let world = World.setEye3dCenter desiredEye3dCenter world
-                            let world = World.setEye3dRotation desiredEye3dRotation world
-                            world)
-                            Game
-                            world
-                else
-                    desiredEye2dCenter <- World.getEye2dCenter world
-                    desiredEye3dCenter <- World.getEye3dCenter world
-                    desiredEye3dRotation <- World.getEye3dRotation world
 
                 // reloading assets dialog
                 if reloadAssetsRequested > 0 then
@@ -2951,6 +2953,21 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         // fin
         world
 
+    let private imGuiPostProcess wtemp =
+
+        // override local desired eye changes if eye was changed elsewhere
+        let mutable world = wtemp
+        if eyeChangedElsewhere then
+            desiredEye2dCenter <- World.getEye2dCenter world
+            desiredEye3dCenter <- World.getEye3dCenter world
+            desiredEye3dRotation <- World.getEye3dRotation world
+            eyeChangedElsewhere <- false
+        else
+            world <- World.setEye2dCenter desiredEye2dCenter world
+            world <- World.setEye3dCenter desiredEye3dCenter world
+            world <- World.setEye3dRotation desiredEye3dRotation world
+        world
+
     let rec private runWithCleanUp gaiaState targetDir_ screen wtemp =
         world <- wtemp
         openProjectFilePath <- gaiaState.ProjectDllPath
@@ -2998,14 +3015,14 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             | Left error ->
                 messageBoxOpt <- Some ("Could not read overlayer due to: " + error + "'.")
                 ""
-        let result = World.runWithCleanUp tautology id id imGuiRender imGuiProcess Live true world
+        let result = World.runWithCleanUp tautology imGuiPostProcess id imGuiRender imGuiProcess imGuiPostProcess Live true world
         world <- Unchecked.defaultof<_>
         result
 
     (* Public API *)
 
     /// Run Gaia.
-    let run nuConfig gaiaPlugin =
+    let run gaiaPlugin =
 
         // discover the desired nu plugin for editing
         let (gaiaState, targetDir, plugin) = selectNuPlugin gaiaPlugin
@@ -3023,9 +3040,9 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             // attempt to create the world
             let worldConfig =
                 { Imperative = gaiaState.ProjectImperativeExecution
+                  Accompanied = true
                   Advancing = false
                   ModeOpt = gaiaState.ProjectEditModeOpt
-                  NuConfig = nuConfig
                   SdlConfig = sdlConfig }
             match tryMakeWorld sdlDeps worldConfig plugin with
             | Right (screen, world) ->

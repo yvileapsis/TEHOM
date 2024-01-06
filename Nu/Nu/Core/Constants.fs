@@ -14,6 +14,7 @@ module Engine =
 
     let [<Literal>] ExitCodeSuccess = 0
     let [<Literal>] ExitCodeFailure = 1
+    let [<Uniform>] mutable RunSynchronously = match ConfigurationManager.AppSettings.["RunSynchronously"] with null -> false | size -> scvalue<bool> size
     let [<Literal>] Meter2d = 48.0f
     let [<Literal>] Meter3d = 1.0f
     let [<Literal>] GameSortPriority = Single.MaxValue
@@ -57,8 +58,7 @@ module Engine =
 [<RequireQualifiedAccess>]
 module Render =
 
-    let [<Literal>] DeferredName = "Deferred"
-    let [<Literal>] ForwardName = "Forward"
+    let [<Literal>] IgnoreLightMapsName = "IgnoreLightMaps"
     let [<Literal>] TwoSidedName = "TwoSided"
     let [<Uniform>] mutable Vsync = match ConfigurationManager.AppSettings.["Vsync"] with null -> true | vsync -> scvalue<bool> vsync
     let [<Literal>] VirtualResolutionX = 960
@@ -117,7 +117,7 @@ module Render =
     let [<Literal>] LightsMaxDeferred = 64
     let [<Literal>] LightsMaxForward = 8
     let [<Literal>] ShadowsShaderMax = 16 // NOTE: remember to update SHADOWS_MAX in shaders when changing this!
-    let [<Uniform>] mutable ShadowFovMax = match ConfigurationManager.AppSettings.["ShadowFovMax"] with null -> MathF.TWO_PI / 3.0f (* NOTE: this can construct a pretty wide frustum far plane. *) | shadowFovMax -> scvalue<single> shadowFovMax
+    let [<Uniform>] mutable ShadowFovMax = match ConfigurationManager.AppSettings.["ShadowFovMax"] with null -> 2.1f (* NOTE: this can construct a pretty wide frustum far plane. *) | shadowFovMax -> scvalue<single> shadowFovMax
     let [<Uniform>] mutable ShadowsMax = match ConfigurationManager.AppSettings.["ShadowsMax"] with null -> 8 | shadowsMax -> min (scvalue<int> shadowsMax) ShadowsShaderMax
     let [<Literal>] ReflectionMapResolution = 512
     let [<Literal>] IrradianceMapResolution = 32

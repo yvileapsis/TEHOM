@@ -21,7 +21,8 @@ module PhysicallyBased =
           Metallic : single
           AmbientOcclusion : single
           Emission : single
-          Height : single }
+          Height : single
+          IgnoreLightMaps : bool }
 
     /// Describes a physically-based material.
     type [<Struct>] PhysicallyBasedMaterial =
@@ -80,6 +81,16 @@ module PhysicallyBased =
                 | Some _ | None -> renderStyleDefault
             | Some renderStyle -> renderStyle
 
+        static member extractIgnoreLightMaps ignoreLightMapsDefault (sceneOpt : Assimp.Scene option) surface =
+            match surface.SurfaceNode.IgnoreLightMapsOpt with
+            | None ->
+                match sceneOpt with
+                | Some scene when surface.SurfaceMaterialIndex < scene.Materials.Count ->
+                    let material = scene.Materials.[surface.SurfaceMaterialIndex]
+                    Option.defaultValue ignoreLightMapsDefault material.IgnoreLightMapsOpt
+                | Some _ | None -> ignoreLightMapsDefault
+            | Some ignoreLightMaps -> ignoreLightMaps
+
         static member inline hash surface =
             surface.HashCode
 
@@ -132,6 +143,7 @@ module PhysicallyBased =
     module internal PhysicallyBasedSurfaceFns =
         let extractPresence = PhysicallyBasedSurface.extractPresence
         let extractRenderStyle = PhysicallyBasedSurface.extractRenderStyle
+        let extractIgnoreLightMaps = PhysicallyBasedSurface.extractIgnoreLightMaps
         let hash = PhysicallyBasedSurface.hash
         let equals = PhysicallyBasedSurface.equals
         let comparer = HashIdentity.FromFunctions hash equals
@@ -238,10 +250,14 @@ module PhysicallyBased =
 
     /// Describes an irradiance pass of a deferred physically-based shader that's loaded into GPU.
     type PhysicallyBasedDeferredIrradianceShader =
-        { NormalPlusTextureUniform : int
+        { PositionTextureUniform : int
+          NormalPlusTextureUniform : int
           LightMappingTextureUniform : int
           IrradianceMapUniform : int
           IrradianceMapsUniforms : int array
+          LightMapOriginsUniform : int
+          LightMapMinsUniform : int
+          LightMapSizesUniform : int
           PhysicallyBasedDeferredIrradianceShader : uint }
 
     /// Describes an environment filter pass of a deferred physically-based shader that's loaded into GPU.
@@ -528,6 +544,12 @@ module PhysicallyBased =
             else defaultMaterial.HeightTexture
 
         // compute two-sidedness
+        let ignoreLightMaps =
+            match material.IgnoreLightMapsOpt with
+            | Some ignoreLightMaps -> ignoreLightMaps
+            | None -> false
+
+        // compute two-sidedness
         let twoSided =
             match material.TwoSidedOpt with
             | Some twoSided -> twoSided
@@ -540,7 +562,8 @@ module PhysicallyBased =
               Metallic = metallic
               AmbientOcclusion = ambientOcclusion
               Emission = emission
-              Height = height }
+              Height = height
+              IgnoreLightMaps = ignoreLightMaps }
 
         // make material
         let material =
@@ -1551,18 +1574,26 @@ module PhysicallyBased =
         Hl.Assert ()
 
         // retrieve uniforms
+        let positionTextureUniform = Gl.GetUniformLocation (shader, "positionTexture")
         let normalPlusTextureUniform = Gl.GetUniformLocation (shader, "normalPlusTexture")
         let lightMappingTextureUniform = Gl.GetUniformLocation (shader, "lightMappingTexture")
         let irradianceMapUniform = Gl.GetUniformLocation (shader, "irradianceMap")
         let irradianceMapsUniforms =
             Array.init Constants.Render.LightMapsMaxDeferred $ fun i ->
                 Gl.GetUniformLocation (shader, "irradianceMaps[" + string i + "]")
+        let lightMapOriginsUniform = Gl.GetUniformLocation (shader, "lightMapOrigins")
+        let lightMapMinsUniform = Gl.GetUniformLocation (shader, "lightMapMins")
+        let lightMapSizesUniform = Gl.GetUniformLocation (shader, "lightMapSizes")
 
         // make shader record
-        { NormalPlusTextureUniform = normalPlusTextureUniform
+        { PositionTextureUniform = positionTextureUniform
+          NormalPlusTextureUniform = normalPlusTextureUniform
           LightMappingTextureUniform = lightMappingTextureUniform
           IrradianceMapUniform = irradianceMapUniform
           IrradianceMapsUniforms = irradianceMapsUniforms
+          LightMapOriginsUniform = lightMapOriginsUniform
+          LightMapMinsUniform = lightMapMinsUniform
+          LightMapSizesUniform = lightMapSizesUniform
           PhysicallyBasedDeferredIrradianceShader = shader }
 
     /// Create a physically-based shader for the environment filter pass of deferred rendering.
@@ -1761,7 +1792,6 @@ module PhysicallyBased =
          bones : single array array,
          surfacesCount : int,
          instanceFields : single array,
-         material : PhysicallyBasedMaterial,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedShader) =
 
@@ -1780,10 +1810,6 @@ module PhysicallyBased =
             for i in 0 .. dec (min Constants.Render.BonesMax bones.Length) do
                 Gl.UniformMatrix4 (shader.BonesUniforms.[i], false, bones.[i])
             Hl.Assert ()
-
-        // setup textures
-        Gl.UniformHandleARB (shader.AlbedoTextureUniform, material.AlbedoTexture.TextureHandle)
-        Hl.Assert ()
 
         // update instance buffer
         let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
@@ -2162,18 +2188,26 @@ module PhysicallyBased =
 
     /// Draw the irradiance pass of a deferred physically-based surface.
     let DrawPhysicallyBasedDeferredIrradianceSurface
-        (normalPlusTexture : Texture.Texture,
+        (positionTexture : Texture.Texture,
+         normalPlusTexture : Texture.Texture,
          lightMappingTexture : Texture.Texture,
          irradianceMap : Texture.Texture,
          irradianceMaps : Texture.Texture array,
+         lightMapOrigins : single array,
+         lightMapMins : single array,
+         lightMapSizes : single array,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedDeferredIrradianceShader) =
 
         // setup shader
         Gl.UseProgram shader.PhysicallyBasedDeferredIrradianceShader
+        Gl.Uniform3 (shader.LightMapOriginsUniform, lightMapOrigins)
+        Gl.Uniform3 (shader.LightMapMinsUniform, lightMapMins)
+        Gl.Uniform3 (shader.LightMapSizesUniform, lightMapSizes)
         Hl.Assert ()
 
         // setup textures
+        Gl.UniformHandleARB (shader.PositionTextureUniform, positionTexture.TextureHandle)
         Gl.UniformHandleARB (shader.NormalPlusTextureUniform, normalPlusTexture.TextureHandle)
         Gl.UniformHandleARB (shader.LightMappingTextureUniform, lightMappingTexture.TextureHandle)
         Gl.UniformHandleARB (shader.IrradianceMapUniform, irradianceMap.TextureHandle)

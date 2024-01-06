@@ -1279,8 +1279,6 @@ module EffectFacetModule =
             World.renderView renderPass view world
 
             // render particles
-            let presence = entity.GetPresence world
-            let ignoreLightMaps = presence.IgnoreLightMaps
             let particleSystem = entity.GetParticleSystem world
             let descriptors = ParticleSystem.toParticlesDescriptors time particleSystem
             for descriptor in descriptors do
@@ -1297,7 +1295,6 @@ module EffectFacetModule =
                         RenderBillboardParticles
                             { Absolute = descriptor.Absolute
                               MaterialProperties = descriptor.MaterialProperties
-                              IgnoreLightMaps = ignoreLightMaps
                               Material = descriptor.Material
                               Particles = descriptor.Particles
                               RenderType = descriptor.RenderType
@@ -2033,7 +2030,8 @@ module LightProbe3dFacetModule =
             (Cascade, world)
 
         static member Properties =
-            [define Entity.AlwaysUpdate true
+            [define Entity.Size (v3Dup 0.25f)
+             define Entity.AlwaysUpdate true
              define Entity.LightProbe true
              define Entity.Presence Omnipresent
              define Entity.ProbeBounds (box3 (v3Dup Constants.Render.LightProbeSizeDefault * -0.5f) (v3Dup Constants.Render.LightProbeSizeDefault))
@@ -2117,7 +2115,8 @@ module Light3dFacetModule =
         inherit Facet (false)
 
         static member Properties =
-            [define Entity.Light true
+            [define Entity.Size (v3Dup 0.25f)
+             define Entity.Light true
              define Entity.Color Color.White
              define Entity.Brightness Constants.Render.BrightnessDefault
              define Entity.AttenuationLinear Constants.Render.AttenuationLinearDefault
@@ -2204,10 +2203,8 @@ module StaticBillboardFacetModule =
             let mutable transform = entity.GetTransform world
             let absolute = transform.Absolute
             let affineMatrix = transform.AffineMatrix
-            let presence = transform.Presence
             let insetOpt = entity.GetInsetOpt world
             let properties = entity.GetMaterialProperties world
-            let ignoreLightMaps = presence.IgnoreLightMaps
             let material = entity.GetMaterial world
             let renderType =
                 match entity.GetRenderStyle world with
@@ -2216,8 +2213,7 @@ module StaticBillboardFacetModule =
             World.enqueueRenderMessage3d
                 (RenderBillboard
                     { Absolute = absolute; ModelMatrix = affineMatrix; InsetOpt = insetOpt
-                      MaterialProperties = properties; IgnoreLightMaps = ignoreLightMaps; Material = material
-                      RenderType = renderType; RenderPass = renderPass })
+                      MaterialProperties = properties; Material = material; RenderType = renderType; RenderPass = renderPass })
                 world
 
         override this.RayCast (ray, entity, world) =
@@ -2433,8 +2429,6 @@ module BasicStaticBillboardEmitterFacetModule =
 
         override this.Render (renderPass, entity, world) =
             let time = world.GameTime
-            let presence = entity.GetPresence world
-            let ignoreLightMaps = presence.IgnoreLightMaps
             let particleSystem = entity.GetParticleSystem world
             let particlesMessages =
                 particleSystem |>
@@ -2449,7 +2443,8 @@ module BasicStaticBillboardEmitterFacetModule =
                               MetallicOpt = match emitterProperties.MetallicOpt with ValueSome metallic -> ValueSome metallic | ValueNone -> descriptor.MaterialProperties.MetallicOpt
                               AmbientOcclusionOpt = match emitterProperties.AmbientOcclusionOpt with ValueSome ambientOcclusion -> ValueSome ambientOcclusion | ValueNone -> descriptor.MaterialProperties.AmbientOcclusionOpt
                               EmissionOpt = match emitterProperties.EmissionOpt with ValueSome emission -> ValueSome emission | ValueNone -> descriptor.MaterialProperties.EmissionOpt
-                              HeightOpt = match emitterProperties.HeightOpt with ValueSome height -> ValueSome height | ValueNone -> descriptor.MaterialProperties.HeightOpt }
+                              HeightOpt = match emitterProperties.HeightOpt with ValueSome height -> ValueSome height | ValueNone -> descriptor.MaterialProperties.HeightOpt
+                              IgnoreLightMapsOpt = match emitterProperties.IgnoreLightMapsOpt with ValueSome ignoreLightMaps -> ValueSome ignoreLightMaps | ValueNone -> descriptor.MaterialProperties.IgnoreLightMapsOpt }
                         let emitterMaterial = entity.GetEmitterMaterial world
                         let material =
                             { AlbedoImageOpt = match emitterMaterial.AlbedoImageOpt with ValueSome albedoImage -> ValueSome albedoImage | ValueNone -> descriptor.Material.AlbedoImageOpt
@@ -2464,7 +2459,6 @@ module BasicStaticBillboardEmitterFacetModule =
                             (RenderBillboardParticles
                                 { Absolute = descriptor.Absolute
                                   MaterialProperties = properties
-                                  IgnoreLightMaps = ignoreLightMaps
                                   Material = material
                                   Particles = descriptor.Particles
                                   RenderType = descriptor.RenderType
@@ -2569,16 +2563,14 @@ module StaticModelSurfaceFacetModule =
                 let mutable transform = entity.GetTransform world
                 let absolute = transform.Absolute
                 let affineMatrix = transform.AffineMatrix
-                let presence = transform.Presence
                 let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
                 let properties = entity.GetMaterialProperties world
-                let ignoreLightMaps = presence.IgnoreLightMaps
                 let staticModel = entity.GetStaticModel world
                 let renderType =
                     match entity.GetRenderStyle world with
                     | Deferred -> DeferredRenderType
                     | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-                World.renderStaticModelSurfaceFast (absolute, &affineMatrix, insetOpt, &properties, ignoreLightMaps, staticModel, surfaceIndex, renderType, renderPass, world)
+                World.renderStaticModelSurfaceFast (absolute, &affineMatrix, insetOpt, &properties, staticModel, surfaceIndex, renderType, renderPass, world)
 
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetStaticModelMetadata (entity.GetStaticModel world) with
@@ -2633,15 +2625,13 @@ module AnimatedModelFacetModule =
             let mutable transform = entity.GetTransform world
             let absolute = transform.Absolute
             let affineMatrix = transform.AffineMatrix
-            let presence = transform.Presence
             let startTime = entity.GetStartTime world
             let localTime = world.GameTime - startTime
             let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
             let properties = entity.GetMaterialProperties world
-            let ignoreLightMaps = presence.IgnoreLightMaps
             let animations = entity.GetAnimations world
             let animatedModel = entity.GetAnimatedModel world
-            World.renderAnimatedModelFast (localTime, absolute, &affineMatrix, insetOpt, &properties, ignoreLightMaps, animations, animatedModel, renderPass, world)
+            World.renderAnimatedModelFast (localTime, absolute, &affineMatrix, insetOpt, &properties, animations, animatedModel, renderPass, world)
 
         override this.GetAttributesInferred (entity, world) =
             let animatedModel = entity.GetAnimatedModel world

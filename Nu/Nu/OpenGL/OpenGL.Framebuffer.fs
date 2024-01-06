@@ -80,7 +80,7 @@ module Framebuffer =
         Texture.DestroyTexture position
 
     /// Create shadow buffers.
-    let TryCreateShadowBuffers () =
+    let TryCreateShadowBuffers (shadowResolutionX, shadowResolutionY) =
 
         // create frame buffer object
         let framebuffer = Gl.GenFramebuffer ()
@@ -90,7 +90,7 @@ module Framebuffer =
         // create shadow texture
         let shadowTextureId = Gl.GenTexture ()
         Gl.BindTexture (TextureTarget.Texture2d, shadowTextureId)
-        Gl.TexImage2D (TextureTarget.Texture2d, 0, InternalFormat.DepthComponent32f, Constants.Render.ShadowResolutionX, Constants.Render.ShadowResolutionY, 0, PixelFormat.DepthComponent, PixelType.Float, nativeint 0)
+        Gl.TexImage2D (TextureTarget.Texture2d, 0, InternalFormat.DepthComponent32f, shadowResolutionX, shadowResolutionY, 0, PixelFormat.DepthComponent, PixelType.Float, nativeint 0)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMinFilter, int TextureMinFilter.Nearest)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureMagFilter, int TextureMagFilter.Nearest)
         Gl.TexParameter (TextureTarget.Texture2d, TextureParameterName.TextureWrapS, int TextureWrapMode.ClampToEdge)
@@ -105,15 +105,10 @@ module Framebuffer =
         Hl.Assert ()
 
         // ensure framebuffer is complete
-        let result =
-            if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
-                let shadowTexture = Texture.CreateTextureFromId shadowTextureId
-                Right (shadowTexture, framebuffer)
-            else Left "Could not create complete shadow mapping framebuffer."
-
-        // unbind buffer after checking completeness
-        Gl.BindFramebuffer (FramebufferTarget.Framebuffer, 0u)
-        result
+        if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
+            let shadowTexture = Texture.CreateTextureFromId shadowTextureId
+            Right (shadowTexture, framebuffer)
+        else Left "Could not create complete shadow mapping framebuffer."
 
     /// Destroy shadow buffers.
     let DestroyShadowBuffers (shadowTexture : Texture.Texture, framebuffer) =
