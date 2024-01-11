@@ -166,7 +166,7 @@ module TextInputFacetModule =
                 World.enqueueLayeredOperation2d
                     { Elevation = textTransform.Elevation
                       Horizon = horizon
-                      AssetTag = AssetTag.generalize font
+                      AssetTag = font
                       RenderOperation2d =
                         RenderText
                             { Transform = textTransform

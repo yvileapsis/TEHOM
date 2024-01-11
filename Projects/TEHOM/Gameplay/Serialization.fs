@@ -6,21 +6,18 @@ open Prime
 open Nu
 open Actor
 open Trait
-open Ability
+open TehomID
 open Gameplay
-open FSharp.Configuration
 
 module Serialization =
 
-    type YamlStructure = YamlConfig<"Assets/Actors/default.yaml">
-
     type SavedActors = {
 
-        Descriptions: Map<ActorID, DescriptionTrait>
+        Descriptions: Map<TehomID, DescriptionTrait>
         Volumes: Map<ActorID, VolumeTrait>
         Masses: Map<ActorID, MassTrait>
         Health: Map<ActorID, HealthTrait>
-        Abilities: Map<ActorID, Set<ActionID>>
+        Abilities: Map<ActorID, Set<AbilityID>>
         Composed: Map<ActorID, Composition>
         Attached: Set<Attachment>
 
@@ -54,67 +51,8 @@ module Serialization =
             Attached = Set.union save.Attached this.Attached
         }
 
-    let fromYaml =
-        let data = YamlStructure()
-        data.Load(Assets.Actors.Directory + "\\" + Assets.Actors.ActorsContent)
-
-        let mapActorFromYaml oldMap (yamlActor: YamlStructure.actors_Item_Type) =
-
-            let description =
-                match yamlActor.name, yamlActor.description with
-                | "", "" -> None
-                | name, description -> Some {
-                    Name = GeneratableString.String name
-                    Description = GeneratableString.String description
-                }
-
-            let abilities =
-                let stringToAbility set (ability: YamlStructure.actors_Item_Type.abilities_Item_Type) =
-                    // TODO: all types
-                    match ability.ability with
-                    | _ -> set
-
-                Seq.fold stringToAbility Set.empty yamlActor.abilities
-
-            let actor = {
-                Actor.makeDefault with
-                    Description = description;
-                    Abilities = abilities
-            }
-
-            let addActorToMap map actorID =
-                Map.add (ActorID.ID actorID) actor map
-
-            Seq.fold addActorToMap oldMap yamlActor.guid
-
-        let mapActorComposedFromYaml oldMap (yamlActor: YamlStructure.actors_Item_Type) =
-
-            let parent = ActorID.ID yamlActor.parent
-
-            let children =
-                if Map.containsKey parent oldMap
-                then oldMap[parent]
-                else Map.empty
-
-            let addChildToChildren children child =
-                Map.add (ActorID.ID child) Actor.Simple children
-
-            let children = Seq.fold addChildToChildren children yamlActor.guid
-
-            Map.add parent children oldMap
-        ()
-//            { this with
-//                Actors = Seq.fold mapActorFromYaml this.Actors data.actors
-//                ActorsComposed = Seq.fold mapActorComposedFromYaml this.ActorsComposed data.actors
-//            }
-
     let fromGameplay gameplay =
         let mapOfRecordsToRecordOfMaps saved =
-
-            let description key (value: Actor) map =
-                match value.Description with
-                | Some x -> Map.add key x map
-                | None -> map
 
             let volumes key (value: Actor) map =
                 match value.Volume with
@@ -141,7 +79,6 @@ module Serialization =
             |> Map.fold
                 (fun acc key value -> {
                     acc with
-                        Descriptions = description key value acc.Descriptions
                         Volumes = volumes key value acc.Volumes
                         Masses = masses key value acc.Masses
                         Abilities = abilities key value acc.Abilities
@@ -158,16 +95,16 @@ module Serialization =
         }
     let toGameplay this gameplay =
         let allKeys =
-            Set.ofSeq (Seq.concat [
-                Map.keys this.Descriptions
+            Seq.concat [
+                Map.keys this.Descriptions |> Seq.map ActorID
                 Map.keys this.Health
                 Map.keys this.Masses
                 Map.keys this.Volumes
                 Map.keys this.Abilities
-            ])
+            ]
+            |> Set.ofSeq
 
         let actor key = {
-            Description = Map.tryFind key this.Descriptions
             Health = Map.tryFind key this.Health
             Mass = Map.tryFind key this.Masses
             Volume = Map.tryFind key this.Volumes
@@ -193,8 +130,11 @@ module Serialization =
         let old = fromGameplay gameplay
 
         let newer =
-            Directory.EnumerateFiles (Assets.Actors.ActorsContent, "*.tehom")
-            |> Seq.fold (fun (saved: SavedActors) string ->
-                saved.concat (SavedActors.loadFromFile string)) old
+            try
+                Directory.EnumerateFiles (Assets.Actors.ActorsContent, "*.tehom")
+                |> Seq.fold (fun (saved: SavedActors) string ->
+                    saved.concat (SavedActors.loadFromFile string)) old
+            with
+            _ -> old
 
         toGameplay (old.concat newer) gameplay

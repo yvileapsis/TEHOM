@@ -15,6 +15,9 @@ type MyGamePlugin () =
             "Title", Game.SetModel Title
             "Credits", Game.SetModel Credits
             "Gameplay", Game.SetModel (Gameplay (
-                Serialization.loadFromFile Gameplay.makeDefault
+                Serialization.loadFromFile Gameplay.default'
+            ))
+            "DefaultContent", Game.SetModel (Gameplay (
+                DefaultContent.defaultContent Gameplay.default'
             ))
         ]

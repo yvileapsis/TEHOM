@@ -65,7 +65,7 @@ module Tehom =
             match message with
             | ShowTitle -> just Title
             | ShowCredits -> just Credits
-            | ShowGameplay -> just (Gameplay (Serialization.loadFromFile Gameplay.makeDefault))
+            | ShowGameplay -> just (Gameplay (Serialization.loadFromFile Gameplay.default'))
             | Update ->
                 match model with
                 | Gameplay gameplay ->

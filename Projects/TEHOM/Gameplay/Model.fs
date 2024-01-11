@@ -1,7 +1,5 @@
 ﻿namespace Tehom
 open System
-open System.ComponentModel
-open System.Configuration.Internal
 open Nu
 
 (*
@@ -14,6 +12,37 @@ open Nu
     * Add some form of text input that gets processed as actions, rudimentary string comparison would do
     * Make it possible to move player entity from room 1 to room 2
 *)
+
+module TehomID =
+
+    type TehomID =
+        | ID of string
+        | GUID of Guid
+    with
+        static member empty = ID ""
+        static member guid = GUID (Guid.NewGuid())
+
+    type AttributeID = AttributeID of TehomID
+    with
+        static member unwrap (AttributeID x) = x
+
+    type ActorID = ActorID of TehomID
+    with
+        static member unwrap (ActorID x) = x
+
+    type AbilityID = AbilityID of TehomID
+    with
+        static member unwrap (AbilityID x) = x
+
+    type AbilityGroupID = AbilityGroupID of TehomID
+    with
+        static member unwrap (AbilityGroupID x) = x
+
+    type ActionID = ActionID of TehomID
+    with
+        static member unwrap (ActionID x) = x
+
+open TehomID
 
 module Screens =
 
@@ -32,6 +61,61 @@ module GUI =
         | Scene
         | Stats
         | OtherElements
+
+module Ability =
+    open TehomID
+
+    type Value =
+        | Free
+        | Cost of int
+        | Gain of int
+
+    type Power =
+        | Weak
+        | Normal of int
+        | Godlike
+
+    type Level = uint32 * uint32 * float
+
+    type Ability = {
+        AbilityGroup: AbilityGroupID
+
+        Power: Power
+
+        Initiative: Value
+        Focus: Value
+        Time: Value
+
+//        ChanceToFail: int
+        Levels: Set<Level>
+
+
+    } with
+        static member default' = {
+            AbilityGroup = AbilityGroupID TehomID.empty
+            Power = Weak
+            Initiative = Free
+            Focus = Free
+            Time = Free
+            Levels = Set.empty
+        }
+
+    // Limits what
+    // sort of actions are allowed for each level, i.e. rudimentary brain will disallow talking even with a functioning mouth
+    // TODO: come up with better names
+    // Main point of thinking is to distinguish 'dead' entities from 'alive', as well as animalistic entities,
+    // from ones of higher reasoning and ones of beyond-human reasoning capabilities
+    // 'alive' entity always has at least one free functioning task-processing limb, be it brain, processor or whatever else
+
+    type SenseLevel =
+        | Self
+        | SameParent
+        | Parent
+        | Grandparent
+        | Anylevel
+
+    // TODO: come up with what metric should be those based on
+
 
 module Time =
     // Time is a 360-based clock and a day counter.
@@ -55,50 +139,7 @@ module Time =
         | Aquarius = 10
         | Pisces = 11
 
-    type ActionCost = Time of int
-
     // Most basic time-consuming action costs a minute.
-
-module Ability =
-
-    type ActionID =
-    | ID of string
-    with
-        static member makeDefault = ID ""
-
-    // Limits what
-    // sort of actions are allowed for each level, i.e. rudimentary brain will disallow talking even with a functioning mouth
-    // TODO: come up with better names
-    // Main point of thinking is to distinguish 'dead' entities from 'alive', as well as animalistic entities,
-    // from ones of higher reasoning and ones of beyond-human reasoning capabilities
-    // 'alive' entity always has at least one free functioning task-processing limb, be it brain, processor or whatever else
-    type ThinkingLevel =
-        | Rudimentary
-        | Animalistic
-        | Human
-        | Beyond
-
-    type SenseLevel =
-        | Self
-        | SameParent
-        | Parent
-        | Grandparent
-        | Anylevel
-
-    // TODO: come up with what metric should be those based on
-    type Power =
-        | Weak
-        | Normal of int
-        | Godlike
-
-    // List of abilities 'alive' entities can have.
-    // For composed entities those should be generated based on their structure and are used to filter for actions
-    // the combined entity can do.
-    type Ability = {
-        Action: ActionID
-        Power: Power
-    }
-
 
 module Trait =
 
@@ -139,43 +180,28 @@ module Trait =
         Regeneration: int
     }
 
+
+
 module Actor =
-    open Ability
+    open TehomID
     open Trait
-
-    type ActorID =
-    | ID of string
-    | GUID of Guid
-    with
-        static member makeDefault = ID ""
-        static member guid = GUID (Guid.NewGuid())
-
 
     type Actor = {
 
-        Description: DescriptionTrait option;
         Volume: VolumeTrait option
         Mass: MassTrait option
         Health: HealthTrait option
-        Abilities: Set<ActionID>
+        Abilities: Set<AbilityID>
 
     } with
 
-        static member makeDefault = {
-            Description = None
+        static member default' = {
             Volume = None
             Mass = None
             Health = None
             Abilities = Set.empty
         }
 
-        member this.getDescription =
-            match this.Description with
-            | None -> "Description not found!"
-            | Some { Name = name; Description = description } ->
-                match description with
-                | String str -> str
-                | _ -> "No string in description!"
 
     // Signifies physical attachment, i.e. finger is attached to palm, door is attached to wall.
     // Trait that determines what other entities this entity is attached to.
@@ -187,6 +213,9 @@ module Actor =
         | Strongly
         | WithForce of int
         | Weakly
+
+
+
 
     // Trait that lists other entities parent entity is composed of.
     // It is not necessarily physical, as player party consists of every member of the party.
@@ -200,18 +229,21 @@ module Actor =
         // i.e. low cohesion party of NPCs will disobey player character
         | Controls of int
     with
-        static member (*) (composed, composed') =
+        static member default' =
+            Controls 100
+
+        static member multiply composed composed' =
             match composed with
             | Simple ->
                 match composed' with
                 | Simple -> Simple
-                | Controls x' -> Controls x'
+                | Controls x' -> Simple
             | Controls x ->
                 match composed' with
                 | Simple -> Controls x
                 | Controls x' -> Controls (x * x' / 100)
 
-        static member max (composed, composed') =
+        static member max composed composed' =
             match composed with
             | Simple ->
                 match composed' with
@@ -224,129 +256,310 @@ module Actor =
 
     type Composition = Composition of Map<ActorID, Composed>
     with
-        static member internal add key value (Composition map) =
-            match Map.tryFind key map with
-            | Some x -> Map.add key (max x value) map
-            | None -> Map.add key value map
-            |> Composition
-
-        static member internal join func1 func2 actor compositions : Composition =
-
-            let (Composition func1) : Composition = func1 actor compositions
-            let func2 : Composition = func2 actor compositions
-
-            Map.foldBack Composition.add func1 func2
-
-        static member internal multiply func1 func2 actor compositions : Composition =
-
-            let func1 actor : Composition = func1 actor compositions
-            let func2 actor : Composition = func2 actor compositions
-
-            Map.foldBack (fun key value (Composition map) ->
-                Map.foldBack (fun key value' ->
-                    Composition.add key (value * value')
-                ) map (func2 key)
-            ) Map.empty (func1 actor)
-
         static member unwrap (Composition x) = x
 
-        static member children (actor: ActorID) compositions : Composition =
-            Map.find actor compositions
 
-        static member parents (actor: ActorID) compositions : Composition =
+    type Limb = Limb of List<ActorID * Composed>
+    with
+        static member unwrap (Limb x) = x
+
+        static member default' = Limb List.empty
+
+        static member composed (Limb limb) =
+            limb
+            |> List.map snd
+            |> List.fold Composed.multiply Composed.default'
+
+        static member fromComposition (Composition composition : Composition) : Set<Limb> =
+            composition
+            |> Map.toSeq
+            |> Seq.map (fun x -> Limb [x])
+            |> Set.ofSeq
+
+        static member children (compositions : Map<ActorID, Composition>) (Limb limb : Limb) : Set<Limb> =
+            let (parent, _) = List.head limb
+            match Map.tryFind parent compositions with
+            | None -> Set.empty
+            | Some composition ->
+                composition
+                |> Limb.fromComposition
+                |> Set.map (Limb.unwrap >> (fun list -> List.append list limb) >> Limb)
+
+        static member parents (compositions : Map<ActorID, Composition>) (Limb limb : Limb) : Set<Limb> =
+            let (child, _) = List.head limb
             compositions
-            |> Map.map (fun _ -> Composition.unwrap)
-            |> Map.filter (fun _ -> Map.containsKey actor)
-            |> Map.fold (fun map key value -> Map.add key value[actor] map) Map.empty // Inverse the map.
-            |> Composition
+            |> Map.filter (fun _ ->
+                Composition.unwrap >> Map.containsKey child
+            )
+            |> Map.map (fun parent (Composition composition) ->
+                Map.find child composition
+            )
+            |> Map.fold (fun set parent composed ->
+                Set.add (Limb ([parent, composed] @ limb)) set
+            ) Set.empty
 
-        static member grandChildren =
-            Composition.multiply Composition.children Composition.children
-        static member childrenAndGrandChildren =
-            Composition.join Composition.grandChildren Composition.children
-        static member grandParents =
-            Composition.multiply Composition.parents Composition.parents
-        static member siblings =
-            Composition.multiply Composition.parents Composition.children
+        static member grandChildren (compositions : Map<ActorID, Composition>) (limb : Limb) : Set<Limb> =
+            limb
+            |> Limb.children compositions
+            |> Set.map (Limb.children compositions)
+            |> Set.unionMany
 
-        // TODO:: implement as recursive
-        static member childrenAll =
-            Composition.childrenAndGrandChildren
+        static member grandParents (compositions : Map<ActorID, Composition>) (limb : Limb) : Set<Limb> =
+            limb
+            |> Limb.parents compositions
+            |> Set.map (Limb.parents compositions)
+            |> Set.unionMany
+
+        static member siblings (compositions : Map<ActorID, Composition>) (limb : Limb) : Set<Limb> =
+            limb
+            |> Limb.parents compositions
+            |> Set.map (Limb.children compositions)
+            |> Set.unionMany
+
+        // TODO: remake these recursive functions so they
+        // TODO: accumulate limbs correctly and don't record the same ones over and over
+        static member internal childrenN (compositions : Map<ActorID, Composition>) (level : UInt32)
+            (limb : Limb) : Set<Limb> =
+            let rec childrenN (i: UInt32) limb =
+                if (i = 0u) then Set.ofList [limb]
+                else
+                    limb
+                    |> Limb.children compositions
+                    |> Set.map (childrenN (i - 1u))
+                    |> Set.unionMany
+
+            childrenN level limb
+
+        static member internal parentsN (compositions : Map<ActorID, Composition>) (level : uint32)
+            (limb : Limb) : Set<Limb> =
+            let rec parentsN (i: uint32) limb  =
+                if (i = 0u) then Set.ofList [limb]
+                else
+                    limb
+                    |> Limb.parents compositions
+                    |> Set.map (parentsN (i - 1u))
+                    |> Set.unionMany
+
+            parentsN level limb
+
+        static member allChildren (compositions : Map<ActorID, Composition>) (limb : Limb) : Set<Limb> =
+            let rec allchildren limb =
+                let children = Limb.children compositions limb
+
+                children
+                |> Set.map allchildren
+                |> Set.unionMany
+                |> Set.union children
+
+            allchildren limb
+
+        static member allChildrenByID (compositions : Map<ActorID, Composition>) (actorID : ActorID) : Set<Limb> =
+            Limb [actorID, Composed.default']
+            |> Limb.allChildren compositions
+
+        static member custom (compositions : Map<ActorID, Composition>)
+            (up: uint32) (down: uint32) (limb : Limb) : Set<Limb> =
+
+            let parents = if up <= 0u then id else Set.map (Limb.parentsN compositions up) >> Set.unionMany
+            let children = if down <= 0u then id else Set.map (Limb.childrenN compositions down) >> Set.unionMany
+
+//            let limb = [Limb.unwrap limb |> List.head] |> Limb
+
+            Set.ofList [limb]
+            |> parents
+            |> children
 
 
     type Attachment = Attached * Set<ActorID>
 
-open Actor
+module Action =
+    open TehomID
+    //
+    type Action = {
+        Whatever: uint32
+        Order: List<AbilityGroupID>
+    }
+    with
+        static member default' = {
+            Whatever = 0u
+            Order = List.empty
+        }
 
 module Actions =
 
+    open TehomID
     open Actor
     open Ability
+    open Action
 
-    type System = Map<ActorID, Set<ActionID> * Composed>
+    // needs objects
+    (*
+    Verb -> Set<Action>
+    Action -> Set<Ability * Limb * Composed>
+    Ability -> Set<Object>
+    *)
 
-    let getChildrenSet actor (compositions: Map<ActorID, Composition>) =
-        let (Composition composition) = compositions[actor]
-        composition
-        |> Map.keys
-        |> Set.ofSeq
-
-    let getParentsSet actor compositions =
-        compositions
-        |> Map.values
-        |> Seq.map Map.keys
-        |> Seq.filter (Seq.contains actor)
-        |> Seq.map Set.ofSeq
-        |> Set.unionMany
-
-    let concat func1 func2 actor (compositions: Map<ActorID, Composition>) =
-        let func1 actor = func1 actor compositions
-        let func2 actor = func2 actor compositions
-
-        func1 actor
-        |> Set.map func2
-        |> Set.unionMany
-    let system (composition: Composition) (actors: Map<ActorID, Actor>) : System =
-
-        let filterActors key _ = Map.containsKey key actors
-        let filterAbilities key _ = not actors[key].Abilities.IsEmpty
-        let mapSystem key value = actors[key].Abilities, value
-
-        composition
-        |> Composition.unwrap
-        |> Map.filter filterActors
-        |> Map.filter filterAbilities
-        |> Map.map mapSystem
-
-    let systemOfAbility filter state (system: System) =
-        Map.fold (fun map key (abilities, composed) ->
-            match Set.fold filter state abilities with
-            | Some x -> Map.add key (x, composed) map
-            | None -> map
-        ) Map.empty system
-
-
-    type ThinkingCost = Cost of int
-    type TimeCost = Cost of int
-
-    type Action = {
-        Target: ActorID
-        Type: ActionID
-        ThinkingCost: ThinkingCost
-        TimeCost: TimeCost
-        ChanceToFail: int
+    type Choice = {
+        Action: ActionID
+        Ability: AbilityID
+        Limb: Limb
+        Object: ActorID
     }
+    with
+        static member default' = {
+            Action = ActionID TehomID.empty
+            Ability = AbilityID TehomID.empty
+            Limb = Limb.default'
+            Object = ActorID TehomID.empty
+        }
 
-    let getLookActions (actor: ActorID) (actors: Map<ActorID, Actor>) (compositions: Map<ActorID, Composition>) =
-        let composition = Composition.childrenAll actor compositions
-        let system = system composition actors
-        let actionString = ID "look"
-        let senseLook state = function
-            | action when action = actionString -> None
-//                if Some power > state then Some power else state
-            | _ -> None
-        let looks = systemOfAbility senseLook None system
-        looks
+
+    // should be map of actorabilities -> objects
+    type Choices = Set<Choice>
+
+    let choices (subject: ActorID) (actors: Map<ActorID, Actor>) (compositions: Map<ActorID, Composition>)
+        (abilities: Map<AbilityID, Ability>) (actions: Map<ActionID, Action>) =
+            // filtering by limbs presupposed here, when composition is created.
+        let limbs = Limb.allChildrenByID compositions subject
+
+        let objects abilityID limb =
+            if Map.containsKey abilityID abilities then
+                let levels = abilities[abilityID].Levels
+                levels
+                |> Set.map (fun (up, down, _) ->
+                    Limb.custom compositions up down limb
+                    |> Set.map (Limb.unwrap >> List.head >> fst)
+                )
+                |> Set.unionMany
+            else
+                Set.empty
+
+        let actions abilityID =
+            if Map.containsKey abilityID abilities then
+
+                let abilityGroup = abilities[abilityID].AbilityGroup
+
+                actions
+                |> Map.filter (fun _ value ->
+                    List.contains abilityGroup value.Order
+                )
+                |> Map.keys
+                |> Set.ofSeq
+            else
+               Set.empty
+
+        let abilities limb =
+            let abilities actorID =
+                if Map.containsKey actorID actors then
+                    actors[actorID].Abilities
+                else
+                    Set.empty
+            limb
+            |> Limb.unwrap
+            |> List.head
+            |> fst
+            |> abilities
+
+        limbs
+        |> Set.map (fun limb -> { Choice.default' with Limb = limb })
+
+        |> Set.map (fun choice ->
+            Set.map (fun ability -> { choice with Ability = ability }) (abilities choice.Limb)
+        )
+        |> Set.unionMany
+
+        |> Set.map (fun choice ->
+            Set.map (fun verb -> { choice with Action = verb }) (actions choice.Ability)
+        )
+        |> Set.unionMany
+
+        |> Set.map (fun choice ->
+            Set.map (fun object -> { choice with Object = object }) (objects choice.Ability choice.Limb)
+        )
+        |> Set.unionMany
+
+
+
+    type ChoiceLevel =
+        | FailedAtSubject of ActorID
+        | FailedAtAction of ActionID
+        | FailedAtAbility of AbilityID
+        | FailedAtLimb of string
+        | FailedAtObject of ActorID
+
+    type ChoiceResult = Result<Choices, ChoiceLevel>
+
+    let filterChoices (subject: ActorID) (action : ActionID option) (ability : AbilityID option)
+        (limb : Limb Option) (object : ActorID option) (choices : Choices) : ChoiceResult =
+
+        let (|Empty|_|) a = if Set.isEmpty a then Some () else None
+
+        let filterBy compare = function
+            | None -> id
+            | Some a -> Set.filter (fun (b : Choice) -> a === compare b)
+
+        let actionFilter = filterBy (function { Action = x } -> x) action
+        let abilityFilter = filterBy (function { Ability = x } -> x) ability
+        let limbFilter = filterBy (function { Limb = x } -> x) limb
+        let objectFilter = filterBy (function { Object = x } -> x) object
+
+        match choices with
+            | Empty -> Error (FailedAtSubject subject)
+            | choices ->
+        match actionFilter choices with
+            | Empty -> Error (FailedAtAction action.Value)
+            | choices ->
+        match abilityFilter choices with
+            | Empty -> Error (FailedAtAbility ability.Value)
+            | choices ->
+        match limbFilter choices with
+            | Empty -> Error (FailedAtLimb $"%A{limb}")
+            | choices ->
+        match objectFilter choices with
+            | Empty -> Error (FailedAtObject object.Value)
+            | choices -> Ok choices
+
+    let subject = ActorID (ID "cat")
+    let action = ActionID (ID "look")
+    let object = ActorID (ID "key")
+
+    let tempFilter = filterChoices (subject) (Some action) (None) (None) (Some object)
+
+    (*
+    possibilities
+
+    TODO: make action
+    TODO: filter actorAbiltiies by abilities by action
+    TODO: filter actorAbilities by composed
+    TODO: pick best for a think             <- per action
+
+    handling
+
+    *)
+
+    let whatever =
+        let getChildrenSet actor (compositions: Map<TehomID, Composition>) =
+            let (Composition composition) = compositions[actor]
+            composition
+            |> Map.keys
+            |> Set.ofSeq
+
+        let getParentsSet actor compositions =
+            compositions
+            |> Map.values
+            |> Seq.map Map.keys
+            |> Seq.filter (Seq.contains actor)
+            |> Seq.map Set.ofSeq
+            |> Set.unionMany
+
+        let concat func1 func2 actor (compositions: Map<TehomID, Composition>) =
+            let func1 actor = func1 actor compositions
+            let func2 actor = func2 actor compositions
+
+            func1 actor
+            |> Set.map func2
+            |> Set.unionMany
+        ()
 
     // Rough list of actions 'alive' entities should be capable of, each action should require a certain 'Ability'.
     type EntityActions =
@@ -385,45 +598,6 @@ module Actions =
         | Say
 
 (*
-    Entities can be looked from two angles, structural composition, of what consists of what:
-    Table is composed of: table top, 4 table legs.
-
-    And physical composition:
-    * Table top
-    * 4 table legs, each attached to table top
-
-
-
-    Alive entities are a little more complex.
-
-    What is a cat?
-
-    Alive entities can be also looked at from two angles:
-
-    Physical composition:
-    * torso
-    * 2 front legs, 2 back legs attached to torso
-    * tail attached to torso
-    * head attached to torso
-        head of course can also be split:
-        * skull
-        * two eyes attached to skull
-        * brain attached to skull
-        * skin attached to skull
-
-    Another way to look at the cat is through systems which correspond to its abilities,
-    which are retrieved through filtering structural composition for its abilities:
-    Cat has:
-    * Nervous system -- Filter by CanThink -> brain
-    * Sensory system -- Filter by CanSense -> Eyes, nose, ears, skin, etc
-    * Locomotion system -- Filter by CanMove -> Legs, paws, tail (?), ???
-    * Manipulation system -- Filter by CanGrab -> paws, mouth
-    * Talking system -- Filter by CanTalk -> mouth, lungs (?)
-    * Attack system - Filter by IsWeapon -> paws, mouth
-    New systems can be added later as needed, as it's literally just a filter over the composed entity.
-
-
-
     Horror situations that should be possible in the simulation:
     * Corpses coming alive;
     * Monsters with arrays of limbs;

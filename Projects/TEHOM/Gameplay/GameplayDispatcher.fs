@@ -2,6 +2,7 @@ namespace Tehom
 
 open Prime
 open Nu
+open TehomID
 
 [<AutoOpen>]
 module GameplayDispatcher =
@@ -16,7 +17,7 @@ module GameplayDispatcher =
     // empty Command type because there are no commands needed for this template.
     type GameplayDispatcher () =
         inherit ScreenDispatcher<Gameplay, GameplayMessage, Command> ({
-            Serialization.loadFromFile Gameplay.makeDefault with State = Gameplay.Quitting
+            Serialization.loadFromFile Gameplay.default' with State = Gameplay.Quitting
         })
 
         // here we define the screen's properties and event handling
@@ -32,21 +33,18 @@ module GameplayDispatcher =
                 just { gameplay with Time = inc gameplay.Time }
             | SetDisplayedString str ->
                 just { gameplay with Display = str}
-            | SetDisplayedStringToActorDescription actorID ->
-                let description = ""
-//                    $"{Actions.canSense actorID gameplay.Compositions gameplay.Actors}"
-(*                    match Map.tryFind actorID gameplay.Actors with
-                    | Some actor -> actor.getDescription
-                    | _ -> $"did not find %A{actorID}, weird!"
-*)
-                just { gameplay with Display = description }
+            | DoAction actorID ->
+                just { gameplay with Display = ActionMessage.action gameplay (ActorID actorID) }
             | Save ->
                 Serialization.saveToFile gameplay
                 just gameplay
             | Load ->
                 let gameplay = Serialization.loadFromFile gameplay
-                just gameplay
 
+                // TODO: remove when done building systems
+                let gameplay = DefaultContent.defaultContent gameplay
+
+                just gameplay
             | StartQuitting ->
                 just { gameplay with State = Gameplay.Quitting }
             | FinishQuitting ->

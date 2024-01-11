@@ -28,8 +28,8 @@ module GameplayGui =
             Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
             Entity.Text == "Enter your string"
             Entity.TextInputChangedEvent =|> fun evt ->
-                let actorID = ActorID.ID (evt.Data)
-                SetDisplayedStringToActorDescription actorID
+                let actorID = TehomID.ID (evt.Data)
+                DoAction actorID
         ]
 
         // quit

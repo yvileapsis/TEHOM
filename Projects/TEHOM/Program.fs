@@ -21,8 +21,5 @@ module Program =
         // point current working directory at program's base directory
         Directory.SetCurrentDirectory AppContext.BaseDirectory
 
-        // initialize Nu
-        Nu.init worldConfig.NuConfig
-
         // run the engine with the given config and plugin
         World.run worldConfig (MyGamePlugin ())

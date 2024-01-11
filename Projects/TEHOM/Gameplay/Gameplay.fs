@@ -2,6 +2,10 @@ namespace Tehom
 
 open Nu
 open Actor
+open TehomID
+open Trait
+open Ability
+open Action
 
 module Gameplay =
     // this represents that state of the simulation during gameplay.
@@ -18,26 +22,40 @@ module Gameplay =
         Time : int64
         State : GameplayState
 
+
+        Descriptions: Map<TehomID, DescriptionTrait>
+
         Actors: Map<ActorID, Actor>
         Compositions: Map<ActorID, Composition>
+
+        Abilities: Map<AbilityID, Ability>
+
+        Actions: Map<ActionID, Action>
+
         Attachments: Set<Attachment>
 
         // TODO: root entities, maybe
 
-        Player: ActorID
+        Player: TehomID
 
         Display : string
 
     } with
-        static member makeDefault = {
+        static member default' = {
             Time = 0
             State = Playing
 
+            Descriptions = Map.empty
+
             Actors = Map.empty
             Compositions = Map.empty
+
+            Abilities = Map.empty
+            Actions = Map.empty
+
             Attachments = Set.empty
 
-            Player = ActorID.ID "player"
+            Player = ID "player"
 
             Display = "Hello world!"
         }
@@ -46,7 +64,7 @@ module Gameplay =
 type GameplayMessage =
     | Update
     | SetDisplayedString of string
-    | SetDisplayedStringToActorDescription of ActorID
+    | DoAction of TehomID
     | Save
     | Load
     | StartQuitting
