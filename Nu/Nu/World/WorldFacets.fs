@@ -2552,6 +2552,7 @@ module StaticModelSurfaceFacetModule =
         static member Properties =
             [define Entity.InsetOpt None
              define Entity.MaterialProperties MaterialProperties.empty
+             define Entity.Material Material.empty
              define Entity.RenderStyle Deferred
              define Entity.StaticModel Assets.Default.StaticModel
              define Entity.SurfaceIndex 0]
@@ -2565,12 +2566,13 @@ module StaticModelSurfaceFacetModule =
                 let affineMatrix = transform.AffineMatrix
                 let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
                 let properties = entity.GetMaterialProperties world
+                let material = entity.GetMaterial world
                 let staticModel = entity.GetStaticModel world
                 let renderType =
                     match entity.GetRenderStyle world with
                     | Deferred -> DeferredRenderType
                     | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-                World.renderStaticModelSurfaceFast (absolute, &affineMatrix, insetOpt, &properties, staticModel, surfaceIndex, renderType, renderPass, world)
+                World.renderStaticModelSurfaceFast (absolute, &affineMatrix, insetOpt, &properties, &material, staticModel, surfaceIndex, renderType, renderPass, world)
 
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetStaticModelMetadata (entity.GetStaticModel world) with
@@ -2609,29 +2611,72 @@ module AnimatedModelFacetModule =
         member this.GetAnimatedModel world : AnimatedModel AssetTag = this.Get (nameof this.AnimatedModel) world
         member this.SetAnimatedModel (value : AnimatedModel AssetTag) world = this.Set (nameof this.AnimatedModel) value world
         member this.AnimatedModel = lens (nameof this.AnimatedModel) this this.GetAnimatedModel this.SetAnimatedModel
+        member this.GetBoneTransformsOpt world : Matrix4x4 array option = this.Get (nameof this.BoneTransformsOpt) world
+        member this.SetBoneTransformsOpt (value : Matrix4x4 array option) world = this.Set (nameof this.BoneTransformsOpt) value world
+        member this.BoneTransformsOpt = lens (nameof this.BoneTransformsOpt) this this.GetBoneTransformsOpt this.SetBoneTransformsOpt
 
     /// Augments an entity with an animated model.
     type AnimatedModelFacet () =
         inherit Facet (false)
 
+        static let tryComputeBoneTransforms time animations (sceneOpt : Assimp.Scene option) =
+            match sceneOpt with
+            | Some scene when scene.Meshes.Count > 0 ->
+                let boneTransforms = scene.ComputeBoneTransforms (time, animations, scene.Meshes.[0], scene)
+                Some boneTransforms
+            | Some _ | None -> None
+
+        static let tryAnimateBones (entity : Entity) (world : World) =
+            let time = world.GameTime
+            let animations = entity.GetAnimations world
+            let animatedModel = entity.GetAnimatedModel world
+            let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with Some model -> model.SceneOpt | None -> None
+            let boneTransformsOpt = tryComputeBoneTransforms time animations sceneOpt
+            entity.SetBoneTransformsOpt boneTransformsOpt world
+
         static member Properties =
             [define Entity.StartTime GameTime.zero
              define Entity.InsetOpt None
              define Entity.MaterialProperties MaterialProperties.empty
-             define Entity.Animations [|{ StartTime = GameTime.zero; LifeTimeOpt = None; Name = "Armature|Idle"; Playback = Loop; Rate = 1.0f; Weight = 1.0f; BoneFilterOpt = None }|]
-             define Entity.AnimatedModel Assets.Default.AnimatedModel]
+             define Entity.Animations [|{ StartTime = GameTime.zero; LifeTimeOpt = None; Name = "Armature"; Playback = Loop; Rate = 1.0f; Weight = 1.0f; BoneFilterOpt = None }|]
+             define Entity.AnimatedModel Assets.Default.AnimatedModel
+             nonPersistent Entity.BoneTransformsOpt None]
+
+        override this.Register (entity, world) =
+            let world = tryAnimateBones entity world
+            let world =
+                World.sense
+                    (fun evt world -> (Cascade, tryAnimateBones evt.Subscriber world))
+                    (entity.ChangeEvent (nameof entity.AnimatedModel)) entity (nameof AnimatedModelFacet) world
+            world
+
+        override this.Update (entity, world) =
+            let time = world.GameTime
+            let animations = entity.GetAnimations world
+            let animatedModel = entity.GetAnimatedModel world
+            let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with Some model -> model.SceneOpt | None -> None
+            let boneTransformsOpt =
+                match World.tryAwaitJob (world.DateTime + TimeSpan.FromSeconds 0.1) (entity, nameof AnimatedModelFacet) world with
+                | Some (JobCompletion (_, _, (:? (Matrix4x4 array option) as boneTransformsOpt))) -> boneTransformsOpt
+                | _ -> None
+            let world =
+                if boneTransformsOpt.IsSome
+                then entity.SetBoneTransformsOpt boneTransformsOpt world
+                else world
+            let job = Job.make (entity, nameof AnimatedModelFacet) (fun () -> tryComputeBoneTransforms time animations sceneOpt)
+            World.enqueueJob 1.0f job world
+            world
 
         override this.Render (renderPass, entity, world) =
             let mutable transform = entity.GetTransform world
             let absolute = transform.Absolute
             let affineMatrix = transform.AffineMatrix
-            let startTime = entity.GetStartTime world
-            let localTime = world.GameTime - startTime
             let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
             let properties = entity.GetMaterialProperties world
-            let animations = entity.GetAnimations world
             let animatedModel = entity.GetAnimatedModel world
-            World.renderAnimatedModelFast (localTime, absolute, &affineMatrix, insetOpt, &properties, animations, animatedModel, renderPass, world)
+            match entity.GetBoneTransformsOpt world with
+            | Some boneTransforms -> World.renderAnimatedModelFast (absolute, &affineMatrix, insetOpt, &properties, boneTransforms, animatedModel, renderPass, world)
+            | None -> ()
 
         override this.GetAttributesInferred (entity, world) =
             let animatedModel = entity.GetAnimatedModel world

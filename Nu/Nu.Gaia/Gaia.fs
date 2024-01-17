@@ -54,6 +54,7 @@ module Gaia =
     let mutable private rightClickPosition = v2Zero
     let mutable private focusedPropertyDescriptorOpt = Option<PropertyDescriptor * Simulant>.None
     let mutable private focusPropertyEditorRequested = false
+    let mutable private focusAssetViewSearchRequested = false
     let mutable private propertyValueStrPrevious = ""
     let mutable private dragDropPayloadOpt = None
     let mutable private dragEntityState = DragEntityInactive
@@ -78,6 +79,8 @@ module Gaia =
     let mutable private desiredEye3dCenter = v3Zero
     let mutable private desiredEye3dRotation = quatIdentity
     let mutable private eyeChangedElsewhere = false
+    let mutable private fpsStartDateTime = DateTimeOffset.Now
+    let mutable private fpsStartUpdateTime = 0L
 
     (* Configuration States *)
 
@@ -90,7 +93,6 @@ module Gaia =
     let mutable private alternativeEyeTravelInput = false
     let mutable private entityHierarchySearchStr = ""
     let mutable private assetViewerSearchStr = ""
-    let mutable private assetPickerSearchStr = ""
     let mutable private lightMappingConfig = { LightMappingEnabled = true }
     let mutable private ssaoConfig =
         { SsaoEnabled = true
@@ -117,7 +119,6 @@ module Gaia =
     let mutable private messageBoxOpt = Option<string>.None
     let mutable private recoverableExceptionOpt = Option<Exception * World>.None
     let mutable private showEntityContextMenu = false
-    let mutable private showAssetPickerDialog = false
     let mutable private showNewProjectDialog = false
     let mutable private showOpenProjectDialog = false
     let mutable private showOpenProjectFileDialog = false
@@ -137,7 +138,6 @@ module Gaia =
         messageBoxOpt.IsSome ||
         recoverableExceptionOpt.IsSome ||
         showEntityContextMenu ||
-        showAssetPickerDialog ||
         showNewProjectDialog ||
         showOpenProjectDialog ||
         showOpenProjectFileDialog ||
@@ -168,57 +168,57 @@ DockId=0x00000002,0
 
 [Window][Property Editor]
 Pos=284,854
-Size=667,226
+Size=638,226
 Collapsed=0
 DockId=0x00000001,0
 
 [Window][Asset Viewer]
-Pos=0,56
-Size=282,1024
+Pos=924,854
+Size=698,226
 Collapsed=0
-DockId=0x0000000C,1
+DockId=0x00000009,0
 
 [Window][Metrics]
-Pos=953,854
-Size=669,226
+Pos=924,854
+Size=698,226
+Collapsed=0
+DockId=0x00000009,7
+
+[Window][Event Tracing]
+Pos=924,854
+Size=698,226
 Collapsed=0
 DockId=0x00000009,6
 
-[Window][Event Tracing]
-Pos=953,854
-Size=669,226
+[Window][Overlayer]
+Pos=924,854
+Size=698,226
 Collapsed=0
 DockId=0x00000009,5
 
-[Window][Overlayer]
-Pos=953,854
-Size=669,226
+[Window][Asset Graph]
+Pos=924,854
+Size=698,226
 Collapsed=0
 DockId=0x00000009,4
 
-[Window][Asset Graph]
-Pos=953,854
-Size=669,226
+[Window][Renderer]
+Pos=924,854
+Size=698,226
 Collapsed=0
 DockId=0x00000009,3
 
-[Window][Renderer]
-Pos=953,854
-Size=669,226
+[Window][Audio Player]
+Pos=924,854
+Size=698,226
 Collapsed=0
 DockId=0x00000009,2
 
-[Window][Audio Player]
-Pos=953,854
-Size=669,226
+[Window][Edit Params]
+Pos=924,854
+Size=698,226
 Collapsed=0
 DockId=0x00000009,1
-
-[Window][Edit Params]
-Pos=953,854
-Size=669,226
-Collapsed=0
-DockId=0x00000009,0
 
 [Window][Full Screen Enabled]
 Pos=20,23
@@ -363,8 +363,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         DockNode      ID=0x00000005 Parent=0x00000008 SizeRef=1223,979 Split=Y
           DockNode    ID=0x00000004 Parent=0x00000005 SizeRef=1678,796 CentralNode=1
           DockNode    ID=0x00000003 Parent=0x00000005 SizeRef=1678,226 Split=X Selected=0xD4E24632
-            DockNode  ID=0x00000001 Parent=0x00000003 SizeRef=667,205 Selected=0x61D81DE4
-            DockNode  ID=0x00000009 Parent=0x00000003 SizeRef=669,205 Selected=0x8411189D
+            DockNode  ID=0x00000001 Parent=0x00000003 SizeRef=638,205 Selected=0x61D81DE4
+            DockNode  ID=0x00000009 Parent=0x00000003 SizeRef=698,205 Selected=0x8411189D
         DockNode      ID=0x00000006 Parent=0x00000008 SizeRef=346,979 Selected=0x199AB496
     DockNode          ID=0x0000000E Parent=0x0000000F SizeRef=296,1080 Selected=0xD5116FF8
 
@@ -561,6 +561,10 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 selectEntityOpt (Some entity)
                 Some (intersection, entity)
             | None -> None
+
+    let private pickAsset () =
+        ImGui.SetWindowFocus "Asset Viewer"
+        focusAssetViewSearchRequested <- true
 
     (* Nu Event Handlers *)
 
@@ -1259,7 +1263,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         let treeNodeFlags =
             (if selected then ImGuiTreeNodeFlags.Selected else ImGuiTreeNodeFlags.None) |||
             (if not branch || searchActive then ImGuiTreeNodeFlags.Leaf else ImGuiTreeNodeFlags.None) |||
-            (if newEntityParentOpt = Some entity && DateTimeOffset.UtcNow.Millisecond / 400 % 2 = 0 then ImGuiTreeNodeFlags.Bullet else ImGuiTreeNodeFlags.None) |||
+            (if newEntityParentOpt = Some entity && DateTimeOffset.Now.Millisecond / 400 % 2 = 0 then ImGuiTreeNodeFlags.Bullet else ImGuiTreeNodeFlags.None) |||
             ImGuiTreeNodeFlags.OpenOnArrow
         if not searchActive then
             if expandEntityHierarchy then ImGui.SetNextItemOpen true
@@ -1364,27 +1368,29 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         expanded
 
     let rec private imGuiEntityHierarchy (entity : Entity) =
-        let searchActive =
-            not (String.IsNullOrWhiteSpace entityHierarchySearchStr)
-        let visible =
-            not searchActive || entity.Name.ToLowerInvariant().Contains (entityHierarchySearchStr.ToLowerInvariant ())
-        let expanded =
-            if visible then
-                let branch = entity.HasChildren world
-                imGuiEntity branch searchActive entity
-            else false
-        if expanded || searchActive then
-            let children =
-                entity.GetChildren world |>
-                Array.ofSeq |>
-                Array.map (fun entity -> ((entity.Surnames.Length, entity.GetOrder world), entity)) |>
-                Array.sortBy fst |>
-                Array.map snd
-            for child in children do imGuiEntityHierarchy child
-            if visible then
-                ImGui.TreePop ()
+        if entity.Exists world then // NOTE: entity may have been moved during this process.
+            let searchActive =
+                not (String.IsNullOrWhiteSpace entityHierarchySearchStr)
+            let visible =
+                not searchActive || entity.Name.ToLowerInvariant().Contains (entityHierarchySearchStr.ToLowerInvariant ())
+            let expanded =
+                if visible then
+                    let branch = entity.HasChildren world
+                    imGuiEntity branch searchActive entity
+                else false
+            if expanded || searchActive then
+                let children =
+                    entity.GetChildren world |>
+                    Array.ofSeq |>
+                    Array.map (fun entity -> ((entity.Surnames.Length, entity.GetOrder world), entity)) |>
+                    Array.sortBy fst |>
+                    Array.map snd
+                for child in children do
+                    imGuiEntityHierarchy child
+                if visible then
+                    ImGui.TreePop ()
 
-    let private imGuiEditMaterialProperiesProperty mp propertyDescriptor simulant =
+    let private imGuiEditMaterialPropertiesProperty mp propertyDescriptor simulant =
 
         // edit albedo
         let mutable isSome = ValueOption.isSome mp.AlbedoOpt
@@ -1498,6 +1504,313 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             | ValueNone -> ()
         if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
 
+    let private imGuiEditMaterialProperty m propertyDescriptor simulant =
+
+        // edit albedo image
+        let mutable isSome = ValueOption.isSome m.AlbedoImageOpt
+        if ImGui.Checkbox ("##mpAlbedoImageIsSome", &isSome) then
+            if isSome
+            then setPropertyValue { m with AlbedoImageOpt = ValueSome Assets.Default.MaterialAlbedo } propertyDescriptor simulant
+            else setPropertyValue { m with AlbedoImageOpt = ValueNone } propertyDescriptor simulant
+        else
+            match m.AlbedoImageOpt with
+            | ValueSome albedoImage ->
+                let mutable propertyValueStr = scstring albedoImage
+                ImGui.SameLine ()
+                if ImGui.InputText ("##mpAlbedoImage", &propertyValueStr, 4096u) then
+                    let worldsPast' = worldsPast
+                    try let propertyValue = scvalue propertyValueStr
+                        setPropertyValue { m with AlbedoImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                    with _ ->
+                        worldsPast <- worldsPast'
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                if ImGui.BeginDragDropTarget () then
+                    if not (NativePtr.isNullPtr (ImGui.AcceptDragDropPayload "Asset").NativePtr) then
+                        match dragDropPayloadOpt with
+                        | Some payload ->
+                            let worldsPast' = worldsPast
+                            try let propertyValueEscaped = payload
+                                let propertyValueUnescaped = String.unescape propertyValueEscaped
+                                let propertyValue = scvalue propertyValueUnescaped
+                                setPropertyValue { m with AlbedoImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                            with _ ->
+                                worldsPast <- worldsPast'
+                        | None -> ()
+                    ImGui.EndDragDropTarget ()
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                ImGui.SameLine ()
+                ImGui.PushID ("##mpAlbedoImagePick")
+                if ImGui.Button ("V", v2Dup 19.0f) then pickAsset ()
+                ImGui.PopID ()
+            | ValueNone -> ()
+        if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+        ImGui.SameLine ()
+        ImGui.Text "AlbedoImageOpt"
+
+        // edit roughness image
+        let mutable isSome = ValueOption.isSome m.RoughnessImageOpt
+        if ImGui.Checkbox ("##mpRoughnessImageIsSome", &isSome) then
+            if isSome
+            then setPropertyValue { m with RoughnessImageOpt = ValueSome Assets.Default.MaterialRoughness } propertyDescriptor simulant
+            else setPropertyValue { m with RoughnessImageOpt = ValueNone } propertyDescriptor simulant
+        else
+            match m.RoughnessImageOpt with
+            | ValueSome roughnessImage ->
+                let mutable propertyValueStr = scstring roughnessImage
+                ImGui.SameLine ()
+                if ImGui.InputText ("##mpRoughnessImage", &propertyValueStr, 4096u) then
+                    let worldsPast' = worldsPast
+                    try let propertyValue = scvalue propertyValueStr
+                        setPropertyValue { m with RoughnessImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                    with _ ->
+                        worldsPast <- worldsPast'
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                if ImGui.BeginDragDropTarget () then
+                    if not (NativePtr.isNullPtr (ImGui.AcceptDragDropPayload "Asset").NativePtr) then
+                        match dragDropPayloadOpt with
+                        | Some payload ->
+                            let worldsPast' = worldsPast
+                            try let propertyValueEscaped = payload
+                                let propertyValueUnescaped = String.unescape propertyValueEscaped
+                                let propertyValue = scvalue propertyValueUnescaped
+                                setPropertyValue { m with RoughnessImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                            with _ ->
+                                worldsPast <- worldsPast'
+                        | None -> ()
+                    ImGui.EndDragDropTarget ()
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                ImGui.SameLine ()
+                ImGui.PushID ("##mpRoughnessImagePick")
+                if ImGui.Button ("V", v2Dup 19.0f) then pickAsset ()
+                ImGui.PopID ()
+            | ValueNone -> ()
+        if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+        ImGui.SameLine ()
+        ImGui.Text "RoughnessImageOpt"
+
+        // edit metallic image
+        let mutable isSome = ValueOption.isSome m.MetallicImageOpt
+        if ImGui.Checkbox ("##mpMetallicImageIsSome", &isSome) then
+            if isSome
+            then setPropertyValue { m with MetallicImageOpt = ValueSome Assets.Default.MaterialMetallic } propertyDescriptor simulant
+            else setPropertyValue { m with MetallicImageOpt = ValueNone } propertyDescriptor simulant
+        else
+            match m.MetallicImageOpt with
+            | ValueSome metallicImage ->
+                let mutable propertyValueStr = scstring metallicImage
+                ImGui.SameLine ()
+                if ImGui.InputText ("##mpMetallicImage", &propertyValueStr, 4096u) then
+                    let worldsPast' = worldsPast
+                    try let propertyValue = scvalue propertyValueStr
+                        setPropertyValue { m with MetallicImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                    with _ ->
+                        worldsPast <- worldsPast'
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                if ImGui.BeginDragDropTarget () then
+                    if not (NativePtr.isNullPtr (ImGui.AcceptDragDropPayload "Asset").NativePtr) then
+                        match dragDropPayloadOpt with
+                        | Some payload ->
+                            let worldsPast' = worldsPast
+                            try let propertyValueEscaped = payload
+                                let propertyValueUnescaped = String.unescape propertyValueEscaped
+                                let propertyValue = scvalue propertyValueUnescaped
+                                setPropertyValue { m with MetallicImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                            with _ ->
+                                worldsPast <- worldsPast'
+                        | None -> ()
+                    ImGui.EndDragDropTarget ()
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                ImGui.SameLine ()
+                ImGui.PushID ("##mpMetallicImagePick")
+                if ImGui.Button ("V", v2Dup 19.0f) then pickAsset ()
+                ImGui.PopID ()
+            | ValueNone -> ()
+        if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+        ImGui.SameLine ()
+        ImGui.Text "MetallicImageOpt"
+
+        // edit ambient occlusion image
+        let mutable isSome = ValueOption.isSome m.AmbientOcclusionImageOpt
+        if ImGui.Checkbox ("##mpAmbientOcclusionImageIsSome", &isSome) then
+            if isSome
+            then setPropertyValue { m with AmbientOcclusionImageOpt = ValueSome Assets.Default.MaterialAmbientOcclusion } propertyDescriptor simulant
+            else setPropertyValue { m with AmbientOcclusionImageOpt = ValueNone } propertyDescriptor simulant
+        else
+            match m.AmbientOcclusionImageOpt with
+            | ValueSome ambientOcclusionImage ->
+                let mutable propertyValueStr = scstring ambientOcclusionImage
+                ImGui.SameLine ()
+                if ImGui.InputText ("##mpAmbientOcclusionImage", &propertyValueStr, 4096u) then
+                    let worldsPast' = worldsPast
+                    try let propertyValue = scvalue propertyValueStr
+                        setPropertyValue { m with AmbientOcclusionImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                    with _ ->
+                        worldsPast <- worldsPast'
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                if ImGui.BeginDragDropTarget () then
+                    if not (NativePtr.isNullPtr (ImGui.AcceptDragDropPayload "Asset").NativePtr) then
+                        match dragDropPayloadOpt with
+                        | Some payload ->
+                            let worldsPast' = worldsPast
+                            try let propertyValueEscaped = payload
+                                let propertyValueUnescaped = String.unescape propertyValueEscaped
+                                let propertyValue = scvalue propertyValueUnescaped
+                                setPropertyValue { m with AmbientOcclusionImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                            with _ ->
+                                worldsPast <- worldsPast'
+                        | None -> ()
+                    ImGui.EndDragDropTarget ()
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                ImGui.SameLine ()
+                ImGui.PushID ("##mpAmbientOcclusionImagePick")
+                if ImGui.Button ("V", v2Dup 19.0f) then pickAsset ()
+                ImGui.PopID ()
+            | ValueNone -> ()
+        if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+        ImGui.SameLine ()
+        ImGui.Text "AmbientOcclusionImageOpt"
+
+        // edit emission image
+        let mutable isSome = ValueOption.isSome m.EmissionImageOpt
+        if ImGui.Checkbox ("##mpEmissionImageIsSome", &isSome) then
+            if isSome
+            then setPropertyValue { m with EmissionImageOpt = ValueSome Assets.Default.MaterialEmission } propertyDescriptor simulant
+            else setPropertyValue { m with EmissionImageOpt = ValueNone } propertyDescriptor simulant
+        else
+            match m.EmissionImageOpt with
+            | ValueSome emissionImage ->
+                let mutable propertyValueStr = scstring emissionImage
+                ImGui.SameLine ()
+                if ImGui.InputText ("##mpEmissionImage", &propertyValueStr, 4096u) then
+                    let worldsPast' = worldsPast
+                    try let propertyValue = scvalue propertyValueStr
+                        setPropertyValue { m with EmissionImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                    with _ ->
+                        worldsPast <- worldsPast'
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                if ImGui.BeginDragDropTarget () then
+                    if not (NativePtr.isNullPtr (ImGui.AcceptDragDropPayload "Asset").NativePtr) then
+                        match dragDropPayloadOpt with
+                        | Some payload ->
+                            let worldsPast' = worldsPast
+                            try let propertyValueEscaped = payload
+                                let propertyValueUnescaped = String.unescape propertyValueEscaped
+                                let propertyValue = scvalue propertyValueUnescaped
+                                setPropertyValue { m with EmissionImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                            with _ ->
+                                worldsPast <- worldsPast'
+                        | None -> ()
+                    ImGui.EndDragDropTarget ()
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                ImGui.SameLine ()
+                ImGui.PushID ("##mpEmissionImagePick")
+                if ImGui.Button ("V", v2Dup 19.0f) then pickAsset ()
+                ImGui.PopID ()
+            | ValueNone -> ()
+        if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+        ImGui.SameLine ()
+        ImGui.Text "EmissionImageOpt"
+
+        // edit normal image
+        let mutable isSome = ValueOption.isSome m.NormalImageOpt
+        if ImGui.Checkbox ("##mpNormalImageIsSome", &isSome) then
+            if isSome
+            then setPropertyValue { m with NormalImageOpt = ValueSome Assets.Default.MaterialNormal } propertyDescriptor simulant
+            else setPropertyValue { m with NormalImageOpt = ValueNone } propertyDescriptor simulant
+        else
+            match m.NormalImageOpt with
+            | ValueSome normalImage ->
+                let mutable propertyValueStr = scstring normalImage
+                ImGui.SameLine ()
+                if ImGui.InputText ("##mpNormalImage", &propertyValueStr, 4096u) then
+                    let worldsPast' = worldsPast
+                    try let propertyValue = scvalue propertyValueStr
+                        setPropertyValue { m with NormalImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                    with _ ->
+                        worldsPast <- worldsPast'
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                if ImGui.BeginDragDropTarget () then
+                    if not (NativePtr.isNullPtr (ImGui.AcceptDragDropPayload "Asset").NativePtr) then
+                        match dragDropPayloadOpt with
+                        | Some payload ->
+                            let worldsPast' = worldsPast
+                            try let propertyValueEscaped = payload
+                                let propertyValueUnescaped = String.unescape propertyValueEscaped
+                                let propertyValue = scvalue propertyValueUnescaped
+                                setPropertyValue { m with NormalImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                            with _ ->
+                                worldsPast <- worldsPast'
+                        | None -> ()
+                    ImGui.EndDragDropTarget ()
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                ImGui.SameLine ()
+                ImGui.PushID ("##mpNormalImagePick")
+                if ImGui.Button ("V", v2Dup 19.0f) then pickAsset ()
+                ImGui.PopID ()
+            | ValueNone -> ()
+        if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+        ImGui.SameLine ()
+        ImGui.Text "NormalImageOpt"
+
+        // edit height image
+        let mutable isSome = ValueOption.isSome m.HeightImageOpt
+        if ImGui.Checkbox ("##mpHeightImageIsSome", &isSome) then
+            if isSome
+            then setPropertyValue { m with HeightImageOpt = ValueSome Assets.Default.MaterialHeight } propertyDescriptor simulant
+            else setPropertyValue { m with HeightImageOpt = ValueNone } propertyDescriptor simulant
+        else
+            match m.HeightImageOpt with
+            | ValueSome heightImage ->
+                let mutable propertyValueStr = scstring heightImage
+                ImGui.SameLine ()
+                if ImGui.InputText ("##mpHeightImage", &propertyValueStr, 4096u) then
+                    let worldsPast' = worldsPast
+                    try let propertyValue = scvalue propertyValueStr
+                        setPropertyValue { m with HeightImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                    with _ ->
+                        worldsPast <- worldsPast'
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                if ImGui.BeginDragDropTarget () then
+                    if not (NativePtr.isNullPtr (ImGui.AcceptDragDropPayload "Asset").NativePtr) then
+                        match dragDropPayloadOpt with
+                        | Some payload ->
+                            let worldsPast' = worldsPast
+                            try let propertyValueEscaped = payload
+                                let propertyValueUnescaped = String.unescape propertyValueEscaped
+                                let propertyValue = scvalue propertyValueUnescaped
+                                setPropertyValue { m with HeightImageOpt = ValueSome propertyValue } propertyDescriptor simulant
+                            with _ ->
+                                worldsPast <- worldsPast'
+                        | None -> ()
+                    ImGui.EndDragDropTarget ()
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+                ImGui.SameLine ()
+                ImGui.PushID ("##mpHeightImagePick")
+                if ImGui.Button ("V", v2Dup 19.0f) then pickAsset ()
+                ImGui.PopID ()
+            | ValueNone -> ()
+        if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+        ImGui.SameLine ()
+        ImGui.Text "HeightImageOpt"
+
+        // edit two-sided
+        let mutable isSome = ValueOption.isSome m.TwoSidedOpt
+        if ImGui.Checkbox ("##mpTwoSidedIsSome", &isSome) then
+            if isSome
+            then setPropertyValue { m with TwoSidedOpt = ValueSome false } propertyDescriptor simulant
+            else setPropertyValue { m with TwoSidedOpt = ValueNone } propertyDescriptor simulant
+        else
+            match m.TwoSidedOpt with
+            | ValueSome twoSided ->
+                let mutable twoSided = twoSided
+                ImGui.SameLine ()
+                if ImGui.Checkbox ("##mpTwoSided", &twoSided) then setPropertyValue { m with TwoSidedOpt = ValueSome twoSided } propertyDescriptor simulant
+                if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+            | ValueNone -> ()
+        ImGui.SameLine ()
+        ImGui.Text "TwoSidedOpt"
+        if ImGui.IsItemFocused () then focusedPropertyDescriptorOpt <- Some (propertyDescriptor, simulant)
+
     let rec private imGuiEditProperty (getProperty : PropertyDescriptor -> Simulant -> obj) (setProperty : obj -> PropertyDescriptor -> Simulant -> unit) (focusProperty : unit -> unit) (propertyLabelPrefix : string) (propertyDescriptor : PropertyDescriptor) (simulant : Simulant) =
         let ty = propertyDescriptor.PropertyType
         let name = propertyDescriptor.PropertyName
@@ -1523,7 +1836,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         | :? Vector2i as v -> let mutable v' = v in if ImGui.DragInt2 (name, &v'.X, snapDrag) then setProperty v' propertyDescriptor simulant
         | :? Vector3i as v -> let mutable v' = v in if ImGui.DragInt3 (name, &v'.X, snapDrag) then setProperty v' propertyDescriptor simulant
         | :? Vector4i as v -> let mutable v' = v in if ImGui.DragInt4 (name, &v'.X, snapDrag) then setProperty v' propertyDescriptor simulant
-        | :? MaterialProperties as mp -> imGuiEditMaterialProperiesProperty mp propertyDescriptor simulant
+        | :? MaterialProperties as mp -> imGuiEditMaterialPropertiesProperty mp propertyDescriptor simulant
+        | :? Material as m -> imGuiEditMaterialProperty m propertyDescriptor simulant
         | :? Box2 as b ->
             ImGui.Text name
             let mutable min = v2 b.Min.X b.Min.Y
@@ -1645,6 +1959,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                    ty.GetGenericTypeDefinition () = typedefof<_ option> &&
                    ty.GenericTypeArguments.[0] <> typedefof<_ option> &&
                    ty.GenericTypeArguments.[0] <> typeof<MaterialProperties> &&
+                   ty.GenericTypeArguments.[0] <> typeof<Material> &&
                    (ty.GenericTypeArguments.[0].IsValueType && ty.GenericTypeArguments.[0].Name <> typedefof<_ AssetTag>.Name ||
                     ty.GenericTypeArguments.[0] = typeof<string> ||
                     ty.GenericTypeArguments.[0] |> FSharpType.isNullTrueValue) then
@@ -1672,6 +1987,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                      ty.GetGenericTypeDefinition () = typedefof<_ voption> &&
                      ty.GenericTypeArguments.[0] <> typedefof<_ voption> &&
                      ty.GenericTypeArguments.[0] <> typeof<MaterialProperties> &&
+                     ty.GenericTypeArguments.[0] <> typeof<Material> &&
                      (ty.GenericTypeArguments.[0].IsValueType && ty.GenericTypeArguments.[0].Name <> typedefof<_ AssetTag>.Name ||
                       ty.GenericTypeArguments.[0] = typeof<string> ||
                       ty.GenericTypeArguments.[0] |> FSharpType.isNullTrueValue) then
@@ -1718,7 +2034,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         ImGui.EndDragDropTarget ()
                     ImGui.SameLine ()
                     ImGui.PushID ("##pickAsset" + name)
-                    if ImGui.Button ("V", v2Dup 19.0f) then showAssetPickerDialog <- true
+                    if ImGui.Button ("V", v2Dup 19.0f) then pickAsset ()
                     focusProperty ()
                     ImGui.PopID ()
                     ImGui.SameLine ()
@@ -2164,27 +2480,6 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                             ImGui.EndTooltip ()
                         ImGui.End ()
 
-                    // asset viewer window
-                    if ImGui.Begin "Asset Viewer" then
-                        ImGui.SetNextItemWidth -1.0f
-                        ImGui.InputTextWithHint ("##assetViewerSearchStr", "[enter search text]", &assetViewerSearchStr, 4096u) |> ignore<bool>
-                        let assets = Metadata.getDiscoveredAssets ()
-                        for package in assets do
-                            let flags = ImGuiTreeNodeFlags.SpanAvailWidth ||| ImGuiTreeNodeFlags.OpenOnArrow
-                            if ImGui.TreeNodeEx (package.Key, flags) then
-                                for assetName in package.Value do
-                                    if (assetName.ToLowerInvariant ()).Contains (assetViewerSearchStr.ToLowerInvariant ()) then
-                                        ImGui.TreeNodeEx (assetName, flags ||| ImGuiTreeNodeFlags.Leaf) |> ignore<bool>
-                                        if ImGui.BeginDragDropSource () then
-                                            let assetTagStr = "[" + package.Key + " " + assetName + "]"
-                                            dragDropPayloadOpt <- Some assetTagStr
-                                            ImGui.Text assetTagStr
-                                            ImGui.SetDragDropPayload ("Asset", IntPtr.Zero, 0u) |> ignore<bool>
-                                            ImGui.EndDragDropSource ()
-                                        ImGui.TreePop ()
-                                ImGui.TreePop ()
-                        ImGui.End ()
-
                     // entity hierarchy window
                     if ImGui.Begin "Entity Hierarchy" then
                         
@@ -2316,7 +2611,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                             let isPropertyAssetTag = propertyDescriptor.PropertyType.IsGenericType && propertyDescriptor.PropertyType.GetGenericTypeDefinition () = typedefof<_ AssetTag>
                             if  isPropertyAssetTag then
                                 ImGui.SameLine ()
-                                if ImGui.Button "Pick" then showAssetPickerDialog <- true
+                                if ImGui.Button "Pick" then pickAsset ()
                             if  focusPropertyEditorRequested then
                                 ImGui.SetKeyboardFocusHere ()
                                 focusPropertyEditorRequested <- false
@@ -2357,29 +2652,37 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
 
                     // matrics window
                     if ImGui.Begin ("Metrics", ImGuiWindowFlags.NoNav) then
-                        ImGui.Text "Draw Calls:"
+                        ImGui.Text "Fps:"
                         ImGui.SameLine ()
-                        ImGui.Text (string (OpenGL.Hl.GetDrawCalls ()))
+                        let currentDateTime = DateTimeOffset.Now
+                        let elapsedDateTime = currentDateTime - fpsStartDateTime
+                        if elapsedDateTime.TotalSeconds >= 5.0 then
+                            fpsStartUpdateTime <- world.UpdateTime
+                            fpsStartDateTime <- currentDateTime
+                        let elapsedDateTime = currentDateTime - fpsStartDateTime
+                        let time = double (world.UpdateTime - fpsStartUpdateTime)
+                        let frames = time / elapsedDateTime.TotalSeconds
+                        ImGui.Text (if not (Double.IsNaN frames) then String.Format ("{0:f2}", frames) else "0.00")
+                        ImGui.Text "Draw Call Count:"
+                        ImGui.SameLine ()
+                        ImGui.Text (string (OpenGL.Hl.GetDrawCallCount ()))
+                        ImGui.Text "Draw Instance Count:"
+                        ImGui.SameLine ()
+                        ImGui.Text (string (OpenGL.Hl.GetDrawInstanceCount ()))
                         ImGui.End ()
 
-                    // asset graph window
-                    if ImGui.Begin ("Asset Graph", ImGuiWindowFlags.NoNav) then
-                        if ImGui.Button "Save" then
-                            let assetSourceDir = targetDir + "/../../.."
-                            let assetGraphFilePath = assetSourceDir + "/" + Assets.Global.AssetGraphFilePath
-                            try let packageDescriptorsStr = assetGraphStr |> scvalue<Map<string, PackageDescriptor>> |> scstring
-                                let prettyPrinter = (SyntaxAttribute.defaultValue typeof<AssetGraph>).PrettyPrinter
-                                File.WriteAllText (assetGraphFilePath, PrettyPrinter.prettyPrint packageDescriptorsStr prettyPrinter)
-                            with exn -> messageBoxOpt <- Some ("Could not save asset graph due to: " + scstring exn)
-                        ImGui.SameLine ()
-                        if ImGui.Button "Load" then
-                            match AssetGraph.tryMakeFromFile (targetDir + "/" + Assets.Global.AssetGraphFilePath) with
-                            | Right assetGraph ->
-                                let packageDescriptorsStr = scstring (AssetGraph.getPackageDescriptors assetGraph)
-                                let prettyPrinter = (SyntaxAttribute.defaultValue typeof<AssetGraph>).PrettyPrinter
-                                assetGraphStr <- PrettyPrinter.prettyPrint packageDescriptorsStr prettyPrinter
-                            | Left error -> messageBoxOpt <- Some ("Could not read asset graph due to: " + error + "'.")
-                        ImGui.InputTextMultiline ("##assetGraphStr", &assetGraphStr, 131072u, v2 -1.0f -1.0f) |> ignore<bool>
+                    // event tracing window
+                    if ImGui.Begin ("Event Tracing", ImGuiWindowFlags.NoNav) then
+                        let mutable traceEvents = world |> World.getEventTracerOpt |> Option.isSome
+                        if ImGui.Checkbox ("Trace Events", &traceEvents) then
+                            world <- World.setEventTracerOpt (if traceEvents then Some (Log.remark "Event") else None) world
+                        let eventFilter = World.getEventFilter world
+                        let prettyPrinter = (SyntaxAttribute.defaultValue typeof<EventFilter>).PrettyPrinter
+                        let mutable eventFilterStr = PrettyPrinter.prettyPrint (scstring eventFilter) prettyPrinter
+                        if ImGui.InputTextMultiline ("##eventFilterStr", &eventFilterStr, 131072u, v2 -1.0f -1.0f) then
+                            try let eventFilter = scvalue<EventFilter> eventFilterStr
+                                world <- World.setEventFilter eventFilter world
+                            with _ -> ()
                         ImGui.End ()
 
                     // overlayer window
@@ -2403,18 +2706,24 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         ImGui.InputTextMultiline ("##overlayerStr", &overlayerStr, 131072u, v2 -1.0f -1.0f) |> ignore<bool>
                         ImGui.End ()
 
-                    // event tracing window
-                    if ImGui.Begin ("Event Tracing", ImGuiWindowFlags.NoNav) then
-                        let mutable traceEvents = world |> World.getEventTracerOpt |> Option.isSome
-                        if ImGui.Checkbox ("Trace Events", &traceEvents) then
-                            world <- World.setEventTracerOpt (if traceEvents then Some (Log.remark "Event") else None) world
-                        let eventFilter = World.getEventFilter world
-                        let prettyPrinter = (SyntaxAttribute.defaultValue typeof<EventFilter>).PrettyPrinter
-                        let mutable eventFilterStr = PrettyPrinter.prettyPrint (scstring eventFilter) prettyPrinter
-                        if ImGui.InputTextMultiline ("##eventFilterStr", &eventFilterStr, 131072u, v2 -1.0f -1.0f) then
-                            try let eventFilter = scvalue<EventFilter> eventFilterStr
-                                world <- World.setEventFilter eventFilter world
-                            with _ -> ()
+                    // asset graph window
+                    if ImGui.Begin ("Asset Graph", ImGuiWindowFlags.NoNav) then
+                        if ImGui.Button "Save" then
+                            let assetSourceDir = targetDir + "/../../.."
+                            let assetGraphFilePath = assetSourceDir + "/" + Assets.Global.AssetGraphFilePath
+                            try let packageDescriptorsStr = assetGraphStr |> scvalue<Map<string, PackageDescriptor>> |> scstring
+                                let prettyPrinter = (SyntaxAttribute.defaultValue typeof<AssetGraph>).PrettyPrinter
+                                File.WriteAllText (assetGraphFilePath, PrettyPrinter.prettyPrint packageDescriptorsStr prettyPrinter)
+                            with exn -> messageBoxOpt <- Some ("Could not save asset graph due to: " + scstring exn)
+                        ImGui.SameLine ()
+                        if ImGui.Button "Load" then
+                            match AssetGraph.tryMakeFromFile (targetDir + "/" + Assets.Global.AssetGraphFilePath) with
+                            | Right assetGraph ->
+                                let packageDescriptorsStr = scstring (AssetGraph.getPackageDescriptors assetGraph)
+                                let prettyPrinter = (SyntaxAttribute.defaultValue typeof<AssetGraph>).PrettyPrinter
+                                assetGraphStr <- PrettyPrinter.prettyPrint packageDescriptorsStr prettyPrinter
+                            | Left error -> messageBoxOpt <- Some ("Could not read asset graph due to: " + error + "'.")
+                        ImGui.InputTextMultiline ("##assetGraphStr", &assetGraphStr, 131072u, v2 -1.0f -1.0f) |> ignore<bool>
                         ImGui.End ()
 
                     // renderer window
@@ -2501,6 +2810,35 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         ImGui.Checkbox ("Alternative Eye Travel Input", &alternativeEyeTravelInput) |> ignore<bool>
                         ImGui.End ()
 
+                    // asset viewer window
+                    if ImGui.Begin "Asset Viewer" then
+                        if focusAssetViewSearchRequested then
+                            ImGui.SetKeyboardFocusHere ()
+                            focusAssetViewSearchRequested <- false
+                        ImGui.SetNextItemWidth -1.0f
+                        let searchActivePrevious = not (String.IsNullOrWhiteSpace assetViewerSearchStr)
+                        ImGui.InputTextWithHint ("##assetViewerSearchStr", "[enter search text]", &assetViewerSearchStr, 4096u) |> ignore<bool>
+                        let searchActiveCurrent = not (String.IsNullOrWhiteSpace assetViewerSearchStr)
+                        let searchDeactivated = searchActivePrevious && not searchActiveCurrent
+                        let assets = Metadata.getDiscoveredAssets ()
+                        for package in assets do
+                            let flags = ImGuiTreeNodeFlags.SpanAvailWidth ||| ImGuiTreeNodeFlags.OpenOnArrow
+                            if searchActiveCurrent then ImGui.SetNextItemOpen true
+                            if searchDeactivated then ImGui.SetNextItemOpen false
+                            if ImGui.TreeNodeEx (package.Key, flags) then
+                                for assetName in package.Value do
+                                    if (assetName.ToLowerInvariant ()).Contains (assetViewerSearchStr.ToLowerInvariant ()) then
+                                        ImGui.TreeNodeEx (assetName, flags ||| ImGuiTreeNodeFlags.Leaf) |> ignore<bool>
+                                        if ImGui.BeginDragDropSource () then
+                                            let assetTagStr = "[" + package.Key + " " + assetName + "]"
+                                            dragDropPayloadOpt <- Some assetTagStr
+                                            ImGui.Text assetTagStr
+                                            ImGui.SetDragDropPayload ("Asset", IntPtr.Zero, 0u) |> ignore<bool>
+                                            ImGui.EndDragDropSource ()
+                                        ImGui.TreePop ()
+                                ImGui.TreePop ()
+                        ImGui.End ()
+
                 // in full-screen mode, just show full-screen short cut window
                 else
                     if ImGui.Begin ("Full Screen Enabled", ImGuiWindowFlags.NoNav) then
@@ -2515,38 +2853,6 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 // if message box not shown, may show another popup
                 match messageBoxOpt with
                 | None ->
-
-                    // asset picker dialog
-                    if showAssetPickerDialog then
-                        let title = "Choose an Asset..."
-                        if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
-                        if ImGui.BeginPopupModal (title, &showAssetPickerDialog) then
-                            ImGui.SetNextItemWidth -1.0f
-                            ImGui.InputTextWithHint ("##searchString", "[enter search text]", &assetPickerSearchStr, 4096u) |> ignore<bool>
-                            let assets = Metadata.getDiscoveredAssets ()
-                            for package in assets do
-                                let flags = ImGuiTreeNodeFlags.SpanAvailWidth ||| ImGuiTreeNodeFlags.OpenOnArrow
-                                if ImGui.TreeNodeEx (package.Key, flags) then
-                                    for assetName in package.Value do
-                                        if (assetName.ToLowerInvariant ()).Contains (assetPickerSearchStr.ToLowerInvariant ()) then
-                                            if ImGui.TreeNodeEx (assetName, flags ||| ImGuiTreeNodeFlags.Leaf) then
-                                                if ImGui.IsMouseDoubleClicked ImGuiMouseButton.Left && ImGui.IsItemHovered () then
-                                                    match focusedPropertyDescriptorOpt with
-                                                    | Some (propertyDescriptor, simulant) when
-                                                        World.getExists simulant world &&
-                                                        propertyDescriptor.PropertyType <> typeof<ComputedProperty> ->
-                                                        let packageName = if Symbol.shouldBeExplicit package.Key then ("\"" + package.Key + "\"") else package.Key
-                                                        let assetName = if Symbol.shouldBeExplicit assetName then ("\"" + assetName + "\"") else assetName
-                                                        let assetTagStr = "[" + packageName + " " + assetName + "]"
-                                                        let converter = SymbolicConverter (false, None, propertyDescriptor.PropertyType)
-                                                        let assetTagObj = converter.ConvertFromString assetTagStr
-                                                        setPropertyValue assetTagObj propertyDescriptor simulant
-                                                    | Some _ | None -> ()
-                                                    showAssetPickerDialog <- false
-                                                ImGui.TreePop ()
-                                    ImGui.TreePop ()
-                            if ImGui.IsKeyReleased ImGuiKey.Escape then showAssetPickerDialog <- false
-                            ImGui.EndPopup ()
 
                     // new project dialog
                     if showNewProjectDialog then

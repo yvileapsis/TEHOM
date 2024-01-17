@@ -1550,7 +1550,8 @@ and [<ReferenceEquality>] internal Subsystems =
 
 /// Keeps the World from occupying more than two cache lines.
 and [<ReferenceEquality>] internal WorldExtension =
-    { DestructionListRev : Simulant list
+    { JobSystem : JobSystem // might be nice if there were room for this in the World type...
+      DestructionListRev : Simulant list
       Dispatchers : Dispatchers
       Plugin : NuPlugin }
 
@@ -1630,6 +1631,14 @@ and [<ReferenceEquality>] World =
     /// Get the polymorphic engine time.
     member this.GameTime =
         AmbientState.getGameTime this.AmbientState
+
+    /// Get the amount of date time that has transpired between this and the previous frame.
+    member this.DateDelta =
+        AmbientState.getDateDelta this.AmbientState
+
+    /// Get the clock time as of when the current frame began.
+    member this.DateTime =
+        AmbientState.getDateTime this.AmbientState
 
     member
 #if !DEBUG

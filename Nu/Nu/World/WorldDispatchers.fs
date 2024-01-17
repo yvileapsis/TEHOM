@@ -204,7 +204,7 @@ module FpsDispatcherModule =
 
         static let resetIntermittent (entity : Entity) world =
             let startDateTime = entity.GetStartDateTime world
-            let currentDateTime = DateTimeOffset.UtcNow
+            let currentDateTime = DateTimeOffset.Now
             let elapsedDateTime = currentDateTime - startDateTime
             if elapsedDateTime.TotalSeconds >= 5.0 then
                 let world = entity.SetStartUpdateTime world.UpdateTime world
@@ -213,13 +213,13 @@ module FpsDispatcherModule =
 
         static member Properties =
             [nonPersistent Entity.StartUpdateTime 0L
-             nonPersistent Entity.StartDateTime DateTimeOffset.UtcNow]
+             nonPersistent Entity.StartDateTime DateTimeOffset.Now]
 
         override this.Update (entity, world) =
             if entity.GetEnabled world then
                 let world = resetIntermittent entity world
                 let startDateTime = entity.GetStartDateTime world
-                let currentDateTime = DateTimeOffset.UtcNow
+                let currentDateTime = DateTimeOffset.Now
                 let elapsedDateTime = currentDateTime - startDateTime
                 let time = double (world.UpdateTime - entity.GetStartUpdateTime world)
                 let frames = time / elapsedDateTime.TotalSeconds
@@ -698,23 +698,23 @@ module Character3dDispatcherModule =
             let linearVelocity = World.getBodyLinearVelocity bodyId world
             let angularVelocity = World.getBodyAngularVelocity bodyId world
             let forwardness = (Vector3.Dot (linearVelocity, rotation.Forward))
-            let backwardness = (Vector3.Dot (linearVelocity, -rotation.Forward))
-            let rightwardness = (Vector3.Dot (linearVelocity, rotation.Right))
-            let leftwardness = (Vector3.Dot (linearVelocity, -rotation.Right))
-            let turnRightwardness = (angularVelocity * v3Up).Length ()
-            let turnLeftwardness = -turnRightwardness
+            let backness = (Vector3.Dot (linearVelocity, -rotation.Forward))
+            let rightness = (Vector3.Dot (linearVelocity, rotation.Right))
+            let leftness = (Vector3.Dot (linearVelocity, -rotation.Right))
+            let turnRightness = (angularVelocity * v3Up).Length ()
+            let turnLeftness = -turnRightness
             let animations = [{ StartTime = 0L; LifeTimeOpt = None; Name = "Armature|Idle"; Playback = Loop; Rate = 1.0f; Weight = 0.5f; BoneFilterOpt = None }]
             let animations =
-                if forwardness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkForward"; Playback = Loop; Rate = 1.5f; Weight = forwardness; BoneFilterOpt = None } :: animations
-                elif backwardness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkBackward"; Playback = Loop; Rate = 1.5f; Weight = backwardness; BoneFilterOpt = None } :: animations
+                if forwardness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkForward"; Playback = Loop; Rate = 1.0f; Weight = forwardness; BoneFilterOpt = None } :: animations
+                elif backness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkBack"; Playback = Loop; Rate = 1.0f; Weight = backness; BoneFilterOpt = None } :: animations
                 else animations
             let animations =
-                if rightwardness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkRightward"; Playback = Loop; Rate = 1.5f; Weight = rightwardness; BoneFilterOpt = None } :: animations
-                elif leftwardness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkLeftward"; Playback = Loop; Rate = 1.5f; Weight = leftwardness; BoneFilterOpt = None } :: animations
+                if rightness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkRight"; Playback = Loop; Rate = 1.0f; Weight = rightness; BoneFilterOpt = None } :: animations
+                elif leftness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkLeft"; Playback = Loop; Rate = 1.0f; Weight = leftness; BoneFilterOpt = None } :: animations
                 else animations
             let animations =
-                if turnRightwardness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnRightward"; Playback = Loop; Rate = 1.5f; Weight = turnRightwardness; BoneFilterOpt = None } :: animations
-                elif turnLeftwardness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnLeftward"; Playback = Loop; Rate = 1.5f; Weight = turnLeftwardness; BoneFilterOpt = None } :: animations
+                if turnRightness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnRight"; Playback = Loop; Rate = 1.0f; Weight = turnRightness; BoneFilterOpt = None } :: animations
+                elif turnLeftness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnLeft"; Playback = Loop; Rate = 1.0f; Weight = turnLeftness; BoneFilterOpt = None } :: animations
                 else animations
             entity.SetAnimations (List.toArray animations) world
 

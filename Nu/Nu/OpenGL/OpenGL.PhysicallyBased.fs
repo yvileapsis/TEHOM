@@ -317,19 +317,9 @@ module PhysicallyBased =
           ShadowMatricesUniforms : int array
           PhysicallyBasedDeferredLightingShader : uint }
 
-    /// Describes a blur pass of a physically-based shader that's loaded into GPU.
-    type PhysicallyBasedBlurShader =
-        { InputTextureUniform : int
-          PhysicallyBasedBlurShader : uint }
-
-    /// Describes an fxaa pass of a physically-based shader that's loaded into GPU.
-    type PhysicallyBasedFxaaShader =
-        { InputTextureUniform : int
-          PhysicallyBasedFxaaShader : uint }
-
-    /// Create physically-based material from an assimp mesh. falling back on default in case of missing textures.
-    /// Uses file name-based inferences to look for non-albedo files as well as determining if roughness should be
-    /// inverted to smoothness (such as when a model is imported from an fbx exported from a Unity scene).
+    /// Create physically-based material from an assimp mesh, falling back on defaults in case of missing textures.
+    /// Uses file name-based inferences to look for texture files in case the ones that were hard-coded in the model
+    /// files can't be located.
     /// Thread-safe if renderable = false.
     let CreatePhysicallyBasedMaterial (renderable, dirPath, defaultMaterial, textureMemo, material : Assimp.Material) =
 
@@ -341,31 +331,40 @@ module PhysicallyBased =
             if material.HasColorDiffuse
             then color material.ColorDiffuse.R material.ColorDiffuse.G material.ColorDiffuse.B material.ColorDiffuse.A
             else Constants.Render.AlbedoDefault
-        let mutable (_, albedoTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Diffuse, 0)
-        if isNull albedoTextureSlot.FilePath
-        then albedoTextureSlot.FilePath <- "" // ensure not null
-        else
-            albedoTextureSlot.FilePath <- PathF.Normalize albedoTextureSlot.FilePath
-            let individualDirectories = albedoTextureSlot.FilePath.Split "/"
-            let possibleFilePaths = [for i in dec individualDirectories.Length .. -1 .. 0 do String.join "/" (Array.skip i individualDirectories)]
+        let mutable (_, albedoTextureSlotA) = material.GetMaterialTexture (Assimp.TextureType.BaseColor, 0)
+        let mutable (_, albedoTextureSlotB) = material.GetMaterialTexture (Assimp.TextureType.Diffuse, 0)
+        let mutable albedoTextureSlotFilePath =
+            if isNull albedoTextureSlotA.FilePath then
+                if isNull albedoTextureSlotB.FilePath then ""
+                else albedoTextureSlotB.FilePath
+            else albedoTextureSlotA.FilePath
+        if albedoTextureSlotFilePath <> "" then
+            albedoTextureSlotFilePath <- PathF.Normalize albedoTextureSlotFilePath
+            let individualPaths = albedoTextureSlotFilePath.Split "/"
+            let possibleFilePaths =
+                [|for i in dec individualPaths.Length .. -1 .. 0 do
+                    let possibleFilePath = String.join "/" (Array.skip i individualPaths)
+                    possibleFilePath
+                    if PathF.GetExtensionLower possibleFilePath = ".psd" then PathF.ChangeExtension (possibleFilePath, ".png")
+                    PathF.ChangeExtension (possibleFilePath, ".dds")|]
             let mutable found = false
             let mutable i = 0
             while not found && i < possibleFilePaths.Length do
                 let possibleFilePath = possibleFilePaths.[i]
                 if File.Exists (dirPrefix + possibleFilePath) then
-                    albedoTextureSlot.FilePath <- possibleFilePath
+                    albedoTextureSlotFilePath <- possibleFilePath
                     found <- true
                 else i <- inc i
         let (albedoMetadata, albedoTexture) =
             if renderable then
-                match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + albedoTextureSlot.FilePath, textureMemo) with
+                match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + albedoTextureSlotFilePath, textureMemo) with
                 | Right (textureMetadata, texture) -> (textureMetadata, texture)
                 | Left _ -> (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
             else (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
 
         // infer possible substitute texture names
-        let albedoTextureDirName =              match albedoTextureSlot.FilePath with null -> "" | filePath -> PathF.GetDirectoryName filePath
-        let albedoTextureFileName =             PathF.GetFileName albedoTextureSlot.FilePath
+        let albedoTextureDirName =              match albedoTextureSlotFilePath with null -> "" | filePath -> PathF.GetDirectoryName filePath
+        let albedoTextureFileName =             PathF.GetFileName albedoTextureSlotFilePath
         let substitutionPrefix =                if albedoTextureDirName <> "" then albedoTextureDirName + "/" else ""
         let has_bc =                            albedoTextureFileName.Contains "_bc"
         let has_d =                             albedoTextureFileName.Contains "_d"
@@ -399,28 +398,28 @@ module PhysicallyBased =
         roughnessTextureSlot.FilePath <- roughnessTextureSlot.FilePath // trim
         let roughnessTexture =
             if renderable then
-                match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + roughnessTextureSlot.FilePath, textureMemo) with
+                match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + roughnessTextureSlot.FilePath, textureMemo) with
                 | Right (_, texture) -> texture
                 | Left _ ->
-                    match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + gTextureFilePath, textureMemo) with
+                    match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + gTextureFilePath, textureMemo) with
                     | Right (_, texture) -> texture
                     | Left _ ->
-                        match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + sTextureFilePath, textureMemo) with
+                        match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + sTextureFilePath, textureMemo) with
                         | Right (_, texture) -> texture
                         | Left _ ->
-                            match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + g_mTextureFilePath, textureMemo) with
+                            match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + g_mTextureFilePath, textureMemo) with
                             | Right (_, texture) -> texture
                             | Left _ ->
-                                match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + g_m_aoTextureFilePath, textureMemo) with
+                                match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + g_m_aoTextureFilePath, textureMemo) with
                                 | Right (_, texture) -> texture
                                 | Left _ ->
-                                    match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + roughnessTextureFilePath, textureMemo) with
+                                    match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + roughnessTextureFilePath, textureMemo) with
                                     | Right (_, texture) -> texture
                                     | Left _ ->
-                                        match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + rmTextureFilePath, textureMemo) with
+                                        match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + rmTextureFilePath, textureMemo) with
                                         | Right (_, texture) -> texture
                                         | Left _ ->
-                                            match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + rmaTextureFilePath, textureMemo) with
+                                            match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + rmaTextureFilePath, textureMemo) with
                                             | Right (_, texture) -> texture
                                             | Left _ -> defaultMaterial.RoughnessTexture
             else defaultMaterial.RoughnessTexture
@@ -433,56 +432,59 @@ module PhysicallyBased =
         else metallicTextureSlot.FilePath <- PathF.Normalize metallicTextureSlot.FilePath
         let metallicTexture =
             if renderable then
-                match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + metallicTextureSlot.FilePath, textureMemo) with
+                match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + metallicTextureSlot.FilePath, textureMemo) with
                 | Right (_, texture) -> texture
                 | Left _ ->
-                    match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + mTextureFilePath, textureMemo) with
+                    match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + mTextureFilePath, textureMemo) with
                     | Right (_, texture) -> texture
                     | Left _ ->
-                        match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + g_mTextureFilePath, textureMemo) with
+                        match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + g_mTextureFilePath, textureMemo) with
                         | Right (_, texture) -> texture
                         | Left _ ->
-                            match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + g_m_aoTextureFilePath, textureMemo) with
+                            match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + g_m_aoTextureFilePath, textureMemo) with
                             | Right (_, texture) -> texture
                             | Left _ ->
-                                match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + metallicTextureFilePath, textureMemo) with
+                                match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + metallicTextureFilePath, textureMemo) with
                                 | Right (_, texture) -> texture
                                 | Left _ ->
-                                    match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + metalnessTextureFilePath, textureMemo) with
+                                    match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + metalnessTextureFilePath, textureMemo) with
                                     | Right (_, texture) -> texture
                                     | Left _ ->
-                                        match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + rmTextureFilePath, textureMemo) with
+                                        match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + rmTextureFilePath, textureMemo) with
                                         | Right (_, texture) -> texture
                                         | Left _ ->
-                                            match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + rmaTextureFilePath, textureMemo) with
+                                            match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + rmaTextureFilePath, textureMemo) with
                                             | Right (_, texture) -> texture
                                             | Left _ -> defaultMaterial.MetallicTexture
             else defaultMaterial.MetallicTexture
 
         // attempt to load ambient occlusion info
         let ambientOcclusion = Constants.Render.AmbientOcclusionDefault
-        let mutable (_, ambientOcclusionTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Ambient, 0)
-        if isNull ambientOcclusionTextureSlot.FilePath
-        then ambientOcclusionTextureSlot.FilePath <- "" // ensure not null
-        else ambientOcclusionTextureSlot.FilePath <- PathF.Normalize ambientOcclusionTextureSlot.FilePath
+        let mutable (_, ambientOcclusionTextureSlotA) = material.GetMaterialTexture (Assimp.TextureType.Ambient, 0)
+        let mutable (_, ambientOcclusionTextureSlotB) = material.GetMaterialTexture (Assimp.TextureType.AmbientOcclusion, 0)
+        let ambientOcclusionTextureSlotFilePath =
+            if isNull ambientOcclusionTextureSlotA.FilePath then
+                if isNull ambientOcclusionTextureSlotB.FilePath then ""
+                else ambientOcclusionTextureSlotB.FilePath
+            else ambientOcclusionTextureSlotA.FilePath
         let ambientOcclusionTexture =
             if renderable then
-                match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + ambientOcclusionTextureSlot.FilePath, textureMemo) with
+                match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + ambientOcclusionTextureSlotFilePath, textureMemo) with
                 | Right (_, texture) -> texture
                 | Left _ ->
-                    match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + aoTextureFilePath, textureMemo) with
+                    match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + aoTextureFilePath, textureMemo) with
                     | Right (_, texture) -> texture
                     | Left _ ->
-                        match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + g_m_aoTextureFilePath, textureMemo) with
+                        match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + g_m_aoTextureFilePath, textureMemo) with
                         | Right (_, texture) -> texture
                         | Left _ ->
-                            match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + ambientOcclusionTextureFilePath, textureMemo) with
+                            match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + ambientOcclusionTextureFilePath, textureMemo) with
                             | Right (_, texture) -> texture
                             | Left _ ->
-                                match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + aoTextureFilePath', textureMemo) with
+                                match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + aoTextureFilePath', textureMemo) with
                                 | Right (_, texture) -> texture
                                 | Left _ ->
-                                    match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + rmaTextureFilePath, textureMemo) with
+                                    match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + rmaTextureFilePath, textureMemo) with
                                     | Right (_, texture) -> texture
                                     | Left _ -> defaultMaterial.AmbientOcclusionTexture
             else defaultMaterial.AmbientOcclusionTexture
@@ -495,13 +497,13 @@ module PhysicallyBased =
         else emissionTextureSlot.FilePath <- PathF.Normalize emissionTextureSlot.FilePath
         let emissionTexture =
             if renderable then
-                match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + emissionTextureSlot.FilePath, textureMemo) with
+                match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + emissionTextureSlot.FilePath, textureMemo) with
                 | Right (_, texture) -> texture
                 | Left _ ->
-                    match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + eTextureFilePath, textureMemo) with
+                    match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + eTextureFilePath, textureMemo) with
                     | Right (_, texture) -> texture
                     | Left _ ->
-                        match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + emissionTextureFilePath, textureMemo) with
+                        match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + emissionTextureFilePath, textureMemo) with
                         | Right (_, texture) -> texture
                         | Left _ -> defaultMaterial.EmissionTexture
             else defaultMaterial.EmissionTexture
@@ -513,13 +515,13 @@ module PhysicallyBased =
         else normalTextureSlot.FilePath <- PathF.Normalize normalTextureSlot.FilePath
         let normalTexture =
             if renderable then
-                match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.UncompressedTextureFormat, dirPrefix + normalTextureSlot.FilePath, textureMemo) with
+                match Texture.TryCreateTextureFilteredMemoized (false, dirPrefix + normalTextureSlot.FilePath, textureMemo) with
                 | Right (_, texture) -> texture
                 | Left _ ->
-                    match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.UncompressedTextureFormat, dirPrefix + nTextureFilePath, textureMemo) with
+                    match Texture.TryCreateTextureFilteredMemoized (false, dirPrefix + nTextureFilePath, textureMemo) with
                     | Right (_, texture) -> texture
                     | Left _ ->
-                        match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.UncompressedTextureFormat, dirPrefix + normalTextureFilePath, textureMemo) with
+                        match Texture.TryCreateTextureFilteredMemoized (false, dirPrefix + normalTextureFilePath, textureMemo) with
                         | Right (_, texture) -> texture
                         | Left _ -> defaultMaterial.NormalTexture
             else defaultMaterial.NormalTexture
@@ -532,13 +534,13 @@ module PhysicallyBased =
         else heightTextureSlot.FilePath <- PathF.Normalize heightTextureSlot.FilePath
         let heightTexture =
             if renderable then
-                match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + heightTextureSlot.FilePath, textureMemo) with
+                match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + heightTextureSlot.FilePath, textureMemo) with
                 | Right (_, texture) -> texture
                 | Left _ ->
-                    match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + hTextureFilePath, textureMemo) with
+                    match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + hTextureFilePath, textureMemo) with
                     | Right (_, texture) -> texture
                     | Left _ ->
-                        match Texture.TryCreateTextureFilteredMemoized (Constants.OpenGL.CompressedColorTextureFormat, dirPrefix + heightTextureFilePath, textureMemo) with
+                        match Texture.TryCreateTextureFilteredMemoized (true, dirPrefix + heightTextureFilePath, textureMemo) with
                         | Right (_, texture) -> texture
                         | Left _ -> defaultMaterial.HeightTexture
             else defaultMaterial.HeightTexture
@@ -1728,34 +1730,6 @@ module PhysicallyBased =
           ShadowMatricesUniforms = shadowMatricesUniforms
           PhysicallyBasedDeferredLightingShader = shader }
 
-    /// Create a physically-based shader for the blur pass of rendering.
-    let CreatePhysicallyBasedBlurShader (shaderFilePath : string) =
-
-        // create shader
-        let shader = Shader.CreateShaderFromFilePath shaderFilePath
-        Hl.Assert ()
-
-        // retrieve uniforms
-        let inputTextureUniform = Gl.GetUniformLocation (shader, "inputTexture")
-
-        // make shader record
-        { InputTextureUniform = inputTextureUniform
-          PhysicallyBasedBlurShader = shader }
-
-    /// Create a physically-based shader for the fxaa pass of rendering.
-    let CreatePhysicallyBasedFxaaShader (shaderFilePath : string) =
-
-        // create shader
-        let shader = Shader.CreateShaderFromFilePath shaderFilePath
-        Hl.Assert ()
-
-        // retrieve uniforms
-        let inputTextureUniform = Gl.GetUniformLocation (shader, "inputTexture")
-
-        // make shader record
-        { InputTextureUniform = inputTextureUniform
-          PhysicallyBasedFxaaShader = shader }
-
     /// Create the shaders for physically-based shadow rendering.
     let CreatePhysicallyBasedShadowShaders (shaderStaticShadowFilePath, shaderAnimatedShadowFilePath, shaderTerrainShadowFilePath) =
         let shaderStaticShadow = CreatePhysicallyBasedShader shaderStaticShadowFilePath
@@ -1783,6 +1757,104 @@ module PhysicallyBased =
         Hl.Assert ()
         let shaderLighting = CreatePhysicallyBasedDeferredLightingShader shaderLightingFilePath
         (shaderStatic, shaderAnimated, shaderTerrain, shaderLightMapping, shaderIrradiance, shaderEnvironmentFilter, shaderSsao, shaderLighting)
+
+    /// Draw the filter box pass using a physically-based surface.
+    let DrawFilterBoxSurface
+        (inputTexture : Texture.Texture,
+         geometry : PhysicallyBasedGeometry,
+         shader : Filter.FilterBoxShader) =
+
+        // setup shader
+        Gl.UseProgram shader.FilterBoxShader
+        Hl.Assert ()
+
+        // setup textures
+        Gl.UniformHandleARB (shader.InputTextureUniform, inputTexture.TextureHandle)
+        Hl.Assert ()
+
+        // setup geometry
+        Gl.BindVertexArray geometry.PhysicallyBasedVao
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.VertexBuffer)
+        Gl.BindBuffer (BufferTarget.ElementArrayBuffer, geometry.IndexBuffer)
+        Hl.Assert ()
+
+        // draw geometry
+        Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.ReportDrawCall 1
+        Hl.Assert ()
+
+        // teardown geometry
+        Gl.BindVertexArray 0u
+        Hl.Assert ()
+
+        // teardown shader
+        Gl.UseProgram 0u
+
+    /// Draw the filter gaussian pass using a physically-based surface.
+    let DrawFilterGaussianSurface
+        (scale : Vector2,
+         inputTexture : Texture.Texture,
+         geometry : PhysicallyBasedGeometry,
+         shader : Filter.FilterGaussianShader) =
+
+        // setup shader
+        Gl.UseProgram shader.FilterGaussianShader
+        Gl.Uniform2 (shader.ScaleUniform, scale.X, scale.Y)
+        Hl.Assert ()
+
+        // setup textures
+        Gl.UniformHandleARB (shader.InputTextureUniform, inputTexture.TextureHandle)
+        Hl.Assert ()
+
+        // setup geometry
+        Gl.BindVertexArray geometry.PhysicallyBasedVao
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.VertexBuffer)
+        Gl.BindBuffer (BufferTarget.ElementArrayBuffer, geometry.IndexBuffer)
+        Hl.Assert ()
+
+        // draw geometry
+        Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.ReportDrawCall 1
+        Hl.Assert ()
+
+        // teardown geometry
+        Gl.BindVertexArray 0u
+        Hl.Assert ()
+
+        // teardown shader
+        Gl.UseProgram 0u
+
+    /// Draw the filter fxaa pass using a physically-based surface.
+    let DrawFilterFxaaSurface
+        (inputTexture : Texture.Texture,
+         geometry : PhysicallyBasedGeometry,
+         shader : Filter.FilterFxaaShader) =
+
+        // setup shader
+        Gl.UseProgram shader.FilterFxaaShader
+        Hl.Assert ()
+
+        // setup textures
+        Gl.UniformHandleARB (shader.InputTextureUniform, inputTexture.TextureHandle)
+        Hl.Assert ()
+
+        // setup geometry
+        Gl.BindVertexArray geometry.PhysicallyBasedVao
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.VertexBuffer)
+        Gl.BindBuffer (BufferTarget.ElementArrayBuffer, geometry.IndexBuffer)
+        Hl.Assert ()
+
+        // draw geometry
+        Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Hl.ReportDrawCall 1
+        Hl.Assert ()
+
+        // teardown geometry
+        Gl.BindVertexArray 0u
+        Hl.Assert ()
+
+        // teardown shader
+        Gl.UseProgram 0u
 
     /// Draw a batch of physically-based surfaces' shadows.
     let DrawPhysicallyBasedShadowSurfaces
@@ -1827,7 +1899,7 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElementsInstanced (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0, surfacesCount)
-        Hl.RegisterDrawCall ()
+        Hl.ReportDrawCall surfacesCount
         Hl.Assert ()
 
         // stop batch
@@ -1906,7 +1978,7 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElementsInstanced (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0, surfacesCount)
-        Hl.RegisterDrawCall ()
+        Hl.ReportDrawCall surfacesCount
         Hl.Assert ()
 
         // stop batch
@@ -2042,7 +2114,7 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElementsInstanced (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0, surfacesCount)
-        Hl.RegisterDrawCall ()
+        Hl.ReportDrawCall surfacesCount
         Hl.Assert ()
 
         // teardown geometry
@@ -2128,7 +2200,7 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, elementsCount, DrawElementsType.UnsignedInt, nativeint 0)
-        Hl.RegisterDrawCall ()
+        Hl.ReportDrawCall 1
         Hl.Assert ()
 
         // teardown geometry
@@ -2176,7 +2248,7 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
-        Hl.RegisterDrawCall ()
+        Hl.ReportDrawCall 1
         Hl.Assert ()
 
         // teardown geometry
@@ -2223,7 +2295,7 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
-        Hl.RegisterDrawCall ()
+        Hl.ReportDrawCall 1
         Hl.Assert ()
 
         // teardown geometry
@@ -2274,7 +2346,7 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
-        Hl.RegisterDrawCall ()
+        Hl.ReportDrawCall 1
         Hl.Assert ()
 
         // teardown geometry
@@ -2324,7 +2396,7 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
-        Hl.RegisterDrawCall ()
+        Hl.ReportDrawCall 1
         Hl.Assert ()
 
         // teardown geometry
@@ -2406,71 +2478,7 @@ module PhysicallyBased =
 
         // draw geometry
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
-        Hl.RegisterDrawCall ()
-        Hl.Assert ()
-
-        // teardown geometry
-        Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown shader
-        Gl.UseProgram 0u
-
-    /// Draw the blur pass of a physically-based surface.
-    let DrawPhysicallyBasedBlurSurface
-        (inputTexture : Texture.Texture,
-         geometry : PhysicallyBasedGeometry,
-         shader : PhysicallyBasedBlurShader) =
-
-        // setup shader
-        Gl.UseProgram shader.PhysicallyBasedBlurShader
-        Hl.Assert ()
-
-        // setup textures
-        Gl.UniformHandleARB (shader.InputTextureUniform, inputTexture.TextureHandle)
-        Hl.Assert ()
-
-        // setup geometry
-        Gl.BindVertexArray geometry.PhysicallyBasedVao
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.VertexBuffer)
-        Gl.BindBuffer (BufferTarget.ElementArrayBuffer, geometry.IndexBuffer)
-        Hl.Assert ()
-
-        // draw geometry
-        Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
-        Hl.RegisterDrawCall ()
-        Hl.Assert ()
-
-        // teardown geometry
-        Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown shader
-        Gl.UseProgram 0u
-
-    /// Draw the fxaa pass of a physically-based surface.
-    let DrawPhysicallyBasedFxaaSurface
-        (inputTexture : Texture.Texture,
-         geometry : PhysicallyBasedGeometry,
-         shader : PhysicallyBasedFxaaShader) =
-
-        // setup shader
-        Gl.UseProgram shader.PhysicallyBasedFxaaShader
-        Hl.Assert ()
-
-        // setup textures
-        Gl.UniformHandleARB (shader.InputTextureUniform, inputTexture.TextureHandle)
-        Hl.Assert ()
-
-        // setup geometry
-        Gl.BindVertexArray geometry.PhysicallyBasedVao
-        Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.VertexBuffer)
-        Gl.BindBuffer (BufferTarget.ElementArrayBuffer, geometry.IndexBuffer)
-        Hl.Assert ()
-
-        // draw geometry
-        Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
-        Hl.RegisterDrawCall ()
+        Hl.ReportDrawCall 1
         Hl.Assert ()
 
         // teardown geometry

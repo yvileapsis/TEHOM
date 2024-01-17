@@ -9,12 +9,28 @@ open System.Configuration
 open Prime
 open Nu
 
+module OpenGL =
+
+    let [<Literal>] VersionMajor = 4
+    let [<Literal>] VersionMinor = 1
+    let [<Literal>] CoreProfile = true
+    let [<Uniform>] GlslVersionPragma = "#version " + string VersionMajor + string VersionMinor + "0 " + if CoreProfile then "core" else ""
+    let [<Literal>] UncompressedTextureFormat = OpenGL.InternalFormat.Rgba8
+    let [<Literal>] BlockCompressedTextureFormat = OpenGL.InternalFormat.CompressedRgbaS3tcDxt5Ext
+    let [<Uniform>] mutable HlAssert = match ConfigurationManager.AppSettings.["HlAssert"] with null -> false | hlAssert -> scvalue hlAssert
+
+[<RequireQualifiedAccess>]
+module Assimp =
+
+    let [<Literal>] PostProcessSteps = Assimp.PostProcessSteps.Triangulate ||| Assimp.PostProcessSteps.GlobalScale
+    let [<Literal>] RawPropertyPrefix = "$raw."
+
 [<RequireQualifiedAccess>]
 module Engine =
 
     let [<Literal>] ExitCodeSuccess = 0
     let [<Literal>] ExitCodeFailure = 1
-    let [<Uniform>] mutable RunSynchronously = match ConfigurationManager.AppSettings.["RunSynchronously"] with null -> false | size -> scvalue<bool> size
+    let [<Uniform>] mutable RunSynchronously = match ConfigurationManager.AppSettings.["RunSynchronously"] with null -> false | size -> scvalue size
     let [<Literal>] Meter2d = 48.0f
     let [<Literal>] Meter3d = 1.0f
     let [<Literal>] GameSortPriority = Single.MaxValue
@@ -40,19 +56,19 @@ module Engine =
     let [<Uniform>] EntityGuiSizeDefault = Vector3 (Meter2d * 4.0f, Meter2d, 0.0f)
     let [<Uniform>] Entity3dSizeDefault = Vector3 1.0f
     let [<Uniform>] EntityVuiSizeDefault = Vector3 1.0f
-    let [<Uniform>] mutable EntityPerimeterCentered2dDefault = match ConfigurationManager.AppSettings.["EntityPerimeterCentered2dDefault"] with null -> true | centered -> scvalue<bool> centered
-    let [<Uniform>] mutable EntityPerimeterCenteredGuiDefault = match ConfigurationManager.AppSettings.["EntityPerimeterCenteredGuiDefault"] with null -> true | centered -> scvalue<bool> centered
+    let [<Uniform>] mutable EntityPerimeterCentered2dDefault = match ConfigurationManager.AppSettings.["EntityPerimeterCentered2dDefault"] with null -> true | centered -> scvalue centered
+    let [<Uniform>] mutable EntityPerimeterCenteredGuiDefault = match ConfigurationManager.AppSettings.["EntityPerimeterCenteredGuiDefault"] with null -> true | centered -> scvalue centered
     let [<Uniform>] Particle2dSizeDefault = Vector3 (12.0f, 12.0f, 0.0f)
     let [<Uniform>] Particle3dSizeDefault = Vector3 (0.1f, 0.1f, 0.1f)
     let [<Uniform>] Eye3dCenterDefault = Vector3 (0.0f, 1.0f, 4.0f)
-    let [<Uniform>] mutable QuadnodeSize = match ConfigurationManager.AppSettings.["QuadnodeSize"] with null -> 512.0f | size -> scvalue<single> size
-    let [<Uniform>] mutable QuadtreeDepth = match ConfigurationManager.AppSettings.["QuadtreeDepth"] with null -> 6 | depth -> scvalue<int> depth
+    let [<Uniform>] mutable QuadnodeSize = match ConfigurationManager.AppSettings.["QuadnodeSize"] with null -> 512.0f | size -> scvalue size
+    let [<Uniform>] mutable QuadtreeDepth = match ConfigurationManager.AppSettings.["QuadtreeDepth"] with null -> 6 | depth -> scvalue depth
     let [<Uniform>] QuadtreeSize = Vector2 (QuadnodeSize * single (pown 2 QuadtreeDepth))
-    let [<Uniform>] mutable OctnodeSize = match ConfigurationManager.AppSettings.["OctnodeSize"] with null -> 8.0f | size -> scvalue<single> size
-    let [<Uniform>] mutable OctreeDepth = match ConfigurationManager.AppSettings.["OctreeDepth"] with null -> 6 | depth -> scvalue<int> depth
+    let [<Uniform>] mutable OctnodeSize = match ConfigurationManager.AppSettings.["OctnodeSize"] with null -> 8.0f | size -> scvalue size
+    let [<Uniform>] mutable OctreeDepth = match ConfigurationManager.AppSettings.["OctreeDepth"] with null -> 6 | depth -> scvalue depth
     let [<Uniform>] OctreeSize = Vector3 (OctnodeSize * single (pown 2 OctreeDepth))
-    let [<Uniform>] mutable EventTracing = match ConfigurationManager.AppSettings.["EventTracing"] with null -> false | tracing -> scvalue<bool> tracing
-    let [<Uniform>] mutable EventFilter = match ConfigurationManager.AppSettings.["EventFilter"] with null -> Empty | filter -> scvalue<EventFilter> filter
+    let [<Uniform>] mutable EventTracing = match ConfigurationManager.AppSettings.["EventTracing"] with null -> false | tracing -> scvalue tracing
+    let [<Uniform>] mutable EventFilter = match ConfigurationManager.AppSettings.["EventFilter"] with null -> Pass | filter -> scvalue filter
     let [<Uniform>] TickDeltaMax = 1.0 / 10.0 * double Stopwatch.Frequency |> int64
 
 [<RequireQualifiedAccess>]
@@ -60,23 +76,23 @@ module Render =
 
     let [<Literal>] IgnoreLightMapsName = "IgnoreLightMaps"
     let [<Literal>] TwoSidedName = "TwoSided"
-    let [<Uniform>] mutable Vsync = match ConfigurationManager.AppSettings.["Vsync"] with null -> true | vsync -> scvalue<bool> vsync
+    let [<Uniform>] mutable Vsync = match ConfigurationManager.AppSettings.["Vsync"] with null -> true | vsync -> scvalue vsync
     let [<Literal>] VirtualResolutionX = 960
     let [<Literal>] VirtualResolutionY = 540
     let [<Uniform>] VirtualResolution = Vector2i (VirtualResolutionX, VirtualResolutionY)
     let [<Uniform>] VirtualResolutionF = Vector2 (single VirtualResolutionX, single VirtualResolutionY)
-    let [<Uniform>] VirtualScalar = match ConfigurationManager.AppSettings.["VirtualScalar"] with null -> 2 | scalar -> scvalue<int> scalar
+    let [<Uniform>] VirtualScalar = match ConfigurationManager.AppSettings.["VirtualScalar"] with null -> 2 | scalar -> scvalue scalar
     let [<Uniform>] VirtualScalarF = single VirtualScalar
     let [<Uniform>] VirtualScalar2i = Vector2i VirtualScalar
     let [<Uniform>] VirtualScalar2 = Vector2 (single VirtualScalar2i.X, single VirtualScalar2i.Y)
     let [<Uniform>] Play3dBoxSize = Vector3 64.0f
     let [<Uniform>] Light3dBoxSize = Vector3 64.0f
-    let [<Uniform>] mutable NearPlaneDistanceInterior = match ConfigurationManager.AppSettings.["NearPlaneDistanceInterior"] with null -> 0.0625f | scalar -> scvalue<single> scalar
-    let [<Uniform>] mutable FarPlaneDistanceInterior = match ConfigurationManager.AppSettings.["FarPlaneDistanceInterior"] with null -> 16.0f (* NOTE: remember to update OPAQUING_DISTANCE in shader when changing this!*) | scalar -> scvalue<single> scalar
-    let [<Uniform>] mutable NearPlaneDistanceExterior = match ConfigurationManager.AppSettings.["NearPlaneDistanceExterior"] with null -> FarPlaneDistanceInterior | scalar -> scvalue<single> scalar
-    let [<Uniform>] mutable FarPlaneDistanceExterior = match ConfigurationManager.AppSettings.["FarPlaneDistanceExterior"] with null -> 128.0f | scalar -> scvalue<single> scalar
-    let [<Uniform>] mutable NearPlaneDistanceImposter = match ConfigurationManager.AppSettings.["NearPlaneDistanceImposter"] with null -> FarPlaneDistanceExterior | scalar -> scvalue<single> scalar
-    let [<Uniform>] mutable FarPlaneDistanceImposter = match ConfigurationManager.AppSettings.["FarPlaneDistanceImposter"] with null -> 16384.0f (* TODO: see if this being large makes SSAO rather less accurate. *)| scalar -> scvalue<single> scalar
+    let [<Uniform>] mutable NearPlaneDistanceInterior = match ConfigurationManager.AppSettings.["NearPlaneDistanceInterior"] with null -> 0.0625f | scalar -> scvalue scalar
+    let [<Uniform>] mutable FarPlaneDistanceInterior = match ConfigurationManager.AppSettings.["FarPlaneDistanceInterior"] with null -> 16.0f (* NOTE: remember to update OPAQUING_DISTANCE in shader when changing this!*) | scalar -> scvalue scalar
+    let [<Uniform>] mutable NearPlaneDistanceExterior = match ConfigurationManager.AppSettings.["NearPlaneDistanceExterior"] with null -> FarPlaneDistanceInterior | scalar -> scvalue scalar
+    let [<Uniform>] mutable FarPlaneDistanceExterior = match ConfigurationManager.AppSettings.["FarPlaneDistanceExterior"] with null -> 128.0f | scalar -> scvalue scalar
+    let [<Uniform>] mutable NearPlaneDistanceImposter = match ConfigurationManager.AppSettings.["NearPlaneDistanceImposter"] with null -> FarPlaneDistanceExterior | scalar -> scvalue scalar
+    let [<Uniform>] mutable FarPlaneDistanceImposter = match ConfigurationManager.AppSettings.["FarPlaneDistanceImposter"] with null -> 16384.0f (* TODO: see if this being large makes SSAO rather less accurate. *)| scalar -> scvalue scalar
     let [<Uniform>] NearPlaneDistanceOmnipresent = NearPlaneDistanceInterior
     let [<Uniform>] FarPlaneDistanceOmnipresent = FarPlaneDistanceImposter
     let [<Uniform>] ResolutionX = VirtualResolutionX * VirtualScalar
@@ -91,7 +107,7 @@ module Render =
     let [<Uniform>] ShadowResolutionY = 512 * VirtualScalar
     let [<Uniform>] ShadowResolutionF = Vector2 (single ShadowResolutionX, single ShadowResolutionY)
     let [<Uniform>] ShadowResolution = Vector2i (ShadowResolutionX, ShadowResolutionY)
-    let [<Uniform>] mutable SsaoResolutionDivisor = match ConfigurationManager.AppSettings.["SsaoResolutionDivisor"] with null -> 1 | ssaoResolutionDivisor -> scvalue<int> ssaoResolutionDivisor
+    let [<Uniform>] mutable SsaoResolutionDivisor = match ConfigurationManager.AppSettings.["SsaoResolutionDivisor"] with null -> 1 | ssaoResolutionDivisor -> scvalue ssaoResolutionDivisor
     let [<Uniform>] SsaoResolutionX = ResolutionX / SsaoResolutionDivisor
     let [<Uniform>] SsaoResolutionY = ResolutionY / SsaoResolutionDivisor
     let [<Uniform>] SsaoResolutionF = Vector2 (single SsaoResolutionX, single SsaoResolutionY)
@@ -116,21 +132,23 @@ module Render =
     let [<Literal>] LightMapsMaxForward = 2
     let [<Literal>] LightsMaxDeferred = 64
     let [<Literal>] LightsMaxForward = 8
-    let [<Literal>] ShadowsShaderMax = 16 // NOTE: remember to update SHADOWS_MAX in shaders when changing this!
-    let [<Uniform>] mutable ShadowFovMax = match ConfigurationManager.AppSettings.["ShadowFovMax"] with null -> 2.1f (* NOTE: this can construct a pretty wide frustum far plane. *) | shadowFovMax -> scvalue<single> shadowFovMax
-    let [<Uniform>] mutable ShadowsMax = match ConfigurationManager.AppSettings.["ShadowsMax"] with null -> 8 | shadowsMax -> min (scvalue<int> shadowsMax) ShadowsShaderMax
+    let [<Uniform>] mutable ShadowDetailedCount = match ConfigurationManager.AppSettings.["ShadowDetailedCount"] with null -> 1 | scalar -> scvalue scalar
+    let [<Uniform>] mutable ShadowDetailedResolutionScalar = match ConfigurationManager.AppSettings.["ShadowDetailedResolutionScalar"] with null -> 2 | scalar -> scvalue scalar
+    let [<Literal>] ShadowFovMax = 2.1f // NOTE: remember to update SHADOW_FOV_MAX in shaders when changing this!
+    let [<Literal>] ShadowsMaxShader = 16 // NOTE: remember to update SHADOWS_MAX in shaders when changing this!
+    let [<Uniform>] mutable ShadowsMax = match ConfigurationManager.AppSettings.["ShadowsMax"] with null -> 8 | shadowsMax -> min (scvalue shadowsMax) ShadowsMaxShader
     let [<Literal>] ReflectionMapResolution = 512
     let [<Literal>] IrradianceMapResolution = 32
     let [<Literal>] EnvironmentFilterResolution = 128
     let [<Literal>] EnvironmentFilterMips = 5 // NOTE: changing this requires changing the REFLECTION_LOD_MAX constants in shader code.
     let [<Literal>] LightMappingEnabledDefault = true
     let [<Literal>] SsaoEnabledDefault = true
-    let [<Literal>] SsaoIntensityDefault = 1.5f
+    let [<Literal>] SsaoIntensityDefault = 1.25f
     let [<Literal>] SsaoBiasDefault = 0.025f
     let [<Literal>] SsaoRadiusDefault = 0.25f
     let [<Literal>] SsaoDistanceMaxDefault = 0.1f
     let [<Literal>] SsaoSampleCountMax = 128
-    let [<Literal>] SsaoSampleCountDefault = 16
+    let [<Literal>] SsaoSampleCountDefault = 12
     let [<Literal>] FxaaEnabledDefault = true
     let [<Literal>] LightProbeSizeDefault = 3.0f
     let [<Literal>] BrightnessDefault = 3.0f
@@ -143,22 +161,6 @@ module Render =
     let [<Literal>] AmbientOcclusionDefault = 1.0f
     let [<Literal>] EmissionDefault = 1.0f
     let [<Literal>] HeightDefault = 1.0f
-
-module OpenGL =
-
-    let [<Literal>] VersionMajor = 4
-    let [<Literal>] VersionMinor = 1
-    let [<Literal>] CoreProfile = true
-    let [<Uniform>] GlslVersionPragma = "#version " + string VersionMajor + string VersionMinor + "0 " + if CoreProfile then "core" else ""
-    let [<Literal>] CompressedColorTextureFormat = OpenGL.InternalFormat.CompressedRgbaS3tcDxt5Ext
-    let [<Literal>] UncompressedTextureFormat = OpenGL.InternalFormat.Rgba8
-    let [<Uniform>] mutable HlAssert = match ConfigurationManager.AppSettings.["HlAssert"] with null -> false | hlAssert -> scvalue<bool> hlAssert
-
-[<RequireQualifiedAccess>]
-module Assimp =
-
-    let [<Literal>] PostProcessSteps = Assimp.PostProcessSteps.Triangulate ||| Assimp.PostProcessSteps.GlobalScale
-    let [<Literal>] RawPropertyPrefix = "$raw."
 
 [<RequireQualifiedAccess>]
 module Audio =
@@ -241,6 +243,9 @@ module Paths =
     let [<Literal>] SkyBoxShaderFilePath = "Assets/Default/SkyBox.glsl"
     let [<Literal>] IrradianceShaderFilePath = "Assets/Default/Irradiance.glsl"
     let [<Literal>] EnvironmentFilterShaderFilePath = "Assets/Default/EnvironmentFilter.glsl"
+    let [<Literal>] FilterBox1dShaderFilePath = "Assets/Default/FilterBox1d.glsl"
+    let [<Literal>] FilterGaussian2dShaderFilePath = "Assets/Default/FilterGaussian2d.glsl"
+    let [<Literal>] FilterFxaaShaderFilePath = "Assets/Default/FilterFxaa.glsl"
     let [<Literal>] PhysicallyBasedShadowStaticShaderFilePath = "Assets/Default/PhysicallyBasedShadowStatic.glsl"
     let [<Literal>] PhysicallyBasedShadowAnimatedShaderFilePath = "Assets/Default/PhysicallyBasedShadowAnimated.glsl"
     let [<Literal>] PhysicallyBasedShadowTerrainShaderFilePath = "Assets/Default/PhysicallyBasedShadowTerrain.glsl"
@@ -253,8 +258,3 @@ module Paths =
     let [<Literal>] PhysicallyBasedDeferredSsaoShaderFilePath = "Assets/Default/PhysicallyBasedDeferredSsao.glsl"
     let [<Literal>] PhysicallyBasedDeferredLightingShaderFilePath = "Assets/Default/PhysicallyBasedDeferredLighting.glsl"
     let [<Literal>] PhysicallyBasedForwardStaticShaderFilePath = "Assets/Default/PhysicallyBasedForwardStatic.glsl"
-    let [<Literal>] PhysicallyBasedBlurShaderFilePath = "Assets/Default/PhysicallyBasedBlur.glsl"
-    let [<Literal>] PhysicallyBasedFxaaShaderFilePath = "Assets/Default/PhysicallyBasedFxaa.glsl"
-    let [<Literal>] WhiteTextureFilePath = "Assets/Default/White.bmp"
-    let [<Literal>] BlackTextureFilePath = "Assets/Default/Black.bmp"
-    let [<Literal>] BrdfTextureFilePath = "Assets/Default/Brdf.tiff"

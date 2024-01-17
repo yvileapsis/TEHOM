@@ -105,6 +105,16 @@ module WorldEntityHierarchy =
                                   HeightOpt = ValueSome surface.SurfaceMaterialProperties.Height
                                   IgnoreLightMapsOpt = ValueSome ignoreLightMaps }
                             let world = child.SetMaterialProperties properties world
+                            let material =
+                                { AlbedoImageOpt = ValueOption.ofOption (Metadata.tryGetStaticModelAlbedoImage surface.SurfaceMaterialIndex staticModel)
+                                  RoughnessImageOpt = ValueOption.ofOption (Metadata.tryGetStaticModelRoughnessImage surface.SurfaceMaterialIndex staticModel)
+                                  MetallicImageOpt = ValueOption.ofOption (Metadata.tryGetStaticModelMetallicImage surface.SurfaceMaterialIndex staticModel)
+                                  AmbientOcclusionImageOpt = ValueOption.ofOption (Metadata.tryGetStaticModelAmbientOcclusionImage surface.SurfaceMaterialIndex staticModel)
+                                  EmissionImageOpt = ValueOption.ofOption (Metadata.tryGetStaticModelEmissionImage surface.SurfaceMaterialIndex staticModel)
+                                  NormalImageOpt = ValueOption.ofOption (Metadata.tryGetStaticModelNormalImage surface.SurfaceMaterialIndex staticModel)
+                                  HeightImageOpt = ValueOption.ofOption (Metadata.tryGetStaticModelHeightImage surface.SurfaceMaterialIndex staticModel)
+                                  TwoSidedOpt = ValueOption.ofOption (Metadata.tryGetStaticModelTwoSided surface.SurfaceMaterialIndex staticModel) }
+                            let world = child.SetMaterial material world
                             let world = child.SetRenderStyle renderStyle world
                             let world = child.AutoBounds world
                             world' <- world
@@ -154,10 +164,11 @@ module WorldEntityHierarchy =
                         let presence = transform.Presence
                         let insetOpt = match entity.GetInsetOpt world with Some inset -> Some inset | None -> None // OPTIMIZATION: localize boxed value in memory.
                         let properties = entity.GetMaterialProperties world
+                        let material = entity.GetMaterial world
                         let staticModel = entity.GetStaticModel world
                         let surfaceIndex = entity.GetSurfaceIndex world
                         let renderType = match entity.GetRenderStyle world with Deferred -> DeferredRenderType | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-                        let surface = { Absolute = absolute; ModelMatrix = affineMatrix; Presence = presence; InsetOpt = insetOpt; MaterialProperties = properties; SurfaceIndex = surfaceIndex; StaticModel = staticModel; RenderType = renderType }
+                        let surface = { Absolute = absolute; ModelMatrix = affineMatrix; Presence = presence; InsetOpt = insetOpt; MaterialProperties = properties; Material = material; SurfaceIndex = surfaceIndex; StaticModel = staticModel; RenderType = renderType }
                         Choice3Of3 (PairValue.make entityBounds surface)
                         boundsOpt <- match boundsOpt with Some bounds -> Some (bounds.Combine entityBounds) | None -> Some entityBounds
                         world <- entity.SetVisibleLocal false world
@@ -293,7 +304,7 @@ module FreezeFacetModule =
                     let bounds = &boundsAndSurface.Fst
                     let surface = &boundsAndSurface.Snd
                     if intersects false false surface.Presence bounds then
-                        World.renderStaticModelSurfaceFast (surface.Absolute, &surface.ModelMatrix, Option.toValueOption surface.InsetOpt, &surface.MaterialProperties, surface.StaticModel, surface.SurfaceIndex, surface.RenderType, renderPass, world)
+                        World.renderStaticModelSurfaceFast (surface.Absolute, &surface.ModelMatrix, Option.toValueOption surface.InsetOpt, &surface.MaterialProperties, &surface.Material, surface.StaticModel, surface.SurfaceIndex, surface.RenderType, renderPass, world)
 
 [<AutoOpen>]
 module StaticModelHierarchyDispatcherModule =

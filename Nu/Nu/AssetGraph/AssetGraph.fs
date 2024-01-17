@@ -6,18 +6,19 @@ open System
 open System.Collections.Generic
 open System.IO
 open ImageMagick
+open ImageMagick.Formats
 open Prime
 
 /// A refinement that can be applied to an asset during the build process.
 type Refinement =
     | PsdToPng
-    | Retro
-    
+    | ConvertToDds
+
     /// Convert a string to a refinement value.
     static member ofString str =
         match str with
-        | "PsdToPng" -> PsdToPng
-        | "Retro" -> Retro
+        | nameof PsdToPng -> PsdToPng
+        | nameof ConvertToDds -> ConvertToDds
         | _ -> failwith ("Invalid refinement '" + str + "'.")
 
 /// Describes a game asset, such as a texture, sound, or model in detail.
@@ -73,7 +74,7 @@ module Asset =
 
 /// Tracks assets as well as their originating file paths.
 type [<ReferenceEquality>] Package<'a, 's> =
-    { Assets : Dictionary<string, DateTime * string * 'a>
+    { Assets : Dictionary<string, DateTimeOffset * string * 'a>
       PackageState : 's }
 
 /// A dictionary of asset packages.
@@ -93,8 +94,8 @@ module AssetGraph =
     /// A graph of all the assets used in a game.
     [<Syntax
         ("Asset Assets",
-         "nueffect nuscript nugroup psd png bmp ttf tmx wav ogg csv " +
-         "PsdToPng Retro " +
+         "ttf psd bmp png jpg jpeg tga tif tiff dds cbm fbx dae obj mtl glsl raw wav ogg nueffect nuscript csv nugroup tsx tmx " +
+         "PsdToPng ConvertToDds " +
          "Render Audio Symbol",
          "", "", "",
          Constants.PrettyPrinter.DefaultThresholdMin,
@@ -106,26 +107,13 @@ module AssetGraph =
 
     let private getAssetExtension2 rawAssetExtension refinement =
         match refinement with
-        | PsdToPng -> "png"
-        | Retro -> rawAssetExtension
+        | PsdToPng -> if rawAssetExtension = ".psd" then ".png" else rawAssetExtension
+        | ConvertToDds -> ".dds"
 
     let private getAssetExtension usingRawAssets rawAssetExtension refinements =
-        if usingRawAssets then List.fold getAssetExtension2 rawAssetExtension refinements
+        if usingRawAssets
+        then List.fold getAssetExtension2 rawAssetExtension refinements
         else rawAssetExtension
-
-    let private writeMagickImageAsPng psdHack (filePath : string) (image : MagickImage) =
-        match PathF.GetExtensionLower filePath with
-        | ".png" ->
-            use stream = File.OpenWrite filePath
-            if psdHack then
-                // HACK: this is a hack that deals with a more recent image magick bug that causes the transparent
-                // pixels of an image to be turned pure white or black. The side-effect of this hack is that your
-                // psd images cannot contain full white or black as a color.
-                image.ColorFuzz <- Percentage 0.0
-                image.Opaque (MagickColor.FromRgba (byte 255, byte 255, byte 255, byte 255), MagickColor.FromRgba (byte 0, byte 0, byte 0, byte 0))
-                image.Opaque (MagickColor.FromRgba (byte 0, byte 0, byte 0, byte 255), MagickColor.FromRgba (byte 0, byte 0, byte 0, byte 0))
-            image.Write (stream, MagickFormat.Png32)
-        | _ -> Log.info ("Invalid image file format for scaling refinement; must be of *.png format.")
 
     /// Apply a single refinement to an asset.
     let private refineAssetOnce (intermediateFileSubpath : string) intermediateDirectory refinementDirectory refinement =
@@ -143,12 +131,30 @@ module AssetGraph =
         Directory.CreateDirectory (PathF.GetDirectoryName refinementFilePath) |> ignore
         match refinement with
         | PsdToPng ->
+            if intermediateFileExtension = ".psd" then
+                use imageCollection = new MagickImageCollection (intermediateFilePath)
+                use image0 = imageCollection.[0] // NOTE: we clear out image0 to fix conversion to png somehow.
+                image0.ColorFuzz <- Percentage 100.0
+                image0.FloodFill (MagickColors.Transparent, 0, 0)
+                use image = imageCollection.Flatten MagickColors.Transparent
+                use stream = File.OpenWrite refinementFilePath
+                image.Write (stream, MagickFormat.Png32)
+            elif not (File.Exists refinementFilePath) then
+                File.Copy (intermediateFilePath, refinementFilePath)
+        | ConvertToDds ->
             use image = new MagickImage (intermediateFilePath)
-            writeMagickImageAsPng false refinementFilePath image
-        | Retro ->
-            use image = new MagickImage (intermediateFilePath)
-            image.Scale (Percentage 300)
-            writeMagickImageAsPng false refinementFilePath image
+            use stream = File.OpenWrite refinementFilePath
+            let defines = DdsWriteDefines ()
+            defines.FastMipmaps <-
+#if DEBUG
+                true
+#else
+                false
+#endif
+            if OpenGL.Texture.BlockCompressable refinementFilePath
+            then image.Alpha AlphaOption.Set // implicitly directs use of dxt5 compression - https://github.com/ImageMagick/ImageMagick/pull/4914#issuecomment-1060654324
+            else defines.Compression <- DdsCompression.None
+            image.Write (stream, defines)
 
         // return the latest refinement localities
         (refinementFileSubpath, refinementDirectory)
@@ -180,7 +186,7 @@ module AssetGraph =
             // build the asset if fully building or if it's out of date
             if  fullBuild ||
                 not (File.Exists outputFilePath) ||
-                File.GetLastWriteTimeUtc inputFilePath > File.GetLastWriteTimeUtc outputFilePath then
+                File.GetLastWriteTime inputFilePath > File.GetLastWriteTime outputFilePath then
 
                 // refine the asset
                 let (intermediateFileSubpath, intermediateDirectory) =
@@ -270,7 +276,7 @@ module AssetGraph =
         let fullBuild =
             fullBuild ||
             match (assetGraph.FilePathOpt, outputFilePathOpt) with
-            | (Some filePath, Some outputFilePath) -> File.GetLastWriteTimeUtc filePath > File.GetLastWriteTimeUtc outputFilePath
+            | (Some filePath, Some outputFilePath) -> File.GetLastWriteTime filePath > File.GetLastWriteTime outputFilePath
             | (None, None) -> false
             | (_, _) -> failwithumf ()
 

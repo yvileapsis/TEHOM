@@ -103,7 +103,18 @@ module WorldModule =
         static member internal getSimulants world =
             world.Simulants
 
-    type World with // Dispatchers
+    type World with // JobSystem
+
+        /// Enqueue a job for threaded execution.
+        static member enqueueJob priority job world =
+            world.WorldExtension.JobSystem.Enqueue (priority, job)
+
+        /// Await a job from threaded execution.
+        /// Order of jobs with the same key is not guaranteed.
+        static member tryAwaitJob deadline (jobId : obj) world =
+            world.WorldExtension.JobSystem.TryAwait (deadline, jobId)
+
+    type World with // Destruction
 
         static member internal getDestructionListRev world =
             world.WorldExtension.DestructionListRev
@@ -119,6 +130,8 @@ module WorldModule =
                 WorldExtension =
                     { world.WorldExtension with
                         DestructionListRev = List.remove ((=) simulant) world.WorldExtension.DestructionListRev }}
+
+    type World with // Dispatchers
 
         /// Get the facets of the world.
         static member getFacets world =
@@ -238,36 +251,36 @@ module WorldModule =
         static member internal updateKeyValueStore updater world =
             World.updateAmbientState (AmbientState.updateKeyValueStore updater) world
 
-        static member internal tryGetKeyedValueFast<'a> (key, world, value : 'a outref) =
+        static member internal tryGetKeyedValueFast<'k, 'v> (key : 'k, world, value : 'v outref) =
             let ambientState = World.getAmbientState world
             let kvs = AmbientState.getKeyValueStore ambientState
             let mutable valueObj = Unchecked.defaultof<obj>
             if kvs.TryGetValue (key, &valueObj) then
-                value <- valueObj :?> 'a
+                value <- valueObj :?> 'v
                 true
             else false
 
         /// Attempt to look up a value from the world's key value store.
-        static member tryGetKeyedValue<'a> key world =
-            match World.getKeyValueStoreBy (SUMap.tryFind key) world with
-            | Some value -> Some (value :?> 'a)
+        static member tryGetKeyedValue<'k, 'v> (key : 'k) world =
+            match World.getKeyValueStoreBy (SUMap.tryFind (key :> obj)) world with
+            | Some value -> Some (value :?> 'v)
             | None -> None
 
         /// Look up a value from the world's key value store, throwing an exception if it is not found.
-        static member getKeyedValue<'a> key world =
-            World.getKeyValueStoreBy (SUMap.find key) world :?> 'a
+        static member getKeyedValue<'k, 'v> (key : 'k) world =
+            World.getKeyValueStoreBy (SUMap.find (key :> obj)) world :?> 'v
 
         /// Add a value to the world's key value store.
-        static member addKeyedValue<'a> key (value : 'a) world =
-            World.updateKeyValueStore (SUMap.add key (value :> obj)) world
+        static member addKeyedValue<'k, 'v> (key : 'k) (value : 'v) world =
+            World.updateKeyValueStore (SUMap.add (key :> obj) (value :> obj)) world
 
         /// Remove a value from the world's key value store.
-        static member removeKeyedValue key world =
-            World.updateKeyValueStore (SUMap.remove key) world
+        static member removeKeyedValue<'k> (key : 'k) world =
+            World.updateKeyValueStore (SUMap.remove (key :> obj)) world
 
         /// Transform a value in the world's key value store if it exists.
-        static member updateKeyedValue<'a> (updater : 'a -> 'a) key world =
-            World.addKeyedValue key (updater (World.getKeyedValue<'a> key world)) world
+        static member updateKeyedValue<'k, 'v> (updater : 'v -> 'v) (key : 'k) world =
+            World.addKeyedValue<'k, 'v> key (updater (World.getKeyedValue<'k, 'v> key world)) world
 
         static member internal getTasklets world =
             World.getAmbientStateBy AmbientState.getTasklets world

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace Nu
 {
@@ -14,34 +13,6 @@ namespace Nu
     // I was considering using QuickGraph, but it hasn't been maintained in years and doesn't work
     // on the Mono runtime, apparently due to strong-naming issues -
     // http://quickgraph.codeplex.com/workitem/25587
-
-    internal class PriorityQueue<P, V>
-    {
-        private SortedDictionary<P, Queue<V>> list = new SortedDictionary<P, Queue<V>>();
-        public void Enqueue(P priority, V value)
-        {
-            Queue<V> q;
-            if (!list.TryGetValue(priority, out q))
-            {
-                q = new Queue<V>();
-                list.Add(priority, q);
-            }
-            q.Enqueue(value);
-        }
-        public V Dequeue()
-        {
-            // will throw if there isn’t any first item!
-            var pair = list.First();
-            var v = pair.Value.Dequeue();
-            if (pair.Value.Count == 0) // nothing left of the top priority.
-                list.Remove(pair.Key);
-            return v;
-        }
-        public bool IsEmpty
-        {
-            get { return !list.Any(); }
-        }
-    }
 
     public class Path<Node> : IEnumerable<Node>
     {
@@ -62,7 +33,9 @@ namespace Nu
         public IEnumerator<Node> GetEnumerator()
         {
             for (Path<Node> p = this; p != null; p = p.PreviousSteps)
+            {
                 yield return p.LastStep;
+            }
         }
         IEnumerator IEnumerable.GetEnumerator()
         {
@@ -87,13 +60,11 @@ namespace Nu
             var closed = new HashSet<Node>();
             var queue = new PriorityQueue<float, Path<Node>>();
             queue.Enqueue(0, new Path<Node>(start));
-            while (!queue.IsEmpty)
+            Path<Node> path = null;
+            while (queue.TryDequeue(ref path))
             {
-                var path = queue.Dequeue();
-                if (closed.Contains(path.LastStep))
-                    continue;
-                if (path.LastStep.Equals(destination))
-                    return path;
+                if (closed.Contains(path.LastStep)) continue;
+                if (path.LastStep.Equals(destination)) return path;
                 closed.Add(path.LastStep);
                 foreach (Node n in path.LastStep.Neighbors)
                 {

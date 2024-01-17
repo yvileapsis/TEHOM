@@ -38,6 +38,7 @@
 		<Compile Include="Collections\KeyedArray.fs" />
 		<Compile Include="Collections\ForgetfulDictionary.fs" />
 		<Compile Include="Collections\OrderedDictionary.fs" />
+		<Compile Include="JobSystem\JobSystem.fs" />
 		<Compile Include="Ecs\EcsPrelude.fs" />
 		<Compile Include="Ecs\Ecs.fs" />
 		<Compile Include="Transform\Presence.fs" />
@@ -54,6 +55,7 @@
 		<Compile Include="OpenGL\OpenGL.LightMap.fs" />
 		<Compile Include="OpenGL\OpenGL.Framebuffer.fs" />
 		<Compile Include="OpenGL\OpenGL.Sprite.fs" />
+		<Compile Include="OpenGL\OpenGL.Filter.fs" />
 		<Compile Include="OpenGL\OpenGL.SkyBox.fs" />
 		<Compile Include="OpenGL\OpenGL.PhysicallyBased.fs" />
 		<Compile Include="OpenGL\OpenGL.SpriteBatch.fs" />
@@ -209,7 +211,8 @@
 		<PackageReference Include="Csv" Version="2.0.93" />
 		<PackageReference Include="FParsec" Version="1.1.1" />
 		<PackageReference Include="Aether.Physics2D" Version="2.0.0" />
-		<PackageReference Include="Magick.NET-Q8-AnyCPU" Version="7.5.0.1" />
+		<PackageReference Include="Magick.NET-Q8-AnyCPU" Version="13.5.0" />
+		<PackageReference Include="Pfim" Version="0.11.2" />
 		<PackageReference Include="Prime" Version="9.16.0" />
 		<PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
 		<PackageReference Include="System.Drawing.Common" Version="8.0.0" />
