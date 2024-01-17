@@ -21,6 +21,7 @@ const float REFLECTION_LOD_MAX = 5.0;
 const float GAMMA = 2.2;
 const float ATTENUATION_CONSTANT = 1.0;
 const int LIGHTS_MAX = 64;
+const float SHADOW_FOV_MAX = 2.1;
 const int SHADOWS_MAX = 16;
 
 uniform vec3 eyeCenter;
@@ -29,7 +30,7 @@ uniform float lightAmbientBrightness;
 layout (bindless_sampler) uniform sampler2D positionTexture;
 layout (bindless_sampler) uniform sampler2D albedoTexture;
 layout (bindless_sampler) uniform sampler2D materialTexture;
-layout (bindless_sampler) uniform sampler2D normalAndHeightTexture;
+layout (bindless_sampler) uniform sampler2D normalPlusTexture;
 layout (bindless_sampler) uniform sampler2D brdfTexture;
 layout (bindless_sampler) uniform sampler2D irradianceTexture;
 layout (bindless_sampler) uniform sampler2D environmentFilterTexture;
@@ -52,6 +53,31 @@ uniform mat4 shadowMatrices[SHADOWS_MAX];
 in vec2 texCoordsOut;
 
 out vec4 frag;
+
+float linstep(float low, float high, float v)
+{
+    return clamp((v - low) / (high - low), 0.0, 1.0);
+}
+
+float computeShadowScalar(sampler2D shadowMap, vec2 shadowTexCoords, float shadowZ, float varianceMin, float lightBleedFilter)
+{
+    vec2 moments = texture(shadowMap, shadowTexCoords).xy;
+    float p = step(shadowZ, moments.x);
+    float variance = max(moments.y - moments.x * moments.x, varianceMin);
+    float delta = shadowZ - moments.x;
+    float pMax = linstep(lightBleedFilter, 1.0, variance / (variance + delta * delta));
+    return max(p, pMax);
+}
+
+float fadeShadowScalar(vec2 shadowTexCoords, float shadowScalar)
+{
+    vec2 normalized = abs(shadowTexCoords * 2.0 - 1.0);
+    float fadeScalar =
+        max(
+            smoothstep(0.85, 1.0, normalized.x),
+            smoothstep(0.85, 1.0, normalized.y));
+    return 1.0 - (1.0 - shadowScalar) * (1.0 - fadeScalar);
+}
 
 float distributionGGX(vec3 normal, vec3 h, float roughness)
 {
@@ -96,11 +122,11 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 f0, float roughness)
 void main()
 {
     // retrieve normal value first, allowing for early-out
-    vec3 normal = texture(normalAndHeightTexture, texCoordsOut).rgb;
+    vec3 normal = texture(normalPlusTexture, texCoordsOut).xyz;
     if (normal == vec3(1.0)) discard; // discard if geometry pixel was not written (equal to the buffer clearing color of white)
 
     // retrieve remaining data from geometry buffers
-    vec3 position = texture(positionTexture, texCoordsOut).rgb;
+    vec3 position = texture(positionTexture, texCoordsOut).xyz;
     vec3 albedo = texture(albedoTexture, texCoordsOut).rgb;
     vec4 material = texture(materialTexture, texCoordsOut);
 
@@ -131,7 +157,7 @@ void main()
             float distanceSquared = dot(d, d);
             float distance = sqrt(distanceSquared);
             float cutoff = lightCutoffs[i];
-            float cutoffScalar = 1.0f - smoothstep(cutoff * 0.75, cutoff, distance);
+            float cutoffScalar = 1.0f - smoothstep(cutoff * 0.667, cutoff, distance);
             float attenuation = 1.0f / (ATTENUATION_CONSTANT + lightAttenuationLinears[i] * distance + lightAttenuationQuadratics[i] * distanceSquared);
             float angle = acos(dot(l, -lightDirections[i]));
             float halfConeInner = lightConeInners[i] * 0.5f;
@@ -160,10 +186,8 @@ void main()
             float shadowZ = shadowTexCoordsProj.z * 0.5 + 0.5;
             if (shadowZ < 1.0f && shadowTexCoords.x >= 0.0 && shadowTexCoords.x <= 1.0 && shadowTexCoords.y >= 0.0 && shadowTexCoords.y <= 1.0)
             {
-                float depth = texture(shadowTextures[shadowIndex], shadowTexCoords).r;
-                float biasFloor = lightDirectionals[i] == 0 ? 0.0005 : 0.002;
-                float bias = max(biasFloor * (1.0 - dot(normal, l)), biasFloor);
-                shadowScalar = depth + bias < shadowZ ? 0.0 : 1.0;
+                shadowScalar = computeShadowScalar(shadowTextures[shadowIndex], shadowTexCoords, shadowZ, 0.0000001, 0.333);
+                if (lightConeOuters[i] > SHADOW_FOV_MAX) shadowScalar = fadeShadowScalar(shadowTexCoords, shadowScalar);
             }
         }
 

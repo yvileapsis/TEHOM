@@ -122,8 +122,13 @@ module Time =
     // Day is composed of 12 hours, each separated into 30 minutes
     // Each hour is named astrologically.
     // Point is to avoid AM/PM/Military stuff and also distance the world.
+    [<Measure>]
+    type Minute
 
-    type Clock = Time of int
+    [<Measure>]
+    type Hour
+
+    type Time = Time of int<Minute>
 
     type Hours =
         | Aries = 0
@@ -138,6 +143,12 @@ module Time =
         | Capricorn = 9
         | Aquarius = 10
         | Pisces = 11
+        | End = 12
+
+    type Minutes =
+        | Begin = 0
+        | End = 30
+
 
     // Most basic time-consuming action costs a minute.
 

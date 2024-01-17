@@ -5,7 +5,7 @@ open Prime
 open Nu
 
 // this is a plugin for the Nu game engine that directs the execution of your application and editor
-type MyGamePlugin () =
+type TehomPlugin () =
     inherit NuPlugin ()
 
     // this exposes different editing modes in the editor
@@ -14,10 +14,5 @@ type MyGamePlugin () =
             "Splash", Game.SetModel Splash
             "Title", Game.SetModel Title
             "Credits", Game.SetModel Credits
-            "Gameplay", Game.SetModel (Gameplay (
-                Serialization.loadFromFile Gameplay.default'
-            ))
-            "DefaultContent", Game.SetModel (Gameplay (
-                DefaultContent.defaultContent Gameplay.default'
-            ))
+            "Gameplay", Game.SetModel (Gameplay (DefaultContent.defaultContent Gameplay.default'))
         ]

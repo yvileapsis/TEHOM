@@ -57,7 +57,7 @@ module Gameplay =
 
             Player = ID "player"
 
-            Display = "Hello world!"
+            Display = "Hello world!\nOn two lines!"
         }
 
 // this is our MMCC message type.

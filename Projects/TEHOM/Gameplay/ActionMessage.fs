@@ -23,7 +23,9 @@ module ActionMessage =
                     let choices = choices actorID gameplay.Actors gameplay.Compositions gameplay.Abilities gameplay.Actions
                     let choices2 = tempFilter choices
                     match choices2 with
-                    | Ok x -> $"success %i{Set.count x} out of %i{Set.count choices}"
+                    | Ok x ->
+                        $"%A{choices}"
+                        //$"success %i{Set.count x} out of %i{Set.count choices}"
                     | Error x -> $"%A{x}"
                 | false -> $"did not find %A{actorID} composition!"
             | false -> $"did not find %A{actorID} actor!"

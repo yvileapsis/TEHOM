@@ -22,4 +22,4 @@ module Program =
         Directory.SetCurrentDirectory AppContext.BaseDirectory
 
         // run the engine with the given config and plugin
-        World.run worldConfig (MyGamePlugin ())
+        World.run worldConfig (TehomPlugin ())

@@ -31,14 +31,14 @@ layout (location = 3) in mat4 model;
 layout (location = 7) in vec4 texCoordsOffset;
 layout (location = 8) in vec4 albedo;
 layout (location = 9) in vec4 material;
-layout (location = 10) in float height;
+layout (location = 10) in vec2 heightPlus;
 
 out vec4 positionOut;
 out vec2 texCoordsOut;
 out vec3 normalOut;
 flat out vec4 albedoOut;
 flat out vec4 materialOut;
-flat out float heightOut;
+flat out vec2 heightPlusOut;
 
 void main()
 {
@@ -50,7 +50,7 @@ void main()
     albedoOut = albedo;
     materialOut = material;
     normalOut = mat3(model) * normal;
-    heightOut = height;
+    heightPlusOut = heightPlus;
     gl_Position = projection * view * positionOut;
 }
 
@@ -61,12 +61,13 @@ void main()
 const float PI = 3.141592654;
 const float REFLECTION_LOD_MAX = 5.0;
 const float GAMMA = 2.2;
-const float OPAQUING_DISTANCE_BEGIN = 12.0;
-const float OPAQUING_DISTANCE_END = 16.0;
+const float OPAQUING_DISTANCE_BEGIN = 8.0;
+const float OPAQUING_DISTANCE_END = 12.0;
 const float OPAQUING_DISTANCE_RANGE = OPAQUING_DISTANCE_END - OPAQUING_DISTANCE_BEGIN;
 const float ATTENUATION_CONSTANT = 1.0f;
 const int LIGHT_MAPS_MAX = 2;
 const int LIGHTS_MAX = 8;
+const float SHADOW_FOV_MAX = 2.1;
 const int SHADOWS_MAX = 16;
 
 uniform vec3 eyeCenter;
@@ -108,15 +109,64 @@ in vec2 texCoordsOut;
 in vec3 normalOut;
 flat in vec4 albedoOut;
 flat in vec4 materialOut;
-flat in float heightOut;
+flat in vec2 heightPlusOut;
 
 out vec4 frag;
+
+float linstep(float low, float high, float v)
+{
+    return clamp((v - low) / (high - low), 0.0, 1.0);
+}
+
+float computeShadowScalar(sampler2D shadowMap, vec2 shadowTexCoords, float shadowZ, float varianceMin, float lightBleedFilter)
+{
+    vec2 moments = texture(shadowMap, shadowTexCoords).xy;
+    float p = step(shadowZ, moments.x);
+    float variance = max(moments.y - moments.x * moments.x, varianceMin);
+    float delta = shadowZ - moments.x;
+    float pMax = linstep(lightBleedFilter, 1.0, variance / (variance + delta * delta));
+    return max(p, pMax);
+}
+
+float fadeShadowScalar(vec2 shadowTexCoords, float shadowScalar)
+{
+    vec2 normalized = abs(shadowTexCoords * 2.0 - 1.0);
+    float fadeScalar =
+        max(
+            smoothstep(0.85, 1.0, normalized.x),
+            smoothstep(0.85, 1.0, normalized.y));
+    return 1.0 - (1.0 - shadowScalar) * (1.0 - fadeScalar);
+}
 
 bool inBounds(vec3 point, vec3 min, vec3 size)
 {
     return
         all(greaterThanEqual(point, min)) &&
         all(lessThanEqual(point, min + size));
+}
+
+vec2 rayBoxIntersectionRatios(vec3 rayOrigin, vec3 rayDirection, vec3 boxMin, vec3 boxSize)
+{
+    vec3 rayDirectionInv = vec3(1.0) / rayDirection;
+    vec3 boxMax = boxMin + boxSize;
+    vec3 t1 = (boxMin - rayOrigin) * rayDirectionInv;
+    vec3 t2 = (boxMax - rayOrigin) * rayDirectionInv;
+    vec3 tMin = min(t1, t2);
+    vec3 tMax = max(t1, t2);
+    float tEnter = max(max(tMin.x / boxSize.x, tMin.y / boxSize.y), tMin.z / boxSize.z);
+    float tExit = min(min(tMax.x / boxSize.x, tMax.y / boxSize.y), tMax.z / boxSize.z);
+    return tEnter < tExit ? vec2(tEnter, tExit) : vec2(0.0);
+}
+
+float computeDepthRatio(vec3 minA, vec3 sizeA, vec3 minB, vec3 sizeB, vec3 position, vec3 normal)
+{
+    vec3 centerA = minA + sizeA * 0.5;
+    vec3 centerB = minB + sizeB * 0.5;
+    vec3 direction = normalize(cross(cross(centerB - centerA, normal), normal));
+    vec3 intersectionMin = max(minA, minB);
+    vec3 intersectionSize = min(minA + sizeA, minB + sizeB) - intersectionMin;
+    vec2 intersectionRatios = rayBoxIntersectionRatios(position, direction, intersectionMin, intersectionSize);
+    return intersectionRatios != vec2(0.0) ? intersectionRatios.y / (intersectionRatios.y - intersectionRatios.x) : 0.5;
 }
 
 vec3 parallaxCorrection(samplerCube cubeMap, vec3 lightMapOrigin, vec3 lightMapMin, vec3 lightMapSize, vec3 positionWorld, vec3 normalWorld)
@@ -192,8 +242,8 @@ void main()
     vec3 eyeCenterTangent = toTangent * eyeCenter;
     vec3 positionTangent = toTangent * position;
     vec3 toEyeTangent = normalize(eyeCenterTangent - positionTangent);
-    float height = texture(heightTexture, texCoordsOut).r;
-    vec2 parallax = toEyeTangent.xy * height * heightOut;
+    float height = texture(heightTexture, texCoordsOut).x * heightPlusOut.x;
+    vec2 parallax = toEyeTangent.xy * height;
     vec2 texCoords = texCoordsOut - parallax;
 
     // compute albedo with alpha
@@ -209,6 +259,9 @@ void main()
     float metallic = texture(metallicTexture, texCoords).g * materialOut.g;
     float ambientOcclusion = texture(ambientOcclusionTexture, texCoords).b * materialOut.b;
     vec3 emission = vec3(texture(emissionTexture, texCoords).r * materialOut.a);
+
+    // compute ignore light maps
+    bool ignoreLightMaps = heightPlusOut.y != 0.0;
 
     // compute lightAccum term
     vec3 n = normalize(toWorld * (texture(normalTexture, texCoords).xyz * 2.0 - 1.0));
@@ -227,7 +280,7 @@ void main()
             float distanceSquared = dot(d, d);
             float distance = sqrt(distanceSquared);
             float cutoff = lightCutoffs[i];
-            float cutoffScalar = 1.0f - smoothstep(cutoff * 0.75, cutoff, distance);
+            float cutoffScalar = 1.0f - smoothstep(cutoff * 0.667, cutoff, distance);
             float attenuation = 1.0f / (ATTENUATION_CONSTANT + lightAttenuationLinears[i] * distance + lightAttenuationQuadratics[i] * distanceSquared);
             float angle = acos(dot(l, -lightDirections[i]));
             float halfConeInner = lightConeInners[i] * 0.5f;
@@ -256,10 +309,8 @@ void main()
             float shadowZ = shadowTexCoordsProj.z * 0.5 + 0.5;
             if (shadowZ < 1.0f && shadowTexCoords.x >= 0.0 && shadowTexCoords.x <= 1.0 && shadowTexCoords.y >= 0.0 && shadowTexCoords.y <= 1.0)
             {
-                float depth = texture(shadowTextures[shadowIndex], shadowTexCoords).r;
-                float biasFloor = lightDirectionals[i] == 0 ? 0.0002 : 0.002;
-                float bias = max(biasFloor * (1.0 - dot(normal, l)), biasFloor);
-                shadowScalar = depth + bias < shadowZ ? 0.0 : 1.0;
+                shadowScalar = computeShadowScalar(shadowTextures[shadowIndex], shadowTexCoords, shadowZ, 0.0000001, 0.333);
+                if (lightConeOuters[i] > SHADOW_FOV_MAX) shadowScalar = fadeShadowScalar(shadowTexCoords, shadowScalar);
             }
         }
 
@@ -286,8 +337,8 @@ void main()
     }
 
     // determine light map indices, including their validity
-    int lm1 = lightMapsCount > 0 ? 0 : -1;
-    int lm2 = lightMapsCount > 1 ? 1 : -1;
+    int lm1 = lightMapsCount > 0 && !ignoreLightMaps ? 0 : -1;
+    int lm2 = lightMapsCount > 1 && !ignoreLightMaps ? 1 : -1;
     if (lm1 != -1 && !inBounds(position, lightMapMins[lm1], lightMapSizes[lm1])) { lm1 = lm2; lm2 = -1; }
     if (lm2 != -1 && !inBounds(position, lightMapMins[lm2], lightMapSizes[lm2])) lm2 = -1;
 
@@ -297,7 +348,7 @@ void main()
     if (lm1 == -1 && lm2 == -1)
     {
         irradiance = texture(irradianceMap, n).rgb;
-        vec3 r = reflect(-v, n);
+        vec3 r = reflect(-v, n);    
         environmentFilter = textureLod(environmentFilterMap, r, roughness * REFLECTION_LOD_MAX).rgb;
     }
     else if (lm2 == -1)
@@ -308,25 +359,20 @@ void main()
     }
     else
     {
+        // compute blending
+        float ratio = computeDepthRatio(lightMapMins[lm1], lightMapSizes[lm1], lightMapMins[lm2], lightMapSizes[lm2], position, n);
+
         // compute blended irradiance
-        vec3 delta1 = lightMapOrigins[lm1] - position;
-        vec3 delta2 = lightMapOrigins[lm2] - position;
-        float distance1 = sqrt(dot(delta1, delta1));
-        float distance2 = sqrt(dot(delta2, delta2));
-        float distanceTotal = distance1 + distance2;
-        float distanceTotalInverse = 1.0 / distanceTotal;
-        float scalar1 = (distanceTotal - distance1) * distanceTotalInverse;
-        float scalar2 = (distanceTotal - distance2) * distanceTotalInverse;
         vec3 irradiance1 = texture(irradianceMaps[lm1], n).rgb;
         vec3 irradiance2 = texture(irradianceMaps[lm2], n).rgb;
-        irradiance = irradiance1 * scalar1 + irradiance2 * scalar2;
+        irradiance = mix(irradiance1, irradiance2, ratio);
 
         // compute blended environment filter
         vec3 r1 = parallaxCorrection(environmentFilterMaps[lm1], lightMapOrigins[lm1], lightMapMins[lm1], lightMapSizes[lm1], position, n);
         vec3 r2 = parallaxCorrection(environmentFilterMaps[lm2], lightMapOrigins[lm2], lightMapMins[lm2], lightMapSizes[lm2], position, n);
         vec3 environmentFilter1 = textureLod(environmentFilterMaps[lm1], r1, roughness * REFLECTION_LOD_MAX).rgb;
         vec3 environmentFilter2 = textureLod(environmentFilterMaps[lm2], r2, roughness * REFLECTION_LOD_MAX).rgb;
-        environmentFilter = environmentFilter1 * scalar1 + environmentFilter2 * scalar2;
+        environmentFilter = mix(environmentFilter1, environmentFilter2, ratio);
     }
 
     // compute light ambient terms
