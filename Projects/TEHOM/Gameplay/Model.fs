@@ -492,11 +492,11 @@ module Actions =
 
 
     type ChoiceLevel =
-        | FailedAtSubject of ActorID
-        | FailedAtAction of ActionID
-        | FailedAtAbility of AbilityID
+        | FailedAtSubject of string
+        | FailedAtAction of string
+        | FailedAtAbility of string
         | FailedAtLimb of string
-        | FailedAtObject of ActorID
+        | FailedAtObject of string
 
     type ChoiceResult = Result<Choices, ChoiceLevel>
 
@@ -515,19 +515,19 @@ module Actions =
         let objectFilter = filterBy (function { Object = x } -> x) object
 
         match choices with
-            | Empty -> Error (FailedAtSubject subject)
+            | Empty -> Error (FailedAtSubject $"%A{subject}")
             | choices ->
         match actionFilter choices with
-            | Empty -> Error (FailedAtAction action.Value)
+            | Empty -> Error (FailedAtAction $"%A{action.Value}")
             | choices ->
         match abilityFilter choices with
-            | Empty -> Error (FailedAtAbility ability.Value)
+            | Empty -> Error (FailedAtAbility $"%A{ability.Value}")
             | choices ->
         match limbFilter choices with
             | Empty -> Error (FailedAtLimb $"%A{limb}")
             | choices ->
         match objectFilter choices with
-            | Empty -> Error (FailedAtObject object.Value)
+            | Empty -> Error (FailedAtObject $"%A{object.Value}")
             | choices -> Ok choices
 
     let subject = ActorID (ID "cat")
