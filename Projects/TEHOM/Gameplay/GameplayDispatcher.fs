@@ -17,7 +17,7 @@ module GameplayDispatcher =
     // empty Command type because there are no commands needed for this template.
     type GameplayDispatcher () =
         inherit ScreenDispatcher<Gameplay, GameplayMessage, Command> ({
-            Serialization.loadFromFile Gameplay.default' with State = Gameplay.Quitting
+            Gameplay.start with State = Gameplay.Quitting
         })
 
         // here we define the screen's properties and event handling
@@ -30,20 +30,23 @@ module GameplayDispatcher =
         override this.Message (gameplay, message, _, _) =
             match message with
             | Update ->
-                just { gameplay with Time = inc gameplay.Time }
-            | SetDisplayedString str ->
-                just { gameplay with Display = str}
-            | DoAction actorID ->
-                just { gameplay with Display = ActionMessage.action gameplay (ActorID actorID) }
+                just { gameplay with GameTime = inc gameplay.GameTime }
+            | InputString actorID ->
+                let choices = TehomChoices.choices (ActorID actorID) gameplay.Actors
+                if Set.isEmpty (TehomChoices.unwrap choices) then
+                    just gameplay
+                else
+                    let choice = TehomChoices.best choices
+                    withSignal (Action (actorID, choice)) gameplay
+            | Action (actorID, choice) ->
+                let gameplay = { gameplay with Display = $"%A{actorID} %A{choice}" }
+                let gameplay = { gameplay with Time = TehomTime.advance 1u gameplay.Time }
+                just gameplay
             | Save ->
-                Serialization.saveToFile gameplay
+//                Serialization.saveToFile gameplay
                 just gameplay
             | Load ->
-                let gameplay = Serialization.loadFromFile gameplay
-
-                // TODO: remove when done building systems
-                let gameplay = DefaultContent.defaultContent gameplay
-
+//                let gameplay = Serialization.loadFromFile gameplay
                 just gameplay
             | StartQuitting ->
                 just { gameplay with State = Gameplay.Quitting }

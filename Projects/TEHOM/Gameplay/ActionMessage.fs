@@ -2,12 +2,13 @@ namespace Tehom
 
 open Nu
 open Ability
-open Actions
+open TehomChoices
 open Actor
 open Trait
 open TehomID
 open Action
 
+(*
 module ActionMessage =
 
     let action (gameplay: Gameplay) actorID : string =
@@ -32,3 +33,4 @@ module ActionMessage =
 
 //        with
  //           A -> $"%A{A}"
+*)

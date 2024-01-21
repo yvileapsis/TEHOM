@@ -117,37 +117,7 @@ module Ability =
     // TODO: come up with what metric should be those based on
 
 
-module Time =
-    // Time is a 360-based clock and a day counter.
-    // Day is composed of 12 hours, each separated into 30 minutes
-    // Each hour is named astrologically.
-    // Point is to avoid AM/PM/Military stuff and also distance the world.
-    [<Measure>]
-    type Minute
 
-    [<Measure>]
-    type Hour
-
-    type Time = Time of int<Minute>
-
-    type Hours =
-        | Aries = 0
-        | Taurus = 1
-        | Gemini = 2
-        | Cancer = 3
-        | Leo = 4
-        | Virgo = 5
-        | Libra = 6
-        | Scorpio = 7
-        | Sagittarius = 8
-        | Capricorn = 9
-        | Aquarius = 10
-        | Pisces = 11
-        | End = 12
-
-    type Minutes =
-        | Begin = 0
-        | End = 30
 
 
     // Most basic time-consuming action costs a minute.
@@ -396,217 +366,6 @@ module Action =
             Order = List.empty
         }
 
-module Actions =
-
-    open TehomID
-    open Actor
-    open Ability
-    open Action
-
-    // needs objects
-    (*
-    Verb -> Set<Action>
-    Action -> Set<Ability * Limb * Composed>
-    Ability -> Set<Object>
-    *)
-
-    type Choice = {
-        Action: ActionID
-        Ability: AbilityID
-        Limb: Limb
-        Object: ActorID
-    }
-    with
-        static member default' = {
-            Action = ActionID TehomID.empty
-            Ability = AbilityID TehomID.empty
-            Limb = Limb.default'
-            Object = ActorID TehomID.empty
-        }
-
-
-    // should be map of actorabilities -> objects
-    type Choices = Set<Choice>
-
-    let choices (subject: ActorID) (actors: Map<ActorID, Actor>) (compositions: Map<ActorID, Composition>)
-        (abilities: Map<AbilityID, Ability>) (actions: Map<ActionID, Action>) =
-            // filtering by limbs presupposed here, when composition is created.
-        let limbs = Limb.allChildrenByID compositions subject
-
-        let objects abilityID limb =
-            if Map.containsKey abilityID abilities then
-                let levels = abilities[abilityID].Levels
-                levels
-                |> Set.map (fun (up, down, _) ->
-                    Limb.custom compositions up down limb
-                    |> Set.map (Limb.unwrap >> List.head >> fst)
-                )
-                |> Set.unionMany
-            else
-                Set.empty
-
-        let actions abilityID =
-            if Map.containsKey abilityID abilities then
-
-                let abilityGroup = abilities[abilityID].AbilityGroup
-
-                actions
-                |> Map.filter (fun _ value ->
-                    List.contains abilityGroup value.Order
-                )
-                |> Map.keys
-                |> Set.ofSeq
-            else
-               Set.empty
-
-        let abilities limb =
-            let abilities actorID =
-                if Map.containsKey actorID actors then
-                    actors[actorID].Abilities
-                else
-                    Set.empty
-            limb
-            |> Limb.unwrap
-            |> List.head
-            |> fst
-            |> abilities
-
-        limbs
-        |> Set.map (fun limb -> { Choice.default' with Limb = limb })
-
-        |> Set.map (fun choice ->
-            Set.map (fun ability -> { choice with Ability = ability }) (abilities choice.Limb)
-        )
-        |> Set.unionMany
-
-        |> Set.map (fun choice ->
-            Set.map (fun verb -> { choice with Action = verb }) (actions choice.Ability)
-        )
-        |> Set.unionMany
-
-        |> Set.map (fun choice ->
-            Set.map (fun object -> { choice with Object = object }) (objects choice.Ability choice.Limb)
-        )
-        |> Set.unionMany
-
-
-
-    type ChoiceLevel =
-        | FailedAtSubject of string
-        | FailedAtAction of string
-        | FailedAtAbility of string
-        | FailedAtLimb of string
-        | FailedAtObject of string
-
-    type ChoiceResult = Result<Choices, ChoiceLevel>
-
-    let filterChoices (subject: ActorID) (action : ActionID option) (ability : AbilityID option)
-        (limb : Limb Option) (object : ActorID option) (choices : Choices) : ChoiceResult =
-
-        let (|Empty|_|) a = if Set.isEmpty a then Some () else None
-
-        let filterBy compare = function
-            | None -> id
-            | Some a -> Set.filter (fun (b : Choice) -> a === compare b)
-
-        let actionFilter = filterBy (function { Action = x } -> x) action
-        let abilityFilter = filterBy (function { Ability = x } -> x) ability
-        let limbFilter = filterBy (function { Limb = x } -> x) limb
-        let objectFilter = filterBy (function { Object = x } -> x) object
-
-        match choices with
-            | Empty -> Error (FailedAtSubject $"%A{subject}")
-            | choices ->
-        match actionFilter choices with
-            | Empty -> Error (FailedAtAction $"%A{action.Value}")
-            | choices ->
-        match abilityFilter choices with
-            | Empty -> Error (FailedAtAbility $"%A{ability.Value}")
-            | choices ->
-        match limbFilter choices with
-            | Empty -> Error (FailedAtLimb $"%A{limb}")
-            | choices ->
-        match objectFilter choices with
-            | Empty -> Error (FailedAtObject $"%A{object.Value}")
-            | choices -> Ok choices
-
-    let subject = ActorID (ID "cat")
-    let action = ActionID (ID "look")
-    let object = ActorID (ID "key")
-
-    let tempFilter = filterChoices (subject) (Some action) (None) (None) (Some object)
-
-    (*
-    possibilities
-
-    TODO: make action
-    TODO: filter actorAbiltiies by abilities by action
-    TODO: filter actorAbilities by composed
-    TODO: pick best for a think             <- per action
-
-    handling
-
-    *)
-
-    let whatever =
-        let getChildrenSet actor (compositions: Map<TehomID, Composition>) =
-            let (Composition composition) = compositions[actor]
-            composition
-            |> Map.keys
-            |> Set.ofSeq
-
-        let getParentsSet actor compositions =
-            compositions
-            |> Map.values
-            |> Seq.map Map.keys
-            |> Seq.filter (Seq.contains actor)
-            |> Seq.map Set.ofSeq
-            |> Set.unionMany
-
-        let concat func1 func2 actor (compositions: Map<TehomID, Composition>) =
-            let func1 actor = func1 actor compositions
-            let func2 actor = func2 actor compositions
-
-            func1 actor
-            |> Set.map func2
-            |> Set.unionMany
-        ()
-
-    // Rough list of actions 'alive' entities should be capable of, each action should require a certain 'Ability'.
-    type EntityActions =
-        | Look
-        | Go
-
-        | Use
-        | Equip
-        | UnEquip
-        | Take
-        | Drop
-        | Give
-
-        | Attack
-        | Say
-
-    // Will be reworked, rough draft of actions
-    // Somewhere in this module or later there would happen mapping between UI-sent actions and actions player entity does.
-    type PlayerActions =
-        | Wait
-        | Look
-        | Explore
-        | Go
-
-        | Self
-        | Party
-
-        | Use
-        | Equip
-        | UnEquip
-        | Take
-        | Drop
-        | Give
-
-        | Attack
-        | Say
 
 (*
     Horror situations that should be possible in the simulation:
@@ -619,4 +378,14 @@ module Actions =
     * Your limb growing multiple eyes that you can not see through;     <- some concept of ownership or control is definitely needed
     * Your limb leaving you to become its own creature that can be either hostile or friendly to player;
     * Various supernatural things like telekinesis or teleportation;
+*)
+
+(*
+    Actual plans:
+    * First thing I should do is complete the model to the point I have actual look action I can call.
+      For that I need :
+        * Time system
+        * Action taking system
+
+
 *)

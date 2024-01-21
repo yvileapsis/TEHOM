@@ -15,14 +15,25 @@ module GameplayGui =
                 Entity.Color == Color.Black
             ]
 
-            Content.text Simulants.GameplayTime.Name [
+            Content.text Simulants.GameplayGametime.Name [
                 Entity.Position == v3 384.0f 240.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                Entity.Text := string gameplay.Time
+                Entity.Text := string gameplay.GameTime
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.ClearSans12Font
             ]
+
+            Content.text Simulants.GameplayTime.Name [
+                Entity.Position == v3 240.0f 240.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Text :=
+                    $"Day: {TehomTime.getDay gameplay.Time} Time: %A{TehomTime.getHour gameplay.Time} {TehomTime.getMinute gameplay.Time}°"
+                Entity.TextColor == Color.FloralWhite
+                Entity.Font == Assets.Gui.ClearSans12Font
+            ]
+
 
             // TODO: Make something sensible instead of this crutch
             for i, string in gameplay.Display.Split [|'\n'; '\r'|] |> Array.indexed do
@@ -46,7 +57,7 @@ module GameplayGui =
                 Entity.Text == "Enter your string"
                 Entity.TextInputChangedEvent =|> fun evt ->
                     let actorID = TehomID.ID (evt.Data)
-                    DoAction actorID
+                    InputString actorID
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.ClearSans12Font
             ]

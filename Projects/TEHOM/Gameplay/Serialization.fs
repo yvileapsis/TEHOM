@@ -9,28 +9,9 @@ open Trait
 open TehomID
 open Gameplay
 
+(*
 module Serialization =
 
-    type SavedActors = {
-
-        Descriptions: Map<TehomID, DescriptionTrait>
-        Volumes: Map<ActorID, VolumeTrait>
-        Masses: Map<ActorID, MassTrait>
-        Health: Map<ActorID, HealthTrait>
-        Abilities: Map<ActorID, Set<AbilityID>>
-        Composed: Map<ActorID, Composition>
-        Attached: Set<Attachment>
-
-    } with
-        static member makeDefault = {
-            Descriptions = Map.empty
-            Volumes = Map.empty
-            Masses = Map.empty
-            Health = Map.empty
-            Abilities = Map.empty
-            Composed = Map.empty
-            Attached = Set.empty
-        }
 
         member this.saveToFile file =
             let fieldSymbol = valueToSymbol this
@@ -138,3 +119,5 @@ module Serialization =
             _ -> old
 
         toGameplay (old.concat newer) gameplay
+
+*)

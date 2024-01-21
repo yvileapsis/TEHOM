@@ -1,11 +1,8 @@
 namespace Tehom
 
 open Nu
-open Actor
 open TehomID
-open Trait
-open Ability
-open Action
+
 
 module Gameplay =
     // this represents that state of the simulation during gameplay.
@@ -14,46 +11,32 @@ module Gameplay =
         | Quitting
         | Quit
 
+
     // this is our MMCC model type representing gameplay.
     // this model representation uses update time, that is, time based on number of engine updates.
     // if you wish to use clock time instead (https://github.com/bryanedds/Nu/wiki/GameTime-and-its-Polymorphic-Nature),
     // you could use `Time : single` instead.
     type Gameplay = {
-        Time : int64
+        GameTime : int64
+
+        Time : TehomTime
+
         State : GameplayState
 
-
-        Descriptions: Map<TehomID, DescriptionTrait>
-
-        Actors: Map<ActorID, Actor>
-        Compositions: Map<ActorID, Composition>
-
-        Abilities: Map<AbilityID, Ability>
-
-        Actions: Map<ActionID, Action>
-
-        Attachments: Set<Attachment>
-
-        // TODO: root entities, maybe
+        Actors : TehomActors
 
         Player: TehomID
 
         Display : string
 
     } with
-        static member default' = {
-            Time = 0
+        static member start = {
+            GameTime = 0
             State = Playing
 
-            Descriptions = Map.empty
+            Time = TehomTime.empty
 
-            Actors = Map.empty
-            Compositions = Map.empty
-
-            Abilities = Map.empty
-            Actions = Map.empty
-
-            Attachments = Set.empty
+            Actors = TehomActors.addDefault TehomActors.empty
 
             Player = ID "player"
 
@@ -63,8 +46,8 @@ module Gameplay =
 // this is our MMCC message type.
 type GameplayMessage =
     | Update
-    | SetDisplayedString of string
-    | DoAction of TehomID
+    | InputString of TehomID
+    | Action of TehomID * TehomChoice
     | Save
     | Load
     | StartQuitting
