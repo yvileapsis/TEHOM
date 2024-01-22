@@ -34,9 +34,9 @@
 	<ItemGroup>
 		<Compile Include="Assets.fs" />
 		<Compile Include="Simulants.fs" />
-		<Compile Include="Gameplay\Time.fs" />
 		<Compile Include="Gameplay\TextInput.fs" />
 		<Compile Include="Gameplay\InputParser.fs" />
+		<Compile Include="Gameplay\Time.fs" />
 		<Compile Include="Gameplay\Model.fs" />
 		<Compile Include="Gameplay\Actors.fs" />
 		<Compile Include="Gameplay\Choices.fs" />
