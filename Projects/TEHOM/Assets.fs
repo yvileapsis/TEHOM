@@ -16,7 +16,8 @@ module Assets =
         let PackageName = "Gui"
         let TitleGroupFilePath = "Assets\\Gui\\Title.nugroup"
         let CreditsGroupFilePath = "Assets\\Gui\\Credits.nugroup"
-        let ClearSans12Font = asset<Font> PackageName "ClearSans12Font"
+        let ClearSans12Font = asset<Font> PackageName "ClearSansFont"
+        let MontSerratFont = asset<Font> PackageName "MontSerratFont"
 
 
     // these are assets from the Gameplay package.

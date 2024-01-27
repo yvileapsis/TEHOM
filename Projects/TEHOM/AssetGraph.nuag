@@ -17,7 +17,8 @@
    [Assets Assets/Gameplay [nugroup tmx tsx] [] []]]]
  [Gui
   [[Assets Assets/Gui [psd] [Render2d Render3d] [PsdToPng]]
-   [Asset ClearSans12Font "Assets/Gui/ClearSans.012.ttf" [Render2d] []]
+   [Asset ClearSansFont "Assets/Gui/ClearSans.016.ttf" [Render2d] []]
+   [Asset MontSerratFont "Assets/Gui/Montserrat-Regular.016.ttf" [Render2d] []]
    [Assets Assets/Gui [bmp jpeg jpg png] [Render2d Render3d] []]
    [Assets Assets/Gui [cbm fbx glsl mtl obj raw tga tif tiff] [Render3d] []]
    [Assets Assets/Gui [ogg wav] [Audio] []]

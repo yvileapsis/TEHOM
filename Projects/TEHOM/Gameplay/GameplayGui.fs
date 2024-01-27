@@ -51,7 +51,7 @@ module GameplayGui =
                     Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                     Entity.Text := string
                     Entity.TextColor == Color.FloralWhite
-                    Entity.Font == Assets.Gui.ClearSans12Font
+                    Entity.Font == Assets.Gui.MontSerratFont
                     Entity.FontSize == 10
                     Entity.FontStyle == 0
                ]
