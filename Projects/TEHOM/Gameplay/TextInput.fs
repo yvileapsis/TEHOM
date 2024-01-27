@@ -5,6 +5,7 @@ open System.Numerics
 open Prime
 open Nu
 
+
 [<AutoOpen>]
 module TextInputFacetModule =
 
@@ -162,6 +163,8 @@ module TextInputFacetModule =
                 textTransform.Elevation <- transform.Elevation + shift
                 textTransform.Absolute <- transform.Absolute
                 let font = entity.GetFont world
+                let fontSize = entity.GetFontSize world
+                let fontStyle = entity.GetFontStyle world
 
                 World.enqueueLayeredOperation2d
                     { Elevation = textTransform.Elevation
@@ -172,6 +175,8 @@ module TextInputFacetModule =
                             { Transform = textTransform
                               Text = string
                               Font = font
+                              FontSize = fontSize
+                              FontStyle = fontStyle
                               Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
                               Justification = entity.GetJustification world }}
                     world

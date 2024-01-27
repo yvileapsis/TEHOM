@@ -1,9 +1,23 @@
 namespace Tehom
 
 open Nu
-open Actor
 open FParsec
 
-module InputParser =
+open FSharp.Formatting.Markdown
+open FSharp.Formatting.Common
 
-    let s = ""
+module Testing =
+    let document =
+        """
+# F# Hello world
+Hello world in [F#](http://fsharp.net) looks like this:
+
+    printfn "Hello world!"
+
+For more see [fsharp.org][fsorg].
+
+  [fsorg]: http://fsharp.org "The F# organization." """
+
+    let parsed = Markdown.Parse(document)
+
+    parsed.Paragraphs.Head

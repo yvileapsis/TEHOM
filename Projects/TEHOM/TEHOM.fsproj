@@ -170,6 +170,8 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="FSharp.Formatting" Version="20.0.0-alpha-018" />
+		<PackageReference Include="FSharp.Formatting.Markdown" Version="1.0.0" />
 		<Reference Include="AssimpNet">
 			<HintPath>..\..\Nu\Nu.Dependencies\AssimpNet\netstandard1.3\AssimpNet.dll</HintPath>
 		</Reference>
