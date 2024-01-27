@@ -1152,12 +1152,12 @@ module EffectFacetModule =
         member this.EffectHistoryMax = lens (nameof this.EffectHistoryMax) this this.GetEffectHistoryMax this.SetEffectHistoryMax
         member this.GetEffectHistory world : Effects.Slice Deque = this.Get (nameof this.EffectHistory) world
         member this.EffectHistory = lensReadOnly (nameof this.EffectHistory) this this.GetEffectHistory
-        member this.GetEffectTags world : Map<string, Effects.Slice> = this.Get (nameof this.EffectTags) world
-        member this.SetEffectTags (value : Map<string, Effects.Slice>) world = this.Set (nameof this.EffectTags) value world
-        member this.EffectTags = lens (nameof this.EffectTags) this this.GetEffectTags this.SetEffectTags
-        member this.GetEffectView world : View = this.Get (nameof this.EffectView) world
-        member this.SetEffectView (value : View) world = this.Set (nameof this.EffectView) value world
-        member this.EffectView = lens (nameof this.EffectView) this this.GetEffectView this.SetEffectView
+        member this.GetEffectTagTokens world : Map<string, Effects.Slice> = this.Get (nameof this.EffectTagTokens) world
+        member this.SetEffectTagTokens (value : Map<string, Effects.Slice>) world = this.Set (nameof this.EffectTagTokens) value world
+        member this.EffectTagTokens = lens (nameof this.EffectTagTokens) this this.GetEffectTagTokens this.SetEffectTagTokens
+        member this.GetEffectToken world : Token = this.Get (nameof this.EffectToken) world
+        member this.SetEffectToken (value : Token) world = this.Set (nameof this.EffectToken) value world
+        member this.EffectToken = lens (nameof this.EffectToken) this this.GetEffectToken this.SetEffectToken
 
     /// Augments an entity with an effect.
     type EffectFacet () =
@@ -1189,10 +1189,10 @@ module EffectFacetModule =
                     (entity.GetEffectDescriptor world)
 
             // run effect, optionally destroying upon exhaustion
-            let (liveness, effect, view) = Effect.run effect world
+            let (liveness, effect, token) = Effect.run effect world
             let world = entity.SetParticleSystem effect.ParticleSystem world
-            let world = entity.SetEffectTags effect.Tags world
-            let world = entity.SetEffectView view world
+            let world = entity.SetEffectTagTokens effect.TagTokens world
+            let world = entity.SetEffectToken token world
             if liveness = Dead && entity.GetSelfDestruct world
             then World.destroyEntity entity world
             else world
@@ -1254,8 +1254,8 @@ module EffectFacetModule =
              define Entity.EffectRenderType (ForwardRenderType (0.0f, 0.0f))
              define Entity.EffectHistoryMax Constants.Effects.EffectHistoryMaxDefault
              variable Entity.EffectHistory (fun _ -> Deque<Effects.Slice> (inc Constants.Effects.EffectHistoryMaxDefault))
-             nonPersistent Entity.EffectTags Map.empty
-             nonPersistent Entity.EffectView View.empty]
+             nonPersistent Entity.EffectTagTokens Map.empty
+             nonPersistent Entity.EffectToken Token.empty]
 
         override this.Register (entity, world) =
             let effectStartTime = Option.defaultValue world.GameTime (entity.GetEffectStartTimeOpt world)
@@ -1286,12 +1286,13 @@ module EffectFacetModule =
 #endif
         override this.Render (renderPass, entity, world) =
 
-            // render effect view
+            // render effect token
             let time = world.GameTime
-            let view = entity.GetEffectView world
-            World.renderView renderPass view world
+            let token = entity.GetEffectToken world
+            World.renderToken renderPass token world
 
             // render particles
+            let presence = entity.GetPresence world
             let particleSystem = entity.GetParticleSystem world
             let descriptors = ParticleSystem.toParticlesDescriptors time particleSystem
             for descriptor in descriptors do
@@ -1307,6 +1308,7 @@ module EffectFacetModule =
                     let message =
                         RenderBillboardParticles
                             { Absolute = descriptor.Absolute
+                              Presence = presence
                               MaterialProperties = descriptor.MaterialProperties
                               Material = descriptor.Material
                               Particles = descriptor.Particles
@@ -2216,6 +2218,7 @@ module StaticBillboardFacetModule =
             let mutable transform = entity.GetTransform world
             let absolute = transform.Absolute
             let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
             let insetOpt = entity.GetInsetOpt world
             let properties = entity.GetMaterialProperties world
             let material = entity.GetMaterial world
@@ -2225,7 +2228,7 @@ module StaticBillboardFacetModule =
                 | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
             World.enqueueRenderMessage3d
                 (RenderBillboard
-                    { Absolute = absolute; ModelMatrix = affineMatrix; InsetOpt = insetOpt
+                    { Absolute = absolute; Presence = presence; ModelMatrix = affineMatrix; InsetOpt = insetOpt
                       MaterialProperties = properties; Material = material; RenderType = renderType; RenderPass = renderPass })
                 world
 
@@ -2442,6 +2445,7 @@ module BasicStaticBillboardEmitterFacetModule =
 
         override this.Render (renderPass, entity, world) =
             let time = world.GameTime
+            let presence = entity.GetPresence world
             let particleSystem = entity.GetParticleSystem world
             let particlesMessages =
                 particleSystem |>
@@ -2457,7 +2461,8 @@ module BasicStaticBillboardEmitterFacetModule =
                               AmbientOcclusionOpt = match emitterProperties.AmbientOcclusionOpt with ValueSome ambientOcclusion -> ValueSome ambientOcclusion | ValueNone -> descriptor.MaterialProperties.AmbientOcclusionOpt
                               EmissionOpt = match emitterProperties.EmissionOpt with ValueSome emission -> ValueSome emission | ValueNone -> descriptor.MaterialProperties.EmissionOpt
                               HeightOpt = match emitterProperties.HeightOpt with ValueSome height -> ValueSome height | ValueNone -> descriptor.MaterialProperties.HeightOpt
-                              IgnoreLightMapsOpt = match emitterProperties.IgnoreLightMapsOpt with ValueSome ignoreLightMaps -> ValueSome ignoreLightMaps | ValueNone -> descriptor.MaterialProperties.IgnoreLightMapsOpt }
+                              IgnoreLightMapsOpt = match emitterProperties.IgnoreLightMapsOpt with ValueSome ignoreLightMaps -> ValueSome ignoreLightMaps | ValueNone -> descriptor.MaterialProperties.IgnoreLightMapsOpt
+                              OpaqueDistanceOpt = ValueNone }
                         let emitterMaterial = entity.GetEmitterMaterial world
                         let material =
                             { AlbedoImageOpt = match emitterMaterial.AlbedoImageOpt with ValueSome albedoImage -> ValueSome albedoImage | ValueNone -> descriptor.Material.AlbedoImageOpt
@@ -2471,6 +2476,7 @@ module BasicStaticBillboardEmitterFacetModule =
                         Some
                             (RenderBillboardParticles
                                 { Absolute = descriptor.Absolute
+                                  Presence = presence
                                   MaterialProperties = properties
                                   Material = material
                                   Particles = descriptor.Particles
@@ -2577,6 +2583,7 @@ module StaticModelSurfaceFacetModule =
                 let mutable transform = entity.GetTransform world
                 let absolute = transform.Absolute
                 let affineMatrix = transform.AffineMatrix
+                let presence = transform.Presence
                 let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
                 let properties = entity.GetMaterialProperties world
                 let material = entity.GetMaterial world
@@ -2585,7 +2592,7 @@ module StaticModelSurfaceFacetModule =
                     match entity.GetRenderStyle world with
                     | Deferred -> DeferredRenderType
                     | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-                World.renderStaticModelSurfaceFast (absolute, &affineMatrix, insetOpt, &properties, &material, staticModel, surfaceIndex, renderType, renderPass, world)
+                World.renderStaticModelSurfaceFast (absolute, &affineMatrix, presence, insetOpt, &properties, &material, staticModel, surfaceIndex, renderType, renderPass, world)
 
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetStaticModelMetadata (entity.GetStaticModel world) with
@@ -2635,7 +2642,7 @@ module AnimatedModelFacetModule =
         static let tryComputeBoneTransforms time animations (sceneOpt : Assimp.Scene option) =
             match sceneOpt with
             | Some scene when scene.Meshes.Count > 0 ->
-                let boneTransforms = scene.ComputeBoneTransforms (time, animations, scene.Meshes.[0], scene)
+                let boneTransforms = scene.ComputeBoneTransforms (time, animations, scene.Meshes.[0])
                 Some boneTransforms
             | Some _ | None -> None
 
@@ -2669,7 +2676,7 @@ module AnimatedModelFacetModule =
             let animatedModel = entity.GetAnimatedModel world
             let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with Some model -> model.SceneOpt | None -> None
             let boneTransformsOpt =
-                match World.tryAwaitJob (world.DateTime + TimeSpan.FromSeconds 0.1) (entity, nameof AnimatedModelFacet) world with
+                match World.tryAwaitJob (world.DateTime + TimeSpan.FromSeconds 0.001) (entity, nameof AnimatedModelFacet) world with
                 | Some (JobCompletion (_, _, (:? (Matrix4x4 array option) as boneTransformsOpt))) -> boneTransformsOpt
                 | _ -> None
             let world =
@@ -2684,11 +2691,12 @@ module AnimatedModelFacetModule =
             let mutable transform = entity.GetTransform world
             let absolute = transform.Absolute
             let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
             let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
             let properties = entity.GetMaterialProperties world
             let animatedModel = entity.GetAnimatedModel world
             match entity.GetBoneTransformsOpt world with
-            | Some boneTransforms -> World.renderAnimatedModelFast (absolute, &affineMatrix, insetOpt, &properties, boneTransforms, animatedModel, renderPass, world)
+            | Some boneTransforms -> World.renderAnimatedModelFast (absolute, &affineMatrix, presence, insetOpt, &properties, boneTransforms, animatedModel, renderPass, world)
             | None -> ()
 
         override this.GetAttributesInferred (entity, world) =
@@ -2733,9 +2741,9 @@ module TerrainFacetModule =
         member this.GetTerrainMaterial world : TerrainMaterial = this.Get (nameof this.TerrainMaterial) world
         member this.SetTerrainMaterial (value : TerrainMaterial) world = this.Set (nameof this.TerrainMaterial) value world
         member this.TerrainMaterial = lens (nameof this.TerrainMaterial) this this.GetTerrainMaterial this.SetTerrainMaterial
-        member this.GetTintImage world : Image AssetTag = this.Get (nameof this.TintImage) world
-        member this.SetTintImage (value : Image AssetTag) world = this.Set (nameof this.TintImage) value world
-        member this.TintImage = lens (nameof this.TintImage) this this.GetTintImage this.SetTintImage
+        member this.GetTintImageOpt world : Image AssetTag option = this.Get (nameof this.TintImageOpt) world
+        member this.SetTintImageOpt (value : Image AssetTag option) world = this.Set (nameof this.TintImageOpt) value world
+        member this.TintImageOpt = lens (nameof this.TintImageOpt) this this.GetTintImageOpt this.SetTintImageOpt
         member this.GetNormalImageOpt world : Image AssetTag option = this.Get (nameof this.NormalImageOpt) world
         member this.SetNormalImageOpt (value : Image AssetTag option) world = this.Set (nameof this.NormalImageOpt) value world
         member this.NormalImageOpt = lens (nameof this.NormalImageOpt) this this.GetNormalImageOpt this.SetNormalImageOpt
@@ -2795,7 +2803,7 @@ module TerrainFacetModule =
                           RedsMap
                             [|Assets.Default.TerrainLayerBlend
                               Assets.Default.TerrainLayer2Blend|]})
-             define Entity.TintImage Assets.Default.TerrainTint
+             define Entity.TintImageOpt None
              define Entity.NormalImageOpt None
              define Entity.Tiles (v2 256.0f 256.0f)
              define Entity.HeightMap (RawHeightMap { Resolution = v2i 513 513; RawFormat = RawUInt16 LittleEndian; RawAsset = Assets.Default.HeightMap })
@@ -2856,7 +2864,7 @@ module TerrainFacetModule =
                   InsetOpt = entity.GetInsetOpt world
                   MaterialProperties = entity.GetTerrainMaterialProperties world
                   Material = entity.GetTerrainMaterial world
-                  TintImage = entity.GetTintImage world
+                  TintImageOpt = entity.GetTintImageOpt world
                   NormalImageOpt = entity.GetNormalImageOpt world
                   Tiles = entity.GetTiles world
                   HeightMap = entity.GetHeightMap world

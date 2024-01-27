@@ -30,6 +30,12 @@ module Texture =
           TextureTexelWidth : single
           TextureTexelHeight : single }
 
+        static member make width height =
+            { TextureWidth = width
+              TextureHeight = height
+              TextureTexelWidth = 1.0f / single width
+              TextureTexelHeight = 1.0f / single height }
+
         /// Unpopulated texture data.
         static member empty =
             { TextureWidth = 0
@@ -70,16 +76,18 @@ module Texture =
             { Textures = Dictionary HashIdentity.Structural }
 
     /// Check that an asset with the given name or file path can utilize block compression (IE, it's not a normal map,
-    /// blend map, or specified as uncompressed). An asset name instead of a file path can also be given.
+    /// blend map, or specified as uncompressed).
     /// TODO: move this somewhere more general?
     let BlockCompressable (assetNameOrFilePath : string) =
         let name = PathF.GetFileNameWithoutExtension assetNameOrFilePath
         not (name.EndsWith "_n") &&
         not (name.EndsWith "_u") &&
         not (name.EndsWith "_b") &&
+        not (name.EndsWith "_t") &&
         not (name.EndsWith "Normal") &&
         not (name.EndsWith "Uncompressed") &&
-        not (name.EndsWith "Blend")
+        not (name.EndsWith "Blend") &&
+        not (name.EndsWith "Tint")
 
     let private TryFormatUncompressedPfimageData (image : IImage) =
         let data = image.Data
@@ -271,11 +279,7 @@ module Texture =
                 try let image = Pfimage.FromFile filePath
                     match TryFormatUncompressedPfimageData image with
                     | Some (bytes, _) ->
-                        let metadata =
-                            { TextureWidth = image.Width
-                              TextureHeight = image.Height
-                              TextureTexelWidth = 1.0f / single image.Width
-                              TextureTexelHeight = 1.0f / single image.Height }
+                        let metadata = TextureMetadata.make image.Width image.Height
                         Some (TextureDataDotNet (metadata, bytes))
                     | None -> None
                 with _ -> None
@@ -283,11 +287,7 @@ module Texture =
                 try let config = PfimConfig (decompress = false)
                     use fileStream = File.OpenRead filePath
                     use dds = Dds.Create (fileStream, config)
-                    let metadata =
-                        { TextureWidth = dds.Width
-                          TextureHeight = dds.Height
-                          TextureTexelWidth = 1.0f / single dds.Width
-                          TextureTexelHeight = 1.0f / single dds.Height }
+                    let metadata = TextureMetadata.make dds.Width dds.Height
                     if dds.Compressed then
                         let mutable dims = v2i dds.Width dds.Height
                         let mutable size = ((dims.X + 3) / 4) * ((dims.Y + 3) / 4) * 16
@@ -308,11 +308,7 @@ module Texture =
             elif platform = PlatformID.Win32NT || platform = PlatformID.Win32Windows then
                 try let bitmap = new Drawing.Bitmap (filePath)
                     let data = bitmap.LockBits (Drawing.Rectangle (0, 0, bitmap.Width, bitmap.Height), Drawing.Imaging.ImageLockMode.ReadOnly, Drawing.Imaging.PixelFormat.Format32bppArgb)
-                    let metadata =
-                        { TextureWidth = bitmap.Width
-                          TextureHeight = bitmap.Height
-                          TextureTexelWidth = 1.0f / single bitmap.Width
-                          TextureTexelHeight = 1.0f / single bitmap.Height }
+                    let metadata = TextureMetadata.make bitmap.Width bitmap.Height
                     let scan0 = data.Scan0
                     Some (TextureDataNative (metadata, scan0, { new IDisposable with member this.Dispose () = bitmap.UnlockBits data; bitmap.Dispose () })) // NOTE: calling UnlockBits explicitly since I can't figure out if Dispose does.
                 with _ -> None
@@ -322,11 +318,7 @@ module Texture =
                 let unconvertedPtr = SDL_image.IMG_Load filePath
                 if unconvertedPtr <> nativeint 0 then
                     let unconverted = Marshal.PtrToStructure<SDL.SDL_Surface> unconvertedPtr
-                    let metadata =
-                        { TextureWidth = unconverted.w
-                          TextureHeight = unconverted.h
-                          TextureTexelWidth = 1.0f / single unconverted.w
-                          TextureTexelHeight = 1.0f / single unconverted.h }
+                    let metadata = TextureMetadata.make unconverted.w unconverted.h
                     let unconvertedFormat = Marshal.PtrToStructure<SDL.SDL_PixelFormat> unconverted.format
                     if unconvertedFormat.format <> format then
                         let convertedPtr = SDL.SDL_ConvertSurfaceFormat (unconvertedPtr, format, 0u)

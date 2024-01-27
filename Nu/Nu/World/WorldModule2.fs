@@ -76,6 +76,8 @@ module WorldModule2 =
             Octree.make Constants.Engine.OctreeDepth Constants.Engine.OctreeSize
 
         static member internal rebuildQuadtree world =
+            let quadtree = World.getQuadtree world
+            Quadtree.clear quadtree
             let omniEntities =
                 match World.getOmniScreenOpt world with
                 | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntitiesFlattened world) |> Seq.concat
@@ -85,7 +87,6 @@ module WorldModule2 =
                 | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntitiesFlattened world) |> Seq.concat
                 | None -> Seq.empty
             let entities = Seq.append omniEntities selectedEntities
-            let quadtree = World.makeQuadtree ()
             for entity in entities do
                 let bounds = entity.GetBounds world
                 let visible = entity.GetVisible world || entity.GetAlwaysRender world
@@ -94,9 +95,11 @@ module WorldModule2 =
                 if entity.GetIs2d world then
                     let element = Quadelement.make visible static_ entity
                     Quadtree.addElement presence bounds.Box2 element quadtree
-            quadtree
+            world
 
         static member internal rebuildOctree world =
+            let octree = World.getOctree world
+            Octree.clear octree
             let omniEntities =
                 match World.getOmniScreenOpt world with
                 | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntitiesFlattened world) |> Seq.concat
@@ -105,8 +108,8 @@ module WorldModule2 =
                 match World.getSelectedScreenOpt world with
                 | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntitiesFlattened world) |> Seq.concat
                 | None -> Seq.empty
-            let entities = Seq.append omniEntities selectedEntities
-            let octree = World.makeOctree ()
+            let entities =
+                Seq.append omniEntities selectedEntities
             for entity in entities do
                 let bounds = entity.GetBounds world
                 let visible = entity.GetVisible world || entity.GetAlwaysRender world
@@ -117,7 +120,7 @@ module WorldModule2 =
                 if entity.GetIs3d world then
                     let element = Octelement.make visible static_ lightProbe light presence bounds entity
                     Octree.addElement presence bounds element octree
-            octree
+            world
 
         /// Select the given screen without transitioning, even if another transition is taking place.
         static member internal selectScreenOpt transitionStateAndScreenOpt world =
@@ -461,7 +464,7 @@ module WorldModule2 =
 
                 // propagate errors
                 | Left error -> (Left error, world)
-            with exn -> (Left (scstring exn), World.choose world)
+            with exn -> (Left (scstring exn), World.switch world)
 
         /// Send a message to the subsystems to reload their existing assets.
         static member reloadExistingAssets world =
@@ -495,7 +498,7 @@ module WorldModule2 =
 
                 // propagate errors
                 | Left error -> (Left error, world)
-            with exn -> (Left (scstring exn), World.choose world)
+            with exn -> (Left (scstring exn), World.switch world)
 
         /// Reload asset graph, build assets, then reload built assets.
         /// Currently does not support reloading of song assets, and possibly others that are
@@ -507,27 +510,24 @@ module WorldModule2 =
             | (Right _, world) -> (true, world)
             | (Left _, world) -> (false, world)
 
-        /// Shelve a non-current world for background storage (such as for an undo / redo system).
-        static member shelveNonCurrent world =
-            World.shelveAmbientStateNonCurrent world
+        /// Switch simulation to this world, resynchronizing the imperative subsystems with its current state.
+        /// Needed when abandoning execution of the current world in favor of an old world, such as in the case of an
+        /// exception where the try expression resulted in a transformed world that is to be discarded.
+        static member switch (world : World) =
 
-        /// Shelve the current world for background storage (such as for an undo / redo system).
-        static member shelveCurrent world =
-            World.shelveAmbientStateCurrent world
-
-        /// Unshelve the world from background storage (such as for an undo / redo system).
-        static member unshelve (world : World) =
+            // manually choose world to override choose count check
+            WorldTypes.Chosen <- world
 
             // sync tick watch state to advancing
-            let world = World.unshelveAmbientState world
+            let world = World.switchAmbientState world
 
-            // clear existing 3d physics messages and rebuild
-            let world = World.clearPhysicsMessages3d world
-            let world = World.enqueuePhysicsMessage3d ClearPhysicsMessageInternal world
+            // rebuild spatial trees
+            let world = World.rebuildOctree world
+            let world = World.rebuildQuadtree world
 
-            // clear existing 2d physics messages and rebuild
-            let world = World.clearPhysicsMessages2d world
-            let world = World.enqueuePhysicsMessage2d ClearPhysicsMessageInternal world
+            // clear existing physics
+            let world = World.handlePhysicsMessage3d ClearPhysicsMessageInternal world
+            let world = World.handlePhysicsMessage2d ClearPhysicsMessageInternal world
 
             // register the physics of entities in the current screen
             match World.getSelectedScreenOpt world with
@@ -599,7 +599,7 @@ module WorldModule2 =
                     World.publishPlus { MouseMoveData.Position = mousePosition } Nu.Game.Handle.MouseMoveEvent eventTrace Nu.Game.Handle true true world
                 | SDL.SDL_EventType.SDL_MOUSEBUTTONDOWN ->
                     let io = ImGui.GetIO ()
-                    if not (io.WantCaptureMousePlus) then
+                    if not (io.WantCaptureMouseGlobal) then
                         let mousePosition = World.getMousePosition world
                         let mouseButton = World.toNuMouseButton (uint32 evt.button.button)
                         let mouseButtonDownEvent = stoa<MouseButtonData> ("Mouse/" + MouseButton.toEventName mouseButton + "/Down/Event/" + Constants.Engine.GameName)
@@ -612,7 +612,7 @@ module WorldModule2 =
                     else world
                 | SDL.SDL_EventType.SDL_MOUSEBUTTONUP ->
                     let io = ImGui.GetIO ()
-                    if not (io.WantCaptureMousePlus) then
+                    if not (io.WantCaptureMouseGlobal) then
                         let mousePosition = World.getMousePosition world
                         let mouseButton = World.toNuMouseButton (uint32 evt.button.button)
                         let mouseButtonUpEvent = stoa<MouseButtonData> ("Mouse/" + MouseButton.toEventName mouseButton + "/Up/Event/" + Constants.Engine.GameName)
@@ -638,14 +638,14 @@ module WorldModule2 =
                     let imGui = World.getImGui world
                     let textInput = char evt.text.text.FixedElementField
                     imGui.HandleKeyChar textInput
-                    if not (io.WantCaptureKeyboardPlus) then
+                    if not (io.WantCaptureKeyboardGlobal) then
                         let eventData = { TextInput = textInput }
                         let eventTrace = EventTrace.debug "World" "processInput" "TextInput" EventTrace.empty
                         World.publishPlus eventData Nu.Game.Handle.TextInputEvent eventTrace Nu.Game.Handle true true world
                     else world
                 | SDL.SDL_EventType.SDL_KEYDOWN ->
                     let io = ImGui.GetIO ()
-                    if not (io.WantCaptureKeyboardPlus) then
+                    if not (io.WantCaptureKeyboardGlobal) then
                         let keyboard = evt.key
                         let key = keyboard.keysym
                         let eventData = { KeyboardKey = key.scancode |> int |> enum<KeyboardKey>; Repeated = keyboard.repeat <> byte 0; Down = true }
@@ -656,7 +656,7 @@ module WorldModule2 =
                     else world
                 | SDL.SDL_EventType.SDL_KEYUP ->
                     let io = ImGui.GetIO ()
-                    if not (io.WantCaptureKeyboardPlus) then
+                    if not (io.WantCaptureKeyboardGlobal) then
                         let keyboard = evt.key
                         let key = keyboard.keysym
                         let eventData = { KeyboardKey = key.scancode |> int |> enum<KeyboardKey>; Repeated = keyboard.repeat <> byte 0; Down = false }
@@ -743,29 +743,13 @@ module WorldModule2 =
                                     let eventTrace = EventTrace.debug "World" "processIntegrationMessage" "" EventTrace.empty
                                     World.publishPlus transformData transformAddress eventTrace Nu.Game.Handle false false world
                                 else entity.ApplyPhysics center rotation linearVelocity angularVelocity world
-                            else
-                                let mutable destroying = false
-                                World.inspectMessages (fun message ->
-                                    match message with
-                                    | DestroyBodyMessage dbm -> if dbm.BodyId = bodyId then destroying <- true
-                                    | DestroyBodiesMessage dbm -> if List.contains bodyId dbm.BodyIds then destroying <- true
-                                    | CreateBodyMessage cbm -> if cbm.BodyId = bodyId then destroying <- false
-                                    | CreateBodiesMessage cbm -> if cbm.BodySource = entity then destroying <- false
-                                    | ClearPhysicsMessageInternal -> destroying <- true
-                                    | _ -> ())
-                                    false world
-                                if not destroying then
-                                    Log.info ("Entity physics out of range. Re-propagating physics for '" + scstring entity + "'.")
-                                    World.propagateEntityPhysics entity world
-                                else world
+                            else world
                         else world
                     | _ -> world
             | Dead -> world
 
         static member private getElements2dBy (getElementsFromQuadree : Entity Quadtree -> Entity Quadelement seq) world =
             let quadtree = World.getQuadtree world
-            let (quadtree, quadtreeCache) = MutantCache.getMutant (fun () -> World.rebuildQuadtree world) quadtree
-            let world = World.setQuadtree quadtreeCache world
             let elements = getElementsFromQuadree quadtree
             (elements, world)
 
@@ -782,8 +766,6 @@ module WorldModule2 =
 
         static member private getEntities2dBy getElementsFromQuadtree world =
             let quadtree = World.getQuadtree world
-            let (quadtree, quadtreeCache) = MutantCache.getMutant (fun () -> World.rebuildQuadtree world) quadtree
-            let world = World.setQuadtree quadtreeCache world
             let elements = getElementsFromQuadtree quadtree
             let entities = Seq.map (fun (element : Entity Quadelement) -> element.Entry) elements
             (entities, world)
@@ -812,8 +794,6 @@ module WorldModule2 =
 
         static member private getElements3dBy (getElementsFromOctree : Entity Octree -> Entity Octelement seq) world =
             let octree = World.getOctree world
-            let (octree, octreeCache) = MutantCache.getMutant (fun () -> World.rebuildOctree world) octree
-            let world = World.setOctree octreeCache world
             let elements = getElementsFromOctree octree
             (elements, world)
 
@@ -836,8 +816,6 @@ module WorldModule2 =
 
         static member private getEntities3dBy getElementsFromOctree world =
             let octree = World.getOctree world
-            let (octree, octreeCache) = MutantCache.getMutant (fun () -> World.rebuildOctree world) octree
-            let world = World.setOctree octreeCache world
             let elements = getElementsFromOctree octree
             let entities = Seq.map (fun (element : Entity Octelement) -> element.Entry) elements
             (entities, world)
@@ -1221,7 +1199,6 @@ module WorldModule2 =
             CachedHashSet3dShadow.Clear ()
             world
 
-
         static member private processInput world =
             if SDL.SDL_WasInit SDL.SDL_INIT_TIMER <> 0u then
                 let mutable result = (World.getLiveness world, world)
@@ -1236,8 +1213,7 @@ module WorldModule2 =
 
         static member private processPhysics2d world =
             let physicsEngine = World.getPhysicsEngine2d world
-            let physicsMessages = physicsEngine.PopMessages ()
-            let integrationMessages = physicsEngine.Integrate world.GameDelta physicsMessages
+            let integrationMessages = physicsEngine.Integrate world.GameDelta
             let eventTrace = EventTrace.debug "World" "processPhysics2d" "" EventTrace.empty
             let world = World.publishPlus { IntegrationMessages = integrationMessages } Nu.Game.Handle.IntegrationEvent eventTrace Nu.Game.Handle false false world
             let world = Seq.fold (flip World.processIntegrationMessage) world integrationMessages
@@ -1245,8 +1221,7 @@ module WorldModule2 =
 
         static member private processPhysics3d world =
             let physicsEngine = World.getPhysicsEngine3d world
-            let physicsMessages = physicsEngine.PopMessages ()
-            let integrationMessages = physicsEngine.Integrate world.GameDelta physicsMessages
+            let integrationMessages = physicsEngine.Integrate world.GameDelta
             let eventTrace = EventTrace.debug "World" "processPhysics3d" "" EventTrace.empty
             let world = World.publishPlus { IntegrationMessages = integrationMessages } Nu.Game.Handle.IntegrationEvent eventTrace Nu.Game.Handle false false world
             let world = Seq.fold (flip World.processIntegrationMessage) world integrationMessages
@@ -1439,7 +1414,7 @@ module WorldModule2 =
                 World.cleanUp world
                 Constants.Engine.ExitCodeSuccess
             with exn ->
-                let world = World.choose world
+                let world = World.switch world
                 Log.trace (scstring exn)
                 World.cleanUp world
                 Constants.Engine.ExitCodeFailure
@@ -1662,17 +1637,28 @@ module EntityPropertyDescriptor =
         let baseProperties = Reflection.getPropertyDefinitions typeof<EntityDispatcher>
         let rigidBodyProperties = Reflection.getPropertyDefinitions typeof<RigidBodyFacet>
         if propertyName = "Name" || propertyName = "Surnames" || propertyName = "Model" || propertyName = "MountOpt" || propertyName = "OverlayNameOpt" then "Ambient Properties"
-        elif propertyName = "FacetNames" then "Applied Facet Names"
-        elif List.exists (fun (property : PropertyDefinition) -> propertyName = property.PropertyName) baseProperties then "Built-In Properties"
-        elif propertyName = "MaterialProperties" then "Material Properties"
-        elif propertyName = "Material" then "Material"
+        elif propertyName = "FacetNames" then "Applied Facets"
+        elif propertyName = "Degrees" || propertyName = "DegreesLocal" ||
+             propertyName = "Elevation" || propertyName = "ElevationLocal" ||
+             propertyName = "Offset" || propertyName = "Overflow" ||
+             propertyName = "Position" || propertyName = "PositionLocal" ||
+             propertyName = "Presence" ||
+             propertyName = "Rotation" || propertyName = "RotationLocal" ||
+             propertyName = "Scale" || propertyName = "ScaleLocal" ||
+             propertyName = "Size" then
+             "Basic Transform Properties"
+        elif List.exists (fun (property : PropertyDefinition) -> propertyName = property.PropertyName) baseProperties then "Configuration Properties"
+        elif propertyName = "MaterialProperties" || propertyName = "Material" then "Material Properties"
         elif List.exists (fun (property : PropertyDefinition) -> propertyName = property.PropertyName) rigidBodyProperties then "Physics Properties"
-        else "Xtension Properties"
+        else "Uncategorized Properties"
 
+    // HACK: we show degrees instead of rotation in editor.
     let getEditable propertyDescriptor =
         let propertyName = propertyDescriptor.PropertyName
-        propertyName = "Degrees" || propertyName = "DegreesLocal" || // HACK: we allow degrees specifically for the editor.
-        not (Reflection.isPropertyNonPersistentByName propertyName)
+        if propertyName = "Rotation" || propertyName = "RotationLocal" then false
+        else
+            propertyName = "Degrees" || propertyName = "DegreesLocal" ||
+            not (Reflection.isPropertyNonPersistentByName propertyName)
 
     let getValue propertyDescriptor (entity : Entity) world : obj =
         match PropertyDescriptor.tryGetValue propertyDescriptor entity world with

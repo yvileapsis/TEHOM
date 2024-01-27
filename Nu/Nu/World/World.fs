@@ -190,58 +190,32 @@ module Nu =
             WorldModule.admitScreenElements <- fun screen world ->
                 let entities = World.getGroups screen world |> Seq.map (flip World.getEntitiesFlattened world) |> Seq.concat |> SList.ofSeq
                 let (entities2d, entities3d) = SList.partition (fun (entity : Entity) -> entity.GetIs2d world) entities
-                let worldOld = world
-                let quadtree =
-                    MutantCache.mutateMutant
-                        (fun () -> worldOld.WorldExtension.Dispatchers.RebuildQuadtree worldOld)
-                        (fun quadtree ->
-                            for entity in entities2d do
-                                let entityState = World.getEntityState entity world
-                                let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
-                                Quadtree.addElement entityState.Presence entityState.Bounds.Box2 element quadtree
-                            quadtree)
-                        (World.getQuadtree world)
-                let world = World.setQuadtree quadtree world
-                let octree =
-                    MutantCache.mutateMutant
-                        (fun () -> worldOld.WorldExtension.Dispatchers.RebuildOctree worldOld)
-                        (fun octree ->
-                            for entity in entities3d do
-                                let entityState = World.getEntityState entity world
-                                let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
-                                Octree.addElement entityState.Presence entityState.Bounds element octree
-                            octree)
-                        (World.getOctree world)
-                let world = World.setOctree octree world
+                let quadtree = World.getQuadtree world
+                for entity in entities2d do
+                    let entityState = World.getEntityState entity world
+                    let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
+                    Quadtree.addElement entityState.Presence entityState.Bounds.Box2 element quadtree
+                let octree = World.getOctree world
+                for entity in entities3d do
+                    let entityState = World.getEntityState entity world
+                    let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
+                    Octree.addElement entityState.Presence entityState.Bounds element octree
                 world
                 
             // init evictScreenElements F# reach-around
             WorldModule.evictScreenElements <- fun screen world ->
                 let entities = World.getGroups screen world |> Seq.map (flip World.getEntitiesFlattened world) |> Seq.concat |> SArray.ofSeq
                 let (entities2d, entities3d) = SArray.partition (fun (entity : Entity) -> entity.GetIs2d world) entities
-                let worldOld = world
-                let quadtree =
-                    MutantCache.mutateMutant
-                        (fun () -> worldOld.WorldExtension.Dispatchers.RebuildQuadtree worldOld)
-                        (fun quadtree ->
-                            for entity in entities2d do
-                                let entityState = World.getEntityState entity world
-                                let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
-                                Quadtree.removeElement entityState.Presence entityState.Bounds.Box2 element quadtree
-                            quadtree)
-                        (World.getQuadtree world)
-                let world = World.setQuadtree quadtree world
-                let octree =
-                    MutantCache.mutateMutant
-                        (fun () -> worldOld.WorldExtension.Dispatchers.RebuildOctree worldOld)
-                        (fun octree ->
-                            for entity in entities3d do
-                                let entityState = World.getEntityState entity world
-                                let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
-                                Octree.removeElement entityState.Presence entityState.Bounds element octree
-                            octree)
-                        (World.getOctree world)
-                let world = World.setOctree octree world
+                let quadtree = World.getQuadtree world
+                for entity in entities2d do
+                    let entityState = World.getEntityState entity world
+                    let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
+                    Quadtree.removeElement entityState.Presence entityState.Bounds.Box2 element quadtree
+                let octree = World.getOctree world
+                for entity in entities3d do
+                    let entityState = World.getEntityState entity world
+                    let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
+                    Octree.removeElement entityState.Presence entityState.Bounds element octree
                 world
 
             // init registerScreenPhysics F# reach-around
@@ -311,72 +285,72 @@ module WorldModule3 =
             // TODO: consider if we should reflectively generate these.
             Map.ofListBy World.pairWithName $
                 [EntityDispatcher (true, false, false)
-                 Entity2dDispatcher (false) :> EntityDispatcher
-                 Entity3dDispatcher (false) :> EntityDispatcher
-                 StaticSpriteDispatcher () :> EntityDispatcher
-                 AnimatedSpriteDispatcher () :> EntityDispatcher
-                 GuiDispatcher () :> EntityDispatcher
-                 TextDispatcher () :> EntityDispatcher
-                 LabelDispatcher () :> EntityDispatcher
-                 ButtonDispatcher () :> EntityDispatcher
-                 ToggleButtonDispatcher () :> EntityDispatcher
-                 RadioButtonDispatcher () :> EntityDispatcher
-                 FillBarDispatcher () :> EntityDispatcher
-                 FeelerDispatcher () :> EntityDispatcher
-                 FpsDispatcher () :> EntityDispatcher
-                 BasicStaticSpriteEmitterDispatcher () :> EntityDispatcher
-                 Effect2dDispatcher () :> EntityDispatcher
-                 Block2dDispatcher () :> EntityDispatcher
-                 Box2dDispatcher () :> EntityDispatcher
-                 Character2dDispatcher () :> EntityDispatcher
-                 TileMapDispatcher () :> EntityDispatcher
-                 TmxMapDispatcher () :> EntityDispatcher
-                 LightProbe3dDispatcher () :> EntityDispatcher
-                 Light3dDispatcher () :> EntityDispatcher
-                 SkyBoxDispatcher () :> EntityDispatcher
-                 StaticBillboardDispatcher () :> EntityDispatcher
-                 StaticModelSurfaceDispatcher () :> EntityDispatcher
-                 RigidModelSurfaceDispatcher () :> EntityDispatcher
-                 StaticModelDispatcher () :> EntityDispatcher
-                 AnimatedModelDispatcher () :> EntityDispatcher
-                 RigidModelDispatcher () :> EntityDispatcher
-                 Effect3dDispatcher () :> EntityDispatcher
-                 Block3dDispatcher () :> EntityDispatcher
-                 Box3dDispatcher () :> EntityDispatcher
-                 Character3dDispatcher () :> EntityDispatcher
-                 TerrainDispatcher () :> EntityDispatcher
-                 StaticModelHierarchyDispatcher () :> EntityDispatcher
-                 RigidModelHierarchyDispatcher () :> EntityDispatcher]
+                 Entity2dDispatcher (false)
+                 Entity3dDispatcher (false)
+                 StaticSpriteDispatcher ()
+                 AnimatedSpriteDispatcher ()
+                 GuiDispatcher ()
+                 TextDispatcher ()
+                 LabelDispatcher ()
+                 ButtonDispatcher ()
+                 ToggleButtonDispatcher ()
+                 RadioButtonDispatcher ()
+                 FillBarDispatcher ()
+                 FeelerDispatcher ()
+                 FpsDispatcher ()
+                 BasicStaticSpriteEmitterDispatcher ()
+                 Effect2dDispatcher ()
+                 Block2dDispatcher ()
+                 Box2dDispatcher ()
+                 Character2dDispatcher ()
+                 TileMapDispatcher ()
+                 TmxMapDispatcher ()
+                 LightProbe3dDispatcher ()
+                 Light3dDispatcher ()
+                 SkyBoxDispatcher ()
+                 StaticBillboardDispatcher ()
+                 StaticModelSurfaceDispatcher ()
+                 RigidModelSurfaceDispatcher ()
+                 StaticModelDispatcher ()
+                 AnimatedModelDispatcher ()
+                 RigidModelDispatcher ()
+                 Effect3dDispatcher ()
+                 Block3dDispatcher ()
+                 Box3dDispatcher ()
+                 Character3dDispatcher ()
+                 TerrainDispatcher ()
+                 StaticModelHierarchyDispatcher ()
+                 RigidModelHierarchyDispatcher ()]
 
         static member private makeDefaultFacets () =
             // TODO: consider if we should reflectively generate these.
             Map.ofListBy World.pairWithName $
                 [Facet false
-                 StaticSpriteFacet () :> Facet
-                 AnimatedSpriteFacet () :> Facet
-                 TextFacet () :> Facet
-                 BackdroppableFacet () :> Facet
-                 LabelFacet () :> Facet
-                 ButtonFacet () :> Facet
-                 ToggleButtonFacet () :> Facet
-                 RadioButtonFacet () :> Facet
-                 FillBarFacet () :> Facet
-                 FeelerFacet () :> Facet
-                 BasicStaticSpriteEmitterFacet () :> Facet
-                 EffectFacet () :> Facet
-                 RigidBodyFacet () :> Facet
-                 TileMapFacet () :> Facet
-                 TmxMapFacet () :> Facet
-                 LayoutFacet () :> Facet
-                 LightProbe3dFacet () :> Facet
-                 Light3dFacet () :> Facet
-                 SkyBoxFacet () :> Facet
-                 StaticBillboardFacet () :> Facet
-                 StaticModelSurfaceFacet () :> Facet
-                 StaticModelFacet () :> Facet
-                 AnimatedModelFacet () :> Facet
-                 TerrainFacet () :> Facet
-                 FreezerFacet () :> Facet]
+                 StaticSpriteFacet ()
+                 AnimatedSpriteFacet ()
+                 TextFacet ()
+                 BackdroppableFacet ()
+                 LabelFacet ()
+                 ButtonFacet ()
+                 ToggleButtonFacet ()
+                 RadioButtonFacet ()
+                 FillBarFacet ()
+                 FeelerFacet ()
+                 BasicStaticSpriteEmitterFacet ()
+                 EffectFacet ()
+                 RigidBodyFacet ()
+                 TileMapFacet ()
+                 TmxMapFacet ()
+                 LayoutFacet ()
+                 LightProbe3dFacet ()
+                 Light3dFacet ()
+                 SkyBoxFacet ()
+                 StaticBillboardFacet ()
+                 StaticModelSurfaceFacet ()
+                 StaticModelFacet ()
+                 AnimatedModelFacet ()
+                 TerrainFacet ()
+                 FreezerFacet ()]
 
         /// Update late bindings internally stored by the engine from types found in the given assemblies.
         static member updateLateBindings (assemblies : Assembly array) world =
@@ -447,14 +421,15 @@ module WorldModule3 =
             let simulants = UMap.singleton HashIdentity.Structural config (Game :> Simulant) None
             let worldExtension = { JobSystem = jobSystem; DestructionListRev = []; Dispatchers = dispatchers; Plugin = plugin }
             let world =
-                { EventGraph = eventGraph
+                { ChooseCount = 0
+                  EventGraph = eventGraph
                   EntityStates = entityStates
                   GroupStates = groupStates
                   ScreenStates = screenStates
                   GameState = gameState
                   EntityMounts = UMap.makeEmpty HashIdentity.Structural config
-                  Quadtree = MutantCache.make id quadtree
-                  Octree = MutantCache.make id octree
+                  Quadtree = quadtree
+                  Octree = octree
                   SelectedEcsOpt = None
                   AmbientState = ambientState
                   Subsystems = subsystems
@@ -487,10 +462,7 @@ module WorldModule3 =
                   EntityDispatchers = World.makeDefaultEntityDispatchers ()
                   GroupDispatchers = World.makeDefaultGroupDispatchers ()
                   ScreenDispatchers = World.makeDefaultScreenDispatchers ()
-                  GameDispatchers = Map.ofList [defaultGameDispatcher]
-                  UpdateEntityInEntityTree = World.updateEntityInEntityTree
-                  RebuildQuadtree = World.rebuildQuadtree
-                  RebuildOctree = World.rebuildOctree }
+                  GameDispatchers = Map.ofList [defaultGameDispatcher] }
 
             // make the world's subsystems
             let imGui = ImGui (Constants.Render.ResolutionX, Constants.Render.ResolutionY)
@@ -562,10 +534,7 @@ module WorldModule3 =
                       EntityDispatchers = Map.addMany pluginEntityDispatchers (World.makeDefaultEntityDispatchers ())
                       GroupDispatchers = Map.addMany pluginGroupDispatchers (World.makeDefaultGroupDispatchers ())
                       ScreenDispatchers = Map.addMany pluginScreenDispatchers (World.makeDefaultScreenDispatchers ())
-                      GameDispatchers = Map.addMany pluginGameDispatchers (Map.ofList [defaultGameDispatcher])
-                      UpdateEntityInEntityTree = World.updateEntityInEntityTree
-                      RebuildQuadtree = World.rebuildQuadtree
-                      RebuildOctree = World.rebuildOctree }
+                      GameDispatchers = Map.addMany pluginGameDispatchers (Map.ofList [defaultGameDispatcher]) }
 
                 // get the first game dispatcher
                 let activeGameDispatcher =

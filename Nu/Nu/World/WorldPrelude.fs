@@ -189,9 +189,9 @@ module AmbientState =
               TickTime : int64
               TickTimeShavings : int64
               TickWatch : Stopwatch
-              DateTime : DateTimeOffset
-              // cache line 3
               DateDelta : TimeSpan
+              // cache line 3
+              DateTime : DateTimeOffset
               Tasklets : OMap<Simulant, 'w Tasklet UList>
               SdlDepsOpt : SdlDeps option
               Symbolics : Symbolics
@@ -294,12 +294,8 @@ module AmbientState =
             DateTime = dateTime
             DateDelta = dateTime - state.DateTime }
 
-    /// Shelve the ambient state.
-    let shelve (state : _ AmbientState) =
-        state
-
-    /// Unshelve the ambient state.
-    let unshelve state =
+    /// Switch simulation to use this ambient state.
+    let switch state =
         if state.Advancing
         then state.TickWatch.Start ()
         else state.TickWatch.Stop ()

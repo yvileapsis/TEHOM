@@ -22,7 +22,8 @@ module PhysicallyBased =
           AmbientOcclusion : single
           Emission : single
           Height : single
-          IgnoreLightMaps : bool }
+          IgnoreLightMaps : bool
+          OpaqueDistance : single }
 
     /// Describes a physically-based material.
     type [<Struct>] PhysicallyBasedMaterial =
@@ -91,6 +92,16 @@ module PhysicallyBased =
                 | Some _ | None -> ignoreLightMapsDefault
             | Some ignoreLightMaps -> ignoreLightMaps
 
+        static member extractOpaqueDistance opaqueDistanceDefault (sceneOpt : Assimp.Scene option) surface =
+            match surface.SurfaceNode.OpaqueDistanceOpt with
+            | None ->
+                match sceneOpt with
+                | Some scene when surface.SurfaceMaterialIndex < scene.Materials.Count ->
+                    let material = scene.Materials.[surface.SurfaceMaterialIndex]
+                    Option.defaultValue opaqueDistanceDefault material.OpaqueDistanceOpt
+                | Some _ | None -> opaqueDistanceDefault
+            | Some opaqueDistance -> opaqueDistance
+
         static member inline hash surface =
             surface.HashCode
 
@@ -144,6 +155,7 @@ module PhysicallyBased =
         let extractPresence = PhysicallyBasedSurface.extractPresence
         let extractRenderStyle = PhysicallyBasedSurface.extractRenderStyle
         let extractIgnoreLightMaps = PhysicallyBasedSurface.extractIgnoreLightMaps
+        let extractOpaqueDistance = PhysicallyBasedSurface.extractOpaqueDistance
         let hash = PhysicallyBasedSurface.hash
         let equals = PhysicallyBasedSurface.equals
         let comparer = HashIdentity.FromFunctions hash equals
@@ -191,8 +203,11 @@ module PhysicallyBased =
           ProjectionUniform : int
           BonesUniforms : int array
           EyeCenterUniform : int
+          LightCutoffMarginUniform : int
           LightAmbientColorUniform : int
           LightAmbientBrightnessUniform : int
+          LightShadowBiasAcneUniform : int
+          LightShadowBiasBleedUniform : int
           AlbedoTextureUniform : int
           RoughnessTextureUniform : int
           MetallicTextureUniform : int
@@ -291,8 +306,11 @@ module PhysicallyBased =
     /// Describes the lighting pass of a deferred physically-based shader that's loaded into GPU.
     type PhysicallyBasedDeferredLightingShader =
         { EyeCenterUniform : int
+          LightCutoffMarginUniform : int
           LightAmbientColorUniform : int
           LightAmbientBrightnessUniform : int
+          LightShadowBiasAcneUniform : int
+          LightShadowBiasBleedUniform : int
           PositionTextureUniform : int
           AlbedoTextureUniform : int
           MaterialTextureUniform : int
@@ -545,11 +563,17 @@ module PhysicallyBased =
                         | Left _ -> defaultMaterial.HeightTexture
             else defaultMaterial.HeightTexture
 
-        // compute two-sidedness
+        // compute ignore light maps
         let ignoreLightMaps =
             match material.IgnoreLightMapsOpt with
             | Some ignoreLightMaps -> ignoreLightMaps
-            | None -> false
+            | None -> Constants.Render.IgnoreLightMapsDefault
+
+        // compute opaque distance
+        let opaqueDistance =
+            match material.OpaqueDistanceOpt with
+            | Some opqaqueDistance -> opqaqueDistance
+            | None -> Constants.Render.OpaqueDistanceDefault
 
         // compute two-sidedness
         let twoSided =
@@ -565,7 +589,8 @@ module PhysicallyBased =
               AmbientOcclusion = ambientOcclusion
               Emission = emission
               Height = height
-              IgnoreLightMaps = ignoreLightMaps }
+              IgnoreLightMaps = ignoreLightMaps
+              OpaqueDistance = opaqueDistance }
 
         // make material
         let material =
@@ -871,7 +896,7 @@ module PhysicallyBased =
 
                 // create instance buffer
                 let instanceBuffer = Gl.GenBuffer ()
-                let strideSize = 30 * sizeof<single>
+                let strideSize = Constants.Render.InstanceFieldCount * sizeof<single>
                 Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
                 let instanceDataPtr = GCHandle.Alloc (m4Identity.ToArray (), GCHandleType.Pinned)
                 try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
@@ -898,7 +923,7 @@ module PhysicallyBased =
                 Gl.VertexAttribPointer (9u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (24 * sizeof<single>))
                 Gl.VertexAttribDivisor (9u, 1u)
                 Gl.EnableVertexAttribArray 10u
-                Gl.VertexAttribPointer (10u, 2, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
+                Gl.VertexAttribPointer (10u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
                 Gl.VertexAttribDivisor (10u, 1u)
                 Hl.Assert ()
 
@@ -995,7 +1020,7 @@ module PhysicallyBased =
 
                 // create instance buffer
                 let instanceBuffer = Gl.GenBuffer ()
-                let strideSize = 30 * sizeof<single>
+                let strideSize = Constants.Render.InstanceFieldCount * sizeof<single>
                 Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
                 let instanceDataPtr = GCHandle.Alloc (m4Identity.ToArray (), GCHandleType.Pinned)
                 try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
@@ -1022,7 +1047,7 @@ module PhysicallyBased =
                 Gl.VertexAttribPointer (11u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (24 * sizeof<single>))
                 Gl.VertexAttribDivisor (11u, 1u)
                 Gl.EnableVertexAttribArray 12u
-                Gl.VertexAttribPointer (12u, 2, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
+                Gl.VertexAttribPointer (12u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
                 Gl.VertexAttribDivisor (12u, 1u)
                 Hl.Assert ()
 
@@ -1122,7 +1147,7 @@ module PhysicallyBased =
 
                 // create instance buffer
                 let instanceBuffer = Gl.GenBuffer ()
-                let strideSize = 30 * sizeof<single>
+                let strideSize = Constants.Render.InstanceFieldCount * sizeof<single>
                 Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
                 let instanceDataPtr = GCHandle.Alloc (m4Identity.ToArray (), GCHandleType.Pinned)
                 try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
@@ -1149,7 +1174,7 @@ module PhysicallyBased =
                 Gl.VertexAttribPointer (12u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (24 * sizeof<single>))
                 Gl.VertexAttribDivisor (12u, 1u)
                 Gl.EnableVertexAttribArray 13u
-                Gl.VertexAttribPointer (13u, 2, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
+                Gl.VertexAttribPointer (13u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
                 Gl.VertexAttribDivisor (13u, 1u)
                 Hl.Assert ()
 
@@ -1424,8 +1449,11 @@ module PhysicallyBased =
             Array.init Constants.Render.BonesMax $ fun i ->
                 Gl.GetUniformLocation (shader, "bones[" + string i + "]")
         let eyeCenterUniform = Gl.GetUniformLocation (shader, "eyeCenter")
+        let lightCutoffMarginUniform = Gl.GetUniformLocation (shader, "lightCutoffMargin")
         let lightAmbientColorUniform = Gl.GetUniformLocation (shader, "lightAmbientColor")
         let lightAmbientBrightnessUniform = Gl.GetUniformLocation (shader, "lightAmbientBrightness")
+        let lightShadowBiasAcneUniform = Gl.GetUniformLocation (shader, "lightShadowBiasAcne")
+        let lightShadowBiasBleedUniform = Gl.GetUniformLocation (shader, "lightShadowBiasBleed")
         let albedoTextureUniform = Gl.GetUniformLocation (shader, "albedoTexture")
         let roughnessTextureUniform = Gl.GetUniformLocation (shader, "roughnessTexture")
         let metallicTextureUniform = Gl.GetUniformLocation (shader, "metallicTexture")
@@ -1470,8 +1498,11 @@ module PhysicallyBased =
           ProjectionUniform = projectionUniform
           BonesUniforms = bonesUniforms
           EyeCenterUniform = eyeCenterUniform
+          LightCutoffMarginUniform = lightCutoffMarginUniform
           LightAmbientColorUniform = lightAmbientColorUniform
           LightAmbientBrightnessUniform = lightAmbientBrightnessUniform
+          LightShadowBiasAcneUniform = lightShadowBiasAcneUniform
+          LightShadowBiasBleedUniform = lightShadowBiasBleedUniform
           AlbedoTextureUniform = albedoTextureUniform
           RoughnessTextureUniform = roughnessTextureUniform
           MetallicTextureUniform = metallicTextureUniform
@@ -1673,8 +1704,11 @@ module PhysicallyBased =
 
         // retrieve uniforms
         let eyeCenterUniform = Gl.GetUniformLocation (shader, "eyeCenter")
+        let lightCutoffMarginUniform = Gl.GetUniformLocation (shader, "lightCutoffMargin")
         let lightAmbientColorUniform = Gl.GetUniformLocation (shader, "lightAmbientColor")
         let lightAmbientBrightnessUniform = Gl.GetUniformLocation (shader, "lightAmbientBrightness")
+        let lightShadowBiasAcneUniform = Gl.GetUniformLocation (shader, "lightShadowBiasAcne")
+        let lightShadowBiasBleedUniform = Gl.GetUniformLocation (shader, "lightShadowBiasBleed")
         let positionTextureUniform = Gl.GetUniformLocation (shader, "positionTexture")
         let albedoTextureUniform = Gl.GetUniformLocation (shader, "albedoTexture")
         let materialTextureUniform = Gl.GetUniformLocation (shader, "materialTexture")
@@ -1704,8 +1738,11 @@ module PhysicallyBased =
 
         // make shader record
         { EyeCenterUniform = eyeCenterUniform
+          LightCutoffMarginUniform = lightCutoffMarginUniform
           LightAmbientColorUniform = lightAmbientColorUniform
           LightAmbientBrightnessUniform = lightAmbientBrightnessUniform
+          LightShadowBiasAcneUniform = lightShadowBiasAcneUniform
+          LightShadowBiasBleedUniform = lightShadowBiasBleedUniform
           PositionTextureUniform = positionTextureUniform
           AlbedoTextureUniform = albedoTextureUniform
           MaterialTextureUniform = materialTextureUniform
@@ -1886,7 +1923,7 @@ module PhysicallyBased =
         // update instance buffer
         let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
         try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 30 * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
             Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
             Hl.Assert ()
         finally instanceFieldsPtr.Free ()
@@ -1965,7 +2002,7 @@ module PhysicallyBased =
         // update instance buffer
         let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
         try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 30 * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
             Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
             Hl.Assert ()
         finally instanceFieldsPtr.Free ()
@@ -2010,8 +2047,11 @@ module PhysicallyBased =
          surfacesCount : int,
          instanceFields : single array,
          eyeCenter : Vector3,
+         lightCutoffMargin : single,
          lightAmbientColor : single array,
          lightAmbientBrightness : single,
+         lightShadowBiasAcne : single,
+         lightShadowBiasBleed : single,
          brdfTexture : Texture.Texture,
          irradianceMap : Texture.Texture,
          environmentFilterMap : Texture.Texture,
@@ -2056,9 +2096,12 @@ module PhysicallyBased =
         for i in 0 .. dec (min Constants.Render.BonesMax bones.Length) do
             Gl.UniformMatrix4 (shader.BonesUniforms.[i], false, bones.[i])
         Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
+        Gl.Uniform1 (shader.LightCutoffMarginUniform, lightCutoffMargin)
         if lightAmbientColor.Length = 3 then
             Gl.Uniform3 (shader.LightAmbientColorUniform, lightAmbientColor)
         Gl.Uniform1 (shader.LightAmbientBrightnessUniform, lightAmbientBrightness)
+        Gl.Uniform1 (shader.LightShadowBiasAcneUniform, lightShadowBiasAcne)
+        Gl.Uniform1 (shader.LightShadowBiasBleedUniform, lightShadowBiasBleed)
         Gl.Uniform3 (shader.LightMapOriginsUniform, lightMapOrigins)
         Gl.Uniform3 (shader.LightMapMinsUniform, lightMapMins)
         Gl.Uniform3 (shader.LightMapSizesUniform, lightMapSizes)
@@ -2101,7 +2144,7 @@ module PhysicallyBased =
         // update instance buffer
         let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
         try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * 30 * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (surfacesCount * Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
             Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
             Hl.Assert ()
         finally instanceFieldsPtr.Free ()
@@ -2187,7 +2230,7 @@ module PhysicallyBased =
         // update instance buffer
         let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
         try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (30 * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
             Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
             Hl.Assert ()
         finally instanceFieldsPtr.Free ()
@@ -2409,8 +2452,11 @@ module PhysicallyBased =
     /// Draw the lighting pass of a deferred physically-based surface.
     let DrawPhysicallyBasedDeferredLightingSurface
         (eyeCenter : Vector3,
+         lightCutoffMargin : single,
          lightAmbientColor : single array,
          lightAmbientBrightness : single,
+         lightShadowBiasAcne : single,
+         lightShadowBiasBleed : single,
          positionTexture : Texture.Texture,
          albedoTexture : Texture.Texture,
          materialTexture : Texture.Texture,
@@ -2439,8 +2485,11 @@ module PhysicallyBased =
         // setup shader
         Gl.UseProgram shader.PhysicallyBasedDeferredLightingShader
         Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
+        Gl.Uniform1 (shader.LightCutoffMarginUniform, lightCutoffMargin)
         Gl.Uniform3 (shader.LightAmbientColorUniform, lightAmbientColor)
         Gl.Uniform1 (shader.LightAmbientBrightnessUniform, lightAmbientBrightness)
+        Gl.Uniform1 (shader.LightShadowBiasAcneUniform, lightShadowBiasAcne)
+        Gl.Uniform1 (shader.LightShadowBiasBleedUniform, lightShadowBiasBleed)
         Gl.Uniform3 (shader.LightOriginsUniform, lightOrigins)
         Gl.Uniform3 (shader.LightDirectionsUniform, lightDirections)
         Gl.Uniform3 (shader.LightColorsUniform, lightColors)

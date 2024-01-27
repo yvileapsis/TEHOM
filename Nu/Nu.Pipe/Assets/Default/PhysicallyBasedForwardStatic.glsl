@@ -31,14 +31,14 @@ layout (location = 3) in mat4 model;
 layout (location = 7) in vec4 texCoordsOffset;
 layout (location = 8) in vec4 albedo;
 layout (location = 9) in vec4 material;
-layout (location = 10) in vec2 heightPlus;
+layout (location = 10) in vec4 heightPlus;
 
 out vec4 positionOut;
 out vec2 texCoordsOut;
 out vec3 normalOut;
 flat out vec4 albedoOut;
 flat out vec4 materialOut;
-flat out vec2 heightPlusOut;
+flat out vec4 heightPlusOut;
 
 void main()
 {
@@ -59,11 +59,8 @@ void main()
 #extension GL_ARB_bindless_texture : require
 
 const float PI = 3.141592654;
-const float REFLECTION_LOD_MAX = 5.0;
+const float REFLECTION_LOD_MAX = 7.0;
 const float GAMMA = 2.2;
-const float OPAQUING_DISTANCE_BEGIN = 8.0;
-const float OPAQUING_DISTANCE_END = 12.0;
-const float OPAQUING_DISTANCE_RANGE = OPAQUING_DISTANCE_END - OPAQUING_DISTANCE_BEGIN;
 const float ATTENUATION_CONSTANT = 1.0f;
 const int LIGHT_MAPS_MAX = 2;
 const int LIGHTS_MAX = 8;
@@ -71,8 +68,11 @@ const float SHADOW_FOV_MAX = 2.1;
 const int SHADOWS_MAX = 16;
 
 uniform vec3 eyeCenter;
+uniform float lightCutoffMargin;
 uniform vec3 lightAmbientColor;
 uniform float lightAmbientBrightness;
+uniform float lightShadowBiasAcne;
+uniform float lightShadowBiasBleed;
 layout (bindless_sampler) uniform sampler2D albedoTexture;
 layout (bindless_sampler) uniform sampler2D roughnessTexture;
 layout (bindless_sampler) uniform sampler2D metallicTexture;
@@ -85,7 +85,7 @@ layout (bindless_sampler) uniform samplerCube irradianceMap;
 layout (bindless_sampler) uniform samplerCube environmentFilterMap;
 layout (bindless_sampler) uniform samplerCube irradianceMaps[LIGHT_MAPS_MAX];
 layout (bindless_sampler) uniform samplerCube environmentFilterMaps[LIGHT_MAPS_MAX];
-uniform sampler2D shadowTextures[SHADOWS_MAX];
+layout (bindless_sampler) uniform sampler2D shadowTextures[SHADOWS_MAX];
 uniform vec3 lightMapOrigins[LIGHT_MAPS_MAX];
 uniform vec3 lightMapMins[LIGHT_MAPS_MAX];
 uniform vec3 lightMapSizes[LIGHT_MAPS_MAX];
@@ -109,7 +109,7 @@ in vec2 texCoordsOut;
 in vec3 normalOut;
 flat in vec4 albedoOut;
 flat in vec4 materialOut;
-flat in vec2 heightPlusOut;
+flat in vec4 heightPlusOut;
 
 out vec4 frag;
 
@@ -118,13 +118,13 @@ float linstep(float low, float high, float v)
     return clamp((v - low) / (high - low), 0.0, 1.0);
 }
 
-float computeShadowScalar(sampler2D shadowMap, vec2 shadowTexCoords, float shadowZ, float varianceMin, float lightBleedFilter)
+float computeShadowScalar(sampler2D shadowMap, vec2 shadowTexCoords, float shadowZ, float shadowBiasAcne, float shadowBiasBleed)
 {
     vec2 moments = texture(shadowMap, shadowTexCoords).xy;
     float p = step(shadowZ, moments.x);
-    float variance = max(moments.y - moments.x * moments.x, varianceMin);
+    float variance = max(moments.y - moments.x * moments.x, shadowBiasAcne);
     float delta = shadowZ - moments.x;
-    float pMax = linstep(lightBleedFilter, 1.0, variance / (variance + delta * delta));
+    float pMax = linstep(shadowBiasBleed, 1.0, variance / (variance + delta * delta));
     return max(p, pMax);
 }
 
@@ -223,6 +223,17 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 f0, float roughness)
 
 void main()
 {
+    // discard if depth out of range
+    float depthCutoff = heightPlusOut.z;
+    if (depthCutoff >= 0.0)
+    {
+        if (gl_FragCoord.z / gl_FragCoord.w > depthCutoff) discard;
+    }
+    else
+    {
+        if (gl_FragCoord.z / gl_FragCoord.w <= -depthCutoff) discard;
+    }
+
     // compute basic fragment data
     vec3 position = positionOut.xyz;
     vec3 normal = normalize(normalOut);
@@ -252,7 +263,8 @@ void main()
     albedo.rgb = pow(albedoSample.rgb, vec3(GAMMA)) * albedoOut.rgb;
     albedo.a = albedoSample.a * albedoOut.a;
     if (albedo.a == 0.0f) discard;
-    albedo.a = mix(albedo.a, 1.0, clamp((distance - OPAQUING_DISTANCE_BEGIN) / OPAQUING_DISTANCE_RANGE, 0.0, 1.0));
+    float opaqueDistance = heightPlusOut.w;
+    albedo.a = mix(albedo.a, 1.0, smoothstep(opaqueDistance * 0.667, opaqueDistance, distance));
 
     // compute material properties
     float roughness = texture(roughnessTexture, texCoords).r * materialOut.r;
@@ -280,14 +292,14 @@ void main()
             float distanceSquared = dot(d, d);
             float distance = sqrt(distanceSquared);
             float cutoff = lightCutoffs[i];
-            float cutoffScalar = 1.0f - smoothstep(cutoff * 0.667, cutoff, distance);
-            float attenuation = 1.0f / (ATTENUATION_CONSTANT + lightAttenuationLinears[i] * distance + lightAttenuationQuadratics[i] * distanceSquared);
+            float cutoffScalar = 1.0 - smoothstep(cutoff * (1.0 - lightCutoffMargin), cutoff, distance);
+            float attenuation = 1.0 / (ATTENUATION_CONSTANT + lightAttenuationLinears[i] * distance + lightAttenuationQuadratics[i] * distanceSquared);
             float angle = acos(dot(l, -lightDirections[i]));
-            float halfConeInner = lightConeInners[i] * 0.5f;
-            float halfConeOuter = lightConeOuters[i] * 0.5f;
+            float halfConeInner = lightConeInners[i] * 0.5;
+            float halfConeOuter = lightConeOuters[i] * 0.5;
             float halfConeDelta = halfConeOuter - halfConeInner;
             float halfConeBetween = angle - halfConeInner;
-            float halfConeScalar = clamp(1.0f - halfConeBetween / halfConeDelta, 0.0f, 1.0);
+            float halfConeScalar = clamp(1.0 - halfConeBetween / halfConeDelta, 0.0, 1.0);
             float intensity = attenuation * halfConeScalar;
             radiance = lightColors[i] * lightBrightnesses[i] * intensity * cutoffScalar;
         }
@@ -309,7 +321,7 @@ void main()
             float shadowZ = shadowTexCoordsProj.z * 0.5 + 0.5;
             if (shadowZ < 1.0f && shadowTexCoords.x >= 0.0 && shadowTexCoords.x <= 1.0 && shadowTexCoords.y >= 0.0 && shadowTexCoords.y <= 1.0)
             {
-                shadowScalar = computeShadowScalar(shadowTextures[shadowIndex], shadowTexCoords, shadowZ, 0.0000001, 0.333);
+                shadowScalar = computeShadowScalar(shadowTextures[shadowIndex], shadowTexCoords, shadowZ, lightShadowBiasAcne, lightShadowBiasBleed);
                 if (lightConeOuters[i] > SHADOW_FOV_MAX) shadowScalar = fadeShadowScalar(shadowTexCoords, shadowScalar);
             }
         }

@@ -16,8 +16,8 @@ Metadata from another thread. *)
 /// full asset loaded into memory.
 type Metadata =
     | RawMetadata
-    | TextureMetadata of Vector2i
-    | TileMapMetadata of string * (TmxTileset * Image AssetTag) array * TmxMap
+    | TextureMetadata of OpenGL.Texture.TextureMetadata
+    | TileMapMetadata of string * (TmxTileset * Image AssetTag) array * TmxMap // TODO: create a record for this.
     | StaticModelMetadata of OpenGL.PhysicallyBased.PhysicallyBasedModel
     | AnimatedModelMetadata of OpenGL.PhysicallyBased.PhysicallyBasedModel
     | SoundMetadata
@@ -26,8 +26,8 @@ type Metadata =
 [<RequireQualifiedAccess>]
 module Metadata =
 
-    let mutable private MetadataPackages :
-        UMap<string, UMap<string, DateTimeOffset * string * Metadata>> = UMap.makeEmpty StringComparer.Ordinal Imperative
+    let mutable private MetadataPackages : UMap<string, UMap<string, DateTimeOffset * string * Metadata>> =
+        UMap.makeEmpty StringComparer.Ordinal Imperative
 
     /// Thread-safe.
     let private tryGenerateRawMetadata (asset : Asset) =
@@ -46,26 +46,25 @@ module Metadata =
                 fileStream.ReadExactly ddsHeader
                 let height = BinaryPrimitives.ReadUInt32LittleEndian (ddsHeader.AsSpan (12, 4))
                 let width = BinaryPrimitives.ReadUInt32LittleEndian (ddsHeader.AsSpan (16, 4))
-                Some (TextureMetadata (v2i (int width) (int height)))
+                Some (TextureMetadata (OpenGL.Texture.TextureMetadata.make (int width) (int height)))
             elif fileExtension = ".tga" then
                 let ddsHeader = Array.zeroCreate<byte> 16
                 use fileStream = new FileStream (asset.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read)
                 fileStream.ReadExactly ddsHeader
                 let width = BinaryPrimitives.ReadUInt16LittleEndian (ddsHeader.AsSpan (12, 2))
                 let height = BinaryPrimitives.ReadUInt16LittleEndian (ddsHeader.AsSpan (14, 2))
-                Some (TextureMetadata (v2i (int width) (int height)))
+                Some (TextureMetadata (OpenGL.Texture.TextureMetadata.make (int width) (int height)))
             elif platform = PlatformID.Win32NT || platform = PlatformID.Win32Windows then
                 use fileStream = new FileStream (asset.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read)
                 use image = Drawing.Image.FromStream (fileStream, false, false)
-                Some (TextureMetadata (v2i image.Width image.Height))
+                Some (TextureMetadata (OpenGL.Texture.TextureMetadata.make image.Width image.Height))
             else
                 // NOTE: System.Drawing.Image is not, AFAIK, available on non-Windows platforms, so we use a VERY slow path here.
-                // TODO: P1: read as many image file type headers as possible to speed this up on non-windows platforms.
                 match OpenGL.Texture.TryCreateTextureData asset.FilePath with
                 | Some textureData ->
                     let metadata = textureData.Metadata
                     textureData.Dispose ()
-                    Some (TextureMetadata (v2i metadata.TextureWidth metadata.TextureHeight))
+                    Some (TextureMetadata metadata)
                 | None ->
                     let errorMessage = "Failed to load texture metadata for '" + asset.FilePath + "."
                     Log.trace errorMessage
@@ -242,55 +241,82 @@ module Metadata =
             | None -> None
         | None -> None
 
-    /// Attempt to get the texture metadata of the given asset.
-    let tryGetTextureSize (assetTag : Image AssetTag) =
-        match tryGetMetadata assetTag with
-        | Some (TextureMetadata size) -> Some size
+    /// Get a copy of the metadata packages.
+    let getMetadataPackages () =
+        let map =
+            MetadataPackages |>
+            UMap.toSeq |>
+            Seq.map (fun (packageName, map) -> (packageName, map |> UMap.toSeq |> Map.ofSeq)) |>
+            Map.ofSeq
+        map
+
+    /// Attempt to get a copy of a metadata package with the given package name.
+    let tryGetMetadataPackage packageName =
+        match MetadataPackages.TryGetValue packageName with
+        | (true, package) -> Some (package |> UMap.toSeq |> Map.ofSeq)
+        | (false, _) -> None
+
+    /// Get a map of all metadata's discovered assets.
+    let getDiscoveredAssets metadata =
+        let sources =
+            getMetadataPackages metadata |>
+            Map.map (fun _ metadata -> Map.toKeyList metadata)
+        sources
+
+    /// Attempt to get the texture metadata of the given image.
+    let tryGetTextureMetadata (image : Image AssetTag) =
+        match tryGetMetadata image with
+        | Some (TextureMetadata metadata) -> Some metadata
         | None -> None
         | _ -> None
 
-    /// Forcibly get the texture size metadata of the given asset (throwing on failure).
-    let getTextureSize assetTag =
-        Option.get (tryGetTextureSize assetTag)
+    /// Forcibly get the texture metadata of the given image (throwing on failure).
+    let getTextureMetadata image =
+        Option.get (tryGetTextureMetadata image)
 
-    /// Attempt to get the texture size metadata of the given asset.
-    let tryGetTextureSizeF assetTag =
-        match tryGetTextureSize assetTag with
+    /// Attempt to get the texture size of the given image.
+    let tryGetTextureSize (image : Image AssetTag) =
+        match tryGetTextureMetadata image with
+        | Some metadata -> Some (v2i metadata.TextureWidth metadata.TextureHeight)
+        | None -> None
+
+    /// Forcibly get the texture size of the given image (throwing on failure).
+    let getTextureSize image =
+        Option.get (tryGetTextureSize image)
+
+    /// Attempt to get the texture size of the given image.
+    let tryGetTextureSizeF image =
+        match tryGetTextureSize image with
         | Some size -> Some (v2 (single size.X) (single size.Y))
         | None -> None
 
-    /// Forcibly get the texture size metadata of the given asset (throwing on failure).
-    let getTextureSizeF assetTag =
-        Option.get (tryGetTextureSizeF assetTag)
+    /// Forcibly get the texture size of the given image (throwing on failure).
+    let getTextureSizeF image =
+        Option.get (tryGetTextureSizeF image)
 
-    /// Attempt to get the tile map metadata of the given asset.
-    let tryGetTileMapMetadata (assetTag : TileMap AssetTag) =
-        match tryGetMetadata assetTag with
+    /// Attempt to get the metadata of the given tile map.
+    let tryGetTileMapMetadata (tileMap : TileMap AssetTag) =
+        match tryGetMetadata tileMap with
         | Some (TileMapMetadata (filePath, imageAssets, tmxMap)) -> Some (filePath, imageAssets, tmxMap)
         | None -> None
         | _ -> None
 
-    /// Forcibly get the tile map metadata of the given asset (throwing on failure).
-    let getTileMapMetadata assetTag =
-        Option.get (tryGetTileMapMetadata assetTag)
+    /// Forcibly get the metadata of the given tile map (throwing on failure).
+    let getTileMapMetadata tileMap =
+        Option.get (tryGetTileMapMetadata tileMap)
 
-    /// Attempt to get the static model metadata of the given asset.
-    let tryGetStaticModelMetadata (assetTag : StaticModel AssetTag) =
-        match tryGetMetadata assetTag with
+    let private tryGetModelMetadata model =
+        match tryGetMetadata model with
         | Some (StaticModelMetadata model) -> Some model
+        | Some (AnimatedModelMetadata model) -> Some model
         | None -> None
         | _ -> None
 
-    /// Forcibly get the static model metadata of the given asset (throwing on failure).
-    let getStaticModelMetadata assetTag =
-        Option.get (tryGetStaticModelMetadata assetTag)
-
-    /// Attempt to get the albedo image asset for the given material index and static model.
-    let tryGetStaticModelAlbedoImage materialIndex staticModel =
-        match tryGetStaticModelMetadata staticModel with
-        | Some staticModelMetadata ->
-            match staticModelMetadata.SceneOpt with
-            | Some scene when scene.Materials.Count > materialIndex ->
+    let private tryGetModelAlbedoImage materialIndex model =
+        match tryGetModelMetadata model with
+        | Some modelMetadata ->
+            match modelMetadata.SceneOpt with
+            | Some scene when materialIndex >= 0 && materialIndex < scene.Materials.Count ->
                 let material = scene.Materials.[materialIndex]
                 let mutable (_, albedoTextureSlotA) = material.GetMaterialTexture (Assimp.TextureType.BaseColor, 0)
                 let mutable (_, albedoTextureSlotB) = material.GetMaterialTexture (Assimp.TextureType.Diffuse, 0)
@@ -300,24 +326,23 @@ module Metadata =
                         else albedoTextureSlotB.FilePath
                     else albedoTextureSlotA.FilePath
                 let assetName = PathF.GetFileNameWithoutExtension albedoTextureSlotFilePath
-                let image = asset staticModel.PackageName assetName
+                let image = asset model.PackageName assetName
                 if getMetadataExists image then Some image else None
             | Some _ | None -> None
         | None -> None
 
-    /// Attempt to get the roughness image asset for the given material index and static model.
-    let tryGetStaticModelRoughnessImage materialIndex staticModel =
-        match tryGetStaticModelMetadata staticModel with
-        | Some staticModelMetadata ->
-            match staticModelMetadata.SceneOpt with
-            | Some scene when scene.Materials.Count > materialIndex ->
+    let private tryGetModelRoughnessImage materialIndex model =
+        match tryGetModelMetadata model with
+        | Some modelMetadata ->
+            match modelMetadata.SceneOpt with
+            | Some scene when materialIndex >= 0 && materialIndex < scene.Materials.Count ->
                 let material = scene.Materials.[materialIndex]
                 let mutable (_, roughnessTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Roughness, 0)
                 if isNull roughnessTextureSlot.FilePath then roughnessTextureSlot.FilePath <- "" // ensure not null
                 let assetName = PathF.GetFileNameWithoutExtension roughnessTextureSlot.FilePath
-                let image = asset staticModel.PackageName assetName
+                let image = asset model.PackageName assetName
                 if not (getMetadataExists image) then
-                    match tryGetStaticModelAlbedoImage materialIndex staticModel with
+                    match tryGetModelAlbedoImage materialIndex model with
                     | Some albedoImage ->
                         let albedoAssetName =   albedoImage.AssetName
                         let has_bc =            albedoAssetName.Contains "_bc"
@@ -345,19 +370,18 @@ module Metadata =
             | Some _ | None -> None
         | None -> None
 
-    /// Attempt to get the metallic image asset for the given material index and static model.
-    let tryGetStaticModelMetallicImage materialIndex staticModel =
-        match tryGetStaticModelMetadata staticModel with
-        | Some staticModelMetadata ->
-            match staticModelMetadata.SceneOpt with
-            | Some scene when scene.Materials.Count > materialIndex ->
+    let private tryGetModelMetallicImage materialIndex model =
+        match tryGetModelMetadata model with
+        | Some modelMetadata ->
+            match modelMetadata.SceneOpt with
+            | Some scene when materialIndex >= 0 && materialIndex < scene.Materials.Count ->
                 let material = scene.Materials.[materialIndex]
                 let mutable (_, metallicTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Metalness, 0)
                 if isNull metallicTextureSlot.FilePath then metallicTextureSlot.FilePath <- "" // ensure not null
                 let assetName = PathF.GetFileNameWithoutExtension metallicTextureSlot.FilePath
-                let image = asset staticModel.PackageName assetName
+                let image = asset model.PackageName assetName
                 if not (getMetadataExists image) then
-                    match tryGetStaticModelAlbedoImage materialIndex staticModel with
+                    match tryGetModelAlbedoImage materialIndex model with
                     | Some albedoImage ->
                         let albedoAssetName =   albedoImage.AssetName
                         let has_bc =            albedoAssetName.Contains "_bc"
@@ -385,12 +409,11 @@ module Metadata =
             | Some _ | None -> None
         | None -> None
 
-    /// Attempt to get the ambient occlusion image asset for the given material index and static model.
-    let tryGetStaticModelAmbientOcclusionImage materialIndex staticModel =
-        match tryGetStaticModelMetadata staticModel with
-        | Some staticModelMetadata ->
-            match staticModelMetadata.SceneOpt with
-            | Some scene when scene.Materials.Count > materialIndex ->
+    let private tryGetModelAmbientOcclusionImage materialIndex model =
+        match tryGetModelMetadata model with
+        | Some modelMetadata ->
+            match modelMetadata.SceneOpt with
+            | Some scene when materialIndex >= 0 && materialIndex < scene.Materials.Count ->
                 let material = scene.Materials.[materialIndex]
                 let mutable (_, ambientOcclusionTextureSlotA) = material.GetMaterialTexture (Assimp.TextureType.Ambient, 0)
                 let mutable (_, ambientOcclusionTextureSlotB) = material.GetMaterialTexture (Assimp.TextureType.AmbientOcclusion, 0)
@@ -400,9 +423,9 @@ module Metadata =
                         else ambientOcclusionTextureSlotB.FilePath
                     else ambientOcclusionTextureSlotA.FilePath
                 let assetName = PathF.GetFileNameWithoutExtension ambientOcclusionTextureSlotFilePath
-                let image = asset staticModel.PackageName assetName
+                let image = asset model.PackageName assetName
                 if not (getMetadataExists image) then
-                    match tryGetStaticModelAlbedoImage materialIndex staticModel with
+                    match tryGetModelAlbedoImage materialIndex model with
                     | Some albedoImage ->
                         let albedoAssetName =       albedoImage.AssetName
                         let has_bc =                albedoAssetName.Contains "_bc"
@@ -426,19 +449,18 @@ module Metadata =
             | Some _ | None -> None
         | None -> None
 
-    /// Attempt to get the emission image asset for the given material index and static model.
-    let tryGetStaticModelEmissionImage materialIndex staticModel =
-        match tryGetStaticModelMetadata staticModel with
-        | Some staticModelMetadata ->
-            match staticModelMetadata.SceneOpt with
-            | Some scene when scene.Materials.Count > materialIndex ->
+    let private tryGetModelEmissionImage materialIndex model =
+        match tryGetModelMetadata model with
+        | Some modelMetadata ->
+            match modelMetadata.SceneOpt with
+            | Some scene when materialIndex >= 0 && materialIndex < scene.Materials.Count ->
                 let material = scene.Materials.[materialIndex]
                 let mutable (_, emissionTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Emissive, 0)
                 if isNull emissionTextureSlot.FilePath then emissionTextureSlot.FilePath <- "" // ensure not null
                 let assetName = PathF.GetFileNameWithoutExtension emissionTextureSlot.FilePath
-                let image = asset staticModel.PackageName assetName
+                let image = asset model.PackageName assetName
                 if not (getMetadataExists image) then
-                    match tryGetStaticModelAlbedoImage materialIndex staticModel with
+                    match tryGetModelAlbedoImage materialIndex model with
                     | Some albedoImage ->
                         let albedoAssetName =   albedoImage.AssetName
                         let has_bc =            albedoAssetName.Contains "_bc"
@@ -456,19 +478,18 @@ module Metadata =
             | Some _ | None -> None
         | None -> None
 
-    /// Attempt to get the normal image asset for the given material index and static model.
-    let tryGetStaticModelNormalImage materialIndex staticModel =
-        match tryGetStaticModelMetadata staticModel with
-        | Some staticModelMetadata ->
-            match staticModelMetadata.SceneOpt with
-            | Some scene when scene.Materials.Count > materialIndex ->
+    let private tryGetModelNormalImage materialIndex model =
+        match tryGetModelMetadata model with
+        | Some modelMetadata ->
+            match modelMetadata.SceneOpt with
+            | Some scene when materialIndex >= 0 && materialIndex < scene.Materials.Count ->
                 let material = scene.Materials.[materialIndex]
                 let mutable (_, normalTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Normals, 0)
                 if isNull normalTextureSlot.FilePath then normalTextureSlot.FilePath <- "" // ensure not null
                 let assetName = PathF.GetFileNameWithoutExtension normalTextureSlot.FilePath
-                let image = asset staticModel.PackageName assetName
+                let image = asset model.PackageName assetName
                 if not (getMetadataExists image) then
-                    match tryGetStaticModelAlbedoImage materialIndex staticModel with
+                    match tryGetModelAlbedoImage materialIndex model with
                     | Some albedoImage ->
                         let albedoAssetName =   albedoImage.AssetName
                         let has_bc =            albedoAssetName.Contains "_bc"
@@ -486,19 +507,18 @@ module Metadata =
             | Some _ | None -> None
         | None -> None
 
-    /// Attempt to get the height image asset for the given material index and static model.
-    let tryGetStaticModelHeightImage materialIndex staticModel =
-        match tryGetStaticModelMetadata staticModel with
-        | Some staticModelMetadata ->
-            match staticModelMetadata.SceneOpt with
-            | Some scene when scene.Materials.Count > materialIndex ->
+    let private tryGetModelHeightImage materialIndex model =
+        match tryGetModelMetadata model with
+        | Some modelMetadata ->
+            match modelMetadata.SceneOpt with
+            | Some scene when materialIndex >= 0 && materialIndex < scene.Materials.Count ->
                 let material = scene.Materials.[materialIndex]
                 let mutable (_, heightTextureSlot) = material.GetMaterialTexture (Assimp.TextureType.Height, 0)
                 if isNull heightTextureSlot.FilePath then heightTextureSlot.FilePath <- "" // ensure not null
                 let assetName = PathF.GetFileNameWithoutExtension heightTextureSlot.FilePath
-                let image = asset staticModel.PackageName assetName
+                let image = asset model.PackageName assetName
                 if not (getMetadataExists image) then
-                    match tryGetStaticModelAlbedoImage materialIndex staticModel with
+                    match tryGetModelAlbedoImage materialIndex model with
                     | Some albedoImage ->
                         let albedoAssetName =   albedoImage.AssetName
                         let has_bc =            albedoAssetName.Contains "_bc"
@@ -516,12 +536,11 @@ module Metadata =
             | Some _ | None -> None
         | None -> None
 
-    /// Attempt to get the two-sided property for the given material index and static model.
-    let tryGetStaticModelTwoSided materialIndex staticModel =
-        match tryGetStaticModelMetadata staticModel with
-        | Some staticModelMetadata ->
-            match staticModelMetadata.SceneOpt with
-            | Some scene when scene.Materials.Count > materialIndex ->
+    let private tryGetModelTwoSided materialIndex model =
+        match tryGetModelMetadata model with
+        | Some modelMetadata ->
+            match modelMetadata.SceneOpt with
+            | Some scene when materialIndex >= 0 && materialIndex < scene.Materials.Count ->
                 let material = scene.Materials.[materialIndex]
                 match material.IgnoreLightMapsOpt with
                 | Some ignoreLightMaps -> Some ignoreLightMaps
@@ -529,35 +548,88 @@ module Metadata =
             | Some _ | None -> None
         | None -> None
 
-    /// Attempt to get the animated model metadata of the given asset.
-    let tryGetAnimatedModelMetadata (assetTag : AnimatedModel AssetTag) =
-        match tryGetMetadata assetTag with
+    /// Attempt to get the metadata of the given static model.
+    let tryGetStaticModelMetadata (staticModel : StaticModel AssetTag) =
+        match tryGetMetadata staticModel with
+        | Some (StaticModelMetadata model) -> Some model
+        | None -> None
+        | _ -> None
+
+    /// Forcibly get the metadata of the given static model (throwing on failure).
+    let getStaticModelMetadata staticModel =
+        Option.get (tryGetStaticModelMetadata staticModel)
+
+    /// Attempt to get the albedo image asset for the given material index and static model.
+    let tryGetStaticModelAlbedoImage materialIndex (staticModel : StaticModel AssetTag) =
+        tryGetModelAlbedoImage materialIndex staticModel
+
+    /// Attempt to get the roughness image asset for the given material index and static model.
+    let tryGetStaticModelRoughnessImage materialIndex (staticModel : StaticModel AssetTag) =
+        tryGetModelRoughnessImage materialIndex staticModel
+
+    /// Attempt to get the metallic image asset for the given material index and static model.
+    let tryGetStaticModelMetallicImage materialIndex (staticModel : StaticModel AssetTag) =
+        tryGetModelMetallicImage materialIndex staticModel
+
+    /// Attempt to get the ambient occlusion image asset for the given material index and static model.
+    let tryGetStaticModelAmbientOcclusionImage materialIndex (staticModel : StaticModel AssetTag) =
+        tryGetModelAmbientOcclusionImage materialIndex staticModel
+
+    /// Attempt to get the emission image asset for the given material index and static model.
+    let tryGetStaticModelEmissionImage materialIndex (staticModel : StaticModel AssetTag) =
+        tryGetModelEmissionImage materialIndex staticModel
+
+    /// Attempt to get the normal image asset for the given material index and static model.
+    let tryGetStaticModelNormalImage materialIndex (staticModel : StaticModel AssetTag) =
+        tryGetModelNormalImage materialIndex staticModel
+
+    /// Attempt to get the height image asset for the given material index and static model.
+    let tryGetStaticModelHeightImage materialIndex (staticModel : StaticModel AssetTag) =
+        tryGetModelHeightImage materialIndex staticModel
+
+    /// Attempt to get the two-sided property for the given material index and static model.
+    let tryGetStaticModelTwoSided materialIndex (staticModel : StaticModel AssetTag) =
+        tryGetModelTwoSided materialIndex staticModel
+
+    /// Attempt to get the metadata of the given animated model.
+    let tryGetAnimatedModelMetadata (animatedModel : AnimatedModel AssetTag) =
+        match tryGetMetadata animatedModel with
         | Some (AnimatedModelMetadata model) -> Some model
         | None -> None
         | _ -> None
 
-    /// Forcibly get the animated cmodel metadata of the given asset (throwing on failure).
-    let getAnimatedModelMetadata assetTag =
-        Option.get (tryGetAnimatedModelMetadata assetTag)
+    /// Forcibly get the metadata of the given animated model (throwing on failure).
+    let getAnimatedModelMetadata animatedModel =
+        Option.get (tryGetAnimatedModelMetadata animatedModel)
 
-    /// Get a copy of the metadata packages.
-    let getMetadataPackages () =
-        let map =
-            MetadataPackages |>
-            UMap.toSeq |>
-            Seq.map (fun (packageName, map) -> (packageName, map |> UMap.toSeq |> Map.ofSeq)) |>
-            Map.ofSeq
-        map
+    /// Attempt to get the albedo image asset for the given material index and animated model.
+    let tryGetAnimatedModelAlbedoImage materialIndex (animatedModel : AnimatedModel AssetTag) =
+        tryGetModelAlbedoImage materialIndex animatedModel
 
-    /// Attempt to get a copy of a metadata package with the given package name.
-    let tryGetMetadataPackage packageName =
-        match MetadataPackages.TryGetValue packageName with
-        | (true, package) -> Some (package |> UMap.toSeq |> Map.ofSeq)
-        | (false, _) -> None
+    /// Attempt to get the roughness image asset for the given material index and animated model.
+    let tryGetAnimatedModelRoughnessImage materialIndex (animatedModel : AnimatedModel AssetTag) =
+        tryGetModelRoughnessImage materialIndex animatedModel
 
-    /// Get a map of all metadata's discovered assets.
-    let getDiscoveredAssets metadata =
-        let sources =
-            getMetadataPackages metadata |>
-            Map.map (fun _ metadata -> Map.toKeyList metadata)
-        sources
+    /// Attempt to get the metallic image asset for the given material index and animated model.
+    let tryGetAnimatedModelMetallicImage materialIndex (animatedModel : AnimatedModel AssetTag) =
+        tryGetModelMetallicImage materialIndex animatedModel
+
+    /// Attempt to get the ambient occlusion image asset for the given material index and animated model.
+    let tryGetAnimatedModelAmbientOcclusionImage materialIndex (animatedModel : AnimatedModel AssetTag) =
+        tryGetModelAmbientOcclusionImage materialIndex animatedModel
+
+    /// Attempt to get the emission image asset for the given material index and animated model.
+    let tryGetAnimatedModelEmissionImage materialIndex (animatedModel : AnimatedModel AssetTag) =
+        tryGetModelEmissionImage materialIndex animatedModel
+
+    /// Attempt to get the normal image asset for the given material index and animated model.
+    let tryGetAnimatedModelNormalImage materialIndex (animatedModel : AnimatedModel AssetTag) =
+        tryGetModelNormalImage materialIndex animatedModel
+
+    /// Attempt to get the height image asset for the given material index and animated model.
+    let tryGetAnimatedModelHeightImage materialIndex (animatedModel : AnimatedModel AssetTag) =
+        tryGetModelHeightImage materialIndex animatedModel
+
+    /// Attempt to get the two-sided property for the given material index and animated model.
+    let tryGetAnimatedModelTwoSided materialIndex (animatedModel : AnimatedModel AssetTag) =
+        tryGetModelTwoSided materialIndex animatedModel

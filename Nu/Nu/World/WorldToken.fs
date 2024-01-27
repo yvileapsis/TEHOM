@@ -6,19 +6,19 @@ open System
 open Prime
 
 [<AutoOpen>]
-module WorldView =
+module WorldToken =
 
     type World with
 
-        static member internal renderView renderPass view world =
-            match view with
+        static member internal renderToken renderPass token world =
+            match token with
 
             // render sprite
-            | SpriteView (elevation, horizon, assetTag, sprite) ->
+            | SpriteToken (elevation, horizon, assetTag, sprite) ->
                 World.renderLayeredSpriteFast (elevation, horizon, assetTag, &sprite.Transform, &sprite.InsetOpt, sprite.Image, &sprite.Color, sprite.Blend, &sprite.Emission, sprite.Flip, world)
 
             // render text
-            | TextView (elevation, horizon, assetTag, text) ->
+            | TextToken (elevation, horizon, assetTag, text) ->
                 let renderText =
                     { Transform = text.Transform
                       Text = text.Text
@@ -30,7 +30,7 @@ module WorldView =
                 World.enqueueLayeredOperation2d { Elevation = elevation; Horizon = horizon; AssetTag = assetTag; RenderOperation2d = RenderText renderText } world
 
             // render 3d light
-            | Light3dView light ->
+            | Light3dToken light ->
                 let renderLight =
                     { LightId = light.LightId
                       Origin = light.Origin
@@ -47,9 +47,10 @@ module WorldView =
                 World.enqueueRenderMessage3d (RenderLight3d renderLight) world
 
             // render billboard
-            | BillboardView billboard ->
+            | BillboardToken billboard ->
                 let renderBillboard =
                     { Absolute = billboard.Absolute
+                      Presence = billboard.Presence
                       ModelMatrix = billboard.ModelMatrix
                       InsetOpt = billboard.InsetOpt
                       MaterialProperties = billboard.MaterialProperties
@@ -59,7 +60,7 @@ module WorldView =
                 World.enqueueRenderMessage3d (RenderBillboard renderBillboard) world
 
             // render static model
-            | StaticModelView staticModel ->
+            | StaticModelToken staticModel ->
                 let renderStaticModel =
                     { Absolute = staticModel.Absolute
                       ModelMatrix = staticModel.ModelMatrix
@@ -72,10 +73,11 @@ module WorldView =
                 World.enqueueRenderMessage3d (RenderStaticModel renderStaticModel) world
 
             // render static model surface
-            | StaticModelSurfaceView staticModelSurface ->
+            | StaticModelSurfaceToken staticModelSurface ->
                 let renderStaticModelSurface =
                     { Absolute = staticModelSurface.Absolute
                       ModelMatrix = staticModelSurface.ModelMatrix
+                      Presence = staticModelSurface.Presence
                       InsetOpt = staticModelSurface.InsetOpt
                       MaterialProperties = staticModelSurface.MaterialProperties
                       Material = staticModelSurface.Material
@@ -86,12 +88,15 @@ module WorldView =
                 World.enqueueRenderMessage3d (RenderStaticModelSurface renderStaticModelSurface) world
 
             // nothing to do
-            | SpawnEmitter (_, _) -> ()
+            | EffectToken (_, _, _) -> ()
 
             // nothing to do
-            | Tag (_, _) -> ()
+            | EmitterToken (_, _) -> ()
+
+            // nothing to do
+            | TagToken (_, _) -> ()
 
             // recur
-            | Views views ->
-                for view in views do
-                    World.renderView renderPass view world
+            | Tokens tokens ->
+                for token in tokens do
+                    World.renderToken renderPass token world

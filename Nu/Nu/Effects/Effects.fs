@@ -42,26 +42,28 @@ type TweenApplicator =
 
 /// A snapshot of an active piece of effect content.
 type Slice =
-    { Position : Vector3
-      Scale : Vector3
-      Offset : Vector3
-      Size : Vector3
-      Angles : Vector3
-      Elevation : single
-      Inset : Box2
-      Color : Color
-      Blend : Blend
-      Emission : Color
-      Height : single
-      IgnoreLightMaps : bool
-      Flip : Flip
-      Brightness : single
-      AttenuationLinear : single
-      AttenuationQuadratic : single
-      LightCutoff : single
-      Volume : single
-      Enabled : bool
-      PerimeterCentered : bool }
+    { SliceDelta : GameTime
+      SliceTime : GameTime
+      mutable Position : Vector3
+      mutable Scale : Vector3
+      mutable Offset : Vector3
+      mutable Size : Vector3
+      mutable Angles : Vector3
+      mutable Elevation : single
+      mutable Inset : Box2
+      mutable Color : Color
+      mutable Blend : Blend
+      mutable Emission : Color
+      mutable Height : single
+      mutable IgnoreLightMaps : bool
+      mutable Flip : Flip
+      mutable Brightness : single
+      mutable LightCutoff : single
+      mutable Volume : single
+      mutable Enabled : bool
+      mutable PerimeterCentered : bool }
+    static member copy slice =
+        { slice with SliceDelta = slice.SliceDelta }
 
 /// An effect key frame with abstract properties.
 type KeyFrame =
@@ -174,8 +176,6 @@ and Aspect =
     | IgnoreLightMaps of bool
     | Flip of Flip
     | Brightness of single
-    | AttenuationLinear of single
-    | AttenuationQuadratic of single
     | LightCutoff of single
     | Volume of single
     | Enableds of Applicator : LogicApplicator * Playback : Playback * KeyFrames : LogicKeyFrame array
@@ -192,6 +192,8 @@ and Aspect =
     | Emissions of Applicator : TweenApplicator * Algorithm : TweenAlgorithm * Playback : Playback * KeyFrames : TweenCKeyFrame array
     | Heights of Applicator : TweenApplicator * Algorithm : TweenAlgorithm * Playback : Playback * KeyFrames : TweenKeyFrame array
     | IgnoreLightMapses of Applicator : LogicApplicator * Playback : Playback * KeyFrames : LogicKeyFrame array
+    | Brightnesses of Applicator : TweenApplicator * Algorithm : TweenAlgorithm * Playback : Playback * KeyFrames : TweenKeyFrame array
+    | LightCutoffs of Applicator : TweenApplicator * Algorithm : TweenAlgorithm * Playback : Playback * KeyFrames : TweenKeyFrame array
     | Volumes of Applicator : TweenApplicator * Algorithm : TweenAlgorithm * Playback : Playback * KeyFrames : TweenKeyFrame array
     | Expand of Name : string * Args : Argument array
     | Aspects of Aspects : Aspect array
@@ -237,11 +239,11 @@ type Definitions =
      "Rate " +
      "Shift " +
      "Resource Expand " +
-     "Enabled Position PositionLocal PositionAbsolute Scale Offset Angles Degrees Size Elevation Inset Color Emission Height IgnoreLightMaps Volume " +
-     "Enableds Positions PositionLocals Scales Offsets Angleses Degreeses Sizes Elevations Insets Colors Emissions Heights IgnoreLightMapses Volumes Aspects " +
+     "Enabled PositionAbsolute Position PositionLocal Scale Offset Angles Degrees Size Elevation Inset Color Emission Height IgnoreLightMaps Flip Brightness LightCutoff Volume " +
+     "Enableds Positions PositionLocals Scales Offsets Angleses Degreeses Sizes Elevations Insets Colors Emissions Heights IgnoreLightMapses Brightnesses LightCutoffs Volumes Aspects " +
      "Expand " +
      "StaticSprite AnimatedSprite TextSprite Light3d Billboard StaticModel Mount Repeat Emit Delay Segment Composite Tag Nil " +
-     "View",
+     "Token",
      "", "", "", "",
      Constants.PrettyPrinter.DefaultThresholdMin,
      Constants.PrettyPrinter.CompositionalThresholdMax)>]
@@ -281,17 +283,18 @@ module EffectSystem =
     /// Evaluates effect descriptors.
     type [<ReferenceEquality>] EffectSystem =
         private
-            { EffectTime : GameTime
-              EffectDelta : GameTime
+            { EffectDelta : GameTime
+              EffectTime : GameTime
+              EffectTimeOriginal : GameTime
               EffectProgressOffset : single
               EffectAbsolute : bool
               EffectPresence : Presence
               EffectRenderType : RenderType
-              EffectViews : View SList
+              EffectTokens : Token SList
               EffectEnv : Definitions }
 
-    let rec private addView view effectSystem =
-        effectSystem.EffectViews.Add view
+    let rec private addToken token effectSystem =
+        effectSystem.EffectTokens.Add token
         effectSystem
 
     let rec private selectKeyFrames2<'kf when 'kf :> KeyFrame> localTime playback (keyFrames : 'kf array) =
@@ -431,12 +434,12 @@ module EffectSystem =
                 Log.info ("Could not find definition with name '" + definitionName + "'.")
                 asset Assets.Default.PackageName Assets.Default.ImageName
 
-    let rec private iterateViews incrementAspects content slice history effectSystem =
+    let rec private iterateTokens incrementAspects content slice history effectSystem =
         let effectSystem = { effectSystem with EffectProgressOffset = 0.0f }
         let slice = evalAspects incrementAspects slice effectSystem
         (slice, evalContent content slice history effectSystem)
 
-    and private cycleViews incrementAspects content slice history effectSystem =
+    and private cycleTokens incrementAspects content slice history effectSystem =
         let slice = evalAspects incrementAspects slice effectSystem
         evalContent content slice history effectSystem
 
@@ -445,41 +448,40 @@ module EffectSystem =
         let progress = progress + effectSystem.EffectProgressOffset
         if progress > 1.0f then progress - 1.0f else progress
 
-    and private evalAspect aspect (slice : Slice) effectSystem =
+    and private evalAspect aspect slice effectSystem =
         match aspect with
-        | Position position -> { slice with Position = slice.Position + position }
+        | Position position -> slice.Position <- slice.Position + position; slice
         | PositionLocal positionLocal ->
             let oriented = Vector3.Transform (positionLocal, slice.Angles.RollPitchYaw)
             let translated = slice.Position + oriented
-            { slice with Position = translated }
-        | PositionAbsolute position -> { slice with Position = position }
-        | Scale scale -> { slice with Scale = scale }
-        | Offset offset -> { slice with Offset = offset }
-        | Angles angles -> { slice with Angles = angles }
-        | Degrees degrees -> { slice with Angles = Math.DegreesToRadians3d degrees }
-        | Size size -> { slice with Size = size }
-        | Elevation elevation -> { slice with Elevation = elevation }
-        | Inset inset -> { slice with Inset = inset }
-        | Color color -> { slice with Color = color }
-        | Blend blend -> { slice with Blend = blend }
-        | Emission emission -> { slice with Emission = emission }
-        | Height height -> { slice with Height = height }
-        | IgnoreLightMaps ignoreLightMaps -> { slice with IgnoreLightMaps = ignoreLightMaps }
-        | Flip flip -> { slice with Flip = flip }
-        | Brightness brightness -> { slice with Brightness = brightness }
-        | AttenuationLinear attenuationLinear -> { slice with AttenuationLinear = attenuationLinear }
-        | AttenuationQuadratic attenuationQuadratic -> { slice with AttenuationQuadratic = attenuationQuadratic }
-        | LightCutoff lightCutoff -> { slice with LightCutoff = lightCutoff }
-        | Volume volume -> { slice with Volume = volume }
-        | Enabled enabled -> { slice with Enabled = enabled }
+            slice.Position <- translated
+            slice
+        | PositionAbsolute position -> slice.Position <- position; slice
+        | Scale scale -> slice.Scale <- scale; slice
+        | Offset offset -> slice.Offset <- offset; slice
+        | Angles angles -> slice.Angles <- angles; slice
+        | Degrees degrees -> slice.Angles <- Math.DegreesToRadians3d degrees; slice
+        | Size size -> slice.Size <- size; slice
+        | Elevation elevation -> slice.Elevation <- elevation; slice
+        | Inset inset -> slice.Inset <- inset; slice
+        | Color color -> slice.Color <- color; slice
+        | Blend blend -> slice.Blend <- blend; slice
+        | Emission emission -> slice.Emission <- emission; slice
+        | Height height -> slice.Height <- height; slice
+        | IgnoreLightMaps ignoreLightMaps -> slice.IgnoreLightMaps <- ignoreLightMaps; slice
+        | Flip flip -> slice.Flip <- flip; slice
+        | Brightness brightness -> slice.Brightness <- brightness; slice
+        | LightCutoff lightCutoff -> slice.LightCutoff <- lightCutoff; slice
+        | Volume volume -> slice.Volume <- volume; slice
+        | Enabled enabled -> slice.Enabled <- enabled; slice
         | Positions (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween (fun (a, b) -> a * b) keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
                 let applied = applyTween Vector3.Multiply Vector3.Divide Vector3.Pow Vector3.Modulo slice.Position tweened applicator
-                { slice with Position = applied }
-            else slice
+                slice.Position <- applied
+            slice
         | PositionLocals (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
@@ -487,107 +489,123 @@ module EffectSystem =
                 let tweened = tween Vector3.op_Multiply keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
                 let oriented = Vector3.Transform (tweened, slice.Angles.RollPitchYaw)
                 let applied = applyTween Vector3.Multiply Vector3.Divide Vector3.Pow Vector3.Modulo slice.Position oriented applicator
-                { slice with Position = applied }
-            else slice
+                slice.Position <- applied
+            slice
         | Scales (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween Vector3.op_Multiply keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
                 let applied = applyTween Vector3.Multiply Vector3.Divide Vector3.Pow Vector3.Modulo slice.Size tweened applicator
-                { slice with Scale = applied }
-            else slice
+                slice.Scale <- applied
+            slice
         | Offsets (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween Vector3.op_Multiply keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
                 let applied = applyTween Vector3.Multiply Vector3.Divide Vector3.Pow Vector3.Modulo slice.Position tweened applicator
-                { slice with Offset = applied }
-            else slice
+                slice.Offset <- applied
+            slice
         | Sizes (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween Vector3.op_Multiply keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
                 let applied = applyTween Vector3.Multiply Vector3.Divide Vector3.Pow Vector3.Modulo slice.Size tweened applicator
-                { slice with Size = applied }
-            else slice
+                slice.Size <- applied
+            slice
         | Angleses (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween Vector3.Multiply keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
                 let applied = applyTween Vector3.Multiply Vector3.Divide Vector3.Pow Vector3.Modulo slice.Angles tweened applicator
-                { slice with Angles = applied }
-            else slice
+                slice.Angles <- applied
+            slice
         | Degreeses (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween Vector3.Multiply keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
                 let applied = applyTween Vector3.Multiply Vector3.Divide Vector3.Pow Vector3.Modulo (Math.RadiansToDegrees3d slice.Angles) tweened applicator
-                { slice with Angles = Math.DegreesToRadians3d applied }
-            else slice
+                slice.Angles <- Math.DegreesToRadians3d applied
+            slice
         | Elevations (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween (fun (x, y) -> x * y) keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
                 let applied = applyTween (fun (x, y) -> x * y) (fun (x, y) -> x / y) (fun (x, y) -> single (Math.Pow (double x, double y))) (fun (x, y) -> x % y) slice.Elevation tweened applicator
-                { slice with Elevation = applied }
-            else slice
+                slice.Elevation <- applied
+            slice
         | Insets (_, _, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let applied = if progress < 0.5f then keyFrame.TweenValue else keyFrame2.TweenValue
-                { slice with Inset = applied }
-            else slice
+                slice.Inset <- applied
+            slice
         | Colors (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween Vector4.op_Multiply (keyFrame.TweenValue.Vector4) (keyFrame2.TweenValue.Vector4) progress algorithm
                 let applied = applyTween Color.Multiply Color.Divide Color.Pow Color.Modulo slice.Color (Nu.Color tweened) applicator
-                { slice with Color = applied }
-            else slice
+                slice.Color <- applied
+            slice
         | Emissions (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween Color.op_Multiply keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
                 let applied = applyTween Color.Multiply Color.Divide Color.Pow Color.Modulo slice.Color tweened applicator
-                { slice with Emission = applied }
-            else slice
+                slice.Emission <- applied
+            slice
         | Heights (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween (fun (x, y) -> x * y) keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
-                let applied = applyTween (fun (x, y) -> x * y) (fun (x, y) -> x / y) (fun (x, y) -> single (Math.Pow (double x, double y))) (fun (x, y) -> x % y) slice.Elevation tweened applicator
-                { slice with Height = applied }
-            else slice
+                let applied = applyTween (fun (x, y) -> x * y) (fun (x, y) -> x / y) (fun (x, y) -> single (Math.Pow (double x, double y))) (fun (x, y) -> x % y) slice.Height tweened applicator
+                slice.Height <- applied
+            slice
         | IgnoreLightMapses (applicator, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (_, keyFrame, _) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let applied = applyLogic slice.Enabled keyFrame.LogicValue applicator
-                { slice with IgnoreLightMaps = applied }
-            else slice
+                slice.IgnoreLightMaps <- applied
+            slice
+        | Brightnesses (applicator, algorithm, playback, keyFrames) ->
+            if Array.notEmpty keyFrames then
+                let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
+                let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
+                let tweened = tween (fun (x, y) -> x * y) keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
+                let applied = applyTween (fun (x, y) -> x * y) (fun (x, y) -> x / y) (fun (x, y) -> single (Math.Pow (double x, double y))) (fun (x, y) -> x % y) slice.Brightness tweened applicator
+                slice.Brightness <- applied
+            slice
+        | LightCutoffs (applicator, algorithm, playback, keyFrames) ->
+            if Array.notEmpty keyFrames then
+                let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
+                let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
+                let tweened = tween (fun (x, y) -> x * y) keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
+                let applied = applyTween (fun (x, y) -> x * y) (fun (x, y) -> x / y) (fun (x, y) -> single (Math.Pow (double x, double y))) (fun (x, y) -> x % y) slice.LightCutoff tweened applicator
+                slice.LightCutoff <- applied
+            slice
         | Volumes (applicator, algorithm, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (keyFrameTime, keyFrame, keyFrame2) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let progress = evalProgress keyFrameTime keyFrame.TweenLength effectSystem
                 let tweened = tween (fun (x, y) -> x * y) keyFrame.TweenValue keyFrame2.TweenValue progress algorithm
                 let applied = applyTween (fun (x, y) -> x * y) (fun (x, y) -> x / y) (fun (x, y) -> single (Math.Pow (double x, double y))) (fun (x, y) -> x % y) slice.Volume tweened applicator
-                { slice with Volume = applied }
-            else slice
+                slice.Volume <- applied
+            slice
         | Enableds (applicator, playback, keyFrames) ->
             if Array.notEmpty keyFrames then
                 let (_, keyFrame, _) = selectKeyFrames effectSystem.EffectTime playback keyFrames
                 let applied = applyLogic slice.Enabled keyFrame.LogicValue applicator
-                { slice with Enabled = applied }
-            else slice
+                slice.Enabled <- applied
+            slice
         | Aspect.Expand (definitionName, _) ->
             match Map.tryFind definitionName effectSystem.EffectEnv with
             | Some definition ->
@@ -598,7 +616,7 @@ module EffectSystem =
         | Aspects aspects ->
             Array.fold (fun slice aspect -> evalAspect aspect slice effectSystem) slice aspects
 
-    and private evalAspects aspects slice effectSystem =
+    and private evalAspects aspects (slice : Slice) effectSystem =
         Array.fold (fun slice aspect -> evalAspect aspect slice effectSystem) slice aspects
 
     and private evalExpand definitionName arguments slice history effectSystem =
@@ -623,7 +641,7 @@ module EffectSystem =
         // eval aspects
         let slice = evalAspects aspects slice effectSystem
 
-        // build sprite views
+        // build sprite tokens
         let effectSystem =
             if slice.Enabled then
                 let mutable transform = Transform.makeIntuitive slice.Position slice.Scale slice.Offset slice.Size slice.Angles slice.Elevation effectSystem.EffectAbsolute slice.PerimeterCentered
@@ -635,8 +653,8 @@ module EffectSystem =
                       Blend = slice.Blend
                       Emission = slice.Emission
                       Flip = slice.Flip }
-                let spriteView = SpriteView (transform.Elevation, transform.Horizon, image, sprite)
-                addView spriteView effectSystem
+                let spriteToken = SpriteToken (transform.Elevation, transform.Horizon, image, sprite)
+                addToken spriteToken effectSystem
             else effectSystem
 
         // build implicitly mounted content
@@ -659,7 +677,7 @@ module EffectSystem =
             // eval inset
             let inset = evalInset celSize celCount celRun delay playback effectSystem
 
-            // build animated sprite views
+            // build animated sprite tokens
             let effectSystem =
                 if  slice.Enabled &&
                     not (playback = Once && cel >= celCount) then
@@ -672,8 +690,8 @@ module EffectSystem =
                           Blend = slice.Blend
                           Emission = slice.Emission
                           Flip = slice.Flip }
-                    let spriteView = SpriteView (transform.Elevation, transform.Horizon, image, sprite)
-                    addView spriteView effectSystem
+                    let spriteToken = SpriteToken (transform.Elevation, transform.Horizon, image, sprite)
+                    addToken spriteToken effectSystem
                 else effectSystem
 
             // build implicitly mounted content
@@ -690,7 +708,7 @@ module EffectSystem =
         // eval aspects
         let slice = evalAspects aspects slice effectSystem
 
-        // build text views
+        // build text tokens
         let effectSystem =
             if slice.Enabled then
                 let mutable transform = Transform.makeIntuitive slice.Position slice.Scale slice.Offset slice.Size slice.Angles slice.Elevation effectSystem.EffectAbsolute slice.PerimeterCentered
@@ -702,8 +720,8 @@ module EffectSystem =
                       FontStyle = 0
                       Color = slice.Color
                       Justification = Justified (JustifyCenter, JustifyMiddle) }
-                let textView = TextView (transform.Elevation, transform.Horizon, font, text)
-                addView textView effectSystem
+                let textToken = TextToken (transform.Elevation, transform.Horizon, font, text)
+                addToken textToken effectSystem
             else effectSystem
 
         // build implicitly mounted content
@@ -714,13 +732,13 @@ module EffectSystem =
         // eval aspects
         let slice = evalAspects aspects slice effectSystem
 
-        // build model views
+        // build light tokens
         let effectSystem =
             if slice.Enabled then
                 let rotation = Quaternion.CreateFromYawPitchRoll (slice.Angles.Z, slice.Angles.Y, slice.Angles.X)
                 let direction = rotation.Down
-                let modelView =
-                    Light3dView
+                let lightToken =
+                    Light3dToken
                         { LightId = 0UL
                           Origin = slice.Position
                           Rotation = rotation
@@ -728,12 +746,12 @@ module EffectSystem =
                           Presence = effectSystem.EffectPresence
                           Color = slice.Color
                           Brightness = slice.Brightness
-                          AttenuationLinear = slice.AttenuationLinear
-                          AttenuationQuadratic = slice.AttenuationQuadratic
+                          AttenuationLinear = 1.0f / (slice.Brightness * slice.LightCutoff)
+                          AttenuationQuadratic = 1.0f / (slice.Brightness * slice.LightCutoff * slice.LightCutoff)
                           LightCutoff = slice.LightCutoff
                           LightType = lightType
                           DesireShadows = false }
-                addView modelView effectSystem
+                addToken lightToken effectSystem
             else effectSystem
 
         // build implicitly mounted content
@@ -753,7 +771,7 @@ module EffectSystem =
         // eval aspects
         let slice = evalAspects aspects slice effectSystem
 
-        // build model views
+        // build billboard tokens
         let effectSystem =
             if slice.Enabled then
                 let affineMatrix = Matrix4x4.CreateFromTrs (slice.Position, slice.Angles.RollPitchYaw, slice.Scale)
@@ -765,7 +783,8 @@ module EffectSystem =
                       AmbientOcclusionOpt = ValueNone
                       EmissionOpt = ValueSome slice.Emission.R
                       HeightOpt = ValueSome slice.Height
-                      IgnoreLightMapsOpt = ValueSome slice.IgnoreLightMaps }
+                      IgnoreLightMapsOpt = ValueSome slice.IgnoreLightMaps
+                      OpaqueDistanceOpt = ValueNone }
                 let material =
                     { AlbedoImageOpt = ValueSome (AssetTag.specialize<Image> imageAlbedo)
                       RoughnessImageOpt = ValueSome (AssetTag.specialize<Image> imageRoughness)
@@ -775,8 +794,8 @@ module EffectSystem =
                       NormalImageOpt = ValueSome (AssetTag.specialize<Image> imageNormal)
                       HeightImageOpt = ValueSome (AssetTag.specialize<Image> imageHeight)
                       TwoSidedOpt = ValueSome twoSided }
-                let modelView =
-                    BillboardView
+                let billboardToken =
+                    BillboardToken
                         { Absolute = effectSystem.EffectAbsolute
                           ModelMatrix = affineMatrix
                           Presence = effectSystem.EffectPresence
@@ -784,7 +803,7 @@ module EffectSystem =
                           MaterialProperties = properties
                           Material = material
                           RenderType = effectSystem.EffectRenderType }
-                addView modelView effectSystem
+                addToken billboardToken effectSystem
             else effectSystem
 
         // build implicitly mounted content
@@ -798,7 +817,7 @@ module EffectSystem =
         // eval aspects
         let slice = evalAspects aspects slice effectSystem
 
-        // build model views
+        // build static model tokens
         let effectSystem =
             if slice.Enabled then
                 let staticModel = AssetTag.specialize<StaticModel> staticModel
@@ -811,9 +830,10 @@ module EffectSystem =
                       AmbientOcclusionOpt = ValueNone
                       EmissionOpt = ValueSome slice.Emission.R
                       HeightOpt = ValueSome slice.Height
-                      IgnoreLightMapsOpt = ValueSome slice.IgnoreLightMaps }
-                let modelView =
-                    StaticModelView
+                      IgnoreLightMapsOpt = ValueSome slice.IgnoreLightMaps
+                      OpaqueDistanceOpt = ValueNone }
+                let staticModelToken =
+                    StaticModelToken
                         { Absolute = effectSystem.EffectAbsolute
                           ModelMatrix = affineMatrix
                           Presence = effectSystem.EffectPresence
@@ -821,7 +841,7 @@ module EffectSystem =
                           MaterialProperties = properties
                           StaticModel = staticModel
                           RenderType = effectSystem.EffectRenderType }
-                addView modelView effectSystem
+                addToken staticModelToken effectSystem
             else effectSystem
 
         // build implicitly mounted content
@@ -842,7 +862,7 @@ module EffectSystem =
         | Iterate count ->
             Array.fold
                 (fun (slice, effectSystem) _ ->
-                    let (slice, effectSystem) = iterateViews incrementAspects content slice history effectSystem
+                    let (slice, effectSystem) = iterateTokens incrementAspects content slice history effectSystem
                     (slice, effectSystem))
                 (slice, effectSystem)
                 [|0 .. count - 1|] |>
@@ -853,7 +873,7 @@ module EffectSystem =
             Array.fold
                 (fun effectSystem i ->
                     let effectSystem = { effectSystem with EffectProgressOffset = 1.0f / single count * single i }
-                    cycleViews incrementAspects content slice history effectSystem)
+                    cycleTokens incrementAspects content slice history effectSystem)
                 effectSystem
                 [|0 .. count - 1|]
 
@@ -862,41 +882,37 @@ module EffectSystem =
         // eval aspects
         let slice = evalAspects aspects slice effectSystem
 
-        // build tag view
+        // build tag token
         let effectSystem =
             if slice.Enabled then
-                let tagView = Nu.Tag (name, slice)
-                addView tagView effectSystem
+                let tagToken = Nu.TagToken (name, slice)
+                addToken tagToken effectSystem
             else effectSystem
 
         // build implicitly mounted content
         evalContent content slice history effectSystem
 
     and private evalEmit shift rate emitterAspects aspects content history effectSystem =
-        let effectSystem =
-            Seq.foldi
-                (fun i effectSystem (slice : Slice) ->
-                    let effectTimeOld = effectSystem.EffectTime
-                    let timePassed = effectSystem.EffectDelta * GameTime.make (int64 i) (single i)
-                    let slice = { slice with Elevation = slice.Elevation + shift }
-                    let slice = evalAspects emitterAspects slice { effectSystem with EffectTime = effectSystem.EffectTime - timePassed }
-                    let emitCountLastFrame = single (effectSystem.EffectTime - timePassed - effectSystem.EffectDelta) * rate
-                    let emitCountThisFrame = single (effectSystem.EffectTime - timePassed) * rate
-                    let emitCount = int emitCountThisFrame - int emitCountLastFrame
-                    let effectSystem = { effectSystem with EffectTime = timePassed }
-                    let effectSystem =
-                        Array.fold
-                            (fun effectSystem _ ->
-                                let slice = evalAspects aspects slice effectSystem
-                                if slice.Enabled
-                                then evalContent content slice history effectSystem
-                                else effectSystem)
-                            effectSystem
-                            [|0 .. emitCount - 1|]
-                    { effectSystem with EffectTime = effectTimeOld })
-                effectSystem
-                history
-        effectSystem
+        Seq.fold (fun effectSystem slice ->
+            let effectTimeOld = effectSystem.EffectTime
+            let effectTime = effectSystem.EffectTimeOriginal - slice.SliceTime
+            let slice = { slice with Elevation = slice.Elevation + shift }
+            let slice = evalAspects emitterAspects slice { effectSystem with EffectTime = effectSystem.EffectTime - effectTime }
+            let emitCountLastFrame = single (effectSystem.EffectTime - effectTime - slice.SliceDelta) * rate
+            let emitCountThisFrame = single (effectSystem.EffectTime - effectTime) * rate
+            let emitCount = int emitCountThisFrame - int emitCountLastFrame
+            let effectSystem =
+                Array.fold (fun effectSystem _ ->
+                    let emission = Slice.copy slice
+                    let emission = evalAspects aspects emission effectSystem
+                    if emission.Enabled
+                    then evalContent content emission history effectSystem
+                    else effectSystem)
+                    { effectSystem with EffectTime = effectTime }
+                    [|0 .. emitCount - 1|]
+            { effectSystem with EffectTime = effectTimeOld })
+            effectSystem
+            history
 
     and private evalSegment start stop content slice history effectSystem =
         if  effectSystem.EffectTime >= start &&
@@ -951,9 +967,9 @@ module EffectSystem =
             contents
 
     let private release effectSystem =
-        let views = Views (SArray.ofSeq effectSystem.EffectViews)
-        let effectSystem = { effectSystem with EffectViews = SList.make () }
-        (views, effectSystem)
+        let tokens = Tokens (SArray.ofSeq effectSystem.EffectTokens)
+        let effectSystem = { effectSystem with EffectTokens = SList.make () }
+        (tokens, effectSystem)
 
     /// Evaluates an EffectDescriptor, applying the effect if it is still alive, with the following parameters:
     ///   - descriptor: The EffectDescriptor to be evaluated.
@@ -987,13 +1003,14 @@ module EffectSystem =
     ///   - renderType: The render type of the effect.
     ///   - globalEnv: The global environment for the effect.
     let make localTime delta absolute presence renderType globalEnv =
-        { EffectTime = localTime
-          EffectDelta = delta
+        { EffectDelta = delta
+          EffectTime = localTime
+          EffectTimeOriginal = localTime
           EffectProgressOffset = 0.0f
           EffectAbsolute = absolute
           EffectPresence = presence
           EffectRenderType = renderType
-          EffectViews = SList.make ()
+          EffectTokens = SList.make ()
           EffectEnv = globalEnv }
 
 /// Evaluates effect descriptors.

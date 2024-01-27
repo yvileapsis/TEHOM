@@ -4,10 +4,8 @@
 namespace Nu
 open System
 open System.Buffers.Binary
-open System.Collections.Generic
 open System.IO
 open System.Numerics
-open System.Runtime.InteropServices
 open Prime
 
 /// The endianness which indicates byte order in a raw asset.
@@ -102,8 +100,6 @@ type HeightMap =
 
                 // fin
                 Some { Resolution = v2i resolutionX resolutionY; HeightsNormalized = heightsNormalized; PositionsAndTexCoordses = positionsAndTexCoordses }
-
-            // handle errors
             else Log.info "Block-compressed image files are unsupported for use as height maps."; None
         | None -> None
 
@@ -286,26 +282,32 @@ type BodyBoxRounded =
       TransformOpt : Affine option
       PropertiesOpt : BodyShapeProperties option }
 
-/// The shape of a physics body convex hull.
+/// The shape of a triangulated physics body convex hull.
 type BodyConvexHull =
     { Vertices : Vector3 array
       TransformOpt : Affine option
       PropertiesOpt : BodyShapeProperties option }
 
-/// The shape of a physics body static model.
+/// The shape of a triangulated physics body static model.
 type BodyStaticModel =
     { StaticModel : StaticModel AssetTag
       TransformOpt : Affine option
       PropertiesOpt : BodyShapeProperties option }
 
-/// The shape of a physics body static model surface.
+/// The shape of a triangulated physics body static model surface.
 type BodyStaticModelSurface =
     { SurfaceIndex : int
       StaticModel : StaticModel AssetTag
       TransformOpt : Affine option
       PropertiesOpt : BodyShapeProperties option }
 
-/// The shape of a physics body convex hull.
+/// The shape of a triangulated physics body geometry.
+type BodyGeometry =
+    { Vertices : Vector3 array
+      TransformOpt : Affine option
+      PropertiesOpt : BodyShapeProperties option }
+
+/// The shape of a triangulated physics body terrain.
 type BodyTerrain =
     { Resolution : Vector2i
       Bounds : Box3
@@ -327,6 +329,7 @@ type BodyShape =
     | BodyConvexHull of BodyConvexHull
     | BodyStaticModel of BodyStaticModel
     | BodyStaticModelSurface of BodyStaticModelSurface
+    | BodyGeometry of BodyGeometry
     | BodyTerrain of BodyTerrain
     | BodyShapes of BodyShape list
 
@@ -616,16 +619,10 @@ type PhysicsEngine =
     abstract GetBodyToGroundContactTangentOpt : BodyId -> Vector3 option
     /// Check that the body with the given physics id is on the ground.
     abstract IsBodyOnGround : BodyId -> bool
-    /// Inspect messages with the given lambda.
-    abstract InspectMessages : (PhysicsMessage -> unit) -> unit
-    /// Pop all of the physics messages that have been enqueued.
-    abstract PopMessages : unit -> PhysicsMessage List
-    /// Clear all of the physics messages that have been enqueued.
-    abstract ClearMessages : unit -> unit
-    /// Enqueue a message from an external source.
-    abstract EnqueueMessage : PhysicsMessage -> unit
+    /// Handle a physics message from an external source.
+    abstract HandleMessage : PhysicsMessage -> unit
     /// Integrate the physics system one step.
-    abstract Integrate : GameTime -> PhysicsMessage List -> IntegrationMessage SArray
+    abstract Integrate : GameTime -> IntegrationMessage SArray
     /// Handle physics clean up by freeing all created resources.
     abstract CleanUp : unit -> unit
 
@@ -642,11 +639,8 @@ type [<ReferenceEquality>] StubPhysicsEngine =
         member physicsEngine.GetBodyToGroundContactNormalOpt _ = failwith "No bodies in StubPhysicsEngine"
         member physicsEngine.GetBodyToGroundContactTangentOpt _ = failwith "No bodies in StubPhysicsEngine"
         member physicsEngine.IsBodyOnGround _ = failwith "No bodies in StubPhysicsEngine"
-        member physicsEngine.InspectMessages _ = ()
-        member physicsEngine.PopMessages () = List ()
-        member physicsEngine.ClearMessages () = ()
-        member physicsEngine.EnqueueMessage _ = ()
-        member physicsEngine.Integrate _ _ = SArray.empty
+        member physicsEngine.HandleMessage _ = ()
+        member physicsEngine.Integrate _ = SArray.empty
         member physicsEngine.CleanUp () = ()
 
 [<RequireQualifiedAccess>]
@@ -679,5 +673,6 @@ module Physics =
         | BodyConvexHull bodyConvexHull -> BodyConvexHull { bodyConvexHull with Vertices = Array.map (fun vertex -> size * vertex) bodyConvexHull.Vertices; TransformOpt = scaleTranslation size bodyConvexHull.TransformOpt }
         | BodyStaticModel _ as bodyStaticModel -> bodyStaticModel
         | BodyStaticModelSurface _ as bodyStaticModelSurface -> bodyStaticModelSurface
+        | BodyGeometry _ as bodyGeometry -> bodyGeometry
         | BodyTerrain _ as bodyTerrain -> bodyTerrain
         | BodyShapes bodyShapes -> BodyShapes (List.map (localizeBodyShape size) bodyShapes)
