@@ -5,15 +5,19 @@ open Actor
 
 module GameplayGui =
 
-    let Gui (gameplay: Gameplay) =
+    let Background (gameplay: Gameplay) =
 
-        Content.group Simulants.GameplayGui.Name [] [// time
-
+        Content.group Simulants.GameplayBackground.Name [] [
             Content.staticSprite "Background" [
                 Entity.Size == Constants.Render.VirtualResolution.V3
                 Entity.StaticImage == Assets.Default.Black
                 Entity.Color == Color.Black
             ]
+        ]
+
+    let Gui (gameplay: Gameplay) =
+
+        Content.group Simulants.GameplayGui.Name [] [// time
 
             Content.text Simulants.GameplayGametime.Name [
                 Entity.Position == v3 384.0f 240.0f 0.0f
@@ -36,22 +40,27 @@ module GameplayGui =
                 Entity.FontSizing == Some 10
             ]
 
+            richText (Simulants.GameplayTextBox.Name) [
+                Entity.Size == v3 600.0f 100.0f 0.0f
+                Entity.Position == v3 -36.0f 120.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                Entity.Text := """
+1. **Testing a simple sentence.** 2. __Continuing testing a simple sentence.__ 3. *Continuing testing a simple sentence.* 4. ~~Finishing testing a simple sentence.~~
 
-            // TODO: Make something sensible instead of this crutch
-            for i, string in gameplay.Display.Split [|'\n'; '\r'|] |> Array.indexed do
-                let y = 216.0f - float32 i * 12.0f
-                let x = if y < -120.0f then 40.0f else -240.0f
-                let y = if y < -120.0f then 558.0f - float32 i * 12.0f else y
+||'''||
 
-                Content.text (Simulants.GameplayTextBox.Name + $"{i}") [
-                    Entity.Position == v3 x y 0.0f
-                    Entity.Elevation == 10.0f
-                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                    Entity.Text := string
-                    Entity.TextColor == Color.FloralWhite
-                    Entity.Font == Assets.Gui.MontSerratFont
-                    Entity.FontSizing == Some 10
-               ]
+|| 1. Testing a simple sentence. 2. Continuing testing a simple sentence. 3. Continuing testing a simple sentence. 4. Finishing testing a simple sentence.
+
+|| 1. Testing a simple sentence. 2. Continuing testing a simple sentence. 3. Continuing testing a simple sentence. 4. Finishing testing a simple sentence. ||
+
+1. Testing a simple sentence. 2. Continuing testing a simple sentence. 3. Continuing testing a simple sentence. 4. Finishing testing a simple sentence. ||
+
+"""
+                Entity.TextColor == Color.FloralWhite
+                Entity.Font == Assets.Gui.MontSerratFont
+                Entity.FontSizing == Some 10
+            ]
 
             TextInput.textInput Simulants.GameplayTextInputBox.Name [
                 Entity.Position == v3 -240.0f -144.0f 0.0f

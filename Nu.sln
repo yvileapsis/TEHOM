@@ -42,7 +42,7 @@ Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Nu.Gaia", "Nu\Nu.Gaia\Nu.Ga
 		{FCF8AB21-93D4-4C37-8227-A9DE2C1EA58C} = {FCF8AB21-93D4-4C37-8227-A9DE2C1EA58C}
 	EndProjectSection
 EndProject
-Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "TEHOM", "Projects\TEHOM\TEHOM.fsproj", "{29ABC014-0F59-41B1-95EE-8B9720C5D14A}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Tehom", "Projects\Tehom\Tehom.fsproj", "{29ABC014-0F59-41B1-95EE-8B9720C5D14A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

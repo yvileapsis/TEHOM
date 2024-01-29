@@ -9,6 +9,7 @@
 		<TieredPGO>True</TieredPGO>
 		<DisableFastUpToDateCheck>True</DisableFastUpToDateCheck>
 		<PostBuildEvent>dotnet "$(MSBuildProjectDirectory)/../../Nu/Nu.Pipe/bin/$(Configuration)/net7.0/Nu.Pipe.dll" "$(MSBuildProjectDirectory)/" "$(MSBuildProjectDirectory)/bin/$(Configuration)/net7.0/" "$(MSBuildProjectDirectory)/refinement/" "False"</PostBuildEvent>
+		<RootNamespace>Tehom</RootNamespace>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCpu'">
@@ -34,8 +35,9 @@
 	<ItemGroup>
 		<Compile Include="Assets.fs" />
 		<Compile Include="Simulants.fs" />
-		<Compile Include="Gameplay\TextInput.fs" />
 		<Compile Include="Gameplay\InputParser.fs" />
+		<Compile Include="Gameplay\RichText.fs" />
+		<Compile Include="Gameplay\TextInput.fs" />
 		<Compile Include="Gameplay\Time.fs" />
 		<Compile Include="Gameplay\Model.fs" />
 		<Compile Include="Gameplay\Actors.fs" />
