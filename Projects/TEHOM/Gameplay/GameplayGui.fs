@@ -22,8 +22,7 @@ module GameplayGui =
                 Entity.Text := string gameplay.GameTime
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.ClearSans12Font
-                Entity.FontSize == 10
-                Entity.FontStyle == 0
+                Entity.FontSizing == Some 10
             ]
 
             Content.text Simulants.GameplayTime.Name [
@@ -34,8 +33,7 @@ module GameplayGui =
                     $"Day: {TehomTime.getDay gameplay.Time} Time: %A{TehomTime.getHour gameplay.Time} {TehomTime.getMinute gameplay.Time}°"
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.ClearSans12Font
-                Entity.FontSize == 10
-                Entity.FontStyle == 0
+                Entity.FontSizing == Some 10
             ]
 
 
@@ -52,8 +50,7 @@ module GameplayGui =
                     Entity.Text := string
                     Entity.TextColor == Color.FloralWhite
                     Entity.Font == Assets.Gui.MontSerratFont
-                    Entity.FontSize == 10
-                    Entity.FontStyle == 0
+                    Entity.FontSizing == Some 10
                ]
 
             TextInput.textInput Simulants.GameplayTextInputBox.Name [
@@ -66,8 +63,7 @@ module GameplayGui =
                     InputString actorID
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.ClearSans12Font
-                Entity.FontSize == 10
-                Entity.FontStyle == 0
+                Entity.FontSizing == Some 10
             ]
 
             // Save
