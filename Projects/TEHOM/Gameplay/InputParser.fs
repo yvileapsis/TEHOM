@@ -12,7 +12,7 @@ module NuMark =
     What we're going to leverage for this markup language is that majority of formating is done on per-line basis.
     *)
 
-    type SizeAndColor = {
+    type Formatted = {
         Size: string
         Style: string
         Color: string
@@ -24,10 +24,9 @@ module NuMark =
             Color = ""
         }
 
-    let parserSizeAndColor : Parser<SizeAndColor, unit> =
+    let parseFormat specialChars : Parser<Formatted, unit> =
 
-        many1Chars anyChar |>> (fun x -> SizeAndColor.empty)
-
+        many1Chars (noneOf specialChars) |>> (fun x -> { Formatted.empty with Size = x})
 
 
     type Justification = Justification
@@ -40,54 +39,55 @@ module NuMark =
         | Underlined of Text list
         | Subscript of Text list
         | Superscript of Text list
-        | SizeAndColor of SizeAndColor * Text
+        | Formatted of Formatted * Text
         | String of string
 
     let parseLine : Parser<Text list, unit> =
-        // forward declared for recursive processing
-        let mutable lineElement = pzero
+        let lineElement, lineElementRef = createParserForwardedToRef()
 
-        let text specialChars = many1Satisfy (isNoneOf specialChars) |>> Text.String
-        let trailing specialChars = many1Satisfy (isAnyOf specialChars) |>> Text.String
+        let text specialChars = many1Satisfy (isNoneOf specialChars) |>> Text.String <?> "string"
+        let trailingSymbol specialChars = many1Satisfy (isAnyOf specialChars) |>> Text.String <?> "trailing"
 
-        let enclosed left right =
-            pstring left >>.
-            many1Till lineElement (followedByString right)
-            .>> pstring right
+        let listToSymbol symbol = many1Till lineElement (followedByString symbol)
 
-        (*
-            {color:FF0000}~Testing~
-            {color:FF0000, style:}~Testing~
+        let style styleType symbol =
+            pstring symbol
+            >>. listToSymbol symbol
+            .>> pstring symbol
+            |>> styleType
+            <?> "style"
 
-        *)
-
-        let color =
-            enclosed "{" "}"
-
-        let style style syntax =
-            syntax
-            |> Seq.map (fun s -> enclosed s s |>> style)
-            |> choice
-            |> attempt
-            <?> nameof style
-
-        // previously pzero
-        lineElement <- choice [
-            text "~^*_"
-            style Bold ["**"]
-            style Italics ["*"]
-            style Strikethrough ["~~"]
-            style Normal ["~"]
-            style Underlined ["__"]
-            style Subscript ["_"]
-            style Superscript ["^"]
-            trailing "~^*_"
+        let allStyles = choice [
+            style Bold "**"
+            style Italics "*"
+            style Strikethrough "~~"
+            style Normal "~"
+            style Underlined "__"
+            style Subscript "_"
+            style Superscript "^"
         ]
 
-        many lineElement
+        let color dataParser =
+            pstring "{"
+            >>. dataParser
+            .>> pstring "}"
+            .>>. allStyles
+            |>> Formatted
+            <?> "color"
+
+        lineElementRef.Value <- choice [
+            text "~^*_{}"
+            attempt (color (parseFormat "{}"))
+            attempt allStyles
+            trailingSymbol "~^*_{}"
+        ]
+
+        many1 lineElement
 
 
-    run parseLine """~~**This is bold text** __This is underlined text__~~ *This is italic text* _This is subscript text_ ~~Strikethrough~~ ~This is Normal Text~"""
+    run parseLine """~~value~~ {tseta} ~~whatever"""
+
+    run parseLine """{test}~~**This is bold text** __This is underlined text__~~ {also a style}*This is italic text* _This is subscript text_ ~~Strikethrough~~ ~This is Normal Text~"""
 
 
     type Node =
