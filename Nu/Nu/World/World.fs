@@ -168,10 +168,6 @@ module Nu =
             WorldModule.getSelected <- fun simulant world ->
                 World.getSelected simulant world
 
-            // init getScreenEcs F# reach-around
-            WorldModule.getScreenEcs <- 
-                World.getScreenEcs
-
             // init sortSubscriptionByElevation F# reach-around
             WorldModule.sortSubscriptionsByElevation <- fun subscriptions worldObj ->
                 let world = worldObj :?> World
@@ -285,8 +281,8 @@ module WorldModule3 =
             // TODO: consider if we should reflectively generate these.
             Map.ofListBy World.pairWithName $
                 [EntityDispatcher (true, false, false)
-                 Entity2dDispatcher (false)
-                 Entity3dDispatcher (false)
+                 Entity2dDispatcher false
+                 Entity3dDispatcher false
                  StaticSpriteDispatcher ()
                  AnimatedSpriteDispatcher ()
                  GuiDispatcher ()
@@ -430,7 +426,6 @@ module WorldModule3 =
                   EntityMounts = UMap.makeEmpty HashIdentity.Structural config
                   Quadtree = quadtree
                   Octree = octree
-                  SelectedEcsOpt = None
                   AmbientState = ambientState
                   Subsystems = subsystems
                   Simulants = simulants

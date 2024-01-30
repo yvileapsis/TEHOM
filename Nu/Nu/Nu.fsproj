@@ -8,7 +8,7 @@
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCpu'">
 		<WarnOn>FS1182</WarnOn>
-		<NoWarn>FS9;FS1178;FS3391;FS3536</NoWarn>
+		<NoWarn>FS9;FS1178;FS3391;FS3536;FS3560</NoWarn>
 		<WarningLevel>5</WarningLevel>
 		<DefineConstants>TRACE;DISABLE_ENTITY_PRE_UPDATE;DISABLE_ENTITY_POST_UPDATE</DefineConstants>
 		<WarningsAsErrors>FS0026;FS0049;FS3239;$(WarningsAsErrors)</WarningsAsErrors>
@@ -16,7 +16,7 @@
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCpu'">
 		<WarnOn>FS1182</WarnOn>
-		<NoWarn>FS9;FS1178;FS3391;FS3536</NoWarn>
+		<NoWarn>FS9;FS1178;FS3391;FS3536;FS3560</NoWarn>
 		<Tailcalls>False</Tailcalls>
 		<WarningLevel>5</WarningLevel>
 		<DefineConstants>TRACE;DISABLE_ENTITY_PRE_UPDATE;DISABLE_ENTITY_POST_UPDATE</DefineConstants>
@@ -40,8 +40,6 @@
 		<Compile Include="Collections\KeyedArray.fs" />
 		<Compile Include="Collections\ForgetfulDictionary.fs" />
 		<Compile Include="Collections\OrderedDictionary.fs" />
-		<Compile Include="Ecs\EcsPrelude.fs" />
-		<Compile Include="Ecs\Ecs.fs" />
 		<Compile Include="Transform\Presence.fs" />
 		<Compile Include="Transform\Viewport.fs" />
 		<Compile Include="Transform\Quadtree.fs" />
@@ -162,12 +160,6 @@
 		<None Include="libpng16-16.dll">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
-		<None Include="libvorbisfile-3.dll">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
-		<None Include="libvorbis-0.dll">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
 		<None Include="libFLAC-8.dll">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
@@ -215,7 +207,7 @@
 		<PackageReference Include="Aether.Physics2D" Version="2.0.0" />
 		<PackageReference Include="Magick.NET-Q8-AnyCPU" Version="13.5.0" />
 		<PackageReference Include="Pfim" Version="0.11.2" />
-		<PackageReference Include="Prime" Version="9.16.0" />
+		<PackageReference Include="Prime" Version="9.17.0" />
 		<PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
 		<PackageReference Include="System.Drawing.Common" Version="8.0.0" />
 		<PackageReference Include="Twizzle.ImGuizmo.NET" Version="1.89.4.1" />
