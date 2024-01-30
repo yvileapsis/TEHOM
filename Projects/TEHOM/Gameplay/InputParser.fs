@@ -12,13 +12,23 @@ module NuMark =
     What we're going to leverage for this markup language is that majority of formating is done on per-line basis.
     *)
 
-    type Color = Color
-
-    type Style = {
-        Size: uint
-        Style: uint
-        Color: Color
+    type SizeAndColor = {
+        Size: string
+        Style: string
+        Color: string
     }
+    with
+        static member empty = {
+            Size = ""
+            Style = ""
+            Color = ""
+        }
+
+    let parserSizeAndColor : Parser<SizeAndColor, unit> =
+
+        many1Chars anyChar |>> (fun x -> SizeAndColor.empty)
+
+
 
     type Justification = Justification
 
@@ -30,21 +40,29 @@ module NuMark =
         | Underlined of Text list
         | Subscript of Text list
         | Superscript of Text list
-        | Color of string * Text
+        | SizeAndColor of SizeAndColor * Text
         | String of string
 
-    let lineParser : Parser<Text list, unit> =
-        let lineElements, lineElementsR = createParserForwardedToRef()
+    let parseLine : Parser<Text list, unit> =
+        // forward declared for recursive processing
+        let mutable lineElement = pzero
 
-        let specialChars = "~^*_"
-
-        let text = many1Satisfy (isNoneOf specialChars) |>> Text.String
-        let trailing = many1Satisfy (isAnyOf specialChars) |>> Text.String
+        let text specialChars = many1Satisfy (isNoneOf specialChars) |>> Text.String
+        let trailing specialChars = many1Satisfy (isAnyOf specialChars) |>> Text.String
 
         let enclosed left right =
             pstring left >>.
-            many1Till lineElements (followedByString right)
+            many1Till lineElement (followedByString right)
             .>> pstring right
+
+        (*
+            {color:FF0000}~Testing~
+            {color:FF0000, style:}~Testing~
+
+        *)
+
+        let color =
+            enclosed "{" "}"
 
         let style style syntax =
             syntax
@@ -53,9 +71,9 @@ module NuMark =
             |> attempt
             <?> nameof style
 
-
-        let lineElement : Parser<Text, unit> = choice [
-            text
+        // previously pzero
+        lineElement <- choice [
+            text "~^*_"
             style Bold ["**"]
             style Italics ["*"]
             style Strikethrough ["~~"]
@@ -63,15 +81,13 @@ module NuMark =
             style Underlined ["__"]
             style Subscript ["_"]
             style Superscript ["^"]
-            trailing
+            trailing "~^*_"
         ]
 
-        lineElementsR.Value <- lineElement
-
-        many lineElements
+        many lineElement
 
 
-    run lineParser """~~**This is bold text** __This is underlined text__~~ *This is italic text* _This is subscript text_ ~~Strikethrough~~ ~This is Normal Text~"""
+    run parseLine """~~**This is bold text** __This is underlined text__~~ *This is italic text* _This is subscript text_ ~~Strikethrough~~ ~This is Normal Text~"""
 
 
     type Node =
