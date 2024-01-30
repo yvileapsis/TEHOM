@@ -31,22 +31,22 @@ module NuMark =
 
     type Justification = Justification
 
-    type Text =
-        | Normal of Text list
-        | Bold of Text list
-        | Italics of Text list
-        | Strikethrough of Text list
-        | Underlined of Text list
-        | Subscript of Text list
-        | Superscript of Text list
-        | Formatted of Formatted * Text
+    type Line =
+        | Normal of Line list
+        | Bold of Line list
+        | Italics of Line list
+        | Strikethrough of Line list
+        | Underlined of Line list
+        | Subscript of Line list
+        | Superscript of Line list
+        | Formatted of Formatted * Line
         | String of string
 
-    let parseLine : Parser<Text list, unit> =
+    let parseLine : Parser<Line list, unit> =
         let lineElement, lineElementRef = createParserForwardedToRef()
 
-        let text specialChars = many1Satisfy (isNoneOf specialChars) |>> Text.String <?> "string"
-        let trailingSymbol specialChars = many1Satisfy (isAnyOf specialChars) |>> Text.String <?> "trailing"
+        let text specialChars = many1Satisfy (isNoneOf specialChars) |>> Line.String <?> "string"
+        let trailingSymbol specialChars = many1Satisfy (isAnyOf specialChars) |>> Line.String <?> "trailing"
 
         let listToSymbol symbol = many1Till lineElement (followedByString symbol)
 
@@ -67,9 +67,9 @@ module NuMark =
             style Superscript "^"
         ]
 
-        let color dataParser =
+        let color =
             pstring "{"
-            >>. dataParser
+            >>. parseFormat "{}"
             .>> pstring "}"
             .>>. allStyles
             |>> Formatted
@@ -77,7 +77,7 @@ module NuMark =
 
         lineElementRef.Value <- choice [
             text "~^*_{}"
-            attempt (color (parseFormat "{}"))
+            attempt color
             attempt allStyles
             trailingSymbol "~^*_{}"
         ]
@@ -100,7 +100,7 @@ module NuMark =
         | Table
         | Image
         | HorizontalLine
-        | Line of Justification * Text
+        | Line of Justification * Line
 
 
     let textTest  =
