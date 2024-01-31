@@ -32,15 +32,16 @@ module NuMark =
     type Justification = Justification
 
     type Line =
-        | Normal of Line list
-        | Bold of Line list
-        | Italics of Line list
-        | Strikethrough of Line list
-        | Underlined of Line list
-        | Subscript of Line list
-        | Superscript of Line list
-        | Formatted of Formatted * Line
         | String of string
+        | List of Line list
+        | Normal of Line
+        | Bold of Line
+        | Italics of Line
+        | Strikethrough of Line
+        | Underlined of Line
+        | Subscript of Line
+        | Superscript of Line
+        | Formatted of Formatted * Line
 
     let parseLine : Parser<Line list, unit> =
         let lineElement, lineElementRef = createParserForwardedToRef()
@@ -54,6 +55,7 @@ module NuMark =
             pstring symbol
             >>. listToSymbol symbol
             .>> pstring symbol
+            |>> function [ oneMember ] -> oneMember | list -> List list
             |>> styleType
             <?> "style"
 
