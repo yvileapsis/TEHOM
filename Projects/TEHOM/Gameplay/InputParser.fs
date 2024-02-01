@@ -93,6 +93,8 @@ module NuMark =
 
 
     type Node =
+        | Line of Justification * Line
+        | Paragraph of Node
         | Header of Node
         | Quote of Node
         | Indent of Node
@@ -102,8 +104,55 @@ module NuMark =
         | Table
         | Image
         | HorizontalLine
-        | Line of Justification * Line
 
+
+    (*
+        White space before, in the middle, etc of commands is ignored
+
+        ### Header
+        # # # Same tier of header
+          ### Also the same header with the same indentation
+
+        >>> triple quote
+        > > > also triple quote
+
+        Right quote <<<
+
+        ### Centered Header ###
+
+        Header To The Right ###   <- there could be unlimited whitespace but not any symbols
+
+        | Normal Paragraph
+        Also Normal Paragraph
+        | Centered Paragraph |
+        Right Oriented Paragraph |
+
+        ``` ``` <- code block
+        ` ` <- one line code
+        |: Table with one |
+        | - |
+
+        | Table | With :|: Several |
+        | - | - | - |
+
+        classic table
+
+        | Whatever | Whatever | whatever |
+        |:-|:-:|-:|
+
+
+
+
+    *)
+
+    let parseNode =
+        let node, nodeRef = createParserForwardedToRef()
+
+        nodeRef <- choice [
+
+        ]
+
+        node
 
     let textTest  =
         """---
