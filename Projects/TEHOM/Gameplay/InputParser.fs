@@ -1,5 +1,7 @@
 namespace Tehom
 
+open System
+
 module NuMark =
 
     #r "nuget: FParsec"
@@ -24,12 +26,9 @@ module NuMark =
             Color = ""
         }
 
-    let parseFormat specialChars : Parser<Formatted, unit> =
-
-        many1Chars (noneOf specialChars) |>> (fun x -> { Formatted.empty with Size = x})
-
-
-    type Justification = Justification
+    let parseFormat until : Parser<Formatted, unit> =
+        many1CharsTill anyChar until
+        |>> (fun x -> { Formatted.empty with Size = x })
 
     type Line =
         | String of string
@@ -43,19 +42,31 @@ module NuMark =
         | Superscript of Line
         | Formatted of Formatted * Line
 
-    let parseLine : Parser<Line list, unit> =
+    let parseLine till : Parser<Line, unit> =
         let lineElement, lineElementRef = createParserForwardedToRef()
 
-        let text specialChars = many1Satisfy (isNoneOf specialChars) |>> Line.String <?> "string"
-        let trailingSymbol specialChars = many1Satisfy (isAnyOf specialChars) |>> Line.String <?> "trailing"
+        let many1TillOptional chars till =
+            attempt (many1Till chars till)
+            <|> many1 chars
 
-        let listToSymbol symbol = many1Till lineElement (followedByString symbol)
+        let text specialChars =
+            many1TillOptional (noneOf specialChars) till
+            |>> (Array.ofList >> System.String >> Line.String)
+            <?> "string"
+
+        let trailingSymbol specialChars =
+            many1Chars (anyOf specialChars)
+            |>> Line.String
+            <?> "trailing"
+
+        let listToSymbol symbol =
+            many1Till lineElement (followedByString symbol)
+            |>> function [ oneMember ] -> oneMember | list -> List list
 
         let style styleType symbol =
             pstring symbol
             >>. listToSymbol symbol
             .>> pstring symbol
-            |>> function [ oneMember ] -> oneMember | list -> List list
             |>> styleType
             <?> "style"
 
@@ -71,30 +82,30 @@ module NuMark =
 
         let color =
             pstring "{"
-            >>. parseFormat "{}"
+            >>. parseFormat (followedByString "}")
             .>> pstring "}"
             .>>. allStyles
             |>> Formatted
             <?> "color"
 
         lineElementRef.Value <- choice [
-            text "~^*_{}"
+            text ['~'; '^'; '*'; '_'; '{'; '}']
             attempt color
             attempt allStyles
-            trailingSymbol "~^*_{}"
+            trailingSymbol ['~'; '^'; '*'; '_'; '{'; '}']
         ]
 
-        many1 lineElement
+        many1TillOptional lineElement till
+        |>> function [ oneMember ] -> oneMember | list -> List list
 
-
-    run parseLine """~~value~~ {tseta} ~~whatever"""
-
-    run parseLine """{test}~~**This is bold text** __This is underlined text__~~ {also a style}*This is italic text* _This is subscript text_ ~~Strikethrough~~ ~This is Normal Text~"""
-
+    type Justification =
+        | Left
+        | Center
+        | Right
 
     type Node =
-        | Line of Justification * Line
-        | Paragraph of Node
+        | NodeList of Node list
+        | Paragraph of Justification * Line
         | Header of Node
         | Quote of Node
         | Indent of Node
@@ -104,6 +115,69 @@ module NuMark =
         | Table
         | Image
         | HorizontalLine
+
+
+    let parseNode : Parser<Node, _> =
+        let node, nodeRef = createParserForwardedToRef()
+
+        let list =
+            sepEndBy1 node newline
+            |>> NodeList
+
+        let line =
+            let line = parseLine (followedByString " |" <|> followedByString "|" <|> followedByNewline)
+
+            let center =
+                pstring "|"
+                >>? optional (pstring " ")
+                >>? line
+                .>>? optional (pstring " ")
+                .>>? pstring "|"
+                |>> fun x -> Center, x
+
+            let left =
+                pstring "|"
+                >>? optional (pstring " ")
+                >>? line
+                |>> fun x -> Left, x
+
+            let right =
+                line
+                .>>? optional (pstring " ")
+                .>>? pstring "|"
+                |>> fun x -> Right, x
+
+            let no =
+                line
+                |>> fun x -> Left, x
+
+            optional spaces
+            >>. choice [
+                center
+                left
+                right
+                no
+            ]
+            |>> Paragraph
+
+        nodeRef.Value <- choice [
+            line
+        ]
+
+        list
+
+
+    run parseNode """~~value~~ {whatever}~test~
+    | testing a second line |
+    whatever |
+"""
+
+    run parseNode """{test}~~**This is bold text** __This is underlined text__~~
+{also a style}*This is italic text*  |
+_This is subscript text_ |
+~~Strikethrough~~ |
+~This is Normal Text~ |
+"""
 
 
     (*
@@ -144,15 +218,6 @@ module NuMark =
 
 
     *)
-
-    let parseNode =
-        let node, nodeRef = createParserForwardedToRef()
-
-        nodeRef <- choice [
-
-        ]
-
-        node
 
     let textTest  =
         """---
