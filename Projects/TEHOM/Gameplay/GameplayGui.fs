@@ -53,6 +53,22 @@ module GameplayGui =
                     Entity.FontSizing == Some 10
                ]
 
+            richText (Simulants.GameplayTextBox.Name + "!" + "test") [
+                Entity.Position == v3 120.0f 120.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                Entity.Text := """
+| Left
+Right |
+| Center |
+**Bold**
+{#FF0000}~~Red Strikethrough~~
+"""
+                Entity.TextColor == Color.FloralWhite
+                Entity.Font == Assets.Gui.MontSerratFont
+                Entity.FontSizing == Some 10
+            ]
+
             TextInput.textInput Simulants.GameplayTextInputBox.Name [
                 Entity.Position == v3 -240.0f -144.0f 0.0f
                 Entity.Elevation == 10.0f

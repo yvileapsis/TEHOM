@@ -1,6 +1,7 @@
 namespace Tehom
 
 open System
+open Nu
 
 module NuMark =
 
@@ -98,14 +99,9 @@ module NuMark =
         many1TillOptional lineElement till
         |>> function [ oneMember ] -> oneMember | list -> List list
 
-    type Justification =
-        | Left
-        | Center
-        | Right
-
     type Node =
         | NodeList of Node list
-        | Paragraph of Justification * Line
+        | Paragraph of Nu.Justification * Line
         | Header of Node
         | Quote of Node
         | Indent of Node
@@ -133,23 +129,23 @@ module NuMark =
                 >>? line
                 .>>? optional (pstring " ")
                 .>>? pstring "|"
-                |>> fun x -> Center, x
+                |>> fun x -> Nu.Justified (Nu.JustifyCenter, Nu.JustifyMiddle), x
 
             let left =
                 pstring "|"
                 >>? optional (pstring " ")
                 >>? line
-                |>> fun x -> Left, x
+                |>> fun x -> Nu.Justified (Nu.JustifyLeft, Nu.JustifyMiddle), x
 
             let right =
                 line
                 .>>? optional (pstring " ")
                 .>>? pstring "|"
-                |>> fun x -> Right, x
+                |>> fun x -> Nu.Justified (Nu.JustifyRight, Nu.JustifyMiddle), x
 
             let no =
                 line
-                |>> fun x -> Left, x
+                |>> fun x -> Nu.Justified (Nu.JustifyLeft, Nu.JustifyMiddle), x
 
             optional spaces
             >>. choice [
@@ -179,6 +175,10 @@ _This is subscript text_ |
 ~This is Normal Text~ |
 """
 
+    let parseNuMark string =
+        match run parseNode string with
+        | Success (x, _, _) -> x
+        | Failure (_, x, _) -> Node.Paragraph (Nu.Justified (Nu.JustifyLeft, Nu.JustifyMiddle), Line.String $"%A{x}")
 
     (*
         White space before, in the middle, etc of commands is ignored
