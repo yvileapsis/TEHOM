@@ -51,7 +51,7 @@ module RichTextFacetModule =
                 let defjustification = entity.GetJustification world
 
 
-                let toDraw =
+                let toDraw RichTextDescriptor =
                     let (NuMark.NodeList list) = parsedText
                     list
                     |> List.map (fun (Paragraph (x, y)) -> x, y)
@@ -73,13 +73,15 @@ module RichTextFacetModule =
 
                     )
 
+                toDraw |> ignore
 
-                World.enqueueLayeredOperation2d {
+
+(*                World.enqueueLayeredOperation2d {
                     Elevation = textTransform.Elevation
                     Horizon = horizon
                     AssetTag = deffont
                     RenderOperation2d = RenderRichText toDraw
-                } world
+                } world*)
 
         override this.GetAttributesInferred (_, _) =
             AttributesInferred.make Constants.Engine.EntityGuiSizeDefault v3Zero
