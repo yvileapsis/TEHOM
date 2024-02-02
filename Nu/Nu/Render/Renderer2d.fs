@@ -83,6 +83,20 @@ type TextDescriptor =
       Color : Color
       Justification : Justification }
 
+type [<Struct>] RichTextBlock =
+    { Text : string
+      Font : Font AssetTag
+      FontSizing : int option
+      FontStyling : FontStyle Set
+      Color : Color
+      Justification : Justification }
+
+/// Describes how to render rich text to a rendering subsystem.
+type RichTextDescriptor =
+    { mutable Transform : Transform
+      Entries : RichTextBlock array }
+
+
 /// Describes a 2d rendering operation.
 type [<ReferenceEquality>] RenderOperation2d =
     | RenderSprite of SpriteDescriptor
@@ -91,7 +105,7 @@ type [<ReferenceEquality>] RenderOperation2d =
     | RenderSpriteParticles of SpriteParticlesDescriptor
     | RenderCachedSprite of CachedSpriteDescriptor
     | RenderText of TextDescriptor
-    | RenderRichText of TextDescriptor list
+    | RenderRichText of RichTextDescriptor
     | RenderTiles of TilesDescriptor
     | RenderCallback2d of (Vector2 * Vector2 * Renderer2d -> unit)
 
@@ -576,14 +590,15 @@ type [<ReferenceEquality>] GlRenderer2d =
 
     /// Render rich text.
     static member renderRichText
-        (textToRender : TextDescriptor list,
+        (transform : Transform byref,
+         textToRender : RichTextBlock array,
          eyeCenter : Vector2,
          eyeSize : Vector2,
          renderer : GlRenderer2d) =
 
-        let firstTransform = textToRender.Head.Transform
+        let firstTransform = transform
 
-        for i, text in textToRender |> List.indexed do
+        for i, text in textToRender |> Array.indexed do
 
             let _y = float32 i * -12.0f
 //            let _x = if _y < -120.0f then 40.0f else -240.0f
@@ -894,7 +909,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                 (&descriptor.Transform, descriptor.Text, descriptor.Font, descriptor.FontSizing, descriptor.FontStyling, &descriptor.Color, descriptor.Justification, eyeCenter, eyeSize, renderer)
         | RenderRichText descriptor ->
             GlRenderer2d.renderRichText
-                (descriptor,  eyeCenter, eyeSize, renderer)
+                (&descriptor.Transform, descriptor.Entries, eyeCenter, eyeSize, renderer)
         | RenderTiles descriptor ->
             GlRenderer2d.renderTiles
                 (&descriptor.Transform, &descriptor.Color, &descriptor.Emission,
