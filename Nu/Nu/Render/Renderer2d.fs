@@ -595,6 +595,8 @@ type [<ReferenceEquality>] GlRenderer2d =
          eyeSize : Vector2,
          renderer : GlRenderer2d) =
 
+        let transform = transform
+
         flip OpenGL.SpriteBatch.InterruptSpriteBatchFrame renderer.SpriteBatchEnv $ fun () ->
 
             // gather context for rendering text
@@ -660,6 +662,27 @@ type [<ReferenceEquality>] GlRenderer2d =
                         Log.infoOnce $"Failed to get glyph metrics for '{char}' with font '{scstring font}' due to: {error}"
                     advance
 
+                // gather rendering resources
+                // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
+                // surface and texture one or more times a frame must be understood!
+                let tryMakeSdlSurface font (color: Color) text =
+                    // compared to renderText moved heree as each chunk of text has its own color
+                    if color.A8 <> 0uy then
+                        // create sdl color
+                        let mutable colorSdl = SDL.SDL_Color ()
+                        colorSdl.r <- color.R8
+                        colorSdl.g <- color.G8
+                        colorSdl.b <- color.B8
+                        colorSdl.a <- color.A8
+
+                        let textSurfacePtr = SDL_ttf.TTF_RenderUNICODE_Blended (font, text, colorSdl)
+
+                        if textSurfacePtr <> IntPtr.Zero then
+                            Some textSurfacePtr
+                        else
+                            None
+                    else None
+
                 let textWithinWidth string font offset width =
                     // TODO: I should do something to pre-load the fonts so I don't load them every block
                     // splits string for concrete offset and width
@@ -688,6 +711,8 @@ type [<ReferenceEquality>] GlRenderer2d =
                         if blockWidth + offset > width then
                             // TODO: check if i is correct, it probably needs to be one less as I just went over the limit
 
+                            i <- i - 1
+
                             let mutable k = i
                             while k > j && not (Char.IsWhiteSpace array[i]) do k <- k - 1
                             if k <> j then
@@ -695,7 +720,8 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                             stringList <- (String array[j..i])::stringList
 
-                            j <- i
+                            j <- i + 1
+                            i <- i + 1
                             blockWidth <- 0
                             offset <- 0
 
@@ -704,7 +730,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                     if (j < i) then
                         stringList <- (String array[j..i])::stringList
 
-                    stringList, blockWidth
+                    List.rev stringList, blockWidth
 
                 let reflowBlock (width: single) (block: RichTextBlock) (offset: Vector2) =
                     match tryGetFont block.Font block.FontSizing block.FontStyling renderer with
@@ -713,21 +739,26 @@ type [<ReferenceEquality>] GlRenderer2d =
                         let lineHeight = single (lineHeight font)
 
                         // TODO: rework so it looks nicer
-                        List.mapi (fun i string ->
-                            if (i = 0) then
-                                offset, string, font, block.Color
-                            else
-                                v2 0.0f (offset.Y + single i * lineHeight), string, font, block.Color
-                        ) list, (v2 (single offsetNew) (offset.Y + single (List.length list) * lineHeight))
+                        list
+                        |> List.choose (tryMakeSdlSurface font block.Color)
+                        |> List.mapi (fun i surface ->
+                            let offset = if (i = 0) then offset else v2 0.0f (offset.Y - single i * lineHeight)
+                            surface, offset
+                        )
+                        , (v2 (single offsetNew) (offset.Y - single (List.length list - 1) * lineHeight))
                     | None -> List.empty, offset
 
                 let reflowLine (width: single) (line: RichTextLine) (offset: Vector2) =
                     // TODO: Margins (?)
                     // TODO: Tabs (?)
 
-                    // TODO: Text Within Width
-                    // Make new block if text doesn't fit
-                    // Set offset depending on justification for each new line
+                    // TODO: new line intersects with text
+                    // TODO: something is wrong with horizontal offset
+                    // TODO: vertical offsets should take into account all fonts on the line and take maximum
+                    // TODO: justification
+                    // TODO: justify justification
+                    // TODO: justify vertically somehow
+                    // TODO: subscript, superscript
 
                     line.Blocks
                     |> List.foldMap (reflowBlock width) (v2 0.0f offset.Y)
@@ -737,43 +768,16 @@ type [<ReferenceEquality>] GlRenderer2d =
                 >> fst
                 >> List.concat
 
-            let makeSdlSurfaces =
-                // gather rendering resources
-                // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
-                // surface and texture one or more times a frame must be understood!
-                let tryMakeSdlSurface font (color: Color) text =
-                    // compared to renderText moved heree as each chunk of text has its own color
-                    if color.A8 <> 0uy then
-                        // create sdl color
-                        let mutable colorSdl = SDL.SDL_Color ()
-                        colorSdl.r <- color.R8
-                        colorSdl.g <- color.G8
-                        colorSdl.b <- color.B8
-                        colorSdl.a <- color.A8
-
-                        let textSurfacePtr = SDL_ttf.TTF_RenderUNICODE_Blended (font, text, colorSdl)
-
-                        if textSurfacePtr <> IntPtr.Zero then
-                            Some textSurfacePtr
-                        else
-                            None
-                    else None
-
-                List.choose (fun (position, string, font, color) ->
-                    match tryMakeSdlSurface font color string with
-                    | Some surface -> Some (surface, position)
-                    | None -> None
-                )
 
             // renders a single block
-            let render (textSurfacePtr, position: Vector2) =
+            let render (textSurfacePtr, offset: Vector2) =
 
                 let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface> textSurfacePtr
 
                 // construct mvp matrix
                 let textSurfaceWidth = textSurface.pitch / 4 // NOTE: textSurface.w may be an innacurate representation of texture width in SDL2_ttf versions beyond v2.0.15 because... I don't know why.
                 let textSurfaceHeight = textSurface.h
-                let translation = position.V3
+                let translation = (position + offset).V3
                 let scale = v3 (single textSurfaceWidth) (single textSurfaceHeight) 1.0f
                 let modelTranslation = Matrix4x4.CreateTranslation translation
                 let modelScale = Matrix4x4.CreateScale scale
@@ -809,7 +813,6 @@ type [<ReferenceEquality>] GlRenderer2d =
             // End target before render is surface * surfaceptr * position 
             textToRender
             |> reflowText size.X
-            |> makeSdlSurfaces
             |> List.iter render
 
             OpenGL.Hl.Assert ()

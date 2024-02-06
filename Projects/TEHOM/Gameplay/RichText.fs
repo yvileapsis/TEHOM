@@ -63,21 +63,21 @@ module RichTextFacetModule =
                                         Text = "1. Testing a simple sentence."
                                         Color = Color.Red
                                         Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 10
+                                        FontSizing = Some 8
                                         FontStyling = Set.ofList [ FontStyle.Bold ]
                                     }
                                     {
                                         Text = "2. Continuing testing a simple sentence."
-                                        Color = Color.White
+                                        Color = Color.Green
                                         Font = Assets.Gui.MontSerratFont
                                         FontSizing = Some 12
-                                        FontStyling = Set.ofList []
+                                        FontStyling = Set.ofList [ FontStyle.Strikethrough ]
                                     }
                                     {
                                         Text = "3. Finishing testing a simple sentence."
                                         Color = Color.White
                                         Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
+                                        FontSizing = Some 14
                                         FontStyling = Set.ofList [ FontStyle.Italic ]
                                     }
                                 ]
@@ -90,8 +90,8 @@ module RichTextFacetModule =
                                         Text = "1. Testing a simple sentence."
                                         Color = Color.Red
                                         Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 10
-                                        FontStyling = Set.ofList [ FontStyle.Bold ]
+                                        FontSizing = Some 12
+                                        FontStyling = Set.ofList []
                                     }
                                     {
                                         Text = "2. Continuing testing a simple sentence."
@@ -105,7 +105,7 @@ module RichTextFacetModule =
                                         Color = Color.White
                                         Font = Assets.Gui.MontSerratFont
                                         FontSizing = Some 12
-                                        FontStyling = Set.ofList [ FontStyle.Italic ]
+                                        FontStyling = Set.ofList []
                                     }
                                 ]
                             }
@@ -117,7 +117,7 @@ module RichTextFacetModule =
                                         Text = "1. Testing a simple sentence."
                                         Color = Color.Red
                                         Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 10
+                                        FontSizing = Some 12
                                         FontStyling = Set.ofList [ FontStyle.Bold ]
                                     }
                                     {
