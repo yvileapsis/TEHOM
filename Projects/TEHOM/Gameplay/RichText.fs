@@ -49,39 +49,97 @@ module RichTextFacetModule =
                 let deffontStyling = entity.GetFontStyling world
                 let defcolor = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
                 let defjustification = entity.GetJustification world
-
-
-                let toDraw RichTextDescriptor =
-                    let (NuMark.NodeList list) = parsedText
-                    list
-                    |> List.map (fun (Paragraph (x, y)) -> x, y)
-                    |> List.map (fun (justification, text) ->
-                        let call = {
-                            Transform = textTransform
-                            Text = ""
-                            Font = deffont
-                            FontSizing = deffontSizing
-                            FontStyling = deffontStyling
-                            Color = defcolor
-                            Justification = justification
-                        }
-                        match text with
-                        | String x -> { call with Text = x }
-                        | Bold (String x) -> { call with Text = x; FontStyling = Set.ofList [ FontStyle.Bold ] }
-                        | Formatted (_, Strikethrough (String x)) -> { call with Text = x; FontStyling = Set.ofList [ FontStyle.Strikethrough ]; Color = Color.Red }
-                        | _ -> { call with Text = "Not Handled" }
-
-                    )
-
-                toDraw |> ignore
-
-
-(*                World.enqueueLayeredOperation2d {
+                World.enqueueLayeredOperation2d {
                     Elevation = textTransform.Elevation
                     Horizon = horizon
                     AssetTag = deffont
-                    RenderOperation2d = RenderRichText toDraw
-                } world*)
+                    RenderOperation2d = RenderRichText {
+                        Transform = textTransform
+                        Entries = [
+                            {
+                                Justification = Justified (JustifyLeft, JustifyMiddle)
+                                Blocks = [
+                                    {
+                                        Text = "1. Testing a simple sentence."
+                                        Color = Color.Red
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 10
+                                        FontStyling = Set.ofList [ FontStyle.Bold ]
+                                    }
+                                    {
+                                        Text = "2. Continuing testing a simple sentence."
+                                        Color = Color.White
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 12
+                                        FontStyling = Set.ofList []
+                                    }
+                                    {
+                                        Text = "3. Finishing testing a simple sentence."
+                                        Color = Color.White
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 12
+                                        FontStyling = Set.ofList [ FontStyle.Italic ]
+                                    }
+                                ]
+                            }
+
+                            {
+                                Justification = Justified (JustifyLeft, JustifyMiddle)
+                                Blocks = [
+                                    {
+                                        Text = "1. Testing a simple sentence."
+                                        Color = Color.Red
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 10
+                                        FontStyling = Set.ofList [ FontStyle.Bold ]
+                                    }
+                                    {
+                                        Text = "2. Continuing testing a simple sentence."
+                                        Color = Color.White
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 12
+                                        FontStyling = Set.ofList []
+                                    }
+                                    {
+                                        Text = "3. Finishing testing a simple sentence."
+                                        Color = Color.White
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 12
+                                        FontStyling = Set.ofList [ FontStyle.Italic ]
+                                    }
+                                ]
+                            }
+
+                            {
+                                Justification = Justified (JustifyRight, JustifyMiddle)
+                                Blocks = [
+                                    {
+                                        Text = "1. Testing a simple sentence."
+                                        Color = Color.Red
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 10
+                                        FontStyling = Set.ofList [ FontStyle.Bold ]
+                                    }
+                                    {
+                                        Text = "2. Continuing testing a simple sentence."
+                                        Color = Color.White
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 12
+                                        FontStyling = Set.ofList []
+                                    }
+                                    {
+                                        Text = "3. Finishing testing a simple sentence."
+                                        Color = Color.White
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 12
+                                        FontStyling = Set.ofList [ FontStyle.Italic ]
+                                    }
+                                ]
+                            }
+
+                        ]
+                    }
+                } world
 
         override this.GetAttributesInferred (_, _) =
             AttributesInferred.make Constants.Engine.EntityGuiSizeDefault v3Zero

@@ -91,13 +91,13 @@ type [<Struct>] RichTextBlock =
       Color : Color }
 
 type [<Struct>] RichTextLine =
-    { Blocks : RichTextBlock array
+    { Blocks : RichTextBlock list
       Justification : Justification }
 
 /// Describes how to render rich text to a rendering subsystem.
 type RichTextDescriptor =
     { mutable Transform : Transform
-      Entries : RichTextBlock array }
+      Entries : RichTextLine list }
 
 
 /// Describes a 2d rendering operation.
@@ -590,7 +590,7 @@ type [<ReferenceEquality>] GlRenderer2d =
     /// Render rich text.
     static member renderRichText
         (transform : Transform byref,
-         textToRender : RichTextLine array,
+         textToRender : RichTextLine list,
          eyeCenter : Vector2,
          eyeSize : Vector2,
          renderer : GlRenderer2d) =
@@ -638,31 +638,14 @@ type [<ReferenceEquality>] GlRenderer2d =
                     | _ -> Log.infoOnce ("Cannot render text with a non-font asset for '" + scstring font + "'."); None
                 | _ -> Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring font + "'."); None
 
-            // gather rendering resources
-            // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
-            // surface and texture one or more times a frame must be understood!
-            let tryRenderBlock font (color: Color) text =
-                // compared to renderText moved heree as each chunk of text has its own color
-                if color.A8 <> 0uy then
-                    // create sdl color
-                    let mutable colorSdl = SDL.SDL_Color ()
-                    colorSdl.r <- color.R8
-                    colorSdl.g <- color.G8
-                    colorSdl.b <- color.B8
-                    colorSdl.a <- color.A8
-
-                    let textSurfacePtr = SDL_ttf.TTF_RenderUNICODE_Blended (font, text, colorSdl)
-                    let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface> textSurfacePtr
-                    Some (textSurface, textSurfacePtr)
-                else None
-
-
-            // TODO: Reflow
-            let textToRender, displayHeight =
+            let reflowText (width: single) =
 
                 let twipsToPixels twips =
                     // Magic numbers lifted from SDL_rtf
                     (((twips * 64 * 72 + (36 + 32 * 72)) / 72) / 20) / 64;
+
+                let lineHeight font =
+                    SDL_ttf.TTF_FontLineSkip font
 
                 let glyphMetrics font (char : char) =
                     let mutable advance = 0
@@ -677,120 +660,157 @@ type [<ReferenceEquality>] GlRenderer2d =
                         Log.infoOnce $"Failed to get glyph metrics for '{char}' with font '{scstring font}' due to: {error}"
                     advance
 
-                let reflowBlock (block: RichTextBlock) width offset =
+                let textWithinWidth string font offset width =
                     // TODO: I should do something to pre-load the fonts so I don't load them every block
-                    match tryGetFont block.Font block.FontSizing block.FontStyling renderer with
-                    | Some font ->
-                        // splits string for concrete offset and width
+                    // splits string for concrete offset and width
 
-                        let array = Array.ofSeq block.Text
-                        let size = Array.length array
+                    let array = Array.ofSeq string
+                    let size = Array.length array
 
-                        // Lots of mutables as my head hurts from trying to come up with how do this functionally
-                        // Also it's probably faster
+                    // Lots of mutables as my head hurts from trying to come up with how do this functionally
+                    // Also it's probably faster
 
-                        // main iterator, where in the char array we are
-                        let mutable i = 0
-                        // secondary iterator, where in the char array current string starts
-                        let mutable j = 0
+                    // main iterator, where in the char array we are
+                    let mutable i = 0
+                    // secondary iterator, where in the char array current string starts
+                    let mutable j = 0
 
-                        let mutable offset = offset
+                    let mutable offset = offset
 
-                        let mutable blockWidth = 0
+                    let mutable blockWidth = 0
 
-                        let mutable stringList = List.empty
+                    let mutable stringList = List.empty
 
-                        while i < size do
-                            blockWidth <- blockWidth + glyphMetrics font array[i]
+                    while i < size do
+                        blockWidth <- blockWidth + glyphMetrics font array[i]
 
-                            // we hit our limit for the line, splitting
-                            if blockWidth + offset > width then
-                                // TODO: check if i is correct, it probably needs to be one less as I just went over the limit
+                        // we hit our limit for the line, splitting
+                        if blockWidth + offset > width then
+                            // TODO: check if i is correct, it probably needs to be one less as I just went over the limit
 
-                                let mutable k = i
-                                while k > j && not (Char.IsWhiteSpace array[i]) do k <- k - 1
-                                if k <> j then
-                                    i <- k
+                            let mutable k = i
+                            while k > j && not (Char.IsWhiteSpace array[i]) do k <- k - 1
+                            if k <> j then
+                                i <- k
 
-                                stringList <- (String array[j..i])::stringList
-
-                                j <- i
-                                blockWidth <- 0
-                                offset <- 0
-
-                            i <- i + 1
-
-                        if (j < i) then
                             stringList <- (String array[j..i])::stringList
 
-                        List.choose (tryRenderBlock font block.Color) stringList, blockWidth
+                            j <- i
+                            blockWidth <- 0
+                            offset <- 0
 
+                        i <- i + 1
+
+                    if (j < i) then
+                        stringList <- (String array[j..i])::stringList
+
+                    stringList, blockWidth
+
+                let reflowBlock (width: single) (block: RichTextBlock) (offset: Vector2) =
+                    match tryGetFont block.Font block.FontSizing block.FontStyling renderer with
+                    | Some font ->
+                        let list, offsetNew = textWithinWidth block.Text font (int offset.X) (int width)
+                        let lineHeight = single (lineHeight font)
+
+                        // TODO: rework so it looks nicer
+                        List.mapi (fun i string ->
+                            if (i = 0) then
+                                offset, string, font, block.Color
+                            else
+                                v2 0.0f (offset.Y + single i * lineHeight), string, font, block.Color
+                        ) list, (v2 (single offsetNew) (offset.Y + single (List.length list) * lineHeight))
                     | None -> List.empty, offset
 
-
-                let reflowLine displayHeight (line: RichTextLine) =
+                let reflowLine (width: single) (line: RichTextLine) (offset: Vector2) =
                     // TODO: Margins (?)
                     // TODO: Tabs (?)
-                    let width = size.X
-
 
                     // TODO: Text Within Width
                     // Make new block if text doesn't fit
                     // Set offset depending on justification for each new line
 
+                    line.Blocks
+                    |> List.foldMap (reflowBlock width) (v2 0.0f offset.Y)
+                    |> fun (fst, snd) -> List.concat fst, snd
 
+                List.foldMap (reflowLine width) Vector2.Zero
+                >> fst
+                >> List.concat
 
+            let makeSdlSurfaces =
+                // gather rendering resources
+                // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
+                // surface and texture one or more times a frame must be understood!
+                let tryMakeSdlSurface font (color: Color) text =
+                    // compared to renderText moved heree as each chunk of text has its own color
+                    if color.A8 <> 0uy then
+                        // create sdl color
+                        let mutable colorSdl = SDL.SDL_Color ()
+                        colorSdl.r <- color.R8
+                        colorSdl.g <- color.G8
+                        colorSdl.b <- color.B8
+                        colorSdl.a <- color.A8
 
-                    let newLine = line
-                    let displayHeight = 0.0
+                        let textSurfacePtr = SDL_ttf.TTF_RenderUNICODE_Blended (font, text, colorSdl)
 
-                    
-                    newLine, displayHeight
+                        if textSurfacePtr <> IntPtr.Zero then
+                            Some textSurfacePtr
+                        else
+                            None
+                    else None
 
-                Array.mapFold reflowLine 0.0 textToRender
-
+                List.choose (fun (position, string, font, color) ->
+                    match tryMakeSdlSurface font color string with
+                    | Some surface -> Some (surface, position)
+                    | None -> None
+                )
 
             // renders a single block
-            let render (textSurface : SDL.SDL_Surface, textSurfacePtr) (position: Vector2) =
-                if textSurfacePtr <> IntPtr.Zero then
+            let render (textSurfacePtr, position: Vector2) =
 
-                    // construct mvp matrix
-                    let textSurfaceWidth = textSurface.pitch / 4 // NOTE: textSurface.w may be an innacurate representation of texture width in SDL2_ttf versions beyond v2.0.15 because... I don't know why.
-                    let textSurfaceHeight = textSurface.h
-                    let translation = position.V3
-                    let scale = v3 (single textSurfaceWidth) (single textSurfaceHeight) 1.0f
-                    let modelTranslation = Matrix4x4.CreateTranslation translation
-                    let modelScale = Matrix4x4.CreateScale scale
-                    let modelMatrix = modelScale * modelTranslation
-                    let modelViewProjection = modelMatrix * viewProjection
+                let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface> textSurfacePtr
 
-                    // upload texture data
-                    let textTextureId = OpenGL.Gl.GenTexture ()
-                    OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, textTextureId)
-                    OpenGL.Gl.TexImage2D (OpenGL.TextureTarget.Texture2d, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, textSurface.pixels)
-                    OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMinFilter, int OpenGL.TextureMinFilter.Nearest)
-                    OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMagFilter, int OpenGL.TextureMagFilter.Nearest)
-                    OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, 0u)
-                    OpenGL.Hl.Assert ()
+                // construct mvp matrix
+                let textSurfaceWidth = textSurface.pitch / 4 // NOTE: textSurface.w may be an innacurate representation of texture width in SDL2_ttf versions beyond v2.0.15 because... I don't know why.
+                let textSurfaceHeight = textSurface.h
+                let translation = position.V3
+                let scale = v3 (single textSurfaceWidth) (single textSurfaceHeight) 1.0f
+                let modelTranslation = Matrix4x4.CreateTranslation translation
+                let modelScale = Matrix4x4.CreateScale scale
+                let modelMatrix = modelScale * modelTranslation
+                let modelViewProjection = modelMatrix * viewProjection
 
-                    // make texture drawable
-                    let textTexture = OpenGL.Texture.CreateTextureFromId textTextureId
-                    OpenGL.Hl.Assert ()
+                // upload texture data
+                let textTextureId = OpenGL.Gl.GenTexture ()
+                OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, textTextureId)
+                OpenGL.Gl.TexImage2D (OpenGL.TextureTarget.Texture2d, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, textSurface.pixels)
+                OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMinFilter, int OpenGL.TextureMinFilter.Nearest)
+                OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMagFilter, int OpenGL.TextureMagFilter.Nearest)
+                OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, 0u)
+                OpenGL.Hl.Assert ()
 
-                    // draw text sprite
-                    // NOTE: we allocate an array here, too.
-                    let (vertices, indices, vao) = renderer.TextQuad
-                    let (modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader) = renderer.SpriteShader
-                    OpenGL.Sprite.DrawSprite (vertices, indices, vao, modelViewProjection.ToArray (), ValueNone, Color.White, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader)
-                    OpenGL.Hl.Assert ()
+                // make texture drawable
+                let textTexture = OpenGL.Texture.CreateTextureFromId textTextureId
+                OpenGL.Hl.Assert ()
 
-                    // destroy texture
-                    SDL.SDL_FreeSurface textSurfacePtr
-                    OpenGL.Texture.DestroyTexture textTexture
-                    OpenGL.Hl.Assert ()
+                // draw text sprite
+                // NOTE: we allocate an array here, too.
+                let (vertices, indices, vao) = renderer.TextQuad
+                let (modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader) = renderer.SpriteShader
+                OpenGL.Sprite.DrawSprite (vertices, indices, vao, modelViewProjection.ToArray (), ValueNone, Color.White, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader)
+                OpenGL.Hl.Assert ()
+
+                // destroy texture
+                SDL.SDL_FreeSurface textSurfacePtr
+                OpenGL.Texture.DestroyTexture textTexture
+                OpenGL.Hl.Assert ()
 
             // TODO: clear pipeline of what goes where
             // End target before render is surface * surfaceptr * position 
+            textToRender
+            |> reflowText size.X
+            |> makeSdlSurfaces
+            |> List.iter render
 
             OpenGL.Hl.Assert ()
 
