@@ -31,17 +31,20 @@ module NuMark =
         many1CharsTill anyChar until
         |>> (fun x -> { Formatted.empty with Size = x })
 
+    type Style =
+        | Normal
+        | Bold
+        | Italics
+        | Strikethrough
+        | Underlined
+        | Subscript
+        | Superscript
+        | Formatted of Formatted
+
     type Line =
         | String of string
         | List of Line list
-        | Normal of Line
-        | Bold of Line
-        | Italics of Line
-        | Strikethrough of Line
-        | Underlined of Line
-        | Subscript of Line
-        | Superscript of Line
-        | Formatted of Formatted * Line
+        | Style of Style * Line
 
     let parseLine till : Parser<Line, unit> =
         let lineElement, lineElementRef = createParserForwardedToRef()
@@ -68,17 +71,16 @@ module NuMark =
             pstring symbol
             >>. listToSymbol symbol
             .>> pstring symbol
-            |>> styleType
+            |>> fun x -> Style (styleType, x)
             <?> "style"
 
         let allStyles = choice [
             style Bold "**"
             style Italics "*"
             style Strikethrough "~~"
-            style Normal "~"
+            style Superscript "~"
             style Underlined "__"
             style Subscript "_"
-            style Superscript "^"
         ]
 
         let color =
@@ -86,7 +88,7 @@ module NuMark =
             >>. parseFormat (followedByString "}")
             .>> pstring "}"
             .>>. allStyles
-            |>> Formatted
+            |>> fun (x, y) -> Style (Formatted x, y)
             <?> "color"
 
         lineElementRef.Value <- choice [
