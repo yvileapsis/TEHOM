@@ -8,73 +8,105 @@ module NuMark =
     #r "nuget: FParsec"
     open FParsec
     (*
-
-    Regular Markdown has very limited styling capabilities and is often paired with bbcode/html/ansi code to fix it.
-    The result is not very cohesive and quite annoying to write.
+    This is a Markdown implementation based on Github flavored Markdown, but with quite a few alterations for easier
+    writing and comprehension. The main way of formatting text is through the use of special characters around formatted
+    text. Additionally, a form of tagging is supported.
 
     What we're going to leverage for this markup language is that majority of formating is done on per-line basis.
+
+    Decisions and limitations:
+
+    1. Markdown formatting:
+        - Formatting blocks are contained within a string of special chars.
+        - Unlike Github flavored Markdown tags don't need to touch words, more similar to Discord's Markdown. This
+          serves two purposes: easier typing and easier parsing.
+        - Nesting is not supported for the same tag, as it wouldn't provide any additional sense.
+        - Nesting is supported for different tags.
+        - Interlinked nesting isn't supported.
+    2. Additional tags formatting:
+        - Contained within "<tag>" and "</tag>"
+        - If tag is not closed entirety of the line till the end is considered to be in the tag.
+
+    3. Unlike Github Markdown I do not intend to support nested subscript and superscript, as those see very limited use
+       and it's hard to imagine game context where that would work as well.
+
+
     *)
 
-    type Formatted = {
-        Size: string
-        Style: string
-        Color: string
-    }
-    with
-        static member empty = {
-            Size = ""
-            Style = ""
-            Color = ""
-        }
-
-    let parseFormat until : Parser<Formatted, unit> =
-        many1CharsTill anyChar until
-        |>> (fun x -> { Formatted.empty with Size = x })
 
     type Style =
-        | Normal
         | Bold
         | Italics
         | Strikethrough
         | Underlined
         | Subscript
         | Superscript
-        | Formatted of Formatted
 
-    type Line =
-        | String of string
-        | List of Line list
-        | Style of Style * Line
+    type Block = {
+        Text: string
+        Size: string
+        Color: string
+        Style: Set<Style>
+    }
+    with
+        static member empty = {
+            Text = ""
+            Size = ""
+            Color = ""
+            Style = Set.empty
+        }
 
-    let parseLine till : Parser<Line, unit> =
-        let lineElement, lineElementRef = createParserForwardedToRef()
+    type Line = Block list
 
-        let many1TillOptional chars till =
-            attempt (many1Till chars till)
-            <|> many1 chars
+    type UserState = {
+        Stack: string list
+    }
+    with
+       static member Default = {
+           Stack = List.empty
+       }
 
-        let text specialChars =
-            many1TillOptional (noneOf specialChars) till
-            |>> (Array.ofList >> System.String >> Line.String)
-            <?> "string"
 
-        let trailingSymbol specialChars =
-            many1Chars (anyOf specialChars)
-            |>> Line.String
-            <?> "trailing"
+    let parseLine till : Parser<Line, UserState> =
 
-        let listToSymbol symbol =
-            many1Till lineElement (followedByString symbol)
-            |>> function [ oneMember ] -> oneMember | list -> List list
+        let specialChars = ['~'; '^'; '*'; '_'; '{'; '}'; '\\'; '\n']
+
+        let text =
+            let escaped = choice [
+                pstring @"\n" >>% ' '
+                pstring @"\*" >>% '*'
+                pstring @"\_" >>% '_'
+                pstring @"\~" >>% '~'
+                pstring @"\\" >>% '\\'
+            ]
+
+            choice [
+                many1Chars escaped <?> "escaped"
+                many1Chars (noneOf specialChars) <?> "text"
+                many1Chars (anyOf specialChars) <?> "special symbol"
+            ]
+            |>> fun x -> [{ Block.empty with Text = x }]
+
+        let styles, stylesRef = createParserForwardedToRef()
+
+        let block =
+            choice [
+                attempt styles
+                text
+            ]
+
+        let insides till =
+            many1Till block till
+            |>> List.concat
 
         let style styleType symbol =
             pstring symbol
-            >>. listToSymbol symbol
-            .>> pstring symbol
-            |>> fun x -> Style (styleType, x)
-            <?> "style"
+            >>? insides (followedByString symbol)
+            |>> List.map (fun x -> { x with Style = Set.add styleType x.Style })
+            .>>? pstring symbol
+            <?> $"style {symbol}"
 
-        let allStyles = choice [
+        stylesRef.Value <- choice [
             style Bold "**"
             style Italics "*"
             style Strikethrough "~~"
@@ -83,44 +115,43 @@ module NuMark =
             style Subscript "_"
         ]
 
-        let color =
-            pstring "{"
-            >>. parseFormat (followedByString "}")
-            .>> pstring "}"
-            .>>. allStyles
-            |>> fun (x, y) -> Style (Formatted x, y)
-            <?> "color"
+        insides till
+        |>> List.fold (fun (x : Line) y ->
+            match x with
+            | [] -> [y]
+            | head::tail ->
+                if head.Style = y.Style then
+                    { head with Text = head.Text + y.Text }::tail
+                else
+                    y::x
+        ) List.empty
+        |>> List.rev
 
-        lineElementRef.Value <- choice [
-            text ['~'; '^'; '*'; '_'; '{'; '}']
-            attempt color
-            attempt allStyles
-            trailingSymbol ['~'; '^'; '*'; '_'; '{'; '}']
-        ]
+//    run parseLine "**bold ~~bold and strikethrough~~** normal *italics* ~*italics superscript*~"
+    runParserOnString (parseLine (followedBy eof)) UserState.Default "" "**bold*italics*bold2**"
 
-        many1TillOptional lineElement till
-        |>> function [ oneMember ] -> oneMember | list -> List list
+    runParserOnString (parseLine (followedBy eof)) UserState.Default "" "__bold\\\*\_bold2__*"
+    runParserOnString (parseLine (followedBy eof)) UserState.Default "" "**bold*bold2**"
+
+    runParserOnString (parseLine (followedBy eof)) UserState.Default "" "**bold ~~strike through~~ bold2**"
+    runParserOnString (parseLine (followedBy eof)) UserState.Default "" "**bold~~strike through~~bold2**"
 
     type Node =
-        | NodeList of Node list
-        | Paragraph of Nu.Justification * Line
-        | Header of Node
-        | Quote of Node
-        | Indent of Node
-        | List of Node
+        | Paragraph of Justification * Line
+        | Header of int * Node
+        | Quote of int * Node
+        | Indent of int * Node
+        | List of int * Node
         | Code
         | Codeblock
         | Table
         | Image
         | HorizontalLine
 
+    type Text = Node list
 
-    let parseNode : Parser<Node, _> =
+    let parseNode : Parser<Text, _> =
         let node, nodeRef = createParserForwardedToRef()
-
-        let list =
-            sepEndBy1 node newline
-            |>> NodeList
 
         let line =
             let line = parseLine (followedByString " |" <|> followedByString "|" <|> followedByNewline)
@@ -131,23 +162,23 @@ module NuMark =
                 >>? line
                 .>>? optional (pstring " ")
                 .>>? pstring "|"
-                |>> fun x -> Nu.Justified (Nu.JustifyCenter, Nu.JustifyMiddle), x
+                |>> fun x -> Justified (JustifyCenter, JustifyMiddle), x
 
             let left =
                 pstring "|"
                 >>? optional (pstring " ")
                 >>? line
-                |>> fun x -> Nu.Justified (Nu.JustifyLeft, Nu.JustifyMiddle), x
+                |>> fun x -> Justified (JustifyLeft, JustifyMiddle), x
 
             let right =
                 line
                 .>>? optional (pstring " ")
                 .>>? pstring "|"
-                |>> fun x -> Nu.Justified (Nu.JustifyRight, Nu.JustifyMiddle), x
+                |>> fun x -> Justified (JustifyRight, JustifyMiddle), x
 
             let no =
                 line
-                |>> fun x -> Nu.Justified (Nu.JustifyLeft, Nu.JustifyMiddle), x
+                |>> fun x -> Justified (JustifyLeft, JustifyMiddle), x
 
             optional spaces
             >>. choice [
@@ -162,15 +193,15 @@ module NuMark =
             line
         ]
 
-        list
+        sepEndBy1 node (newline >>. newline)
 
 
-    run parseNode """~~value~~ {whatever}~test~
+    runParserOnString parseNode UserState.Default "" """~~value~~ {whatever}~test~
     | testing a second line |
     whatever |
 """
 
-    run parseNode """{test}~~**This is bold text** __This is underlined text__~~
+    runParserOnString parseNode UserState.Default "" """{test}~~**This is bold text** __This is underlined text__~~
 {also a style}*This is italic text*  |
 _This is subscript text_ |
 ~~Strikethrough~~ |
@@ -178,9 +209,9 @@ _This is subscript text_ |
 """
 
     let parseNuMark string =
-        match run parseNode string with
+        match runParserOnString parseNode UserState.Default "" string with
         | Success (x, _, _) -> x
-        | Failure (_, x, _) -> Node.Paragraph (Nu.Justified (Nu.JustifyLeft, Nu.JustifyMiddle), Line.String $"%A{x}")
+        | Failure (_, x, _) -> [ Node.Paragraph (Justified (JustifyLeft, JustifyMiddle),[{ Block.empty with Text = $"%A{x}"}]) ]
 
     (*
         White space before, in the middle, etc of commands is ignored

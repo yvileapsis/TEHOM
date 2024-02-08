@@ -41,7 +41,34 @@ module RichTextFacetModule =
                 textTransform.Elevation <- transform.Elevation + shift
                 textTransform.Absolute <- transform.Absolute
 
-                let parsedText = NuMark.parseNuMark text
+                let parsedText =
+                    NuMark.parseNuMark text
+                    |> List.map (function
+                        | NuMark.Paragraph (justification, line) ->
+                            {
+                                Blocks = line
+                                |> List.map (fun block -> {
+                                    Text = block.Text
+                                    Color = Color.White
+                                    Font = Assets.Gui.MontSerratFont
+                                    FontSizing = Some 8
+                                    FontStyling = Set.fold (fun set x ->
+                                        match x with
+                                        | Bold -> Set.add FontStyle.Bold set
+                                        | Italics -> Set.add FontStyle.Italic set
+                                        | Underlined -> Set.add FontStyle.Underline set
+                                        | Strikethrough -> Set.add FontStyle.Strikethrough set
+                                        | _ -> set
+                                    ) Set.empty block.Style
+                                })
+                                Justification = justification
+                            }
+                        | _ ->
+                            {
+                                Blocks = List.empty
+                                Justification = Justification.Unjustified true
+                            }
+                    )
 
 
                 let deffont = entity.GetFont world
@@ -55,7 +82,7 @@ module RichTextFacetModule =
                     AssetTag = deffont
                     RenderOperation2d = RenderRichText {
                         Transform = textTransform
-                        Entries = [
+                        Entries = List.append parsedText [
                             {
                                 Justification = Justified (JustifyLeft, JustifyMiddle)
                                 Blocks = [
