@@ -59,10 +59,13 @@ module GameplayGui =
                 Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                 Entity.Text := """
 | Left
+
 Right |
+
 | Center |
+
 **Bold**
-{#FF0000}~~Red Strikethrough~~
+
 """
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.MontSerratFont
