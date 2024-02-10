@@ -687,9 +687,9 @@ type [<ReferenceEquality>] GlRenderer2d =
                             None
                     else None
 
-                let textWithinWidth string font offset width =
-                    // TODO: I should do something to pre-load the fonts so I don't load them every block
+                let textWithinWidth string font (offset: Vector2) (maxLineHeight: float32) (width: float32) =
                     // splits string for concrete offset and width
+                    // adds up x offset and finds max of y offset
 
                     let array = Array.ofSeq string
                     let size = Array.length array
@@ -704,53 +704,61 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     let mutable offset = offset
 
-                    let mutable blockWidth = 0
+                    let mutable currentOffset = offset.X
+
+                    let lineHeight = single (lineHeight font)
+                    let mutable maxLineHeight = max maxLineHeight lineHeight
 
                     let mutable stringList = List.empty
 
                     while i < size do
-                        blockWidth <- blockWidth + glyphMetrics font array[i]
+                        currentOffset <- currentOffset + single (glyphMetrics font array[i])
 
                         // we hit our limit for the line, splitting
-                        if blockWidth + offset > width then
+                        if currentOffset > width then
                             // TODO: check if i is correct, it probably needs to be one less as I just went over the limit
 
                             i <- i - 1
 
+
+                            // TODO: better cut on space so the new line can't start from space
                             let mutable k = i
-                            while k > j && not (Char.IsWhiteSpace array[i]) do k <- k - 1
-                            if k <> j then
+                            while k >= j && not (Char.IsWhiteSpace array[k]) do k <- k - 1
+                            if k >= j then
                                 i <- k
 
-                            stringList <- (String array[j..i])::stringList
+                            stringList <- (String array[j..i], offset)::stringList
 
                             j <- i + 1
                             i <- i + 1
-                            blockWidth <- 0
-                            offset <- 0
 
-                        i <- i + 1
+                            currentOffset <- 0.0f
+
+                            offset.X <- 0.0f
+                            offset.Y <- offset.Y - maxLineHeight
+                            maxLineHeight <- lineHeight
+                        else
+                            i <- i + 1
 
                     if (j < i) then
-                        stringList <- (String array[j..i])::stringList
+                        stringList <- (String array[j..i], offset)::stringList
 
-                    List.rev stringList, blockWidth
+                    List.rev stringList, (v2 currentOffset (offset.Y), maxLineHeight)
 
-                let reflowBlock (width: single) (block: RichTextBlock) (offset: Vector2) =
+                let reflowBlock (width: single) (block: RichTextBlock) (offset: Vector2) (maxLineHeight: float32) =
                     match tryGetFont block.Font block.FontSizing block.FontStyling renderer with
                     | Some font ->
-                        let list, offsetNew = textWithinWidth block.Text font (int offset.X) (int width)
+                        let list, (offset, maxLineHeight) = textWithinWidth block.Text font offset maxLineHeight width
                         let lineHeight = single (lineHeight font)
 
                         // TODO: rework so it looks nicer
-                        list
-                        |> List.choose (tryMakeSdlSurface font block.Color)
-                        |> List.mapi (fun i surface ->
-                            let offset = if (i = 0) then offset else v2 0.0f (offset.Y - single i * lineHeight)
-                            surface, offset
-                        )
-                        , (v2 (single offsetNew) (offset.Y - single (List.length list - 1) * lineHeight))
-                    | None -> List.empty, offset
+                        List.choose (fun (x, y) ->
+                            match (tryMakeSdlSurface font block.Color x) with
+                            | Some x -> Some (x, y)
+                            | None -> None) list
+
+                        , (offset, maxLineHeight)
+                    | None -> List.empty, (offset, maxLineHeight)
 
                 let reflowLine (width: single) (line: RichTextLine) (offset: Vector2) =
                     // TODO: Margins (?)
@@ -764,9 +772,11 @@ type [<ReferenceEquality>] GlRenderer2d =
                     // TODO: justify vertically somehow
                     // TODO: subscript, superscript
 
+                    let offset = v2 0.0f offset.Y
+
                     line.Blocks
-                    |> List.foldMap (reflowBlock width) (v2 0.0f offset.Y)
-                    |> fun (fst, snd) -> List.concat fst, snd
+                    |> List.foldMap (fun x (y, z) -> reflowBlock width x y z) (offset, 0.0f)
+                    |> fun (fst, (snd, third)) -> List.concat fst, (v2 snd.X (snd.Y - third))
 
                 List.foldMap (reflowLine width) Vector2.Zero
                 >> fst

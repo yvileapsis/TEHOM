@@ -115,20 +115,27 @@ module RichTextFacetModule =
                                 Blocks = [
                                     {
                                         Text = "1. Testing a simple sentence."
-                                        Color = Color.Red
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList []
-                                    }
-                                    {
-                                        Text = "2. Continuing testing a simple sentence."
                                         Color = Color.White
                                         Font = Assets.Gui.MontSerratFont
                                         FontSizing = Some 12
                                         FontStyling = Set.ofList []
                                     }
                                     {
-                                        Text = "3. Finishing testing a simple sentence."
+                                        Text = " 2. Continuing testing a simple sentence."
+                                        Color = Color.White
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 12
+                                        FontStyling = Set.ofList []
+                                    }
+                                    {
+                                        Text = " 3. Continuing testing a simple sentence."
+                                        Color = Color.White
+                                        Font = Assets.Gui.MontSerratFont
+                                        FontSizing = Some 12
+                                        FontStyling = Set.ofList []
+                                    }
+                                    {
+                                        Text = " 4. Finishing testing a simple sentence."
                                         Color = Color.White
                                         Font = Assets.Gui.MontSerratFont
                                         FontSizing = Some 12
@@ -141,21 +148,21 @@ module RichTextFacetModule =
                                 Justification = Justified (JustifyRight, JustifyMiddle)
                                 Blocks = [
                                     {
-                                        Text = "1. Testing a simple sentence."
+                                        Text = "1. Testing a simple sentence. "
                                         Color = Color.Red
                                         Font = Assets.Gui.MontSerratFont
                                         FontSizing = Some 12
                                         FontStyling = Set.ofList [ FontStyle.Bold ]
                                     }
                                     {
-                                        Text = "2. Continuing testing a simple sentence."
+                                        Text = "2. Continuing testing a simple sentence. "
                                         Color = Color.White
                                         Font = Assets.Gui.MontSerratFont
                                         FontSizing = Some 12
                                         FontStyling = Set.ofList []
                                     }
                                     {
-                                        Text = "3. Finishing testing a simple sentence."
+                                        Text = "3. Finishing testing a simple sentence. "
                                         Color = Color.White
                                         Font = Assets.Gui.MontSerratFont
                                         FontSizing = Some 12
