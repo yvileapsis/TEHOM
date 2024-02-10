@@ -655,11 +655,12 @@ type [<ReferenceEquality>] GlRenderer2d =
                 let glyphMetrics font (char : char) =
                     let mutable advance = 0
                     // TODO: Do it in the correct F# manner by figuring out how to pass byref nullptr
-                    let mutable minx = 0
-                    let mutable maxx = 0
-                    let mutable miny = 0
-                    let mutable maxy = 0
-                    let errorCode = SDL_ttf.TTF_GlyphMetrics32 (font, uint32 char, &minx, &maxx, &miny, &maxy, &advance)
+//                    let mutable minx = 0
+//                    let mutable maxx = 0
+//                    let mutable miny = 0
+//                    let mutable maxy = 0
+                    let mutable unused = 0
+                    let errorCode = SDL_ttf.TTF_GlyphMetrics32 (font, uint32 char, &unused, &unused, &unused, &unused, &advance)
                     if errorCode <> 0 then
                         let error = SDL_ttf.TTF_GetError ()
                         Log.infoOnce $"Failed to get glyph metrics for '{char}' with font '{scstring font}' due to: {error}"
