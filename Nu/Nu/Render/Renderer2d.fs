@@ -678,7 +678,29 @@ type [<ReferenceEquality>] GlRenderer2d =
                     IntPtr.Zero
 
             // rework text into lines of concrete width and justification
-            let reflowText list =
+            let reflowText (list: RichTextLine list) =
+
+                (*
+                Let's think about it:
+                We start with list of lists of string * font
+                Starting at 0 we try to fit as much characters as we can (words actually)
+                so I make LL (string*offsetX list * font)
+                Biggest issue is that I don't record where I wrap
+                The easiest solution is (string*offsetX*newLine list)
+                After I render this shit I can drop font and string and get
+                (surface*offsetX*lineHeight*newLine)
+                I concat this inside a single line
+                then I separate it by newLine true
+                within each group I cal max lineHeight
+
+                (surface*offsetX) list * maxLineHeight
+                (surface*offsetX*maxLineHeight)
+                and finally I foldMap through groups to add up lineHeight and get
+                (surface*offset)
+
+                *)
+
+
 
                 // setting reflow width to size of entity
                 let width = size.X
@@ -687,63 +709,73 @@ type [<ReferenceEquality>] GlRenderer2d =
                     // Magic numbers lifted from SDL_rtf
                     (((twips * 64 * 72 + (36 + 32 * 72)) / 72) / 20) / 64;
 
+                // splits string for concrete offset and width
+                // adds up x offset and finds max of y offset
                 let textWithinWidth (string: string) font offset =
-                    // splits string for concrete offset and width
-                    // adds up x offset and finds max of y offset
 
-                    let size = String.length string
+                    let glyphWidth char = single (charWidth font char)
 
                     // Lots of mutables as my head hurts from trying to come up with how do this functionally
                     // Also it's probably faster
 
-                    // main iterator, where in the char array we are
-                    let mutable i = 0
                     // secondary iterator, where in the char array current string starts
-                    let mutable j = 0
+                    // main iterator, where in the char array we are
+                    let mutable iterLeft = 0
+                    let mutable iterRight = 0
+
+                    let mutable stringList :
+                      {| Text: string
+                         OffsetX: float32
+                         NewLine: bool |} list = List.empty
 
                     let mutable currentOffset : float32 = offset
-
-                    let mutable stringList : (string * Vector2) list = List.empty
-
                     let mutable offset = offset
 
-                    let lineHeight = single (fontHeight font)
+                    let mutable newLine = false
 
-                    let glyphWidth char = single (charWidth font char)
+                    let stringLength = String.length string
 
-                    while i < size do
-                        currentOffset <- currentOffset + glyphWidth string[i]
+                    while iterRight < stringLength do
+                        currentOffset <- currentOffset + glyphWidth string[iterRight]
 
                         // we hit our limit for the line, splitting
                         if currentOffset > width then
-                            // TODO: check if i is correct, it probably needs to be one less as I just went over the limit
 
-                            i <- i - 1
+                            // there is a rare case where splitting happens immediately, making string empty
+                            if iterLeft < iterRight then
 
+                                // moving back once as we went over the limit with that last one
+                                iterRight <- iterRight - 1
 
-                            // TODO: better cut on space so the new line can't start from space
-                            let mutable k = i
-                            while k >= j && not (Char.IsWhiteSpace string[k]) do k <- k - 1
-                            if k >= j then
-                                i <- k
+                                // finding last word to split on
+                                let mutable k = iterRight
+                                while k >= iterLeft && not (Char.IsWhiteSpace string[k]) do k <- k - 1
+                                if k >= iterLeft then
+                                    iterRight <- k
 
-                            stringList <- (String string[j..i], v2 offset lineHeight)::stringList
+                                stringList <-
+                                  {| Text = string[iterLeft..iterRight]
+                                     OffsetX = offset
+                                     NewLine = newLine |} :: stringList
 
-                            j <- i + 1
-                            i <- i + 1
+                                iterLeft <- iterRight + 1
+                                iterRight <- iterRight + 1
 
                             currentOffset <- 0.0f
-
                             offset <- 0.0f
+                            newLine <- true
                         else
-                            i <- i + 1
+                            iterRight <- iterRight + 1
 
-                    if (j < i) then
-                        stringList <- (String string[j..i], v2 offset lineHeight)::stringList
+                    if (iterLeft < iterRight) then
+                        stringList <-
+                          {| Text = string[iterLeft..iterRight]
+                             OffsetX = offset
+                             NewLine = newLine |} :: stringList
 
                     stringList, currentOffset
 
-                let reflowBlock offset (block: RichTextBlock) texList =
+                let reflowBlock (block: RichTextBlock) offset =
 
                     let font =
                         let font = getFont block.Font block.FontSizing block.FontStyling
@@ -753,32 +785,27 @@ type [<ReferenceEquality>] GlRenderer2d =
                             // TODO: implement default font in a better way
                             getFont (asset<Font> Assets.Default.PackageName Assets.Default.FontName) None Set.empty
 
+                    let lineHeight = single (fontHeight font)
 
                     let stringList, offset = textWithinWidth block.Text font offset
 
-                    // TODO: rework so it looks nicer
-                    let newTextList =
-                        List.map (fun (string, y) ->
-                            if string <> "" then
-                                renderSdlSurface font block.Color string, y
-                            else
-                                IntPtr.Zero, y
-                        ) stringList
-                        |> List.rev
+                    let surfaceList :
+                      {| Surface: nativeint
+                         OffsetX: float32
+                         LineHeight: float32
+                         NewLine: bool |} list =
 
-                    let combinedList =
-                        match newTextList, texList with
-                        | [], [] -> []
-                        | x, [] -> [x]
-                        | [], x -> x
-                        | [x], [y] -> [x::y]
-                        | [x], head::tail -> (x::head)::tail
-                        | head::tail, [y] -> List.append (List.map (fun x -> [x]) tail) [head::y]
-                        | ihead::itail, ohead::otail -> List.append (List.map (fun x -> [x]) itail) ((ihead::ohead)::otail)
+                        stringList
+                        |> List.map (fun value ->
+                            {| Surface = renderSdlSurface font block.Color value.Text
+                               OffsetX = value.OffsetX
+                               LineHeight = lineHeight
+                               NewLine = value.NewLine |}
+                        )
 
-                    combinedList, offset
+                    surfaceList, offset
 
-                let reflowLine (line: RichTextLine) =
+                let reflowLine (line: RichTextLine) (offset: float32) =
                     // TODO: Margins (?)
                     // TODO: Tabs (?)
 
@@ -790,58 +817,54 @@ type [<ReferenceEquality>] GlRenderer2d =
                     // TODO: justify vertically somehow
                     // TODO: subscript, superscript
 
+                    let startingOffset = 0.0f
 
-                    List.fold (fun (list, offset) block ->
-
-                        let newList, offset = reflowBlock offset block list
-
-                        newList, offset
-
-                    ) (List.empty, 0.0f) line.Blocks
-
+                    line.Blocks
+                    // cut up blocks into manageable fragments that fit lines
+                    |> List.foldMap reflowBlock startingOffset
                     |> fst
-                    |> List.map (fun x ->
-                        let lineHeight : float32 =
-                            List.fold (fun maxHeight (_, vector : Vector2) ->
-                                max vector.Y maxHeight
-                            ) 0.0f x
+                    |> List.concat
+                    // make a new list of lists separated by newlines, with information regarding line height
+                    |> List.fold (fun (listOfLists, currentList, maxLineHeight) value ->
 
-                        x, lineHeight
-                    )
+                        let newValue =
+                          {| Surface = value.Surface
+                             OffsetX = value.OffsetX |}
+
+                        if value.NewLine then
+                            let listOfLists = (currentList, maxLineHeight)::listOfLists
+                            let currentList = List.empty
+                            let currentList = newValue::currentList
+                            let maxLineHeight = value.LineHeight
+
+                            listOfLists, currentList, maxLineHeight
+                        else
+                            let currentList = newValue::currentList
+                            let maxLineHeight = max maxLineHeight value.LineHeight
+
+                            listOfLists, currentList, maxLineHeight
+
+                    ) (List.empty, List.empty, 0.0f)
+                    |> fun (listOfLists, currentList, maxLineHeight) -> (currentList, maxLineHeight)::listOfLists
+
+                    |> List.foldMap (fun (list, lineHeight) state ->
+                        (list, state), state - lineHeight
+                    ) offset
+
+
+                let list, sizeY = List.foldMap reflowLine 0.0f list
 
                 list
-                |> List.map reflowLine
-                |> List.map List.rev
                 |> List.concat
-                |> List.map (fun (list, yoff) ->
-
+                |> List.map (fun (list, offsetY) ->
                     list
-                    |> List.fold (fun state (surface, y) ->
-                    if surface <> IntPtr.Zero then
-                        (surface, y)::state
-                    else
-                        state
-                    ) List.empty
-                    |> List.rev
-                    , yoff
+                    |> List.map (fun value -> value.Surface, v2 value.OffsetX offsetY)
                 )
-                |> List.foldMap (fun (list, height) state ->
-
-                    let state = state - height
-
-                    let list =
-                        list
-                        |> List.map (fun (texture, pos) ->
-                            texture, v2 pos.X state
-                        )
-
-                    list, state
-                ) 0.0f
-                |> fun (fst, snd) -> List.concat fst, snd
+                |> List.concat, sizeY
 
             let renderSprites (surfaces, offset) =
 
-                let position = position + v2 0.0f (size.Y + offset)
+                let position = position + v2 0.0f (size.Y)
 
                 // renders a single block, assumes filtered input
                 let renderOpenGLSprite (textSurfacePtr, offset: Vector2) =
