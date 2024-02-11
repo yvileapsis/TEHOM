@@ -593,7 +593,7 @@ type [<ReferenceEquality>] GlRenderer2d =
     /// Render rich text.
     static member renderRichText
         (transform : Transform byref,
-         textToRender : RichTextLine list,
+         text : RichTextLine list,
          eyeCenter : Vector2,
          eyeSize : Vector2,
          renderer : GlRenderer2d) =
@@ -608,12 +608,11 @@ type [<ReferenceEquality>] GlRenderer2d =
             let perimeter = transform.Perimeter
             let position = perimeter.Min.V2 * Constants.Render.VirtualScalar2
             let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2
-            let position = position + v2 0.0f size.Y
             let viewport = Constants.Render.Viewport
             let viewProjection = viewport.ViewProjection2d (absolute, eyeCenter, eyeSize)
 
+            // get font pointer for point asset and set its styling and sizing
             let getFont fontAsset fontSizing (fontStyling: Set<FontStyle>) =
-                // render only when color isn't fully transparent because SDL_TTF doesn't handle zero alpha text as expected.
                 match GlRenderer2d.tryGetRenderAsset fontAsset renderer with
                 | ValueSome renderAsset ->
                     match renderAsset with
@@ -647,44 +646,46 @@ type [<ReferenceEquality>] GlRenderer2d =
                     Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring fontAsset + "'.")
                     IntPtr.Zero
 
-            let reflowText (width: single) list =
+            // get line height for a font
+            let fontHeight font =
+                SDL_ttf.TTF_FontLineSkip font
+
+            // get single char width for a font
+            let charWidth font (char : char) =
+                let mutable advance = 0
+                let mutable unused = 0
+                let errorCode = SDL_ttf.TTF_GlyphMetrics32 (font, uint32 char, &unused, &unused, &unused, &unused, &advance)
+                if errorCode <> 0 then
+                    let error = SDL_ttf.TTF_GetError ()
+                    Log.infoOnce $"Failed to get glyph metrics for '{char}' with font '{scstring font}' due to: {error}"
+                advance
+
+            // gather rendering resources
+            // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
+            // surface and texture one or more times a frame must be understood!
+            let renderSdlSurface font (color: Color) text =
+                // render only when color isn't fully transparent because SDL_TTF doesn't handle zero alpha text as expected.
+                if color.A8 <> 0uy then
+                    // create sdl color
+                    let mutable colorSdl = SDL.SDL_Color ()
+                    colorSdl.r <- color.R8
+                    colorSdl.g <- color.G8
+                    colorSdl.b <- color.B8
+                    colorSdl.a <- color.A8
+
+                    SDL_ttf.TTF_RenderUNICODE_Blended (font, text, colorSdl)
+                else
+                    IntPtr.Zero
+
+            // rework text into lines of concrete width and justification
+            let reflowText list =
+
+                // setting reflow width to size of entity
+                let width = size.X
 
                 let twipsToPixels twips =
                     // Magic numbers lifted from SDL_rtf
                     (((twips * 64 * 72 + (36 + 32 * 72)) / 72) / 20) / 64;
-
-                let lineHeight font =
-                    SDL_ttf.TTF_FontLineSkip font
-
-                let glyphMetrics font (char : char) =
-                    let mutable advance = 0
-                    // TODO: Do it in the correct F# manner by figuring out how to pass byref nullptr
-//                    let mutable minx = 0
-//                    let mutable maxx = 0
-//                    let mutable miny = 0
-//                    let mutable maxy = 0
-                    let mutable unused = 0
-                    let errorCode = SDL_ttf.TTF_GlyphMetrics32 (font, uint32 char, &unused, &unused, &unused, &unused, &advance)
-                    if errorCode <> 0 then
-                        let error = SDL_ttf.TTF_GetError ()
-                        Log.infoOnce $"Failed to get glyph metrics for '{char}' with font '{scstring font}' due to: {error}"
-                    advance
-
-                // gather rendering resources
-                // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
-                // surface and texture one or more times a frame must be understood!
-                let makeSdlSurface font (color: Color) text =
-                    if color.A8 <> 0uy then
-                        // create sdl color
-                        let mutable colorSdl = SDL.SDL_Color ()
-                        colorSdl.r <- color.R8
-                        colorSdl.g <- color.G8
-                        colorSdl.b <- color.B8
-                        colorSdl.a <- color.A8
-
-                        SDL_ttf.TTF_RenderUNICODE_Blended (font, text, colorSdl)
-                    else
-                        IntPtr.Zero
 
                 let textWithinWidth (string: string) font offset =
                     // splits string for concrete offset and width
@@ -706,9 +707,9 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     let mutable offset = offset
 
-                    let lineHeight = single (lineHeight font)
+                    let lineHeight = single (fontHeight font)
 
-                    let glyphWidth char = single (glyphMetrics font char)
+                    let glyphWidth char = single (charWidth font char)
 
                     while i < size do
                         currentOffset <- currentOffset + glyphWidth string[i]
@@ -759,7 +760,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                     let newTextList =
                         List.map (fun (string, y) ->
                             if string <> "" then
-                                makeSdlSurface font block.Color string, y
+                                renderSdlSurface font block.Color string, y
                             else
                                 IntPtr.Zero, y
                         ) stringList
@@ -808,7 +809,6 @@ type [<ReferenceEquality>] GlRenderer2d =
                         x, lineHeight
                     )
 
-
                 list
                 |> List.map reflowLine
                 |> List.map List.rev
@@ -837,56 +837,63 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     list, state
                 ) 0.0f
-                |> fst
-                |> List.concat
+                |> fun (fst, snd) -> List.concat fst, snd
 
+            let renderSprites (surfaces, offset) =
 
+                let position = position + v2 0.0f (size.Y + offset)
 
-            // renders a single block
-            let render (textSurfacePtr, offset: Vector2) =
+                // renders a single block, assumes filtered input
+                let renderOpenGLSprite (textSurfacePtr, offset: Vector2) =
 
-                let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface> textSurfacePtr
+                    let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface> textSurfacePtr
 
-                // construct mvp matrix
-                let textSurfaceWidth = textSurface.pitch / 4 // NOTE: textSurface.w may be an innacurate representation of texture width in SDL2_ttf versions beyond v2.0.15 because... I don't know why.
-                let textSurfaceHeight = textSurface.h
-                let translation = (position + offset).V3
-                let scale = v3 (single textSurfaceWidth) (single textSurfaceHeight) 1.0f
-                let modelTranslation = Matrix4x4.CreateTranslation translation
-                let modelScale = Matrix4x4.CreateScale scale
-                let modelMatrix = modelScale * modelTranslation
-                let modelViewProjection = modelMatrix * viewProjection
+                    // construct mvp matrix
+                    let textSurfaceWidth = textSurface.pitch / 4 // NOTE: textSurface.w may be an innacurate representation of texture width in SDL2_ttf versions beyond v2.0.15 because... I don't know why.
+                    let textSurfaceHeight = textSurface.h
+                    let translation = (position + offset).V3
+                    let scale = v3 (single textSurfaceWidth) (single textSurfaceHeight) 1.0f
+                    let modelTranslation = Matrix4x4.CreateTranslation translation
+                    let modelScale = Matrix4x4.CreateScale scale
+                    let modelMatrix = modelScale * modelTranslation
+                    let modelViewProjection = modelMatrix * viewProjection
 
-                // upload texture data
-                let textTextureId = OpenGL.Gl.GenTexture ()
-                OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, textTextureId)
-                OpenGL.Gl.TexImage2D (OpenGL.TextureTarget.Texture2d, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, textSurface.pixels)
-                OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMinFilter, int OpenGL.TextureMinFilter.Nearest)
-                OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMagFilter, int OpenGL.TextureMagFilter.Nearest)
-                OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, 0u)
-                OpenGL.Hl.Assert ()
+                    // upload texture data
+                    let textTextureId = OpenGL.Gl.GenTexture ()
+                    OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, textTextureId)
+                    OpenGL.Gl.TexImage2D (OpenGL.TextureTarget.Texture2d, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, textSurface.pixels)
+                    OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMinFilter, int OpenGL.TextureMinFilter.Nearest)
+                    OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMagFilter, int OpenGL.TextureMagFilter.Nearest)
+                    OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, 0u)
+                    OpenGL.Hl.Assert ()
 
-                // make texture drawable
-                let textTexture = OpenGL.Texture.CreateTextureFromId textTextureId
-                OpenGL.Hl.Assert ()
+                    // make texture drawable
+                    let textTexture = OpenGL.Texture.CreateTextureFromId textTextureId
+                    OpenGL.Hl.Assert ()
 
-                // draw text sprite
-                // NOTE: we allocate an array here, too.
-                let (vertices, indices, vao) = renderer.TextQuad
-                let (modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader) = renderer.SpriteShader
-                OpenGL.Sprite.DrawSprite (vertices, indices, vao, modelViewProjection.ToArray (), ValueNone, Color.White, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader)
-                OpenGL.Hl.Assert ()
+                    // draw text sprite
+                    // NOTE: we allocate an array here, too.
+                    let (vertices, indices, vao) = renderer.TextQuad
+                    let (modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader) = renderer.SpriteShader
+                    OpenGL.Sprite.DrawSprite (vertices, indices, vao, modelViewProjection.ToArray (), ValueNone, Color.White, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader)
+                    OpenGL.Hl.Assert ()
 
-                // destroy texture
-                SDL.SDL_FreeSurface textSurfacePtr
-                OpenGL.Texture.DestroyTexture textTexture
-                OpenGL.Hl.Assert ()
+                    // destroy texture
+                    SDL.SDL_FreeSurface textSurfacePtr
+                    OpenGL.Texture.DestroyTexture textTexture
+                    OpenGL.Hl.Assert ()
 
-            // TODO: clear pipeline of what goes where
-            // End target before render is surface * surfaceptr * position 
-            textToRender
-            |> reflowText size.X
-            |> List.iter render
+                List.iter renderOpenGLSprite surfaces
+
+            // Main Pipeline
+            // take text
+            text
+
+            // cut it up into lines and render those into SDL surfaces
+            |> reflowText
+
+            // render SDL surfaces as sprites on OpenGL screen
+            |> renderSprites
 
             OpenGL.Hl.Assert ()
 
