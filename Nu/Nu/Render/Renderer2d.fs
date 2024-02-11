@@ -680,28 +680,6 @@ type [<ReferenceEquality>] GlRenderer2d =
             // rework text into lines of concrete width and justification
             let reflowText (list: RichTextLine list) =
 
-                (*
-                Let's think about it:
-                We start with list of lists of string * font
-                Starting at 0 we try to fit as much characters as we can (words actually)
-                so I make LL (string*offsetX list * font)
-                Biggest issue is that I don't record where I wrap
-                The easiest solution is (string*offsetX*newLine list)
-                After I render this shit I can drop font and string and get
-                (surface*offsetX*lineHeight*newLine)
-                I concat this inside a single line
-                then I separate it by newLine true
-                within each group I cal max lineHeight
-
-                (surface*offsetX) list * maxLineHeight
-                (surface*offsetX*maxLineHeight)
-                and finally I foldMap through groups to add up lineHeight and get
-                (surface*offset)
-
-                *)
-
-
-
                 // setting reflow width to size of entity
                 let width = size.X
 
@@ -711,7 +689,7 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                 // splits string for concrete offset and width
                 // adds up x offset and finds max of y offset
-                let textWithinWidth (string: string) font offset =
+                let splitBlock (string: string) font offset =
 
                     let glyphWidth char = single (charWidth font char)
 
@@ -787,7 +765,7 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     let lineHeight = single (fontHeight font)
 
-                    let stringList, offset = textWithinWidth block.Text font offset
+                    let stringList, offset = splitBlock block.Text font offset
 
                     let surfaceList :
                       {| Surface: nativeint
@@ -809,9 +787,6 @@ type [<ReferenceEquality>] GlRenderer2d =
                     // TODO: Margins (?)
                     // TODO: Tabs (?)
 
-                    // TODO: new line intersects with text
-                    // TODO: something is wrong with horizontal offset
-                    // TODO: vertical offsets should take into account all fonts on the line and take maximum
                     // TODO: justification
                     // TODO: justify justification
                     // TODO: justify vertically somehow
@@ -846,7 +821,7 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     ) (List.empty, List.empty, 0.0f)
                     |> fun (listOfLists, currentList, maxLineHeight) -> (currentList, maxLineHeight)::listOfLists
-
+                    // map vertical offsets for lines
                     |> List.foldMap (fun (list, lineHeight) state ->
                         (list, state), state - lineHeight
                     ) offset
@@ -856,12 +831,16 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                 list
                 |> List.concat
+
                 |> List.map (fun (list, offsetY) ->
                     list
                     |> List.map (fun value -> value.Surface, v2 value.OffsetX offsetY)
                 )
-                |> List.concat, sizeY
+                |> List.concat
 
+                |> List.filter (fun (surface, _) -> surface <> IntPtr.Zero), sizeY
+
+            // render prepared surfaces with OpenGL
             let renderSprites (surfaces, offset) =
 
                 let position = position + v2 0.0f (size.Y)
