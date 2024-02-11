@@ -90,7 +90,7 @@ module RichTextFacetModule =
                                         Text = "1. Testing a simple sentence."
                                         Color = Color.Red
                                         Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 8
+                                        FontSizing = Some 14
                                         FontStyling = Set.ofList [ FontStyle.Bold ]
                                     }
                                     {
@@ -104,7 +104,7 @@ module RichTextFacetModule =
                                         Text = "3. Finishing testing a simple sentence."
                                         Color = Color.White
                                         Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 14
+                                        FontSizing = Some 10
                                         FontStyling = Set.ofList [ FontStyle.Italic ]
                                     }
                                 ]

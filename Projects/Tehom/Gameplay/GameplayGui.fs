@@ -54,7 +54,8 @@ module GameplayGui =
                ]
 
             richText (Simulants.GameplayTextBox.Name + "!" + "test") [
-                Entity.Position == v3 120.0f 120.0f 0.0f
+                Entity.Size == v3 600.0f 100.0f 0.0f
+                Entity.Position == v3 -36.0f 120.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                 Entity.Text := """

@@ -608,16 +608,16 @@ type [<ReferenceEquality>] GlRenderer2d =
             let perimeter = transform.Perimeter
             let position = perimeter.Min.V2 * Constants.Render.VirtualScalar2
             let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2
+            let position = position + v2 0.0f size.Y
             let viewport = Constants.Render.Viewport
             let viewProjection = viewport.ViewProjection2d (absolute, eyeCenter, eyeSize)
 
-            let tryGetFont font fontSizing (fontStyling: Set<FontStyle>) renderer =
+            let getFont fontAsset fontSizing (fontStyling: Set<FontStyle>) =
                 // render only when color isn't fully transparent because SDL_TTF doesn't handle zero alpha text as expected.
-                match GlRenderer2d.tryGetRenderAsset font renderer with
+                match GlRenderer2d.tryGetRenderAsset fontAsset renderer with
                 | ValueSome renderAsset ->
                     match renderAsset with
                     | FontAsset (fontSizeDefault, font) ->
-
                         // attempt to configure sdl font size
                         let fontSize =
                             match fontSizing with
@@ -639,11 +639,15 @@ type [<ReferenceEquality>] GlRenderer2d =
                                 (if fontStyling.Contains Strikethrough then SDL_ttf.TTF_STYLE_STRIKETHROUGH else 0)
                             else 0
                         SDL_ttf.TTF_SetFontStyle (font, styleSdl)
-                        Some font
-                    | _ -> Log.infoOnce ("Cannot render text with a non-font asset for '" + scstring font + "'."); None
-                | _ -> Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring font + "'."); None
+                        font
+                    | _ ->
+                        Log.infoOnce ("Cannot render text with a non-font asset for '" + scstring fontAsset + "'.")
+                        IntPtr.Zero
+                | _ ->
+                    Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring fontAsset + "'.")
+                    IntPtr.Zero
 
-            let reflowText (width: single) =
+            let reflowText (width: single) list =
 
                 let twipsToPixels twips =
                     // Magic numbers lifted from SDL_rtf
@@ -669,8 +673,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                 // gather rendering resources
                 // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
                 // surface and texture one or more times a frame must be understood!
-                let tryMakeSdlSurface font (color: Color) text =
-                    // compared to renderText moved heree as each chunk of text has its own color
+                let makeSdlSurface font (color: Color) text =
                     if color.A8 <> 0uy then
                         // create sdl color
                         let mutable colorSdl = SDL.SDL_Color ()
@@ -679,20 +682,15 @@ type [<ReferenceEquality>] GlRenderer2d =
                         colorSdl.b <- color.B8
                         colorSdl.a <- color.A8
 
-                        let textSurfacePtr = SDL_ttf.TTF_RenderUNICODE_Blended (font, text, colorSdl)
+                        SDL_ttf.TTF_RenderUNICODE_Blended (font, text, colorSdl)
+                    else
+                        IntPtr.Zero
 
-                        if textSurfacePtr <> IntPtr.Zero then
-                            Some textSurfacePtr
-                        else
-                            None
-                    else None
-
-                let textWithinWidth string font (offset: Vector2) (maxLineHeight: float32) (width: float32) =
+                let textWithinWidth (string: string) font offset =
                     // splits string for concrete offset and width
                     // adds up x offset and finds max of y offset
 
-                    let array = Array.ofSeq string
-                    let size = Array.length array
+                    let size = String.length string
 
                     // Lots of mutables as my head hurts from trying to come up with how do this functionally
                     // Also it's probably faster
@@ -702,17 +700,18 @@ type [<ReferenceEquality>] GlRenderer2d =
                     // secondary iterator, where in the char array current string starts
                     let mutable j = 0
 
+                    let mutable currentOffset : float32 = offset
+
+                    let mutable stringList : (string * Vector2) list = List.empty
+
                     let mutable offset = offset
 
-                    let mutable currentOffset = offset.X
-
                     let lineHeight = single (lineHeight font)
-                    let mutable maxLineHeight = max maxLineHeight lineHeight
 
-                    let mutable stringList = List.empty
+                    let glyphWidth char = single (glyphMetrics font char)
 
                     while i < size do
-                        currentOffset <- currentOffset + single (glyphMetrics font array[i])
+                        currentOffset <- currentOffset + glyphWidth string[i]
 
                         // we hit our limit for the line, splitting
                         if currentOffset > width then
@@ -723,44 +722,62 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                             // TODO: better cut on space so the new line can't start from space
                             let mutable k = i
-                            while k >= j && not (Char.IsWhiteSpace array[k]) do k <- k - 1
+                            while k >= j && not (Char.IsWhiteSpace string[k]) do k <- k - 1
                             if k >= j then
                                 i <- k
 
-                            stringList <- (String array[j..i], offset)::stringList
+                            stringList <- (String string[j..i], v2 offset lineHeight)::stringList
 
                             j <- i + 1
                             i <- i + 1
 
                             currentOffset <- 0.0f
 
-                            offset.X <- 0.0f
-                            offset.Y <- offset.Y - maxLineHeight
-                            maxLineHeight <- lineHeight
+                            offset <- 0.0f
                         else
                             i <- i + 1
 
                     if (j < i) then
-                        stringList <- (String array[j..i], offset)::stringList
+                        stringList <- (String string[j..i], v2 offset lineHeight)::stringList
 
-                    List.rev stringList, (v2 currentOffset (offset.Y), maxLineHeight)
+                    stringList, currentOffset
 
-                let reflowBlock (width: single) (block: RichTextBlock) (offset: Vector2) (maxLineHeight: float32) =
-                    match tryGetFont block.Font block.FontSizing block.FontStyling renderer with
-                    | Some font ->
-                        let list, (offset, maxLineHeight) = textWithinWidth block.Text font offset maxLineHeight width
-                        let lineHeight = single (lineHeight font)
+                let reflowBlock offset (block: RichTextBlock) texList =
 
-                        // TODO: rework so it looks nicer
-                        List.choose (fun (x, y) ->
-                            match (tryMakeSdlSurface font block.Color x) with
-                            | Some x -> Some (x, y)
-                            | None -> None) list
+                    let font =
+                        let font = getFont block.Font block.FontSizing block.FontStyling
+                        if font <> IntPtr.Zero then
+                            font
+                        else
+                            // TODO: implement default font in a better way
+                            getFont (asset<Font> Assets.Default.PackageName Assets.Default.FontName) None Set.empty
 
-                        , (offset, maxLineHeight)
-                    | None -> List.empty, (offset, maxLineHeight)
 
-                let reflowLine (width: single) (line: RichTextLine) (offset: Vector2) =
+                    let stringList, offset = textWithinWidth block.Text font offset
+
+                    // TODO: rework so it looks nicer
+                    let newTextList =
+                        List.map (fun (string, y) ->
+                            if string <> "" then
+                                makeSdlSurface font block.Color string, y
+                            else
+                                IntPtr.Zero, y
+                        ) stringList
+                        |> List.rev
+
+                    let combinedList =
+                        match newTextList, texList with
+                        | [], [] -> []
+                        | x, [] -> [x]
+                        | [], x -> x
+                        | [x], [y] -> [x::y]
+                        | [x], head::tail -> (x::head)::tail
+                        | head::tail, [y] -> List.append (List.map (fun x -> [x]) tail) [head::y]
+                        | ihead::itail, ohead::otail -> List.append (List.map (fun x -> [x]) itail) ((ihead::ohead)::otail)
+
+                    combinedList, offset
+
+                let reflowLine (line: RichTextLine) =
                     // TODO: Margins (?)
                     // TODO: Tabs (?)
 
@@ -772,15 +789,57 @@ type [<ReferenceEquality>] GlRenderer2d =
                     // TODO: justify vertically somehow
                     // TODO: subscript, superscript
 
-                    let offset = v2 0.0f offset.Y
 
-                    line.Blocks
-                    |> List.foldMap (fun x (y, z) -> reflowBlock width x y z) (offset, 0.0f)
-                    |> fun (fst, (snd, third)) -> List.concat fst, (v2 snd.X (snd.Y - third))
+                    List.fold (fun (list, offset) block ->
 
-                List.foldMap (reflowLine width) Vector2.Zero
-                >> fst
-                >> List.concat
+                        let newList, offset = reflowBlock offset block list
+
+                        newList, offset
+
+                    ) (List.empty, 0.0f) line.Blocks
+
+                    |> fst
+                    |> List.map (fun x ->
+                        let lineHeight : float32 =
+                            List.fold (fun maxHeight (_, vector : Vector2) ->
+                                max vector.Y maxHeight
+                            ) 0.0f x
+
+                        x, lineHeight
+                    )
+
+
+                list
+                |> List.map reflowLine
+                |> List.map List.rev
+                |> List.concat
+                |> List.map (fun (list, yoff) ->
+
+                    list
+                    |> List.fold (fun state (surface, y) ->
+                    if surface <> IntPtr.Zero then
+                        (surface, y)::state
+                    else
+                        state
+                    ) List.empty
+                    |> List.rev
+                    , yoff
+                )
+                |> List.foldMap (fun (list, height) state ->
+
+                    let state = state - height
+
+                    let list =
+                        list
+                        |> List.map (fun (texture, pos) ->
+                            texture, v2 pos.X state
+                        )
+
+                    list, state
+                ) 0.0f
+                |> fst
+                |> List.concat
+
 
 
             // renders a single block
