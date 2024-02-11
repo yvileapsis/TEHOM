@@ -885,6 +885,8 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                 List.iter renderOpenGLSprite surfaces
 
+                OpenGL.Hl.Assert ()
+
             // Main Pipeline
             // take text
             text
@@ -894,8 +896,6 @@ type [<ReferenceEquality>] GlRenderer2d =
 
             // render SDL surfaces as sprites on OpenGL screen
             |> renderSprites
-
-            OpenGL.Hl.Assert ()
 
         static member renderText
         (transform : Transform byref,
