@@ -5,15 +5,19 @@ open Actor
 
 module GameplayGui =
 
-    let Gui (gameplay: Gameplay) =
+    let Background (gameplay: Gameplay) =
 
-        Content.group Simulants.GameplayGui.Name [] [// time
-
+        Content.group Simulants.GameplayBackground.Name [] [
             Content.staticSprite "Background" [
                 Entity.Size == Constants.Render.VirtualResolution.V3
                 Entity.StaticImage == Assets.Default.Black
                 Entity.Color == Color.Black
             ]
+        ]
+
+    let Gui (gameplay: Gameplay) =
+
+        Content.group Simulants.GameplayGui.Name [] [// time
 
             Content.text Simulants.GameplayGametime.Name [
                 Entity.Position == v3 384.0f 240.0f 0.0f

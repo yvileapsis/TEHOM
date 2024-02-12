@@ -27,6 +27,7 @@ module Simulants =
 
     // gameplay screen
     let Gameplay = Game / "Gameplay"
+    let GameplayBackground = Gameplay / "Background"
     let GameplayGui = Gameplay / "Gui"
     let GameplayGametime = GameplayGui / "Gametime"
     let GameplayTime = GameplayGui / "Time"

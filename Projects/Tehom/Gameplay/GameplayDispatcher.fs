@@ -56,6 +56,7 @@ module GameplayDispatcher =
         // here we describe the content of the game including the level, the hud, and the player
         override this.Content (gameplay, _) = [// the gui group
 
+            GameplayGui.Background gameplay
             GameplayGui.Gui gameplay
 
             // the scene group while playing or quitting
