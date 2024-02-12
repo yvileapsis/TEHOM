@@ -696,12 +696,11 @@ type [<ReferenceEquality>] GlRenderer2d =
                     // Lots of mutables as my head hurts from trying to come up with how do this functionally
                     // Also it's probably faster
 
-                    // secondary iterator, where in the char array current string starts
-                    // main iterator, where in the char array we are
+                    // iterators determining substring
                     let mutable iterLeft = 0
                     let mutable iterRight = 0
 
-                    let mutable stringList :
+                    let mutable list :
                       {| Text: string
                          OffsetX: float32
                          NewLine: bool |} list = List.empty
@@ -731,10 +730,10 @@ type [<ReferenceEquality>] GlRenderer2d =
                                 if k >= iterLeft then
                                     iterRight <- k
 
-                                stringList <-
+                                list <-
                                   {| Text = string[iterLeft..iterRight]
                                      OffsetX = offset
-                                     NewLine = newLine |} :: stringList
+                                     NewLine = newLine |} :: list
 
                                 iterLeft <- iterRight + 1
                                 iterRight <- iterRight + 1
@@ -746,12 +745,12 @@ type [<ReferenceEquality>] GlRenderer2d =
                             iterRight <- iterRight + 1
 
                     if (iterLeft < iterRight) then
-                        stringList <-
+                        list <-
                           {| Text = string[iterLeft..iterRight]
                              OffsetX = offset
-                             NewLine = newLine |} :: stringList
+                             NewLine = newLine |} :: list
 
-                    stringList, currentOffset
+                    list, currentOffset
 
                 let reflowBlock (block: RichTextBlock) offset =
 
@@ -791,8 +790,11 @@ type [<ReferenceEquality>] GlRenderer2d =
                     // TODO: justify justification
                     // TODO: justify vertically somehow
                     // TODO: subscript, superscript
+                    // TODO: special styles like in Godot
 
                     let startingOffset = 0.0f
+
+                    let justification = line.Justification
 
                     line.Blocks
                     // cut up blocks into manageable fragments that fit lines
