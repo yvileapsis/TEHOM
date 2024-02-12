@@ -90,14 +90,14 @@ type [<Struct>] RichTextBlock =
       FontStyling : FontStyle Set
       Color : Color }
 
-type [<Struct>] RichTextLine =
+type [<Struct>] RichTextParagraph =
     { Blocks : RichTextBlock list
       Justification : Justification }
 
 /// Describes how to render rich text to a rendering subsystem.
 type RichTextDescriptor =
     { mutable Transform : Transform
-      Entries : RichTextLine list }
+      Entries : RichTextParagraph list }
 
 
 /// Describes a 2d rendering operation.
@@ -593,7 +593,7 @@ type [<ReferenceEquality>] GlRenderer2d =
     /// Render rich text.
     static member renderRichText
         (transform : Transform byref,
-         text : RichTextLine list,
+         text : RichTextParagraph list,
          eyeCenter : Vector2,
          eyeSize : Vector2,
          renderer : GlRenderer2d) =
@@ -678,7 +678,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                     IntPtr.Zero
 
             // rework text into lines of concrete width and justification
-            let reflowText (list: RichTextLine list) =
+            let reflowText (text: RichTextParagraph list) =
 
                 // setting reflow width to size of entity
                 let width = size.X
@@ -702,44 +702,52 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     let mutable list :
                       {| Text: string
-                         OffsetX: float32
+                         Width: float32
                          NewLine: bool |} list = List.empty
 
-                    let mutable currentOffset : float32 = offset
-                    let mutable offset = offset
+                    let mutable currentWidth : float32 = 0.0f
+
+                    let mutable currentOffset = offset
 
                     let mutable newLine = false
 
                     let stringLength = String.length string
 
                     while iterRight < stringLength do
-                        currentOffset <- currentOffset + glyphWidth string[iterRight]
+                        currentWidth <- currentWidth + glyphWidth string[iterRight]
 
                         // we hit our limit for the line, splitting
-                        if currentOffset > width then
+                        if currentOffset + currentWidth > width then
 
                             // there is a rare case where splitting happens immediately, making string empty
                             if iterLeft < iterRight then
 
                                 // moving back once as we went over the limit with that last one
+                                currentWidth <- currentWidth - glyphWidth string[iterRight]
                                 iterRight <- iterRight - 1
 
                                 // finding last word to split on
                                 let mutable k = iterRight
-                                while k >= iterLeft && not (Char.IsWhiteSpace string[k]) do k <- k - 1
+                                let mutable widthChange = 0.0f
+
+                                while k >= iterLeft && not (Char.IsWhiteSpace string[k]) do
+                                    widthChange <- widthChange + glyphWidth string[k]
+                                    k <- k - 1
+
                                 if k >= iterLeft then
                                     iterRight <- k
+                                    currentWidth <- currentWidth - widthChange
 
                                 list <-
                                   {| Text = string[iterLeft..iterRight]
-                                     OffsetX = offset
+                                     Width = currentWidth
                                      NewLine = newLine |} :: list
 
                                 iterLeft <- iterRight + 1
                                 iterRight <- iterRight + 1
 
+                            currentWidth <- 0.0f
                             currentOffset <- 0.0f
-                            offset <- 0.0f
                             newLine <- true
                         else
                             iterRight <- iterRight + 1
@@ -747,10 +755,10 @@ type [<ReferenceEquality>] GlRenderer2d =
                     if (iterLeft < iterRight) then
                         list <-
                           {| Text = string[iterLeft..iterRight]
-                             OffsetX = offset
+                             Width = currentWidth
                              NewLine = newLine |} :: list
 
-                    list, currentOffset
+                    list, currentOffset + currentWidth
 
                 let reflowBlock (block: RichTextBlock) offset =
 
@@ -768,25 +776,24 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     let surfaceList :
                       {| Surface: nativeint
-                         OffsetX: float32
+                         Width: float32
                          LineHeight: float32
                          NewLine: bool |} list =
 
                         stringList
                         |> List.map (fun value ->
                             {| Surface = renderSdlSurface font block.Color value.Text
-                               OffsetX = value.OffsetX
+                               Width = value.Width
                                LineHeight = lineHeight
                                NewLine = value.NewLine |}
                         )
 
                     surfaceList, offset
 
-                let reflowLine (line: RichTextLine) (offset: float32) =
+                let reflowParagraph (paragraph: RichTextParagraph) (offset: float32) =
                     // TODO: Margins (?)
                     // TODO: Tabs (?)
 
-                    // TODO: justification
                     // TODO: justify justification
                     // TODO: justify vertically somehow
                     // TODO: subscript, superscript
@@ -794,55 +801,106 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     let startingOffset = 0.0f
 
-                    let justification = line.Justification
+                    let lines =
+                        paragraph.Blocks
+                        // cut up blocks into manageable fragments that fit lines
+                        |> List.foldMap reflowBlock startingOffset
+                        |> fst
+                        |> List.map List.rev
+                        |> List.concat
 
-                    line.Blocks
-                    // cut up blocks into manageable fragments that fit lines
-                    |> List.foldMap reflowBlock startingOffset
-                    |> fst
-                    |> List.map List.rev
-                    |> List.concat
-                    // make a new list of lists separated by newlines, with information regarding line height
-                    |> List.fold (fun (listOfLists, currentList, maxLineHeight) value ->
+                        // make a new list of lists separated by newlines, with information regarding line height
+                        |> List.fold (fun (listOfLists, currentList, maxLineHeight) value ->
 
-                        let newValue =
-                          {| Surface = value.Surface
-                             OffsetX = value.OffsetX |}
+                            let newValue =
+                              {| Surface = value.Surface
+                                 Width = value.Width |}
 
-                        if value.NewLine then
-                            let listOfLists = (currentList, maxLineHeight)::listOfLists
-                            let currentList = List.empty
-                            let currentList = newValue::currentList
-                            let maxLineHeight = value.LineHeight
+                            if value.NewLine then
+                                let listOfLists = (currentList, maxLineHeight)::listOfLists
+                                let currentList = List.empty
+                                let currentList = newValue::currentList
+                                let maxLineHeight = value.LineHeight
 
-                            listOfLists, currentList, maxLineHeight
-                        else
-                            let currentList = newValue::currentList
-                            let maxLineHeight = max maxLineHeight value.LineHeight
+                                listOfLists, currentList, maxLineHeight
+                            else
+                                let currentList = newValue::currentList
+                                let maxLineHeight = max maxLineHeight value.LineHeight
 
-                            listOfLists, currentList, maxLineHeight
+                                listOfLists, currentList, maxLineHeight
 
-                    ) (List.empty, List.empty, 0.0f)
-                    |> fun (listOfLists, currentList, maxLineHeight) -> (currentList, maxLineHeight)::listOfLists
-                    // map vertical offsets for lines
-                    |> List.rev
-                    |> List.foldMap (fun (list, lineHeight) state ->
-                        let state = state - lineHeight
-                        (list, state), state
-                    ) offset
+                        ) (List.empty, List.empty, 0.0f)
+                        |> fun (listOfLists, currentList, maxLineHeight) -> (currentList, maxLineHeight)::listOfLists
+                        |> List.rev
+
+                    let justification = paragraph.Justification
+
+                    let surfaces =
+
+                        lines
+                        // set x coordinates
+                        |> List.map (fun (list, lineHeight) ->
+
+                            let list, _ =
+                                match justification with
+
+                                | Justified (JustifyRight, _) ->
+                                    list
+                                    |> List.foldMap (fun value state ->
+                                        let state = state - value.Width
+
+                                        let newValue =
+                                          {| Surface = value.Surface
+                                             OffsetX = state |}
+
+                                        newValue, state
+                                    ) width
+
+                                | Justified (JustifyCenter, _) ->
+
+                                    let lineWidth = list |> List.sumBy _.Width
+
+                                    list
+                                    |> List.foldMap (fun value state ->
+                                        let state = state - value.Width
+
+                                        let newValue =
+                                          {| Surface = value.Surface
+                                             OffsetX = state |}
+
+                                        newValue, state
+                                    ) ((width + lineWidth) / 2.0f)
+
+                                | _ ->
+                                    list
+                                    |> List.rev
+                                    |> List.foldMap (fun value state ->
+                                        let newValue =
+                                          {| Surface = value.Surface
+                                             OffsetX = state |}
+
+                                        let state = state + value.Width
+
+                                        newValue, state
+                                    ) 0.0f
+
+                            list, lineHeight
+                        )
+                        // set y coordinates
+                        |> List.foldMap (fun (list, lineHeight) state ->
+                            let state = state - lineHeight
+                            let list = list |> List.map (fun value -> value.Surface, v2 value.OffsetX state)
+                            list, state
+                        ) offset
+                        // flatten as we no longer store information per line
+                        |> fun (list, offset) -> List.concat list, offset
+
+                    surfaces
 
 
-                let list, sizeY = List.foldMap reflowLine 0.0f list
-
+                let list, sizeY = List.foldMap reflowParagraph 0.0f text
                 list
                 |> List.concat
-
-                |> List.map (fun (list, offsetY) ->
-                    list
-                    |> List.map (fun value -> value.Surface, v2 value.OffsetX offsetY)
-                )
-                |> List.concat
-
                 |> List.filter (fun (surface, _) -> surface <> IntPtr.Zero), sizeY
 
             // render prepared surfaces with OpenGL
