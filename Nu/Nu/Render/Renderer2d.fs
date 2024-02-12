@@ -839,55 +839,53 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     let surfaces =
 
-                        lines
+                        lines |>
                         // set x coordinates
-                        |> List.map (fun (list, lineHeight) ->
+                        match justification with
 
-                            let list, _ =
-                                match justification with
+                        | Justified (JustifyRight, _) ->
+                            List.map (fun (list, lineHeight) ->
+                                list
+                                |> List.foldMap (fun value state ->
+                                    let state = state - value.Width
 
-                                | Justified (JustifyRight, _) ->
-                                    list
-                                    |> List.foldMap (fun value state ->
-                                        let state = state - value.Width
+                                    let newValue = {| Surface = value.Surface; OffsetX = state |}
 
-                                        let newValue =
-                                          {| Surface = value.Surface
-                                             OffsetX = state |}
+                                    newValue, state
+                                ) width
+                                |> fst, lineHeight
+                            )
 
-                                        newValue, state
-                                    ) width
+                        | Justified (JustifyCenter, _) ->
+                            List.map (fun (list, lineHeight) ->
 
-                                | Justified (JustifyCenter, _) ->
+                                let lineWidth = list |> List.sumBy _.Width
 
-                                    let lineWidth = list |> List.sumBy _.Width
+                                list
+                                |> List.foldMap (fun value state ->
+                                    let state = state - value.Width
 
-                                    list
-                                    |> List.foldMap (fun value state ->
-                                        let state = state - value.Width
+                                    let newValue = {| Surface = value.Surface; OffsetX = state |}
 
-                                        let newValue =
-                                          {| Surface = value.Surface
-                                             OffsetX = state |}
+                                    newValue, state
+                                ) ((width + lineWidth) / 2.0f)
+                                |> fst, lineHeight
+                            )
 
-                                        newValue, state
-                                    ) ((width + lineWidth) / 2.0f)
+                        | _ ->
+                            List.map (fun (list, lineHeight) ->
+                                list
+                                |> List.rev
+                                |> List.foldMap (fun value state ->
+                                    let newValue = {| Surface = value.Surface; OffsetX = state |}
 
-                                | _ ->
-                                    list
-                                    |> List.rev
-                                    |> List.foldMap (fun value state ->
-                                        let newValue =
-                                          {| Surface = value.Surface
-                                             OffsetX = state |}
+                                    let state = state + value.Width
 
-                                        let state = state + value.Width
+                                    newValue, state
+                                ) 0.0f
+                                |> fst, lineHeight
+                            )
 
-                                        newValue, state
-                                    ) 0.0f
-
-                            list, lineHeight
-                        )
                         // set y coordinates
                         |> List.foldMap (fun (list, lineHeight) state ->
                             let state = state - lineHeight
