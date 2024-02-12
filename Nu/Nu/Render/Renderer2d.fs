@@ -800,6 +800,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                     // cut up blocks into manageable fragments that fit lines
                     |> List.foldMap reflowBlock startingOffset
                     |> fst
+                    |> List.map List.rev
                     |> List.concat
                     // make a new list of lists separated by newlines, with information regarding line height
                     |> List.fold (fun (listOfLists, currentList, maxLineHeight) value ->
@@ -824,8 +825,10 @@ type [<ReferenceEquality>] GlRenderer2d =
                     ) (List.empty, List.empty, 0.0f)
                     |> fun (listOfLists, currentList, maxLineHeight) -> (currentList, maxLineHeight)::listOfLists
                     // map vertical offsets for lines
+                    |> List.rev
                     |> List.foldMap (fun (list, lineHeight) state ->
-                        (list, state), state - lineHeight
+                        let state = state - lineHeight
+                        (list, state), state
                     ) offset
 
 
