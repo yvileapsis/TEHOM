@@ -48,6 +48,8 @@ module GameplayGui =
                 Entity.Text := """
 1. **Testing a simple sentence.** 2. __Continuing testing a simple sentence.__ 3. *Continuing testing a simple sentence.* 4. ~~Finishing testing a simple sentence.~~
 
+||'''||
+
 || 1. Testing a simple sentence. 2. Continuing testing a simple sentence. 3. Continuing testing a simple sentence. 4. Finishing testing a simple sentence.
 
 || 1. Testing a simple sentence. 2. Continuing testing a simple sentence. 3. Continuing testing a simple sentence. 4. Finishing testing a simple sentence. ||
