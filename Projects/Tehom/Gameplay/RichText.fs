@@ -51,7 +51,7 @@ module RichTextFacetModule =
                                     Text = block.Text
                                     Color = Color.White
                                     Font = Assets.Gui.MontSerratFont
-                                    FontSizing = Some 8
+                                    FontSizing = Some 10
                                     FontStyling = Set.fold (fun set x ->
                                         match x with
                                         | Bold -> Set.add FontStyle.Bold set
@@ -82,129 +82,7 @@ module RichTextFacetModule =
                     AssetTag = deffont
                     RenderOperation2d = RenderRichText {
                         Transform = textTransform
-                        Entries = List.append parsedText [
-                            {
-                                Justification = Justified (JustifyLeft, JustifyMiddle)
-                                Blocks = [
-                                    {
-                                        Text = "1. Testing a simple sentence."
-                                        Color = Color.Red
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 14
-                                        FontStyling = Set.ofList [ FontStyle.Bold ]
-                                    }
-                                    {
-                                        Text = "2. Continuing testing a simple sentence."
-                                        Color = Color.Green
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList [ FontStyle.Strikethrough ]
-                                    }
-                                    {
-                                        Text = "3. Finishing testing a simple sentence."
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 10
-                                        FontStyling = Set.ofList [ FontStyle.Italic ]
-                                    }
-                                ]
-                            }
-
-                            {
-                                Justification = Justified (JustifyLeft, JustifyMiddle)
-                                Blocks = [
-                                    {
-                                        Text = "1. Testing a simple sentence."
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList []
-                                    }
-                                    {
-                                        Text = " 2. Continuing testing a simple sentence."
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList []
-                                    }
-                                    {
-                                        Text = " 3. Continuing testing a simple sentence."
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList []
-                                    }
-                                    {
-                                        Text = " 4. Finishing testing a simple sentence."
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList []
-                                    }
-                                ]
-                            }
-                            {
-                                Justification = Justified (JustifyCenter, JustifyMiddle)
-                                Blocks = [
-                                    {
-                                        Text = "1. Testing a simple sentence."
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList []
-                                    }
-                                    {
-                                        Text = " 2. Continuing testing a simple sentence."
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList []
-                                    }
-                                    {
-                                        Text = " 3. Continuing testing a simple sentence."
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList []
-                                    }
-                                    {
-                                        Text = " 4. Finishing testing a simple sentence."
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList []
-                                    }
-                                ]
-                            }
-
-                            {
-                                Justification = Justified (JustifyRight, JustifyMiddle)
-                                Blocks = [
-                                    {
-                                        Text = "1. Testing a simple sentence. "
-                                        Color = Color.Red
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList [ FontStyle.Bold ]
-                                    }
-                                    {
-                                        Text = "2. Continuing testing a simple sentence. "
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList []
-                                    }
-                                    {
-                                        Text = "3. Finishing testing a simple sentence. "
-                                        Color = Color.White
-                                        Font = Assets.Gui.MontSerratFont
-                                        FontSizing = Some 12
-                                        FontStyling = Set.ofList [ FontStyle.Italic ]
-                                    }
-                                ]
-                            }
-
-                        ]
+                        Entries = parsedText
                     }
                 } world
 

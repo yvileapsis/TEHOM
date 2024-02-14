@@ -713,6 +713,8 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     let stringLength = String.length string
 
+                    // TODO: Remake the line splitter into a per-word-separated-by-whitespace manner, allowing for
+                    // TODO: no backtracking and easier modification into variable whitespace width justification.
                     while iterRight < stringLength do
                         currentWidth <- currentWidth + glyphWidth string[iterRight]
 

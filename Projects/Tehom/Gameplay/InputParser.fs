@@ -71,6 +71,10 @@ module NuMark =
 
         let specialChars = ['~'; '^'; '*'; '_'; '{'; '}'; '\\'; '\n']
 
+        let many1CharsTillOptional chars till =
+            attempt (many1CharsTill chars till)
+            <|> many1Chars chars
+
         let text =
             let escaped = choice [
                 pstring @"\n" >>% ' '
@@ -81,9 +85,9 @@ module NuMark =
             ]
 
             choice [
-                many1Chars escaped <?> "escaped"
-                many1Chars (noneOf specialChars) <?> "text"
-                many1Chars (anyOf specialChars) <?> "special symbol"
+                many1CharsTillOptional escaped till <?> "escaped"
+                many1CharsTillOptional (noneOf specialChars) till <?> "text"
+                many1CharsTillOptional (anyOf specialChars) till <?> "special symbol"
             ]
             |>> fun x -> [{ Block.empty with Text = x }]
 
@@ -154,18 +158,18 @@ module NuMark =
         let node, nodeRef = createParserForwardedToRef()
 
         let line =
-            let line = parseLine (followedByString " |" <|> followedByString "|" <|> followedByNewline)
+            let line = parseLine (followedByString " ||" <|> followedByString "||" <|> followedByNewline)
 
             let center =
-                pstring "|"
+                pstring "||"
                 >>? optional (pstring " ")
                 >>? line
                 .>>? optional (pstring " ")
-                .>>? pstring "|"
+                .>>? pstring "||"
                 |>> fun x -> Justified (JustifyCenter, JustifyMiddle), x
 
             let left =
-                pstring "|"
+                pstring "||"
                 >>? optional (pstring " ")
                 >>? line
                 |>> fun x -> Justified (JustifyLeft, JustifyMiddle), x
@@ -173,7 +177,7 @@ module NuMark =
             let right =
                 line
                 .>>? optional (pstring " ")
-                .>>? pstring "|"
+                .>>? pstring "||"
                 |>> fun x -> Justified (JustifyRight, JustifyMiddle), x
 
             let no =
