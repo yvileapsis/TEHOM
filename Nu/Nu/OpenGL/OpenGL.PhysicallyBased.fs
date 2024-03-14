@@ -102,6 +102,16 @@ module PhysicallyBased =
                 | Some _ | None -> opaqueDistanceDefault
             | Some opaqueDistance -> opaqueDistance
 
+        static member extractNavShape shapeDefault (sceneOpt : Assimp.Scene option) surface =
+            match surface.SurfaceNode.NavShapeOpt with
+            | None ->
+                match sceneOpt with
+                | Some scene when surface.SurfaceMaterialIndex < scene.Materials.Count ->
+                    let material = scene.Materials.[surface.SurfaceMaterialIndex]
+                    Option.defaultValue shapeDefault material.NavShapeOpt
+                | Some _ | None -> shapeDefault
+            | Some shape -> shape
+
         static member inline hash surface =
             surface.HashCode
 
@@ -156,6 +166,7 @@ module PhysicallyBased =
         let extractRenderStyle = PhysicallyBasedSurface.extractRenderStyle
         let extractIgnoreLightMaps = PhysicallyBasedSurface.extractIgnoreLightMaps
         let extractOpaqueDistance = PhysicallyBasedSurface.extractOpaqueDistance
+        let extractNavShape = PhysicallyBasedSurface.extractNavShape
         let hash = PhysicallyBasedSurface.hash
         let equals = PhysicallyBasedSurface.equals
         let comparer = HashIdentity.FromFunctions hash equals
@@ -645,9 +656,9 @@ module PhysicallyBased =
 
                 // fin
                 Right (vertexData, indexData, bounds)
-                    
+
             // error
-            else Left ("Vertex / normal / tex coords count mismatch.")
+            else Left "Vertex / normal / tex coords count mismatch."
 
         // error
         else Left "Mesh is missing vertices, normals, or texCoords."
@@ -2290,6 +2301,7 @@ module PhysicallyBased =
         Hl.Assert ()
 
         // draw geometry
+        Gl.ValidateProgram shader.PhysicallyBasedDeferredLightMappingShader
         Gl.DrawElements (geometry.PrimitiveType, geometry.ElementCount, DrawElementsType.UnsignedInt, nativeint 0)
         Hl.ReportDrawCall 1
         Hl.Assert ()

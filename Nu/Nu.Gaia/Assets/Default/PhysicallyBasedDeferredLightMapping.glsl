@@ -1,5 +1,5 @@
 #shader vertex
-#version 410 core
+#version 410
 
 layout (location = 0) in vec3 position;
 layout (location = 1) in vec2 texCoords;
@@ -13,7 +13,7 @@ void main()
 }
 
 #shader fragment
-#version 410 core
+#version 410
 #extension GL_ARB_bindless_texture : require
 
 const float PI = 3.141592654;
@@ -29,7 +29,7 @@ uniform int lightMapsCount;
 
 in vec2 texCoordsOut;
 
-out vec4 frag;
+layout (location = 0) out vec4 frag;
 
 bool inBounds(vec3 point, vec3 min, vec3 size)
 {

@@ -4,6 +4,7 @@
 namespace Nu
 open System
 open System.Numerics
+open ImGuiNET
 open TiledSharp
 open Prime
 open Nu
@@ -72,8 +73,8 @@ module StaticSpriteFacetModule =
 
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetStaticImage world) with
-            | Some size -> AttributesInferred.make size.V3 v3Zero
-            | None -> AttributesInferred.make Constants.Engine.Entity2dSizeDefault v3Zero
+            | Some size -> AttributesInferred.important size.V3 v3Zero
+            | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
 
 [<AutoOpen>]
 module AnimatedSpriteFacetModule =
@@ -145,7 +146,7 @@ module AnimatedSpriteFacetModule =
             World.renderLayeredSpriteFast (transform.Elevation, transform.Horizon, animationSheet, &transform, &insetOpt, animationSheet, &color, blend, &emission, flip, world)
 
         override this.GetAttributesInferred (entity, world) =
-            AttributesInferred.make (entity.GetCelSize world).V3 v3Zero
+            AttributesInferred.important (entity.GetCelSize world).V3 v3Zero
 
 [<AutoOpen>]
 module BasicStaticSpriteEmitterFacetModule =
@@ -476,7 +477,7 @@ module TextFacetModule =
                     world
 
         override this.GetAttributesInferred (_, _) =
-            AttributesInferred.make Constants.Engine.EntityGuiSizeDefault v3Zero
+            AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module BackdroppableFacetModule =
@@ -522,9 +523,9 @@ module BackdroppableFacetModule =
             match entity.GetBackdropImageOpt world with
             | Some image ->
                 match Metadata.tryGetTextureSizeF image with
-                | Some size -> AttributesInferred.make size.V3 v3Zero
-                | None -> AttributesInferred.make Constants.Engine.Entity2dSizeDefault v3Zero
-            | None -> AttributesInferred.make Constants.Engine.Entity2dSizeDefault v3Zero
+                | Some size -> AttributesInferred.important size.V3 v3Zero
+                | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
 
 [<AutoOpen>]
 module LabelFacetModule =
@@ -563,8 +564,8 @@ module LabelFacetModule =
 
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetLabelImage world) with
-            | Some size -> AttributesInferred.make size.V3 v3Zero
-            | None -> AttributesInferred.make Constants.Engine.EntityGuiSizeDefault v3Zero
+            | Some size -> AttributesInferred.important size.V3 v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module ButtonFacetModule =
@@ -672,8 +673,8 @@ module ButtonFacetModule =
 
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetUpImage world) with
-            | Some size -> AttributesInferred.make size.V3 v3Zero
-            | None -> AttributesInferred.make Constants.Engine.EntityGuiSizeDefault v3Zero
+            | Some size -> AttributesInferred.important size.V3 v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module ToggleButtonFacetModule =
@@ -799,8 +800,8 @@ module ToggleButtonFacetModule =
 
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetUntoggledImage world) with
-            | Some size -> AttributesInferred.make size.V3 v3Zero
-            | None -> AttributesInferred.make Constants.Engine.EntityGuiSizeDefault v3Zero
+            | Some size -> AttributesInferred.important size.V3 v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module RadioButtonFacetModule =
@@ -921,8 +922,8 @@ module RadioButtonFacetModule =
 
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetUndialedImage world) with
-            | Some size -> AttributesInferred.make size.V3 v3Zero
-            | None -> AttributesInferred.make Constants.Engine.EntityGuiSizeDefault v3Zero
+            | Some size -> AttributesInferred.important size.V3 v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module FillBarFacetModule =
@@ -1022,8 +1023,8 @@ module FillBarFacetModule =
 
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetBorderImage world) with
-            | Some size -> AttributesInferred.make size.V3 v3Zero
-            | None -> AttributesInferred.make Constants.Engine.EntityGuiSizeDefault v3Zero
+            | Some size -> AttributesInferred.important size.V3 v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module FeelerFacetModule =
@@ -1107,7 +1108,7 @@ module FeelerFacetModule =
             else world
 
         override this.GetAttributesInferred (_, _) =
-            AttributesInferred.make Constants.Engine.Entity2dSizeDefault v3Zero
+            AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
 
 [<AutoOpen>]
 module EffectFacetModule =
@@ -1398,7 +1399,7 @@ module RigidBodyFacetModule =
 
         static member Properties =
             [define Entity.BodyEnabled true
-             define Entity.BodyType Dynamic
+             define Entity.BodyType Static
              define Entity.SleepingAllowed true
              define Entity.Friction 0.2f
              define Entity.Restitution 0.0f
@@ -1421,29 +1422,29 @@ module RigidBodyFacetModule =
 
             // OPTIMIZATION: using manual unsubscription in order to use less live objects for subscriptions.
             let subIds = Array.init 24 (fun _ -> makeGuid ())
-            let (_, world) = World.subscribePlus subIds.[0] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.Position)) entity world
-            let (_, world) = World.subscribePlus subIds.[1] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.Rotation)) entity world
-            let (_, world) = World.subscribePlus subIds.[2] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.LinearVelocity)) entity world
-            let (_, world) = World.subscribePlus subIds.[3] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.AngularVelocity)) entity world
-            let (_, world) = World.subscribePlus subIds.[4] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Scale)) entity world
-            let (_, world) = World.subscribePlus subIds.[5] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Offset)) entity world
-            let (_, world) = World.subscribePlus subIds.[6] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Size)) entity world
-            let (_, world) = World.subscribePlus subIds.[7] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.PerimeterCentered)) entity world
-            let (_, world) = World.subscribePlus subIds.[8] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyEnabled)) entity world
-            let (_, world) = World.subscribePlus subIds.[9] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyType)) entity world
-            let (_, world) = World.subscribePlus subIds.[10] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.SleepingAllowed)) entity world
-            let (_, world) = World.subscribePlus subIds.[11] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Friction)) entity world
-            let (_, world) = World.subscribePlus subIds.[12] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Restitution)) entity world
-            let (_, world) = World.subscribePlus subIds.[13] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.LinearDamping)) entity world
-            let (_, world) = World.subscribePlus subIds.[14] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.AngularDamping)) entity world
-            let (_, world) = World.subscribePlus subIds.[15] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.AngularFactor)) entity world
-            let (_, world) = World.subscribePlus subIds.[16] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Substance)) entity world
-            let (_, world) = World.subscribePlus subIds.[17] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.GravityOverride)) entity world
-            let (_, world) = World.subscribePlus subIds.[18] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionDetection)) entity world
-            let (_, world) = World.subscribePlus subIds.[19] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity world
-            let (_, world) = World.subscribePlus subIds.[20] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity world
-            let (_, world) = World.subscribePlus subIds.[21] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyShape)) entity world
-            let (_, world) = World.subscribePlus subIds.[23] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Sensor)) entity world
+            let world = World.subscribePlus subIds.[0] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.Position)) entity world |> snd
+            let world = World.subscribePlus subIds.[1] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.Rotation)) entity world |> snd
+            let world = World.subscribePlus subIds.[2] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.LinearVelocity)) entity world |> snd
+            let world = World.subscribePlus subIds.[3] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.AngularVelocity)) entity world |> snd
+            let world = World.subscribePlus subIds.[4] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Scale)) entity world |> snd
+            let world = World.subscribePlus subIds.[5] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Offset)) entity world |> snd
+            let world = World.subscribePlus subIds.[6] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Size)) entity world |> snd
+            let world = World.subscribePlus subIds.[7] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.PerimeterCentered)) entity world |> snd
+            let world = World.subscribePlus subIds.[8] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyEnabled)) entity world |> snd
+            let world = World.subscribePlus subIds.[9] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyType)) entity world |> snd
+            let world = World.subscribePlus subIds.[10] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.SleepingAllowed)) entity world |> snd
+            let world = World.subscribePlus subIds.[11] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Friction)) entity world |> snd
+            let world = World.subscribePlus subIds.[12] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Restitution)) entity world |> snd
+            let world = World.subscribePlus subIds.[13] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.LinearDamping)) entity world |> snd
+            let world = World.subscribePlus subIds.[14] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.AngularDamping)) entity world |> snd
+            let world = World.subscribePlus subIds.[15] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.AngularFactor)) entity world |> snd
+            let world = World.subscribePlus subIds.[16] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Substance)) entity world |> snd
+            let world = World.subscribePlus subIds.[17] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.GravityOverride)) entity world |> snd
+            let world = World.subscribePlus subIds.[18] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionDetection)) entity world |> snd
+            let world = World.subscribePlus subIds.[19] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity world |> snd
+            let world = World.subscribePlus subIds.[20] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity world |> snd
+            let world = World.subscribePlus subIds.[21] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyShape)) entity world |> snd
+            let world = World.subscribePlus subIds.[23] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Sensor)) entity world |> snd
             let unsubscribe = fun world ->
                 Array.fold (fun world subId -> World.unsubscribe subId world) world subIds
             let callback = fun evt world ->
@@ -1463,6 +1464,7 @@ module RigidBodyFacetModule =
                 { BodyIndex = (entity.GetBodyId world).BodyIndex
                   Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
                   Rotation = transform.Rotation
+                  Scale = transform.Scale
                   BodyShape = getBodyShape entity world
                   BodyType = entity.GetBodyType world
                   SleepingAllowed = entity.GetSleepingAllowed world
@@ -1628,7 +1630,7 @@ module TileMapFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match TmxMap.tryGetTileMap (entity.GetTileMap world) with
             | Some tileMap -> TmxMap.getAttributesInferred tileMap
-            | None -> AttributesInferred.make Constants.Engine.Entity2dSizeDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
 
 [<AutoOpen>]
 module TmxMapFacetModule =
@@ -2078,18 +2080,18 @@ module LightProbe3dFacetModule =
             else [||]
 
         override this.GetAttributesInferred (_, _) =
-            AttributesInferred.make (v3Dup 0.25f) v3Zero
+            AttributesInferred.important (v3Dup 0.25f) v3Zero
 
         override this.Edit (op, entity, world) =
             match op with
             | AppendProperties append ->
                 let world =
-                    if ImGuiNET.ImGui.Button "Rerender Light Map" then
+                    if ImGui.Button "Rerender Light Map" then
                         let world = append.Snapshot world
                         entity.SetProbeStale true world
                     else world
                 let world =
-                    if ImGuiNET.ImGui.Button "Recenter in Probe Bounds" then
+                    if ImGui.Button "Recenter in Probe Bounds" then
                         let world = append.Snapshot world
                         let probeBounds = entity.GetProbeBounds world
                         if Option.isSome (entity.GetMountOpt world)
@@ -2097,7 +2099,7 @@ module LightProbe3dFacetModule =
                         else entity.SetPosition probeBounds.Center world
                     else world
                 let world =
-                    if ImGuiNET.ImGui.Button "Reset Probe Bounds" then
+                    if ImGui.Button "Reset Probe Bounds" then
                         let world = append.Snapshot world
                         entity.ResetProbeBounds world
                     else world
@@ -2174,7 +2176,7 @@ module Light3dFacetModule =
             else [||]
 
         override this.GetAttributesInferred (_, _) =
-            AttributesInferred.make (v3Dup 0.25f) v3Zero
+            AttributesInferred.important (v3Dup 0.25f) v3Zero
 
         override this.Edit (op, entity, world) =
             match op with
@@ -2528,7 +2530,7 @@ module StaticModelFacetModule =
             match Metadata.tryGetStaticModelMetadata staticModel with
             | Some staticModelMetadata ->
                 let bounds = staticModelMetadata.Bounds
-                AttributesInferred.make bounds.Size bounds.Center
+                AttributesInferred.important bounds.Size bounds.Center
             | None -> base.GetAttributesInferred (entity, world)
 
         override this.RayCast (ray, entity, world) =
@@ -2597,7 +2599,7 @@ module StaticModelSurfaceFacetModule =
                 let surfaceIndex = entity.GetSurfaceIndex world
                 if surfaceIndex > -1 && surfaceIndex < staticModelMetadata.Surfaces.Length then
                     let bounds = staticModelMetadata.Surfaces.[surfaceIndex].SurfaceBounds
-                    AttributesInferred.make bounds.Size bounds.Center
+                    AttributesInferred.important bounds.Size bounds.Center
                 else base.GetAttributesInferred (entity, world)
             | None -> base.GetAttributesInferred (entity, world)
 
@@ -2701,7 +2703,7 @@ module AnimatedModelFacetModule =
             match Metadata.tryGetAnimatedModelMetadata animatedModel with
             | Some animatedModelMetadata ->
                 let bounds = animatedModelMetadata.Bounds
-                AttributesInferred.make bounds.Size bounds.Center
+                AttributesInferred.important bounds.Size bounds.Center
             | None -> base.GetAttributesInferred (entity, world)
 
         override this.RayCast (ray, entity, world) =
@@ -2831,6 +2833,7 @@ module TerrainFacetModule =
                     { BodyIndex = (entity.GetBodyId world).BodyIndex
                       Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
                       Rotation = transform.Rotation
+                      Scale = transform.Scale
                       BodyShape = BodyTerrain bodyTerrain
                       BodyType = Static
                       SleepingAllowed = true
@@ -2876,5 +2879,192 @@ module TerrainFacetModule =
 
         override this.GetAttributesInferred (entity, world) =
             match entity.TryGetTerrainResolution world with
-            | Some resolution -> AttributesInferred.make (v3 (single (dec resolution.X)) 128.0f (single (dec resolution.Y))) v3Zero
-            | None -> AttributesInferred.make (v3 512.0f 128.0f 512.0f) v3Zero
+            | Some resolution -> AttributesInferred.important (v3 (single (dec resolution.X)) 128.0f (single (dec resolution.Y))) v3Zero
+            | None -> AttributesInferred.important (v3 512.0f 128.0f 512.0f) v3Zero
+
+[<AutoOpen>]
+module NavBodyFacetModule =
+
+    type Entity with
+        member this.GetNavShape world : NavShape = this.Get (nameof this.NavShape) world
+        member this.SetNavShape (value : NavShape) world = this.Set (nameof this.NavShape) value world
+        member this.NavShape = lens (nameof this.NavShape) this this.GetNavShape this.SetNavShape
+
+    /// Augments an entity with a 3d navigation body.
+    type NavBodyFacet () =
+        inherit Facet (false)
+
+        static let propagateNavBody (entity : Entity) world =
+            match entity.GetNavShape world with
+            | EmptyShape ->
+                if entity.GetIs2d world
+                then world // TODO: implement for 2d navigation when it's available.
+                else World.setNav3dBodyOpt None entity world
+            | shape ->
+                if entity.GetIs2d world
+                then world // TODO: implement for 2d navigation when it's available.
+                else
+                    let bounds = entity.GetBounds world
+                    let affineMatrix = entity.GetAffineMatrix world
+                    let staticModel = entity.GetStaticModel world
+                    let surfaceIndex = entity.GetSurfaceIndex world
+                    World.setNav3dBodyOpt (Some (bounds, affineMatrix, staticModel, surfaceIndex, shape)) entity world
+
+        static member Properties =
+            [define Entity.StaticModel Assets.Default.StaticModel
+             define Entity.SurfaceIndex 0
+             define Entity.NavShape BoundsShape]
+
+        override this.Register (entity, world) =
+
+            // OPTIMIZATION: conditionally subscribe to transform change event.
+            let subId = Gen.id
+            let subscribe world =
+                World.subscribePlus subId (fun _ world -> (Cascade, propagateNavBody entity world)) (entity.ChangeEvent (nameof entity.Bounds)) entity world |> snd
+            let unsubscribe world =
+                World.unsubscribe subId world
+            let callback evt world =
+                let entity = evt.Subscriber : Entity
+                let previous = evt.Data.Previous :?> NavShape
+                let shape = evt.Data.Value :?> NavShape
+                let world = match previous with EmptyShape -> world | _ -> unsubscribe world
+                let world = match shape with EmptyShape -> world | _ -> subscribe world
+                let world = propagateNavBody entity world
+                (Cascade, world)
+            let callback2 evt world =
+                if  Set.contains (nameof NavBodyFacet) (evt.Data.Previous :?> string Set) &&
+                    not (Set.contains (nameof NavBodyFacet) (evt.Data.Value :?> string Set)) then
+                    (Cascade, unsubscribe world)
+                else (Cascade, world)
+            let callback3 _ world = (Cascade, unsubscribe world)
+            let world = match entity.GetNavShape world with EmptyShape -> world | _ -> subscribe world
+            let world = World.sense callback (entity.ChangeEvent (nameof entity.NavShape)) entity (nameof NavBodyFacet) world
+            let world = World.sense callback2 entity.FacetNames.ChangeEvent entity (nameof NavBodyFacet) world
+            let world = World.sense callback3 entity.UnregisteringEvent entity (nameof NavBodyFacet) world
+
+            // unconditional registration behavior
+            let world = World.sense (fun _ world -> (Cascade, propagateNavBody entity world)) (entity.ChangeEvent (nameof entity.StaticModel)) entity (nameof NavBodyFacet) world
+            let world = World.sense (fun _ world -> (Cascade, propagateNavBody entity world)) (entity.ChangeEvent (nameof entity.SurfaceIndex)) entity (nameof NavBodyFacet) world
+            propagateNavBody entity world
+
+        override this.Unregister (entity, world) =
+            if entity.GetIs2d world
+            then world // TODO: implement for 2d navigation when it's available.
+            else World.setNav3dBodyOpt None entity world
+
+        override this.GetAttributesInferred (_, _) =
+            AttributesInferred.unimportant
+
+[<AutoOpen>]
+module Nav3dConfigFacetModule =
+
+    type Entity with
+        member this.GetNav3dConfig world : Nav3dConfig = this.Get (nameof this.Nav3dConfig) world
+        member this.SetNav3dConfig (value : Nav3dConfig) world = this.Set (nameof this.Nav3dConfig) value world
+        member this.Nav3dConfig = lens (nameof this.Nav3dConfig) this this.GetNav3dConfig this.SetNav3dConfig
+
+    /// Augments an entity with a navigation mesh.
+    type Nav3dConfigFacet () =
+        inherit Facet (false)
+
+        static let propagateNav3dConfig (entity : Entity) world =
+            let config = entity.GetNav3dConfig world
+            World.setNav3dConfig config entity.Screen world
+
+        static member Properties =
+            [define Entity.Nav3dConfig Nav3dConfig.defaultConfig]
+
+        override this.Register (entity, world) =
+            World.sense (fun _ world -> (Cascade, propagateNav3dConfig entity world)) (entity.ChangeEvent (nameof entity.Nav3dConfig)) entity (nameof Nav3dConfigFacet) world
+
+        override this.Edit (op, entity, world) =
+            match op with
+            | OverlayViewport _ ->
+                let nav3d = World.getScreenNav3d entity.Screen world
+                match nav3d.Nav3dMeshOpt with
+                | Some (builderResult, _, _) ->
+
+                    // draw interior edges
+                    let dmesh = builderResult.GetMeshDetail ()
+                    let segments =
+                        seq {
+                            for i in 0 .. dec dmesh.nmeshes do
+                                let m = i * 4
+                                let bverts = dmesh.meshes.[m]
+                                let btris = dmesh.meshes.[m + 2]
+                                let ntris = dmesh.meshes.[m + 3]
+                                let verts = bverts * 3
+                                let tris = btris * 4
+                                for j in 0 .. dec ntris do
+                                    let t = tris + j * 4
+                                    let mutable k = 0
+                                    let mutable kp = 2
+                                    while k < 3 do
+                                        let ef = (dmesh.tris.[t + 3] >>> (kp * 2)) &&& 0x3
+                                        if ef = 0 then
+                                            let begin_ =
+                                                v3
+                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3]
+                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 1]
+                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 2]
+                                            let end_ =
+                                                v3
+                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3]
+                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 1]
+                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 2]
+                                            struct (begin_, end_)
+                                        kp <- k
+                                        k <- inc k }
+                    World.imGuiSegments3d false segments 1.0f (Color.Yellow.MapR((*) 0.85f).MapG((*) 0.85f)) world
+
+                    // draw exterior edges
+                    let dmesh = builderResult.GetMeshDetail ()
+                    let segments =
+                        seq {
+                            for i in 0 .. dec dmesh.nmeshes do
+                                let m = i * 4
+                                let bverts = dmesh.meshes.[m]
+                                let btris = dmesh.meshes.[m + 2]
+                                let ntris = dmesh.meshes.[m + 3]
+                                let verts = bverts * 3
+                                let tris = btris * 4
+                                for j in 0 .. dec ntris do
+                                    let t = tris + j * 4
+                                    let mutable k = 0
+                                    let mutable kp = 2
+                                    while k < 3 do
+                                        let ef = (dmesh.tris.[t + 3] >>> (kp * 2)) &&& 0x3
+                                        if ef <> 0 then
+                                            let begin_ =
+                                                v3
+                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3]
+                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 1]
+                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 2]
+                                            let end_ =
+                                                v3
+                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3]
+                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 1]
+                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 2]
+                                            struct (begin_, end_)
+                                        kp <- k
+                                        k <- inc k }
+                    World.imGuiSegments3d false segments 1.0f Color.Yellow world
+
+                    // draw points
+                    let points =
+                        seq {
+                            for i in 0 .. dec dmesh.nmeshes do
+                                let m = i * 4
+                                let bverts = dmesh.meshes.[m]
+                                let nverts = dmesh.meshes.[m + 1]
+                                let verts = bverts * 3
+                                for j in 0 .. dec nverts do
+                                    v3 dmesh.verts.[verts + j * 3] dmesh.verts.[verts + j * 3 + 1] dmesh.verts.[verts + j * 3 + 2] }
+                    World.imGuiCircles3d false points 3.0f Color.LightYellow true world
+                    world
+
+                | None -> world
+            | _ -> world
+
+        override this.GetAttributesInferred (_, _) =
+            AttributesInferred.unimportant

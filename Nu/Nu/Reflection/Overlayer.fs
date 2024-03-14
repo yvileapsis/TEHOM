@@ -26,6 +26,7 @@ type Overlay =
       OverlaidTypeNames : string list
       OverlayProperties : Map<string, Symbol> }
 
+    /// Convert a dispatcher (entity facet or simulant dispatcher) name to an overlay name.
     static member dispatcherNameToOverlayName (typeName : string) =
         typeName
             .Replace("Dispatcher", "Overlay")
@@ -45,41 +46,39 @@ type Overlay =
 
         // get the descriptors needed to construct the overlays
         let overlayDescriptors =
-            List.map
-                (fun (sourceType : Type) ->
-                    let includeNames =
-                        if sourceType.BaseType <> typeof<obj>
-                        then [Overlay.dispatcherNameToOverlayName sourceType.BaseType.Name]
-                        else []
-                    let definitions = Reflection.getPropertyDefinitionsNoInherit sourceType
-                    let requiresFacetNames = requiresFacetNames sourceType
-                    (Overlay.dispatcherNameToOverlayName sourceType.Name, sourceType.Name, includeNames, definitions, requiresFacetNames))
+            List.map (fun (sourceType : Type) ->
+                let includeNames =
+                    if sourceType.BaseType <> typeof<obj>
+                    then [Overlay.dispatcherNameToOverlayName sourceType.BaseType.Name]
+                    else []
+                let definitions = Reflection.getPropertyDefinitionsNoInherit sourceType
+                let requiresFacetNames = requiresFacetNames sourceType
+                (Overlay.dispatcherNameToOverlayName sourceType.Name, sourceType.Name, includeNames, definitions, requiresFacetNames))
                 decomposedTypes
 
         // create the intrinsic overlays with the above descriptors
         let overlays =
-            List.map
-                (fun (overlayName, overlaidTypeName, includeNames, definitions, requiresFacetNames) ->
-                    let overlayProperties =
-                        List.foldBack
-                            (fun definition overlayProperties ->
-                                match definition.PropertyExpr with
-                                | DefineExpr value ->
-                                    let converter = SymbolicConverter (false, None, definition.PropertyType)
-                                    let overlayProperty = converter.ConvertTo (value, typeof<Symbol>) :?> Symbol
-                                    Map.add definition.PropertyName overlayProperty overlayProperties
-                                | VariableExpr _ -> overlayProperties
-                                | ComputedExpr _ -> overlayProperties)
-                            definitions
-                            Map.empty
-                    let overlayProperties =
-                        if requiresFacetNames
-                        then Map.add Constants.Engine.FacetNamesPropertyName (Symbols ([], ValueNone)) overlayProperties
-                        else overlayProperties
-                    { OverlayName = overlayName
-                      OverlaysInherited = includeNames
-                      OverlaidTypeNames = [overlaidTypeName]
-                      OverlayProperties = overlayProperties })
+            List.map (fun (overlayName, overlaidTypeName, includeNames, definitions, requiresFacetNames) ->
+                let overlayProperties =
+                    List.foldBack
+                        (fun definition overlayProperties ->
+                            match definition.PropertyExpr with
+                            | DefineExpr value ->
+                                let converter = SymbolicConverter (false, None, definition.PropertyType)
+                                let overlayProperty = converter.ConvertTo (value, typeof<Symbol>) :?> Symbol
+                                Map.add definition.PropertyName overlayProperty overlayProperties
+                            | VariableExpr _ -> overlayProperties
+                            | ComputedExpr _ -> overlayProperties)
+                        definitions
+                        Map.empty
+                let overlayProperties =
+                    if requiresFacetNames
+                    then Map.add Constants.Engine.FacetNamesPropertyName (Symbols ([], ValueNone)) overlayProperties
+                    else overlayProperties
+                { OverlayName = overlayName
+                  OverlaysInherited = includeNames
+                  OverlaidTypeNames = [overlaidTypeName]
+                  OverlayProperties = overlayProperties })
                 overlayDescriptors
 
         // fin
@@ -93,7 +92,8 @@ module Overlayer =
         private
             { IntrinsicOverlays : Overlay list
               ExtrinsicOverlays : Overlay list
-              Overlays : Map<string, Overlay> }
+              Overlays : Map<string, Overlay>
+              Routes : Map<string, string> }
 
     let rec private getOverlaySymbols2 overlayName overlayer =
         match Map.tryFind overlayName overlayer.Overlays with
@@ -149,7 +149,7 @@ module Overlayer =
                 | None -> Bare
             | None -> Bare
         else NonPersistent
-        
+
     let internal shouldPropertySerialize propertyName propertyType target overlaySymbols =
         match getPropertyState propertyName propertyType target overlaySymbols with
         | Altered | Bare -> true
@@ -247,7 +247,7 @@ module Overlayer =
         applyOverlayToXtension target overlaySymbolsOld overlaySymbolsNew
         target
 
-    /// Apply an overlay to the given target.
+    /// Apply an overlay to the given target (except for any FacetNames property).
     /// Only the properties that are overlaid by the old overlay will be changed.
     let applyOverlay copyTarget overlayNameOld overlayNameNew facetNames target overlayer =
         applyOverlay6 copyTarget overlayNameOld overlayNameNew facetNames target overlayer overlayer
@@ -264,19 +264,31 @@ module Overlayer =
     let getOverlays overlayer =
         overlayer.Overlays
 
+    /// Try to find an optional overlay name for a given classification.
+    let tryGetOverlayNameOpt dispatcherName overlayRouter =
+        Map.tryFind dispatcherName overlayRouter.Routes
+
     /// The empty overlayer.
     let empty =
         { IntrinsicOverlays = List.empty
           ExtrinsicOverlays = List.empty
-          Overlays = Map.empty }
+          Overlays = Map.empty
+          Routes = Map.empty }
 
     /// Make an overlayer.
     let make intrinsicOverlays extrinsicOverlays =
         let intrinsicOverlaysMap = Map.ofListBy (fun overlay -> (overlay.OverlayName, overlay)) intrinsicOverlays
         let extrinsicOverlaysMap = Map.ofListBy (fun overlay -> (overlay.OverlayName, overlay)) extrinsicOverlays
+        let overlays = Map.concat intrinsicOverlaysMap extrinsicOverlaysMap
+        let routes =
+            (intrinsicOverlays @ extrinsicOverlays) |>
+            List.map (fun overlay -> overlay.OverlaidTypeNames |> List.map (fun typeName -> (typeName, overlay.OverlayName))) |>
+            List.concat |>
+            Map.ofList
         { IntrinsicOverlays = intrinsicOverlays
           ExtrinsicOverlays = extrinsicOverlays
-          Overlays = Map.concat intrinsicOverlaysMap extrinsicOverlaysMap }
+          Overlays = overlays
+          Routes = routes }
 
     /// Attempt to make an overlayer by loading overlays from a file and then combining it with
     /// the given intrinsic overlays.

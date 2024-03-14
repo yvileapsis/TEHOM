@@ -1,5 +1,5 @@
 #shader vertex
-#version 410 core
+#version 410
 
 layout (location = 0) in vec3 position;
 
@@ -15,7 +15,7 @@ void main()
 }
 
 #shader fragment
-#version 410 core
+#version 410
 #extension GL_ARB_bindless_texture : require
 
 const float PI = 3.141592654;
@@ -28,7 +28,7 @@ layout (bindless_sampler) uniform samplerCube cubeMap;
 
 in vec3 positionOut;
 
-out vec4 frag;
+layout (location = 0) out vec4 frag;
 
 float distributionGGX(vec3 normal, vec3 h, float roughness)
 {

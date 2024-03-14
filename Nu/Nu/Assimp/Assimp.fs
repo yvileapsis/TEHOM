@@ -29,6 +29,14 @@ type RenderStyle =
     | Deferred
     | Forward of Subsort : single * Sort : single
 
+/// The shape of a navigation body (includes both 2d and 3d representations, with some cases unsupported depending on
+/// the dimensionality of the system utilizing it).
+type NavShape =
+    | EmptyShape
+    | BoundsShape
+    | StaticModelShape
+    | StaticModelSurfaceShape
+
 /// The batch phasing such involved in persisting OpenGL state.
 type [<Struct>] BatchPhase =
     | StartingPhase
@@ -244,6 +252,15 @@ module AssimpExtensions =
                     with _ -> None
                 else Some true
 
+        member this.NavShapeOpt =
+            match this.GetNonTextureProperty (Constants.Assimp.RawPropertyPrefix + Constants.Render.NavShapeName) with
+            | null -> None
+            | property ->
+                if property.PropertyType = Assimp.PropertyType.String then
+                    try property.GetStringValue () |> scvalueMemo<NavShape> |> Some
+                    with _ -> None
+                else Some EmptyShape
+
     /// Node extensions.
     type Assimp.Node with
 
@@ -322,6 +339,16 @@ module AssimpExtensions =
                 match entry.DataType with
                 | Assimp.MetaDataType.String ->
                     try entry.Data :?> string |> scvalueMemo<single> |> Some
+                    with _ -> None
+                | _ -> None
+            | (false, _) -> None
+
+        member this.NavShapeOpt =
+            match this.Metadata.TryGetValue Constants.Render.NavShapeName with
+            | (true, entry) ->
+                match entry.DataType with
+                | Assimp.MetaDataType.String ->
+                    try entry.Data :?> string |> scvalueMemo<NavShape> |> Some
                     with _ -> None
                 | _ -> None
             | (false, _) -> None

@@ -62,7 +62,7 @@ type [<NoEquality; NoComparison>] TilesDescriptor =
       Tiles : TmxLayerTile SList
       TileSourceSize : Vector2i
       TileSize : Vector2
-      TileAssets : (TmxTileset * Image AssetTag) array }
+      TileAssets : struct (TmxTileset * Image AssetTag) array }
 
 /// Describes sprite-based particles.
 type [<NoEquality; NoComparison>] SpriteParticlesDescriptor =
@@ -164,6 +164,17 @@ type [<ReferenceEquality>] private GlPackageState2d =
       CubeMapMemo : OpenGL.CubeMap.CubeMapMemo
       AssimpSceneMemo : OpenGL.Assimp.AssimpSceneMemo }
 
+/// The internally used cached asset package.
+type [<NoEquality; NoComparison>] private RenderPackageCached =
+    { CachedPackageName : string
+      CachedPackageAssets : Dictionary<string, DateTimeOffset * string * RenderAsset> }
+
+/// The internally used cached asset descriptor.
+/// OPTIMIZATION: allowing optional asset tag to reduce allocation of RenderAssetCached instances.
+type [<NoEquality; NoComparison>] private RenderAssetCached =
+    { mutable CachedAssetTagOpt : AssetTag
+      mutable CachedRenderAsset : RenderAsset }
+
 /// The OpenGL implementation of Renderer2d.
 type [<ReferenceEquality>] GlRenderer2d =
     private
@@ -173,14 +184,15 @@ type [<ReferenceEquality>] GlRenderer2d =
           TextQuad : uint * uint * uint // TODO: release these resources on clean-up.
           SpriteBatchEnv : OpenGL.SpriteBatch.SpriteBatchEnv
           RenderPackages : Packages<RenderAsset, GlPackageState2d>
-          mutable RenderPackageCachedOpt : string * Package<RenderAsset, GlPackageState2d> // OPTIMIZATION: nullable for speed.
-          mutable RenderAssetCachedOpt : AssetTag * RenderAsset
+          mutable RenderPackageCachedOpt : RenderPackageCached
+          mutable RenderAssetCached : RenderAssetCached
           mutable ReloadAssetsRequested : bool
           LayeredOperations : LayeredOperation2d List }
 
     static member private invalidateCaches renderer =
         renderer.RenderPackageCachedOpt <- Unchecked.defaultof<_>
-        renderer.RenderAssetCachedOpt <- Unchecked.defaultof<_>
+        renderer.RenderAssetCached.CachedAssetTagOpt <- Unchecked.defaultof<_>
+        renderer.RenderAssetCached.CachedRenderAsset <- RawAsset
 
     static member private freeRenderAsset renderAsset renderer =
         GlRenderer2d.invalidateCaches renderer
@@ -296,40 +308,45 @@ type [<ReferenceEquality>] GlRenderer2d =
         | Left error ->
             Log.info ("Render package load failed due to unloadable asset graph due to: '" + error)
 
-    static member tryGetRenderAsset (assetTag : AssetTag) renderer =
-        if  renderer.RenderAssetCachedOpt :> obj |> notNull &&
-            assetEq assetTag (fst renderer.RenderAssetCachedOpt) then
-            ValueSome (snd renderer.RenderAssetCachedOpt)
+    static member private tryGetRenderAsset (assetTag : AssetTag) renderer =
+        let mutable assetInfo = Unchecked.defaultof<DateTimeOffset * string * RenderAsset> // OPTIMIZATION: seems like TryGetValue allocates here if we use the tupling idiom (this may only be the case in Debug builds tho).
+        if  renderer.RenderAssetCached.CachedAssetTagOpt :> obj |> notNull &&
+            assetEq assetTag renderer.RenderAssetCached.CachedAssetTagOpt then
+            renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag // NOTE: this isn't redundant because we want to trigger refEq early-out.
+            Some renderer.RenderAssetCached.CachedRenderAsset
         elif
             renderer.RenderPackageCachedOpt :> obj |> notNull &&
-            fst renderer.RenderPackageCachedOpt = assetTag.PackageName then
-            let package = snd renderer.RenderPackageCachedOpt
-            match package.Assets.TryGetValue assetTag.AssetName with
-            | (true, (_, _, asset)) ->
-                renderer.RenderAssetCachedOpt <- (assetTag, asset)
-                ValueSome asset
-            | (false, _) -> ValueNone
+            renderer.RenderPackageCachedOpt.CachedPackageName = assetTag.PackageName then
+            let assets = renderer.RenderPackageCachedOpt.CachedPackageAssets
+            if assets.TryGetValue (assetTag.AssetName, &assetInfo) then
+                let asset = Triple.thd assetInfo
+                renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag
+                renderer.RenderAssetCached.CachedRenderAsset <- asset
+                Some asset
+            else None
         else
             match Dictionary.tryFind assetTag.PackageName renderer.RenderPackages with
             | Some package ->
-                renderer.RenderPackageCachedOpt <- (assetTag.PackageName, package)
-                match package.Assets.TryGetValue assetTag.AssetName with
-                | (true, (_, _, asset)) ->
-                    renderer.RenderAssetCachedOpt <- (assetTag, asset)
-                    ValueSome asset
-                | (false, _) -> ValueNone
+                renderer.RenderPackageCachedOpt <- { CachedPackageName = assetTag.PackageName; CachedPackageAssets = package.Assets }
+                if package.Assets.TryGetValue (assetTag.AssetName, &assetInfo) then
+                    let asset = Triple.thd assetInfo
+                    renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag
+                    renderer.RenderAssetCached.CachedRenderAsset <- asset
+                    Some asset
+                else None
             | None ->
                 Log.info ("Loading Render2d package '" + assetTag.PackageName + "' for asset '" + assetTag.AssetName + "' on the fly.")
                 GlRenderer2d.tryLoadRenderPackage assetTag.PackageName renderer
                 match renderer.RenderPackages.TryGetValue assetTag.PackageName with
                 | (true, package) ->
-                    renderer.RenderPackageCachedOpt <- (assetTag.PackageName, package)
-                    match package.Assets.TryGetValue assetTag.AssetName with
-                    | (true, (_, _, asset)) ->
-                        renderer.RenderAssetCachedOpt <- (assetTag, asset)
-                        ValueSome asset
-                    | (false, _) -> ValueNone
-                | (false, _) -> ValueNone
+                    renderer.RenderPackageCachedOpt <- { CachedPackageName = assetTag.PackageName; CachedPackageAssets = package.Assets }
+                    if package.Assets.TryGetValue (assetTag.AssetName, &assetInfo) then
+                        let asset = Triple.thd assetInfo
+                        renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag
+                        renderer.RenderAssetCached.CachedRenderAsset <- asset
+                        Some asset
+                    else None
+                | (false, _) -> None
 
     static member private handleLoadRenderPackage hintPackageName renderer =
         GlRenderer2d.tryLoadRenderPackage hintPackageName renderer
@@ -463,17 +480,17 @@ type [<ReferenceEquality>] GlRenderer2d =
         let pivot = transform.PerimeterPivot.V2 * Constants.Render.VirtualScalar2
         let rotation = -transform.Angles.Z
         match GlRenderer2d.tryGetRenderAsset image renderer with
-        | ValueSome renderAsset ->
+        | Some renderAsset ->
             match renderAsset with
             | TextureAsset (textureMetadata, texture) ->
                 GlRenderer2d.batchSprite absolute min size pivot rotation insetOpt textureMetadata texture color blend emission flip renderer
             | _ -> Log.infoOnce ("Cannot render sprite with a non-texture asset for '" + scstring image + "'.")
-        | _ -> Log.infoOnce ("Sprite failed to render due to unloadable asset for '" + scstring image + "'.")
+        | None -> Log.infoOnce ("Sprite failed to render due to unloadable asset for '" + scstring image + "'.")
 
     /// Render sprite particles.
     static member renderSpriteParticles (blend : Blend, image : Image AssetTag, particles : Particle SArray, renderer) =
         match GlRenderer2d.tryGetRenderAsset image renderer with
-        | ValueSome renderAsset ->
+        | Some renderAsset ->
             match renderAsset with
             | TextureAsset (textureMetadata, texture) ->
                 let mutable index = 0
@@ -493,7 +510,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                     GlRenderer2d.batchSprite absolute min size pivot rotation insetOpt textureMetadata texture color blend emission flip renderer
                     index <- inc index
             | _ -> Log.infoOnce ("Cannot render sprite particle with a non-texture asset for '" + scstring image + "'.")
-        | _ -> Log.infoOnce ("Sprite particles failed to render due to unloadable asset for '" + scstring image + "'.")
+        | None -> Log.infoOnce ("Sprite particles failed to render due to unloadable asset for '" + scstring image + "'.")
 
     /// Render tiles.
     static member renderTiles
@@ -504,7 +521,7 @@ type [<ReferenceEquality>] GlRenderer2d =
          tiles : TmxLayerTile SList,
          tileSourceSize : Vector2i,
          tileSize : Vector2,
-         tileAssets : (TmxTileset * Image AssetTag) array,
+         tileAssets : struct (TmxTileset * Image AssetTag) array,
          eyeCenter : Vector2,
          eyeSize : Vector2,
          renderer) =
@@ -518,17 +535,21 @@ type [<ReferenceEquality>] GlRenderer2d =
         let eyeSize = eyeSize * Constants.Render.VirtualScalar2
         let tileSize = tileSize * Constants.Render.VirtualScalar2
         let tilePivot = tileSize * 0.5f // just rotate around center
-        let (allFound, tileSetTextures) =
+        let mutable tileSetTexturesAllFound = true
+        let tileSetTextures =
             tileAssets |>
-            Array.map (fun (tileSet, tileSetImage) ->
+            Array.map (fun struct (tileSet, tileSetImage) ->
                 match GlRenderer2d.tryGetRenderAsset tileSetImage renderer with
-                | ValueSome (TextureAsset (tileSetTexture, tileSetTextureMetadata)) -> Some (tileSet, tileSetImage, tileSetTexture, tileSetTextureMetadata)
-                | ValueSome _ -> None
-                | ValueNone -> None) |>
-            Array.definitizePlus
+                | Some asset ->
+                    match asset with
+                    | TextureAsset (tileSetTexture, tileSetTextureMetadata) -> ValueSome struct (tileSet, tileSetImage, tileSetTexture, tileSetTextureMetadata)
+                    | _ -> tileSetTexturesAllFound <- false; ValueNone
+                | None -> tileSetTexturesAllFound <- false; ValueNone) |>
+            Array.filter ValueOption.isSome |>
+            Array.map ValueOption.get
 
         // render only when all needed textures are found
-        if allFound then
+        if tileSetTexturesAllFound then
 
             // OPTIMIZATION: allocating refs in a tight-loop is problematic, so pulled out here
             let tilesLength = tiles.Length
@@ -539,7 +560,8 @@ type [<ReferenceEquality>] GlRenderer2d =
                 let tile = tiles.[tileIndex]
                 if tile.Gid <> 0 then // not the empty tile
                     let mapRun = mapSize.X
-                    let (i, j) = (tileIndex % mapRun, tileIndex / mapRun)
+                    let i = tileIndex % mapRun
+                    let j = tileIndex / mapRun
                     let tileMin =
                         v2
                             (min.X + tileSize.X * single i)
@@ -550,18 +572,18 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                         // compute tile flip
                         let flip =
-                            match (tile.HorizontalFlip, tile.VerticalFlip) with
-                            | (false, false) -> FlipNone
-                            | (true, false) -> FlipH
-                            | (false, true) -> FlipV
-                            | (true, true) -> FlipHV
-
+                            match struct (tile.HorizontalFlip, tile.VerticalFlip) with
+                            | struct (false, false) -> FlipNone
+                            | struct (true, false) -> FlipH
+                            | struct (false, true) -> FlipV
+                            | struct (true, true) -> FlipHV
+        
                         // attempt to compute tile set texture
                         let mutable tileOffset = 1 // gid 0 is the empty tile
                         let mutable tileSetIndex = 0
                         let mutable tileSetWidth = 0
-                        let mutable tileSetTextureOpt = None
-                        for (set, _, textureMetadata, texture) in tileSetTextures do
+                        let mutable tileSetTextureOpt = ValueNone
+                        for struct (set, _, textureMetadata, texture) in tileSetTextures do
                             let tileCountOpt = set.TileCount
                             let tileCount = if tileCountOpt.HasValue then tileCountOpt.Value else 0
                             if  tile.Gid >= set.FirstGid && tile.Gid < set.FirstGid + tileCount ||
@@ -570,20 +592,20 @@ type [<ReferenceEquality>] GlRenderer2d =
 #if DEBUG
                                 if tileSetWidth % tileSourceSize.X <> 0 then Log.infoOnce ("Tile set '" + set.Name + "' width is not evenly divided by tile width.")
 #endif
-                                tileSetTextureOpt <- Some (textureMetadata, texture)
-                            if Option.isNone tileSetTextureOpt then
+                                tileSetTextureOpt <- ValueSome struct (textureMetadata, texture)
+                            if tileSetTextureOpt.IsNone then
                                 tileSetIndex <- inc tileSetIndex
                                 tileOffset <- tileOffset + tileCount
 
                         // attempt to render tile
                         match tileSetTextureOpt with
-                        | Some (textureMetadata, texture) ->
+                        | ValueSome struct (textureMetadata, texture) ->
                             let tileId = tile.Gid - tileOffset
                             let tileIdPosition = tileId * tileSourceSize.X
                             let tileSourcePosition = v2 (single (tileIdPosition % tileSetWidth)) (single (tileIdPosition / tileSetWidth * tileSourceSize.Y))
                             let inset = box2 tileSourcePosition (v2 (single tileSourceSize.X) (single tileSourceSize.Y))
                             GlRenderer2d.batchSprite absolute tileMin tileSize tilePivot 0.0f (ValueSome inset) textureMetadata texture color Transparent emission flip renderer
-                        | None -> ()
+                        | ValueNone -> ()
 
                 // fin
                 tileIndex <- inc tileIndex
@@ -988,7 +1010,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                 let viewport = Constants.Render.Viewport
                 let viewProjection = viewport.ViewProjection2d (absolute, eyeCenter, eyeSize)
                 match GlRenderer2d.tryGetRenderAsset font renderer with
-                | ValueSome renderAsset ->
+                | Some renderAsset ->
                     match renderAsset with
                     | FontAsset (fontSizeDefault, font) ->
 
@@ -1095,16 +1117,8 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     // fin
                     | _ -> Log.infoOnce ("Cannot render text with a non-font asset for '" + scstring font + "'.")
-                | _ -> Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring font + "'.")
+                | None -> Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring font + "'.")
             OpenGL.Hl.Assert ()
-
-    static member
-#if !DEBUG
-        inline
-#endif
-        private renderCallback callback eyeCenter eyeSize renderer =
-        flip OpenGL.SpriteBatch.InterruptSpriteBatchFrame renderer.SpriteBatchEnv $ fun () -> callback (eyeCenter, eyeSize, renderer)
-        OpenGL.Hl.Assert ()
 
     static member private renderDescriptor descriptor eyeCenter eyeSize renderer =
         match descriptor with
@@ -1187,7 +1201,7 @@ type [<ReferenceEquality>] GlRenderer2d =
               SpriteBatchEnv = spriteBatchEnv
               RenderPackages = dictPlus StringComparer.Ordinal []
               RenderPackageCachedOpt = Unchecked.defaultof<_>
-              RenderAssetCachedOpt = Unchecked.defaultof<_>
+              RenderAssetCached = { CachedAssetTagOpt = Unchecked.defaultof<_>; CachedRenderAsset = Unchecked.defaultof<_> }
               ReloadAssetsRequested = false
               LayeredOperations = List () }
 

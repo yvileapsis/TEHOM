@@ -3,24 +3,39 @@
 
 namespace Nu
 open System
+open System.Collections.Generic
 open System.Diagnostics
 open System.Numerics
 open SDL2
 open TiledSharp
+open DotRecast.Core.Collections
+open DotRecast.Core.Numerics
+open DotRecast.Recast
+open DotRecast.Recast.Geom
 open Prime
 
 // The inferred attributes of an entity that are used to construct its bounds.
+// HACK: added Important field to allow attributes to be marked as unimportant.
+// TODO: P1: see if we can refactor this type to make its representation and algo less hacky.
 type AttributesInferred =
-    { SizeInferred : Vector3
+    { Unimportant : bool
+      SizeInferred : Vector3
       OffsetInferred : Vector3 }
 
-    static member make size offset =
-        { SizeInferred = size
+    static member important size offset =
+        { Unimportant = false
+          SizeInferred = size
           OffsetInferred = offset }
 
-    static member choose left right =
-        if right.OffsetInferred.MagnitudeSquared >= left.OffsetInferred.MagnitudeSquared // HACK: picking the attribute whose offset is more impactful...
-        then right
+    static member unimportant =
+        { Unimportant = true
+          SizeInferred = v3Zero
+          OffsetInferred = v3Zero }
+
+    static member choose (left : AttributesInferred) (right : AttributesInferred) =
+        if left.Unimportant then right
+        elif right.Unimportant then left
+        elif right.OffsetInferred.MagnitudeSquared >= left.OffsetInferred.MagnitudeSquared then right // HACK: picking the attribute whose offset is more impactful...
         else left
 
 /// Describes a Tiled tile.
@@ -48,6 +63,64 @@ type TileMapDescriptor =
       TileMapSizeF : Vector2
       TileMapPosition : Vector2 }
 
+/// Configure the construction of 3d navigation meshes.
+type [<SymbolicExpansion>] Nav3dConfig =
+    { CellSize : single
+      CellHeight : single
+      AgentHeight : single
+      AgentRadius : single
+      AgentMaxClimb : single
+      AgentMaxSlope : single
+      RegionMinSize : int
+      RegionMergeSize : int
+      EdgeMaxLength : single
+      EdgeMaxError : single
+      VertsPerPolygon : int
+      DetailSampleDistance : single
+      DetailSampleMaxError : single
+      FilterLowHangingObstacles : bool
+      FilterLedgeSpans : bool
+      FilterWalkableLowHeightSpans : bool
+      PartitionType : RcPartition }
+
+    /// The default 3d navigation configuration.
+    static member defaultConfig =
+        { CellSize = 0.1f
+          CellHeight = 0.1f
+          AgentHeight = 1.5f
+          AgentRadius = 0.35f // same as default character 3d radius (maybe should be slightly more?)
+          AgentMaxClimb = 0.35f
+          AgentMaxSlope = 45.0f
+          RegionMinSize = 8
+          RegionMergeSize = 20
+          EdgeMaxLength = 6.0f
+          EdgeMaxError = 1.3f
+          VertsPerPolygon = 6
+          DetailSampleDistance = 6.0f
+          DetailSampleMaxError = 1.0f
+          FilterLowHangingObstacles = true
+          FilterLedgeSpans = true
+          FilterWalkableLowHeightSpans = true
+          PartitionType = RcPartition.LAYERS }
+
+/// 3d navigation input geometry provider.
+type Nav3dInputGeomProvider (vertices, indices, bounds : Box3) =
+    let triMesh = RcTriMesh (vertices, indices)
+    let meshes = RcImmutableArray.Create triMesh
+    let offMeshConnections = List ()
+    let convexVolumes = List ()
+    interface IInputGeomProvider with
+        member this.GetMesh () = triMesh
+        member this.GetMeshBoundsMin () = RcVec3f (bounds.Min.X, bounds.Min.Y, bounds.Min.Z)
+        member this.GetMeshBoundsMax () = RcVec3f (bounds.Max.X, bounds.Max.Y, bounds.Max.Z)
+        member this.Meshes () = meshes
+        member this.AddConvexVolume convexVolume = convexVolumes.Add convexVolume
+        member this.ConvexVolumes () = convexVolumes
+        member this.GetOffMeshConnections () = offMeshConnections
+        member this.AddOffMeshConnection (start, end_, radius, bidir, area, flags) = offMeshConnections.Add (RcOffMeshConnection (start, end_, radius, bidir, area, flags))
+        member this.RemoveOffMeshConnections filter = offMeshConnections.RemoveAll filter |> ignore<int>
+        end
+
 /// The manner in which a gui entity may be docked by a parent entity.
 type DockType =
     | DockCenter
@@ -70,13 +143,6 @@ type FlowDirection =
     | FlowUpward
 
 /// A gui layout.
-[<Syntax
-    ("Flow Dock Grid Manual",
-     "FlowParent FlowUnlimited FlowTo " +
-     "FlowUpward FlowRightward FlowDownward FlowLeftward",
-     "", "", "",
-     Constants.PrettyPrinter.DefaultThresholdMin,
-     Constants.PrettyPrinter.DefaultThresholdMax)>]
 type Layout =
     | Flow of FlowDirection * FlowLimit
     | Dock of Vector4 * bool * bool
@@ -168,75 +234,50 @@ type [<ReferenceEquality>] WorldConfig =
 [<AutoOpen>]
 module AmbientState =
 
-    /// Tracks whether the engine is running imperatively.
-    /// TODO: pack this flag into AmbientState.Advancing.
-    let mutable private Imperative = true
-
-    /// Tracks whether the engine is running accompanied by another program, such as an editor.
-    /// TODO: pack this flag into AmbientState.Advancing.
-    let mutable private Accompanied = true
+    let [<Literal>] private ImperativeMask =    0b0001u
+    let [<Literal>] private AccompaniedMask =   0b0010u
+    let [<Literal>] private AdvancingMask =     0b0100u
 
     /// The ambient state of the world.
     type [<ReferenceEquality>] 'w AmbientState =
         private
             { // cache line 1 (assuming 16 byte header)
+              Flags : uint
               Liveness : Liveness
-              Advancing : bool
               UpdateTime : int64
               TickDelta : int64
-              // cache line 2
               KeyValueStore : SUMap<obj, obj>
               TickTime : int64
+              // cache line 2
               TickTimeShavings : int64
               TickWatch : Stopwatch
               DateDelta : TimeSpan
-              // cache line 3
               DateTime : DateTimeOffset
               Tasklets : OMap<Simulant, 'w Tasklet UList>
               SdlDepsOpt : SdlDeps option
+              // cache line 3
               Symbolics : Symbolics
               Overlayer : Overlayer
-              OverlayRouter : OverlayRouter
               UnculledRenderRequested : bool }
 
-    /// Check that the world's state is advancing.
-    let getAdvancing state =
-        state.Advancing
+        member this.Imperative = this.Flags &&& ImperativeMask <> 0u
+        member this.Accompanied = this.Flags &&& AccompaniedMask <> 0u
+        member this.Advancing = this.Flags &&& AdvancingMask <> 0u
 
-    /// Check that the world's state is advancing.
-    let getHalted state =
-        not state.Advancing
+    /// Get the the liveness state of the engine.
+    let getLiveness state =
+        state.Liveness
 
     /// Set whether the world's state is advancing.
     let setAdvancing advancing (state : _ AmbientState) =
         if advancing <> state.Advancing then
             if advancing then state.TickWatch.Start () else state.TickWatch.Stop ()
-            { state with Advancing = advancing }
+            { state with Flags = if advancing then state.Flags ||| AdvancingMask else state.Flags &&& ~~~AdvancingMask }
         else state
 
-    /// Check that the engine is executing with imperative semantics where applicable.
-    let getImperative (_ : 'w AmbientState) =
-        Imperative
-
-    /// Check that the engine is executing with functional semantics.
-    let getFunctional (_ : 'w AmbientState) =
-        not Imperative
-
-    /// Get whether the engine is running accompanied, such as in an editor.
-    let getAccompanied (_ : 'w AmbientState) =
-        Accompanied
-
-    /// Get whether the engine is running unaccompanied.
-    let getUnaccompanied (_ : 'w AmbientState) =
-        not Accompanied
-
     /// Get the collection config value.
-    let getConfig (_ : 'w AmbientState) =
-        if Imperative then TConfig.Imperative else TConfig.Functional
-
-    /// Get the the liveness state of the engine.
-    let getLiveness state =
-        state.Liveness
+    let getConfig (state : 'w AmbientState) =
+        if state.Imperative then TConfig.Imperative else TConfig.Functional
 
     /// Get the update time.
     let getUpdateTime state =
@@ -259,7 +300,7 @@ module AmbientState =
         single state.TickTime / single Stopwatch.Frequency
 
     /// Get the polymorphic engine time delta.
-    let getGameDelta state =
+    let getGameDelta (state : 'w AmbientState) =
         match Constants.GameTime.DesiredFrameRate with
         | StaticFrameRate _ -> UpdateTime (if state.Advancing then 1L else 0L)
         | DynamicFrameRate _ -> ClockTime (getClockDelta state)
@@ -279,7 +320,7 @@ module AmbientState =
         state.DateTime
 
     /// Update the update and clock times.
-    let updateTime state =
+    let updateTime (state : 'w AmbientState) =
         let updateDelta = if state.Advancing then 1L else 0L
         let tickTimeShaved = state.TickWatch.ElapsedTicks - state.TickTimeShavings
         let tickDelta = tickTimeShaved - state.TickTime
@@ -295,7 +336,7 @@ module AmbientState =
             DateDelta = dateTime - state.DateTime }
 
     /// Switch simulation to use this ambient state.
-    let switch state =
+    let switch (state : 'w AmbientState) =
         if state.Advancing
         then state.TickWatch.Start ()
         else state.TickWatch.Stop ()
@@ -380,7 +421,7 @@ module AmbientState =
         | Some (SglWindow window) ->
             let (width, height) = (ref 0, ref 0)
             SDL.SDL_GetWindowSize (window.SglWindow, width, height) |> ignore
-            Some (v2i !width !height)
+            Some (v2i width.Value height.Value)
         | _ -> None
 
     /// Get symbolics with the by map.
@@ -408,18 +449,6 @@ module AmbientState =
     let setOverlayer overlayer state =
         { state with Overlayer = overlayer }
 
-    /// Get the overlay router.
-    let getOverlayRouter state =
-        state.OverlayRouter
-
-    /// Get the overlay router.
-    let getOverlayRouterBy by state =
-        by state.OverlayRouter
-
-    /// Set the overlay router.
-    let setOverlayRouter router state =
-        { state with OverlayRouter = router }
-
     /// Acknowledge an unculled render request.
     let acknowledgeUnculledRenderRequest state =
         { state with UnculledRenderRequested = false }
@@ -433,12 +462,14 @@ module AmbientState =
         { state with UnculledRenderRequested = true }
 
     /// Make an ambient state value.
-    let make imperative accompanied advancing symbolics overlayer overlayRouter sdlDepsOpt =
-        Imperative <- imperative
-        Accompanied <- accompanied
+    let make imperative accompanied advancing symbolics overlayer sdlDepsOpt =
+        let flags =
+            (if imperative then ImperativeMask else 0u) |||
+            (if accompanied then AccompaniedMask else 0u) |||
+            (if advancing then AdvancingMask else 0u)
         let config = if imperative then TConfig.Imperative else TConfig.Functional
-        { Liveness = Live
-          Advancing = advancing
+        { Flags = flags
+          Liveness = Live
           UpdateTime = 0L
           TickDelta = 0L
           KeyValueStore = SUMap.makeEmpty HashIdentity.Structural config
@@ -451,7 +482,6 @@ module AmbientState =
           SdlDepsOpt = sdlDepsOpt
           Symbolics = symbolics
           Overlayer = overlayer
-          OverlayRouter = overlayRouter
           UnculledRenderRequested = false }
 
 /// The ambient state of the world.

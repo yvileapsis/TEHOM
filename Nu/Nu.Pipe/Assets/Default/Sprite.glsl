@@ -1,5 +1,5 @@
 #shader vertex
-#version 410 core
+#version 410
 
 const int VERTS = 4;
 
@@ -23,12 +23,12 @@ void main()
 }
 
 #shader fragment
-#version 410 core
+#version 410
 #extension GL_ARB_bindless_texture : require
 layout (bindless_sampler) uniform sampler2D tex;
 uniform vec4 color;
 in vec2 texCoords;
-out vec4 frag;
+layout (location = 0) out vec4 frag;
 void main()
 {
     frag = color * texture(tex, texCoords);

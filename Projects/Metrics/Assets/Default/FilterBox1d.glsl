@@ -1,5 +1,5 @@
 #shader vertex
-#version 410 core
+#version 410
 
 layout (location = 0) in vec3 position;
 layout (location = 1) in vec2 texCoords;
@@ -13,14 +13,14 @@ void main()
 }
 
 #shader fragment
-#version 410 core
+#version 410
 #extension GL_ARB_bindless_texture : require
+
+layout (bindless_sampler) uniform sampler2D inputTexture;
 
 in vec2 texCoordsOut;
 
-out float frag;
-
-layout (bindless_sampler) uniform sampler2D inputTexture;
+layout (location = 0) out float frag;
 
 void main()
 {

@@ -4,9 +4,13 @@
 namespace Nu
 open System
 open System.Collections.Generic
+open System.ComponentModel
 open System.Diagnostics
 open System.Numerics
 open System.Reflection
+open DotRecast.Core
+open DotRecast.Detour
+open DotRecast.Recast
 open Prime
 
 [<RequireQualifiedAccess>]
@@ -234,24 +238,6 @@ and Message = inherit Signal
 /// A model-message-command-content (MMCC) command tag type.
 and Command = inherit Signal
 
-/// Specifies the desired screen, if any, or whether to ignore screen desire functionality altogether.
-and DesiredScreen =
-    | Desire of Screen
-    | DesireNone
-    | DesireIgnore
-
-/// The data required to execute slide screen presentation.
-and Slide =
-    { IdlingTime : GameTime
-      Destination : Screen }
-
-/// Describes the behavior of a screen.
-and ScreenBehavior =
-    | Vanilla
-    | Dissolve of DissolveDescriptor * SongDescriptor option
-    | Slide of DissolveDescriptor * SlideDescriptor * SongDescriptor option * Screen
-    | OmniScreen
-
 /// The data for a change in the world's ambient state.
 and AmbientChangeData = 
     { OldWorldWithOldState : World }
@@ -292,6 +278,43 @@ and [<CustomEquality; CustomComparison>] SortPriority =
             match that with
             | :? SortPriority as that -> (this :> SortPriority IComparable).CompareTo that
             | _ -> failwithumf ()
+
+/// Specifies the desired screen, if any, or whether to ignore screen desire functionality altogether.
+and DesiredScreen =
+    | Desire of Screen
+    | DesireNone
+    | DesireIgnore
+
+/// Describes the behavior of a screen.
+and ScreenBehavior =
+    | Vanilla
+    | Dissolve of DissolveDescriptor * SongDescriptor option
+    | Slide of DissolveDescriptor * SlideDescriptor * SongDescriptor option * Screen
+    | OmniScreen
+
+/// The data required to execute slide screen presentation.
+and Slide =
+    { IdlingTime : GameTime
+      Destination : Screen }
+
+/// Represents 3d navigation capabilies for a screen.
+/// NOTE: this type is intended only for internal engine use.
+and [<ReferenceEquality; NoComparison>] Nav3d =
+    { Nav3dContext : RcContext
+      Nav3dBodies : Map<Entity, Box3 * Matrix4x4 * StaticModel AssetTag * int * NavShape>
+      Nav3dBodiesOldOpt : Map<Entity, Box3 * Matrix4x4 * StaticModel AssetTag * int * NavShape> option
+      Nav3dConfig : Nav3dConfig
+      Nav3dConfigOldOpt : Nav3dConfig option
+      Nav3dMeshOpt : (RcBuilderResult * DtNavMesh * DtNavMeshQuery) option }
+
+    // Make an empty 3d navigation service.
+    static member make () =
+        { Nav3dContext = RcContext ()
+          Nav3dBodies = Map.empty
+          Nav3dBodiesOldOpt = None
+          Nav3dConfig = Nav3dConfig.defaultConfig
+          Nav3dConfigOldOpt = None
+          Nav3dMeshOpt = None }
 
 /// Generalized interface tag for late-bound objects.
 and LateBindings = interface end
@@ -482,6 +505,7 @@ and EntityDispatcher (is2d, perimeterCentered, physical) =
          Define? Absolute false
          Define? Model { DesignerType = typeof<unit>; DesignerValue = () }
          Define? MountOpt Option<Entity Relation>.None
+         Define? PropagationSourceOpt Option<Entity>.None
          Define? PublishChangeEvents false
          Define? Enabled true
          Define? EnabledLocal true
@@ -497,7 +521,8 @@ and EntityDispatcher (is2d, perimeterCentered, physical) =
          Define? PublishPreUpdates false
          Define? PublishUpdates false
          Define? PublishPostUpdates false
-         Define? Persistent true]
+         Define? Persistent true
+         Define? PropagatedDescriptorOpt Option<EntityDescriptor>.None]
 
     /// Register an entity when adding it to a group.
     abstract Register : Entity * World -> World
@@ -547,8 +572,8 @@ and EntityDispatcher (is2d, perimeterCentered, physical) =
     abstract GetAttributesInferred : Entity * World -> AttributesInferred
     default this.GetAttributesInferred (_, _) =
         if this.Is2d
-        then AttributesInferred.make Constants.Engine.Entity2dSizeDefault v3Zero
-        else AttributesInferred.make Constants.Engine.Entity3dSizeDefault v3Zero
+        then AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
+        else AttributesInferred.important Constants.Engine.Entity3dSizeDefault v3Zero
 
     /// Attempt to pick an entity with a ray.
     abstract RayCast : Ray3 * Entity * World -> single array
@@ -625,8 +650,8 @@ and Facet (physical) =
     abstract GetAttributesInferred : Entity * World -> AttributesInferred
     default this.GetAttributesInferred (entity, world) =
         if WorldTypes.getEntityIs2d entity world
-        then AttributesInferred.make Constants.Engine.Entity2dSizeDefault v3Zero
-        else AttributesInferred.make Constants.Engine.Entity3dSizeDefault v3Zero
+        then AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
+        else AttributesInferred.important Constants.Engine.Entity3dSizeDefault v3Zero
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
     abstract Edit : EditOperation * Entity * World -> World
@@ -749,6 +774,7 @@ and [<ReferenceEquality>] GroupContent =
 and [<ReferenceEquality>] EntityContent =
     { EntityDispatcherName : string
       EntityName : string
+      EntityFilePathOpt : string option
       mutable EntityCachedOpt : Entity // OPTIMIZATION: allows us to more often hit the EntityStateOpt cache. May be null.
       mutable EventSignalContentsOpt : OrderedDictionary<obj Address * obj, Guid> // OPTIMIZATION: lazily created.
       mutable EventHandlerContentsOpt : OrderedDictionary<int * obj Address, Guid * (Event -> obj)> // OPTIMIZATION: lazily created.
@@ -765,6 +791,7 @@ and [<ReferenceEquality>] EntityContent =
     static member empty =
         { EntityDispatcherName = nameof EntityDispatcher
           EntityName = nameof Entity
+          EntityFilePathOpt = None
           EntityCachedOpt = Unchecked.defaultof<_>
           EventSignalContentsOpt = null
           EventHandlerContentsOpt = null
@@ -791,9 +818,9 @@ and [<ReferenceEquality; CLIMutable>] GameState =
       Eye2dSize : Vector2
       Eye3dCenter : Vector3
       Eye3dRotation : Quaternion
-      Eye3dFrustumInterior : Frustum // OPTIMIZATION: cached value
-      Eye3dFrustumExterior : Frustum // OPTIMIZATION: cached value
-      Eye3dFrustumImposter : Frustum // OPTIMIZATION: cached value
+      Eye3dFrustumInterior : Frustum // OPTIMIZATION: cached value.
+      Eye3dFrustumExterior : Frustum // OPTIMIZATION: cached value.
+      Eye3dFrustumImposter : Frustum // OPTIMIZATION: cached value.
       Order : int64
       Id : Guid }
 
@@ -864,6 +891,7 @@ and [<ReferenceEquality; CLIMutable>] ScreenState =
       Incoming : Transition
       Outgoing : Transition
       SlideOpt : Slide option
+      Nav3d : Nav3d
       Protected : bool
       Persistent : bool
       Order : int64
@@ -881,6 +909,7 @@ and [<ReferenceEquality; CLIMutable>] ScreenState =
           Incoming = Transition.make Incoming
           Outgoing = Transition.make Outgoing
           SlideOpt = None
+          Nav3d = Nav3d.make ()
           Protected = false
           Persistent = true
           Order = Core.getTimeStampUnique ()
@@ -997,8 +1026,10 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
       mutable AnglesLocal : Vector3
       mutable ElevationLocal : single
       mutable MountOpt : Entity Relation option
+      mutable PropagationSourceOpt : Entity option
       mutable OverlayNameOpt : string option
       mutable FacetNames : string Set
+      mutable PropagatedDescriptorOpt : EntityDescriptor option
       mutable Order : int64
       Id : uint64
       Surnames : string array }
@@ -1074,8 +1105,10 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
           AnglesLocal = Vector3.Zero
           ElevationLocal = 0.0f
           MountOpt = None
+          PropagationSourceOpt = None
           OverlayNameOpt = overlayNameOpt
           FacetNames = Set.empty
+          PropagatedDescriptorOpt = None
           Order = Core.getTimeStampUnique ()
           Id = id
           Surnames = surnames }
@@ -1137,8 +1170,39 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     interface SimulantState with
         member this.GetXtension () = this.Xtension
 
+/// Converts Game types, interning its strings for look-up speed.
+and GameConverter (pointType : Type) =
+    inherit TypeConverter ()
+
+    override this.CanConvertTo (_, destType) =
+        destType = typeof<string> ||
+        destType = typeof<Symbol> ||
+        destType = pointType
+
+    override this.ConvertTo (_, _, source, destType) =
+        if destType = typeof<string> then (source :?> Game).ToString ()
+        elif destType = typeof<Symbol> then (AddressConverter typeof<Game Address>).ConvertTo ((source :?> Game).GameAddress, destType)
+        elif destType = pointType then source
+        else failconv "Invalid GameConverter conversion to source." None
+
+    override this.CanConvertFrom (_, sourceType) =
+        sourceType = typeof<string> ||
+        sourceType = typeof<Symbol> ||
+        sourceType = pointType
+
+    override this.ConvertFrom (_, _, source) =
+        match source with
+        | :? string as addressStr -> Game (stoa addressStr)
+        | :? Symbol as addressSymbol ->
+            match addressSymbol with
+            | Atom (addressStr, _) | Text (addressStr, _) -> Game (stoa addressStr)
+            | Number (_, _) | Quote (_, _) | Symbols (_, _) -> failconv "Expected Atom or Text for conversion to Game." (Some addressSymbol)
+        | _ ->
+            if pointType.IsInstanceOfType source then source
+            else failconv "Invalid GameConverter conversion from source." None
+
 /// The game type that hosts the various screens used to navigate through a game.
-and Game (gameAddress : Game Address) =
+and [<TypeConverter (typeof<GameConverter>)>] Game (gameAddress : Game Address) =
 
 #if DEBUG
     // check that address is of correct length for a game
@@ -1201,9 +1265,40 @@ and Game (gameAddress : Game Address) =
             | :? Game as that -> (this :> Game IComparable).CompareTo that
             | _ -> failwith "Invalid Game comparison (comparee not of type Game)."
 
+/// Converts Screen types, interning its strings for look-up speed.
+and ScreenConverter (pointType : Type) =
+    inherit TypeConverter ()
+
+    override this.CanConvertTo (_, destType) =
+        destType = typeof<string> ||
+        destType = typeof<Symbol> ||
+        destType = pointType
+
+    override this.ConvertTo (_, _, source, destType) =
+        if destType = typeof<string> then (source :?> Screen).ToString ()
+        elif destType = typeof<Symbol> then (AddressConverter typeof<Screen Address>).ConvertTo ((source :?> Screen).ScreenAddress, destType)
+        elif destType = pointType then source
+        else failconv "Invalid ScreenConverter conversion to source." None
+
+    override this.CanConvertFrom (_, sourceType) =
+        sourceType = typeof<string> ||
+        sourceType = typeof<Symbol> ||
+        sourceType = pointType
+
+    override this.ConvertFrom (_, _, source) =
+        match source with
+        | :? string as addressStr -> Screen (stoa addressStr)
+        | :? Symbol as addressSymbol ->
+            match addressSymbol with
+            | Atom (addressStr, _) | Text (addressStr, _) -> Screen (stoa addressStr)
+            | Number (_, _) | Quote (_, _) | Symbols (_, _) -> failconv "Expected Atom or Text for conversion to Screen." (Some addressSymbol)
+        | _ ->
+            if pointType.IsInstanceOfType source then source
+            else failconv "Invalid ScreenConverter conversion from source." None
+
 /// The screen type that allows transitioning to and from other screens, and also hosts the
 /// currently interactive groups of entities.
-and Screen (screenAddress) =
+and [<TypeConverter (typeof<ScreenConverter>)>] Screen (screenAddress) =
 
 #if DEBUG
     // check that address is of correct length for a screen
@@ -1272,8 +1367,39 @@ and Screen (screenAddress) =
         member this.SimulantAddress = simulantAddress
         end
 
+/// Converts Group types, interning its strings for look-up speed.
+and GroupConverter (pointType : Type) =
+    inherit TypeConverter ()
+
+    override this.CanConvertTo (_, destType) =
+        destType = typeof<string> ||
+        destType = typeof<Symbol> ||
+        destType = pointType
+
+    override this.ConvertTo (_, _, source, destType) =
+        if destType = typeof<string> then (source :?> Group).ToString ()
+        elif destType = typeof<Symbol> then (AddressConverter typeof<Group Address>).ConvertTo ((source :?> Group).GroupAddress, destType)
+        elif destType = pointType then source
+        else failconv "Invalid GroupConverter conversion to source." None
+
+    override this.CanConvertFrom (_, sourceType) =
+        sourceType = typeof<string> ||
+        sourceType = typeof<Symbol> ||
+        sourceType = pointType
+
+    override this.ConvertFrom (_, _, source) =
+        match source with
+        | :? string as addressStr -> Group (stoa addressStr)
+        | :? Symbol as addressSymbol ->
+            match addressSymbol with
+            | Atom (addressStr, _) | Text (addressStr, _) -> Group (stoa addressStr)
+            | Number (_, _) | Quote (_, _) | Symbols (_, _) -> failconv "Expected Atom or Text for conversion to Group." (Some addressSymbol)
+        | _ ->
+            if pointType.IsInstanceOfType source then source
+            else failconv "Invalid GroupConverter conversion from source." None
+
 /// Forms a logical group of entities.
-and Group (groupAddress) =
+and [<TypeConverter (typeof<GroupConverter>)>] Group (groupAddress) =
 
 #if DEBUG
     // check that address is of correct length for a group
@@ -1345,9 +1471,40 @@ and Group (groupAddress) =
             | :? Group as that -> (this :> Group IComparable).CompareTo that
             | _ -> failwith "Invalid Group comparison (comparee not of type Group)."
 
+/// Converts Entity types, interning its strings for look-up speed.
+and EntityConverter (pointType : Type) =
+    inherit TypeConverter ()
+
+    override this.CanConvertTo (_, destType) =
+        destType = typeof<string> ||
+        destType = typeof<Symbol> ||
+        destType = pointType
+
+    override this.ConvertTo (_, _, source, destType) =
+        if destType = typeof<string> then (source :?> Entity).ToString ()
+        elif destType = typeof<Symbol> then (AddressConverter typeof<Entity Address>).ConvertTo ((source :?> Entity).EntityAddress, destType)
+        elif destType = pointType then source
+        else failconv "Invalid EntityConverter conversion to source." None
+
+    override this.CanConvertFrom (_, sourceType) =
+        sourceType = typeof<string> ||
+        sourceType = typeof<Symbol> ||
+        sourceType = pointType
+
+    override this.ConvertFrom (_, _, source) =
+        match source with
+        | :? string as addressStr -> Entity (stoa addressStr)
+        | :? Symbol as addressSymbol ->
+            match addressSymbol with
+            | Atom (addressStr, _) | Text (addressStr, _) -> Entity (stoa addressStr)
+            | Number (_, _) | Quote (_, _) | Symbols (_, _) -> failconv "Expected Atom or Text for conversion to Entity." (Some addressSymbol)
+        | _ ->
+            if pointType.IsInstanceOfType source then source
+            else failconv "Invalid EntityConverter conversion from source." None
+
 /// The type around which the whole game engine is based! Used in combination with dispatchers to implement things
 /// like buttons, characters, blocks, and things of that sort.
-and Entity (entityAddress) =
+and [<TypeConverter (typeof<EntityConverter>)>] Entity (entityAddress) =
 
 #if DEBUG
     // check that address is of correct length for an entity
@@ -1545,14 +1702,13 @@ and [<ReferenceEquality>] internal Subsystems =
 
 /// Keeps the World from occupying more than two cache lines.
 and [<ReferenceEquality>] internal WorldExtension =
-    { JobSystem : JobSystem // might be nice if there were room for this in the World type...
-      DestructionListRev : Simulant list
+    { DestructionListRev : Simulant list
       Dispatchers : Dispatchers
-      Plugin : NuPlugin }
+      Plugin : NuPlugin
+      PropagationTargets : UMap<Entity, Entity USet> }
 
-/// The world, in a functional programming sense. Hosts the game object, the dependencies needed
-/// to implement a game, messages to by consumed by the various engine sub-systems, and general
-/// configuration data.
+/// The world, in a functional programming sense. Hosts the simulation state, the dependencies needed to implement a
+/// game, messages to by consumed by the various engine subsystems, and general configuration data.
 and [<ReferenceEquality>] World =
     internal
         { // cache line 1 (assuming 16 byte header)
@@ -1565,35 +1721,36 @@ and [<ReferenceEquality>] World =
           // cache line 2
           EntityMounts : UMap<Entity, Entity USet>
           Quadtree : Entity Quadtree
-          Octree : Entity Octree
+          mutable OctreeOpt : Entity Octree option // OPTIMIZATION: allow for None for games that don't use 3D.
           AmbientState : World AmbientState
           Subsystems : Subsystems
           Simulants : UMap<Simulant, Simulant USet option> // OPTIMIZATION: using None instead of empty USet to descrease number of USet instances.
+          JobSystem : JobSystem
           WorldExtension : WorldExtension }
-
-    /// Check that the world is advancing (not halted).
-    member this.Advancing =
-        AmbientState.getAdvancing this.AmbientState
-
-    /// Check that the world is halted (not advancing).
-    member this.Halted =
-        AmbientState.getHalted this.AmbientState
 
     /// Check that the world is executing with imperative semantics where applicable.
     member this.Imperative =
-        AmbientState.getImperative this.AmbientState
+        this.AmbientState.Imperative
 
     /// Check that the world is executing with functional semantics.
     member this.Functional =
-        AmbientState.getFunctional this.AmbientState
+        not this.AmbientState.Imperative
 
     /// Check that the world is accompanied (such as by an editor program that controls it).
     member this.Accompanied =
-        AmbientState.getAccompanied this.AmbientState
+        this.AmbientState.Accompanied
 
     /// Check that the world is unaccompanied (such as being absent of an editor program that controls it).
     member this.Unaccompanied =
-        AmbientState.getUnaccompanied this.AmbientState
+        not this.AmbientState.Accompanied
+
+    /// Check that the world is advancing (not halted).
+    member this.Advancing =
+        this.AmbientState.Advancing
+
+    /// Check that the world is halted (not advancing).
+    member this.Halted =
+        not this.AmbientState.Advancing
 
     /// Get the number of updates that have transpired.
     member this.UpdateTime =

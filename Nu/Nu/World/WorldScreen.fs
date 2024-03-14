@@ -4,6 +4,11 @@
 namespace Nu
 open System
 open System.IO
+open System.Numerics
+open DotRecast.Detour
+open DotRecast.Recast
+open DotRecast.Recast.Geom
+open DotRecast.Recast.Toolset.Builder
 open Prime
 
 [<AutoOpen>]
@@ -28,6 +33,8 @@ module WorldScreenModule =
         member this.GetSlideOpt world = World.getScreenSlideOpt this world
         member this.SetSlideOpt value world = World.setScreenSlideOpt value this world |> snd'
         member this.SlideOpt = lens (nameof this.SlideOpt) this this.GetSlideOpt this.SetSlideOpt
+        member this.GetNav3d world = World.getScreenNav3d this world
+        member this.Nav3d = lensReadOnly (nameof this.Nav3d) this this.GetNav3d
         member this.GetProtected world = World.getScreenProtected this world
         member this.Protected = lensReadOnly (nameof this.Protected) this this.GetProtected
         member this.GetPersistent world = World.getScreenPersistent this world
@@ -90,7 +97,10 @@ module WorldScreenModule =
             World.setScreenXtensionProperty propertyName property this world
 
         /// Check that a screen is in an idling state (not transitioning in nor out).
-        member this.Idling world = match this.GetTransitionState world with IdlingState _ -> true | _ -> false
+        member this.Idling world =
+            match this.GetTransitionState world with
+            | IdlingState _ -> true
+            | _ -> false
 
         /// Check that a screen is selected.
         member this.Selected world =
@@ -258,29 +268,29 @@ module WorldScreenModule =
             World.createDissolveScreen5 typeof<'d>.Name nameOpt dissolveDescriptor songOpt world
 
         /// Write a screen to a screen descriptor.
-        static member writeScreen screen (screenDescriptor : ScreenDescriptor) world =
+        static member writeScreen writePropagationHistory (screenDescriptor : ScreenDescriptor) screen world =
             let screenState = World.getScreenState screen world
             let screenDispatcherName = getTypeName screenState.Dispatcher
             let screenDescriptor = { screenDescriptor with ScreenDispatcherName = screenDispatcherName }
             let getScreenProperties = Reflection.writePropertiesFromTarget tautology3 screenDescriptor.ScreenProperties screenState
             let screenDescriptor = { screenDescriptor with ScreenProperties = getScreenProperties }
             let groups = World.getGroups screen world
-            { screenDescriptor with GroupDescriptors = World.writeGroups groups world }
+            { screenDescriptor with GroupDescriptors = World.writeGroups writePropagationHistory groups world }
 
         /// Write multiple screens to a game descriptor.
-        static member writeScreens screens world =
+        static member writeScreens writePropagationHistory screens world =
             screens |>
             Seq.sortBy (fun (screen : Screen) -> screen.GetOrder world) |>
             Seq.filter (fun (screen : Screen) -> screen.GetPersistent world) |>
-            Seq.fold (fun screenDescriptors screen -> World.writeScreen screen ScreenDescriptor.empty world :: screenDescriptors) [] |>
+            Seq.fold (fun screenDescriptors screen -> World.writeScreen writePropagationHistory ScreenDescriptor.empty screen world :: screenDescriptors) [] |>
             Seq.rev |>
             Seq.toList
 
         /// Write a screen to a file.
-        static member writeScreenToFile (filePath : string) screen world =
+        static member writeScreenToFile writePropagationHistory (filePath : string) screen world =
             let filePathTmp = filePath + ".tmp"
             let prettyPrinter = (SyntaxAttribute.defaultValue typeof<GameDescriptor>).PrettyPrinter
-            let screenDescriptor = World.writeScreen screen ScreenDescriptor.empty world
+            let screenDescriptor = World.writeScreen writePropagationHistory ScreenDescriptor.empty screen world
             let screenDescriptorStr = scstring screenDescriptor
             let screenDescriptorPretty = PrettyPrinter.prettyPrint screenDescriptorStr prettyPrinter
             File.WriteAllText (filePathTmp, screenDescriptorPretty)
@@ -347,3 +357,176 @@ module WorldScreenModule =
                 setScreenSlide slideDescriptor destination screen world
             | OmniScreen ->
                 World.setOmniScreen screen world
+
+        static member internal getNav3dDescriptors contents =
+            [for (bounds, affineMatrix, staticModel, surfaceIndex, content) in contents do
+                match content with
+                | EmptyShape -> ()
+                | BoundsShape -> Left bounds
+                | StaticModelSurfaceShape ->
+                    match Metadata.tryGetStaticModelMetadata staticModel with
+                    | Some physicallyBasedModel ->
+                        if surfaceIndex >= 0 && surfaceIndex < physicallyBasedModel.Surfaces.Length then
+                            Right (bounds, affineMatrix, physicallyBasedModel.Surfaces.[surfaceIndex])
+                    | None -> ()
+                | StaticModelShape ->
+                    match Metadata.tryGetStaticModelMetadata staticModel with
+                    | Some physicallyBasedModel ->
+                        for surface in physicallyBasedModel.Surfaces do
+                            Right (bounds, affineMatrix, surface)
+                    | None -> ()]
+
+        static member internal tryBuildNav3dMesh contents config =
+
+            // attempt to create a 3d input geometry provider
+            let geomProviderOpt =
+                match World.getNav3dDescriptors contents with
+                | [] -> None
+                | descriptors ->
+
+                    // attempt to compute bounds and vertices
+                    let mutable boundsOpt = None
+                    let vertices =
+                        [|for descriptor in descriptors do
+                            match descriptor with
+                            | Left bounds ->
+                                match boundsOpt with
+                                | None -> boundsOpt <- Some bounds
+                                | Some (bounds' : Box3) -> boundsOpt <- Some (bounds'.Combine bounds)
+                                let corners = bounds.Corners
+                                for corner in corners do
+                                    corner.X; corner.Y; corner.Z
+                            | Right (bounds, affineMatrix : Matrix4x4, surface) ->
+                                let geometry = surface.PhysicallyBasedGeometry
+                                match boundsOpt with
+                                | None -> boundsOpt <- Some bounds
+                                | Some (bounds' : Box3) -> boundsOpt <- Some (bounds'.Combine bounds)
+                                if geometry.PrimitiveType = OpenGL.PrimitiveType.Triangles then
+                                    for v in geometry.Vertices do
+                                        let v' = Vector3.Transform (v, affineMatrix)
+                                        v'.X; v'.Y; v'.Z|]
+
+                    // compute indices
+                    let mutable offset = 0
+                    let indices =
+                        [|for descriptor in descriptors do
+                            match descriptor with
+                            | Left _ ->
+                                // as the corners are ordered in Box3.Corners...
+                                //
+                                //     6--------7
+                                //    /|       /|
+                                //   / |      / |
+                                //  5--------4  |
+                                //  |  0-----|--3
+                                //  | /      | /
+                                //  |/       |/
+                                //  1--------2
+                                //
+                                offset + 2; offset + 3; offset + 7 // right
+                                offset + 2; offset + 7; offset + 4
+                                offset + 0; offset + 1; offset + 5 // left
+                                offset + 0; offset + 5; offset + 6
+                                offset + 4; offset + 5; offset + 6 // top
+                                offset + 4; offset + 6; offset + 7
+                                offset + 0; offset + 1; offset + 2 // bottom
+                                offset + 0; offset + 2; offset + 3
+                                offset + 0; offset + 3; offset + 7 // back
+                                offset + 0; offset + 7; offset + 6
+                                offset + 1; offset + 2; offset + 4 // front
+                                offset + 1; offset + 4; offset + 5
+                                offset <- offset + 8
+                            | Right (_, _, surface) ->
+                                let geometry = surface.PhysicallyBasedGeometry
+                                if geometry.PrimitiveType = OpenGL.PrimitiveType.Triangles then
+                                    for i in geometry.Indices do
+                                        i + offset
+                                offset <- offset + geometry.Vertices.Length|]
+
+                    // attempt to create geometry provider
+                    match boundsOpt with
+                    | Some bounds when vertices.Length >= 3 && indices.Length >= 3 ->
+                        let provider = Nav3dInputGeomProvider (vertices, indices, bounds)
+                        Some (provider :> IInputGeomProvider)
+                    | Some _ | None -> None
+
+            // attempt to execute 3d navigation mesh construction steps
+            match geomProviderOpt with
+            | Some geomProvider ->
+                let rcConfig =
+                    RcConfig
+                        (config.PartitionType,
+                         config.CellSize, config.CellHeight,
+                         config.AgentMaxSlope, config.AgentHeight, config.AgentRadius, config.AgentMaxClimb,
+                         config.RegionMinSize, config.RegionMergeSize,
+                         config.EdgeMaxLength, config.EdgeMaxError,
+                         config.VertsPerPolygon, config.DetailSampleDistance, config.DetailSampleMaxError,
+                         config.FilterLowHangingObstacles, config.FilterLedgeSpans, config.FilterWalkableLowHeightSpans,
+                         SampleAreaModifications.SAMPLE_AREAMOD_WALKABLE, true)
+                let rcBuilderConfig = RcBuilderConfig (rcConfig, geomProvider.GetMeshBoundsMin (), geomProvider.GetMeshBoundsMax ())
+                let rcBuilder = RcBuilder ()
+                let rcBuilderResult = rcBuilder.Build (geomProvider, rcBuilderConfig)
+                let dtCreateParams = DemoNavMeshBuilder.GetNavMeshCreateParams (geomProvider, config.CellSize, config.CellHeight, config.AgentHeight, config.AgentRadius, config.AgentMaxClimb, rcBuilderResult)
+                match DtNavMeshBuilder.CreateNavMeshData dtCreateParams with
+                | null -> None // some sort of argument issue
+                | dtMeshData ->
+                    DemoNavMeshBuilder.UpdateAreaAndFlags dtMeshData |> ignore<DtMeshData> // ignoring flow-syntax
+                    let dtNavMesh = DtNavMesh (dtMeshData, 6, 0) // TODO: introduce constant?
+                    let dtQuery = DtNavMeshQuery dtNavMesh
+                    Some (rcBuilderResult, dtNavMesh, dtQuery)
+
+            // geometry not found
+            | None -> None
+
+        static member internal setNav3dBodyOpt contentOpt (source : Entity) world =
+            let screen = source.Screen
+            let nav3d = World.getScreenNav3d screen world
+            match (nav3d.Nav3dBodies.TryFind source, contentOpt) with
+            | (Some body, Some body') ->
+                if body' <> body then // OPTIMIZATION: preserve map reference if no content changes detected.
+                    let nav3d = { nav3d with Nav3dBodies = Map.add source body' nav3d.Nav3dBodies }
+                    World.setScreenNav3d nav3d screen world |> snd'
+                else world
+            | (None, Some body) ->
+                let nav3d = { nav3d with Nav3dBodies = Map.add source body nav3d.Nav3dBodies }
+                World.setScreenNav3d nav3d screen world |> snd'
+            | (Some _, None) ->
+                let nav3d = { nav3d with Nav3dBodies = Map.remove source nav3d.Nav3dBodies }
+                World.setScreenNav3d nav3d screen world |> snd'
+            | (None, None) -> world
+
+        /// Set the given screen's 3d navigation configuration.
+        static member setNav3dConfig config screen world =
+            let nav3d = World.getScreenNav3d screen world
+            if config <> nav3d.Nav3dConfig then // OPTIMIZATION: preserve map reference if no content changes detected.
+                let nav3d = { nav3d with Nav3dConfig = config }
+                World.setScreenNav3d nav3d screen world |> snd'
+            else world
+
+        /// Attempt to synchronize the given screen's 3d navigation information.
+        static member synchronizeNav3d screen world =
+            let nav3d = World.getScreenNav3d screen world
+            let rebuild =
+                match (nav3d.Nav3dBodiesOldOpt, nav3d.Nav3dConfigOldOpt) with
+                | (Some bodiesOld, Some configOld) -> nav3d.Nav3dBodies =/= bodiesOld || nav3d.Nav3dConfig =/= configOld
+                | (None, Some _) | (Some _, None) -> Log.infoOnce "Unexpected 3d navigation state; navigation rebuild declined."; false
+                | (None, None) -> nav3d.Nav3dBodies.Count <> 0
+            if rebuild then
+                let bodies = nav3d.Nav3dBodies.Values
+                match World.tryBuildNav3dMesh bodies nav3d.Nav3dConfig with
+                | Some navMesh ->
+                    let nav3d =
+                        { nav3d with
+                            Nav3dBodiesOldOpt = Some nav3d.Nav3dBodies
+                            Nav3dConfigOldOpt = Some nav3d.Nav3dConfig
+                            Nav3dMeshOpt = Some navMesh }
+                    World.setScreenNav3d nav3d screen world |> snd'
+                | None -> Log.info "Unable to build 3d navigation mesh."; world
+            else world
+
+        /// Query the given screen's 3d navigation information if it exists.
+        static member tryQueryNav3d query screen world =
+            let nav3d = World.getScreenNav3d screen world
+            match nav3d.Nav3dMeshOpt with
+            | Some (_, _, dtQuery) -> Some (query dtQuery)
+            | None -> None

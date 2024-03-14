@@ -75,10 +75,12 @@ module WorldEntityHierarchy =
                                 | Left group -> (surface.SurfaceNames.Length > 0, surface.SurfaceNames, group)
                                 | Right entity -> (true, Array.append entity.Surnames surface.SurfaceNames, entity.Group)
                             let (child, world) =
-                                if rigid
-                                then World.createEntity<RigidModelSurfaceDispatcher> DefaultOverlay (Some surnames) group world
+                                if rigid then
+                                    let (child, world) = World.createEntity<RigidModelSurfaceDispatcher> DefaultOverlay (Some surnames) group world
+                                    let shape = OpenGL.PhysicallyBased.PhysicallyBasedSurfaceFns.extractNavShape BoundsShape staticModelMetadata.SceneOpt surface
+                                    let world = child.SetNavShape shape world
+                                    (child, world)
                                 else World.createEntity<StaticModelSurfaceDispatcher> DefaultOverlay (Some surnames) group world
-                            let world = if rigid then child.SetBodyType Static world else world
                             let (position, rotation, scale, world) =
                                 let transform = surface.SurfaceMatrix
                                 let mutable (scale, rotation, position) = (v3One, quatIdentity, v3Zero)
@@ -173,7 +175,7 @@ module WorldEntityHierarchy =
                         let surfaceIndex = entity.GetSurfaceIndex world
                         let renderType = match entity.GetRenderStyle world with Deferred -> DeferredRenderType | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
                         let surface = { Absolute = absolute; ModelMatrix = affineMatrix; Presence = presence; InsetOpt = insetOpt; MaterialProperties = properties; Material = material; SurfaceIndex = surfaceIndex; StaticModel = staticModel; RenderType = renderType }
-                        Choice3Of3 (PairValue.make entityBounds surface)
+                        Choice3Of3 (StructPair.make entityBounds surface)
                         boundsOpt <- match boundsOpt with Some bounds -> Some (bounds.Combine entityBounds) | None -> Some entityBounds
                         world <- entity.SetVisibleLocal false world
                     if entity <> parent then
@@ -223,8 +225,8 @@ module FreezeFacetModule =
         member this.GetFrozenRenderLights3d world : Light3dValue array = this.Get (nameof this.FrozenRenderLights3d) world
         member this.SetFrozenRenderLights3d (value : Light3dValue array) world = this.Set (nameof this.FrozenRenderLights3d) value world
         member this.FrozenRenderLights3d = lens (nameof this.FrozenRenderLights3d) this this.GetFrozenRenderLights3d this.SetFrozenRenderLights3d
-        member this.GetFrozenRenderStaticModelSurfaces world : PairValue<Box3, StaticModelSurfaceValue> array = this.Get (nameof this.FrozenRenderStaticModelSurfaces) world
-        member this.SetFrozenRenderStaticModelSurfaces (value : PairValue<Box3, StaticModelSurfaceValue> array) world = this.Set (nameof this.FrozenRenderStaticModelSurfaces) value world
+        member this.GetFrozenRenderStaticModelSurfaces world : StructPair<Box3, StaticModelSurfaceValue> array = this.Get (nameof this.FrozenRenderStaticModelSurfaces) world
+        member this.SetFrozenRenderStaticModelSurfaces (value : StructPair<Box3, StaticModelSurfaceValue> array) world = this.Set (nameof this.FrozenRenderStaticModelSurfaces) value world
         member this.FrozenRenderStaticModelSurfaces = lens (nameof this.FrozenRenderStaticModelSurfaces) this this.GetFrozenRenderStaticModelSurfaces this.SetFrozenRenderStaticModelSurfaces
         member this.GetFrozen world : bool = this.Get (nameof this.Frozen) world
         member this.SetFrozen (value : bool) world = this.Set (nameof this.Frozen) value world

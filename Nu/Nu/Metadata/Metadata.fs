@@ -17,7 +17,7 @@ Metadata from another thread. *)
 type Metadata =
     | RawMetadata
     | TextureMetadata of OpenGL.Texture.TextureMetadata
-    | TileMapMetadata of string * (TmxTileset * Image AssetTag) array * TmxMap // TODO: create a record for this.
+    | TileMapMetadata of string * struct (TmxTileset * Image AssetTag) array * TmxMap // TODO: create a record for this.
     | StaticModelMetadata of OpenGL.PhysicallyBased.PhysicallyBasedModel
     | AnimatedModelMetadata of OpenGL.PhysicallyBased.PhysicallyBasedModel
     | SoundMetadata
@@ -548,6 +548,18 @@ module Metadata =
             | Some _ | None -> None
         | None -> None
 
+    let private tryGetModelNavShape materialIndex model =
+        match tryGetModelMetadata model with
+        | Some modelMetadata ->
+            match modelMetadata.SceneOpt with
+            | Some scene when materialIndex >= 0 && materialIndex < scene.Materials.Count ->
+                let material = scene.Materials.[materialIndex]
+                match material.NavShapeOpt with
+                | Some shape -> Some shape
+                | None -> None
+            | Some _ | None -> None
+        | None -> None
+
     /// Attempt to get the metadata of the given static model.
     let tryGetStaticModelMetadata (staticModel : StaticModel AssetTag) =
         match tryGetMetadata staticModel with
@@ -591,6 +603,10 @@ module Metadata =
     let tryGetStaticModelTwoSided materialIndex (staticModel : StaticModel AssetTag) =
         tryGetModelTwoSided materialIndex staticModel
 
+    /// Attempt to get the 3d navigation shape for the given material index and static model.
+    let tryGetStaticModelNavShape materialIndex (staticModel : StaticModel AssetTag) =
+        tryGetModelNavShape materialIndex staticModel
+
     /// Attempt to get the metadata of the given animated model.
     let tryGetAnimatedModelMetadata (animatedModel : AnimatedModel AssetTag) =
         match tryGetMetadata animatedModel with
@@ -633,3 +649,7 @@ module Metadata =
     /// Attempt to get the two-sided property for the given material index and animated model.
     let tryGetAnimatedModelTwoSided materialIndex (animatedModel : AnimatedModel AssetTag) =
         tryGetModelTwoSided materialIndex animatedModel
+
+    /// Attempt to get the 3d navigation shape property for the given material index and animated model.
+    let tryGetAnimatedModelNavShape materialIndex (animatedModel : AnimatedModel AssetTag) =
+        tryGetModelNavShape materialIndex animatedModel

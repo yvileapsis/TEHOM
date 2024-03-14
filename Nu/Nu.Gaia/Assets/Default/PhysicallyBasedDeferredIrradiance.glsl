@@ -1,5 +1,5 @@
 #shader vertex
-#version 410 core
+#version 410
 
 layout (location = 0) in vec3 position;
 layout (location = 1) in vec2 texCoords;
@@ -13,7 +13,7 @@ void main()
 }
 
 #shader fragment
-#version 410 core
+#version 410
 #extension GL_ARB_bindless_texture : require
 
 const float PI = 3.141592654;
@@ -30,7 +30,7 @@ uniform vec3 lightMapSizes[LIGHT_MAPS_MAX];
 
 in vec2 texCoordsOut;
 
-out vec4 frag;
+layout (location = 0) out vec4 frag;
 
 vec2 rayBoxIntersectionRatios(vec3 rayOrigin, vec3 rayDirection, vec3 boxMin, vec3 boxSize)
 {

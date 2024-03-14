@@ -3,7 +3,6 @@
 
 namespace Nu
 open System
-open System.IO
 open System.Numerics
 open Prime
 
@@ -11,7 +10,7 @@ open Prime
 module WorldEntityModule =
 
     /// Mutable clipboard that allows its state to persist beyond undo / redo.
-    let mutable private Clipboard : EntityDescriptor option = None
+    let mutable private Clipboard : (bool * EntityDescriptor * Entity) option = None
 
     [<RequireQualifiedAccess>]
     module private Cached =
@@ -52,6 +51,7 @@ module WorldEntityModule =
         let mutable Absolute = Unchecked.defaultof<Lens<bool, Entity>>
         let mutable Imperative = Unchecked.defaultof<Lens<bool, Entity>>
         let mutable MountOpt = Unchecked.defaultof<Lens<Entity Relation option, Entity>>
+        let mutable PropagationSourceOpt = Unchecked.defaultof<Lens<Entity option, Entity>>
         let mutable Enabled = Unchecked.defaultof<Lens<bool, Entity>>
         let mutable EnabledLocal = Unchecked.defaultof<Lens<bool, Entity>>
         let mutable Visible = Unchecked.defaultof<Lens<bool, Entity>>
@@ -72,6 +72,7 @@ module WorldEntityModule =
         let mutable Destroying = Unchecked.defaultof<Lens<bool, Entity>>
         let mutable OverlayNameOpt = Unchecked.defaultof<Lens<string option, Entity>>
         let mutable FacetNames = Unchecked.defaultof<Lens<string Set, Entity>>
+        let mutable PropagatedDescriptorOpt = Unchecked.defaultof<Lens<EntityDescriptor option, Entity>>
         let mutable Order = Unchecked.defaultof<Lens<int64, Entity>>
         let mutable Id = Unchecked.defaultof<Lens<uint64, Entity>>
 
@@ -185,6 +186,9 @@ module WorldEntityModule =
         member this.GetMountOpt world = World.getEntityMountOpt this world
         member this.SetMountOpt value world = World.setEntityMountOpt value this world |> snd'
         member this.MountOpt = if notNull (this :> obj) then lens (nameof this.MountOpt) this this.GetMountOpt this.SetMountOpt else Cached.MountOpt
+        member this.GetPropagationSourceOpt world = World.getEntityPropagationSourceOpt this world
+        member this.SetPropagationSourceOpt value world = World.setEntityPropagationSourceOpt value this world |> snd'
+        member this.PropagationSourceOpt = if notNull (this :> obj) then lens (nameof this.PropagationSourceOpt) this this.GetPropagationSourceOpt this.SetPropagationSourceOpt else Cached.PropagationSourceOpt
         member this.GetEnabled world = World.getEntityEnabled this world
         member this.SetEnabled value world = World.setEntityEnabled value this world |> snd'
         member this.Enabled = if notNull (this :> obj) then lens (nameof this.Enabled) this this.GetEnabled this.SetEnabled else Cached.Enabled
@@ -237,8 +241,12 @@ module WorldEntityModule =
         member this.OverlayNameOpt = if notNull (this :> obj) then lensReadOnly (nameof this.OverlayNameOpt) this this.GetOverlayNameOpt else Cached.OverlayNameOpt
         member this.GetFacetNames world = World.getEntityFacetNames this world
         member this.FacetNames = if notNull (this :> obj) then lensReadOnly (nameof this.FacetNames) this this.GetFacetNames else Cached.FacetNames
+        member this.GetPropagatedDescriptorOpt world = World.getEntityPropagatedDescriptorOpt this world
+        member this.SetPropagatedDescriptorOpt value world = World.setEntityPropagatedDescriptorOpt value this world |> snd'
+        member this.PropagatedDescriptorOpt = if notNull (this :> obj) then lens (nameof this.PropagatedDescriptorOpt) this this.GetPropagatedDescriptorOpt this.SetPropagatedDescriptorOpt else Cached.PropagatedDescriptorOpt
         member this.GetOrder world = World.getEntityOrder this world
-        member this.Order = if notNull (this :> obj) then lensReadOnly (nameof this.Order) this this.GetOrder else Cached.Order
+        member this.SetOrder value world = World.setEntityOrder value this world |> snd'
+        member this.Order = if notNull (this :> obj) then lens (nameof this.Order) this this.GetOrder this.SetOrder else Cached.Order
         member this.GetId world = World.getEntityId this world
         member this.Id = if notNull (this :> obj) then lensReadOnly (nameof this.Id) this this.GetId else Cached.Id
         static member internal init () =
@@ -279,6 +287,7 @@ module WorldEntityModule =
             Cached.Absolute <- lens (nameof Cached.Absolute) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.Imperative <- lens (nameof Cached.Imperative) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.MountOpt <- lens (nameof Cached.MountOpt) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
+            Cached.PropagationSourceOpt <- lens (nameof Cached.PropagationSourceOpt) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.Enabled <- lens (nameof Cached.Enabled) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.EnabledLocal <- lens (nameof Cached.EnabledLocal) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.Visible <- lens (nameof Cached.Visible) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
@@ -297,6 +306,7 @@ module WorldEntityModule =
             Cached.Destroying <- lensReadOnly (nameof Cached.Destroying) Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.OverlayNameOpt <- lensReadOnly (nameof Cached.OverlayNameOpt) Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.FacetNames <- lensReadOnly (nameof Cached.FacetNames) Unchecked.defaultof<_> Unchecked.defaultof<_>
+            Cached.PropagatedDescriptorOpt <- lensReadOnly (nameof Cached.PropagatedDescriptorOpt) Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.Order <- lensReadOnly (nameof Cached.Order) Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.Id <- lensReadOnly (nameof Cached.Id) Unchecked.defaultof<_> Unchecked.defaultof<_>
 
@@ -352,9 +362,9 @@ module WorldEntityModule =
             World.setEntityTransformByRefWithoutEvent (&value, World.getEntityState this world, this, world)
 
         /// Set the transform of an entity snapped to the give position and rotation snaps.
-        member this.SetTransformSnapped positionSnap degreesSnap scaleSnap (value : Transform) world =
+        member this.SetTransformPositionSnapped positionSnap (value : Transform) world =
             let mutable transform = value
-            transform.Snap (positionSnap, degreesSnap, scaleSnap)
+            transform.SnapPosition positionSnap
             this.SetTransform transform world
 
         /// Try to get a property value and type.
@@ -444,31 +454,22 @@ module WorldEntityModule =
         member this.RayCast ray world = World.rayCastEntity ray this world
 
         /// Automatically change an entity's bounds using its inferred attributes.
-        member this.AutoBounds world =
-            let attributes = this.GetAttributesInferred world
-            let world = World.setEntitySize attributes.SizeInferred this world |> snd'
-            let world = World.setEntityOffset attributes.OffsetInferred this world |> snd'
-            world
+        member this.AutoBounds world = World.autoBoundsEntity this world
 
         /// Set an entity's mount while adjusting its mount properties such that they do not change.
         member this.SetMountOptWithAdjustment (value : Entity Relation option) world =
             match (Option.bind (tryResolve this) (this.GetMountOpt world), Option.bind (tryResolve this) value) with
             | (Some mountOld, Some mountNew) ->
                 if mountOld.Exists world && mountNew.Exists world then
-                    let world =
-                        if  not (World.getEntityPhysical this world && World.getEntityPhysical mountOld world) &&
-                            not (World.getEntityPhysical this world && World.getEntityPhysical mountNew world) then
-                            let affineMatrixMount = World.getEntityAffineMatrix mountNew world
-                            let affineMatrixMounter = World.getEntityAffineMatrix this world
-                            let affineMatrixLocal = affineMatrixMounter * affineMatrixMount.Inverted
-                            let positionLocal = affineMatrixLocal.Translation // TODO: use Matrix4x4.Decompose here.
-                            let rotationLocal = affineMatrixLocal.Rotation
-                            let scaleLocal = affineMatrixLocal.Scale
-                            let world = this.SetPositionLocal positionLocal world
-                            let world = this.SetRotationLocal rotationLocal world
-                            let world = this.SetScaleLocal scaleLocal world
-                            world
-                        else world
+                    let affineMatrixMount = World.getEntityAffineMatrix mountNew world
+                    let affineMatrixMounter = World.getEntityAffineMatrix this world
+                    let affineMatrixLocal = affineMatrixMounter * affineMatrixMount.Inverted
+                    let positionLocal = affineMatrixLocal.Translation // TODO: use Matrix4x4.Decompose here.
+                    let rotationLocal = affineMatrixLocal.Rotation
+                    let scaleLocal = affineMatrixLocal.Scale
+                    let world = this.SetPositionLocal positionLocal world
+                    let world = this.SetRotationLocal rotationLocal world
+                    let world = this.SetScaleLocal scaleLocal world
                     let elevationLocal = this.GetElevation world - mountNew.GetElevation world
                     let world = this.SetElevationLocal elevationLocal world
                     let world = this.SetEnabled (this.GetEnabledLocal world && mountNew.GetEnabled world) world
@@ -479,19 +480,15 @@ module WorldEntityModule =
             | (Some mountOld, None) ->
                 if mountOld.Exists world then
                     let world = this.SetMountOpt value world
-                    let world =
-                        if not (World.getEntityPhysical this world && World.getEntityPhysical mountOld world) then
-                            let position = this.GetPosition world
-                            let rotation = this.GetRotation world
-                            let scale = this.GetScale world
-                            let world = this.SetPositionLocal v3Zero world
-                            let world = this.SetRotationLocal quatIdentity world
-                            let world = this.SetScaleLocal v3One world
-                            let world = this.SetPosition position world
-                            let world = this.SetRotation rotation world
-                            let world = this.SetScale scale world
-                            world
-                        else world
+                    let position = this.GetPosition world
+                    let rotation = this.GetRotation world
+                    let scale = this.GetScale world
+                    let world = this.SetPositionLocal v3Zero world
+                    let world = this.SetRotationLocal quatIdentity world
+                    let world = this.SetScaleLocal v3One world
+                    let world = this.SetPosition position world
+                    let world = this.SetRotation rotation world
+                    let world = this.SetScale scale world
                     let elevation = this.GetElevation world
                     let world = this.SetElevationLocal 0.0f world
                     let world = this.SetElevation elevation world
@@ -501,19 +498,15 @@ module WorldEntityModule =
                 else world
             | (None, Some mountNew) ->
                 if mountNew.Exists world then
-                    let world =
-                        if not (World.getEntityPhysical this world && World.getEntityPhysical mountNew world) then
-                            let affineMatrixMount = World.getEntityAffineMatrix mountNew world
-                            let affineMatrixMounter = World.getEntityAffineMatrix this world
-                            let affineMatrixLocal = affineMatrixMounter * affineMatrixMount.Inverted
-                            let positionLocal = affineMatrixLocal.Translation // TODO: use Matrix4x4.Decompose here.
-                            let rotationLocal = affineMatrixLocal.Rotation
-                            let scaleLocal = affineMatrixLocal.Scale
-                            let world = this.SetPositionLocal positionLocal world
-                            let world = this.SetRotationLocal rotationLocal world
-                            let world = this.SetScaleLocal scaleLocal world
-                            world
-                        else world
+                    let affineMatrixMount = World.getEntityAffineMatrix mountNew world
+                    let affineMatrixMounter = World.getEntityAffineMatrix this world
+                    let affineMatrixLocal = affineMatrixMounter * affineMatrixMount.Inverted
+                    let positionLocal = affineMatrixLocal.Translation // TODO: use Matrix4x4.Decompose here.
+                    let rotationLocal = affineMatrixLocal.Rotation
+                    let scaleLocal = affineMatrixLocal.Scale
+                    let world = this.SetPositionLocal positionLocal world
+                    let world = this.SetRotationLocal rotationLocal world
+                    let world = this.SetScaleLocal scaleLocal world
                     let elevationLocal = this.GetElevation world - mountNew.GetElevation world
                     let world = this.SetElevationLocal elevationLocal world
                     let world = this.SetEnabled (this.GetEnabledLocal world && mountNew.GetEnabled world) world
@@ -812,177 +805,6 @@ module WorldEntityModule =
                 | None -> next.GetOrder world / 2L
             World.setEntityOrder order entity world |> snd'
 
-        /// Write an entity to an entity descriptor.
-        static member writeEntity (entity : Entity) (entityDescriptor : EntityDescriptor) world =
-            let overlayer = World.getOverlayer world
-            let entityState = World.getEntityState entity world
-            let entityDispatcherName = getTypeName entityState.Dispatcher
-            let entityDescriptor = { entityDescriptor with EntityDispatcherName = entityDispatcherName }
-            let entityFacetNames = World.getEntityFacetNamesReflectively entityState
-            let overlaySymbolsOpt =
-                match entityState.OverlayNameOpt with
-                | Some overlayName -> Some (Overlayer.getOverlaySymbols overlayName entityFacetNames overlayer)
-                | None -> None
-            let shouldWriteProperty = fun propertyName propertyType (propertyValue : obj) ->
-                if propertyName = Constants.Engine.OverlayNameOptPropertyName && propertyType = typeof<string option> then
-                    let defaultOverlayNameOpt = World.getEntityDefaultOverlayName entityDispatcherName world
-                    defaultOverlayNameOpt <> (propertyValue :?> string option)
-                else
-                    match overlaySymbolsOpt with
-                    | Some overlaySymbols -> Overlayer.shouldPropertySerialize propertyName propertyType entityState overlaySymbols
-                    | None -> true
-            let entityProperties = Reflection.writePropertiesFromTarget shouldWriteProperty entityDescriptor.EntityProperties entityState
-            let entityDescriptor = { entityDescriptor with EntityProperties = entityProperties }
-            let entityDescriptor =
-                if not (Gen.isNameGenerated entity.Name)
-                then EntityDescriptor.setNameOpt (Some entity.Name) entityDescriptor
-                else entityDescriptor
-            let entities = World.getEntityChildren entity world
-            { entityDescriptor with EntityDescriptors = World.writeEntities entities world }
-
-        /// Write multiple entities to a group descriptor.
-        static member writeEntities entities world =
-            entities |>
-            Seq.sortBy (fun (entity : Entity) -> entity.GetOrder world) |>
-            Seq.filter (fun (entity : Entity) -> entity.GetPersistent world) |>
-            Seq.fold (fun entityDescriptors entity -> World.writeEntity entity EntityDescriptor.empty world :: entityDescriptors) [] |>
-            Seq.rev |>
-            Seq.toList
-
-        /// Write an entity to a file.
-        static member writeEntityToFile (filePath : string) enity world =
-            let filePathTmp = filePath + ".tmp"
-            let prettyPrinter = (SyntaxAttribute.defaultValue typeof<GameDescriptor>).PrettyPrinter
-            let enityDescriptor = World.writeEntity enity EntityDescriptor.empty world
-            let enityDescriptorStr = scstring enityDescriptor
-            let enityDescriptorPretty = PrettyPrinter.prettyPrint enityDescriptorStr prettyPrinter
-            File.WriteAllText (filePathTmp, enityDescriptorPretty)
-            File.Delete filePath
-            File.Move (filePathTmp, filePath)
-
-        /// Read an entity from an entity descriptor.
-        static member readEntity entityDescriptor (nameOpt : string option) (parent : Simulant) world =
-
-            // make the dispatcher
-            let dispatcherName = entityDescriptor.EntityDispatcherName
-            let dispatchers = World.getEntityDispatchers world
-            let (dispatcherName, dispatcher) =
-                match Map.tryFind dispatcherName dispatchers with
-                | Some dispatcher -> (dispatcherName, dispatcher)
-                | None -> failwith ("Could not find an EntityDispatcher named '" + dispatcherName + "'.")
-
-            // get the default overlay name option
-            let defaultOverlayNameOpt = World.getEntityDefaultOverlayName dispatcherName world
-
-            // make the bare entity state with name as id
-            let entityState = EntityState.make (World.getImperative world) None defaultOverlayNameOpt dispatcher
-
-            // attach the entity state's intrinsic facets and their properties
-            let entityState = World.attachIntrinsicFacetsViaNames entityState world
-
-            // read the entity state's overlay and apply it to its facet names if applicable
-            let overlayer = World.getOverlayer world
-            let entityState = Reflection.tryReadOverlayNameOptToTarget id entityDescriptor.EntityProperties entityState
-            let entityState = if Option.isNone entityState.OverlayNameOpt then { entityState with OverlayNameOpt = defaultOverlayNameOpt } else entityState
-            let entityState =
-                match (defaultOverlayNameOpt, entityState.OverlayNameOpt) with
-                | (Some defaultOverlayName, Some overlayName) -> Overlayer.applyOverlayToFacetNames id defaultOverlayName overlayName entityState overlayer overlayer
-                | (_, _) -> entityState
-
-            // read the entity state's facet names
-            let entityState = Reflection.readFacetNamesToTarget id entityDescriptor.EntityProperties entityState
-
-            // attach the entity state's dispatcher properties
-            let entityState = Reflection.attachProperties id entityState.Dispatcher entityState world
-
-            // synchronize the entity state's facets (and attach their properties)
-            let entityState =
-                match World.trySynchronizeFacetsToNames Set.empty entityState None world with
-                | Right (entityState, _) -> entityState
-                | Left error -> Log.debug error; entityState
-
-            // attempt to apply the entity state's overlay
-            let entityState =
-                match entityState.OverlayNameOpt with
-                | Some overlayName ->
-                    // OPTIMIZATION: applying overlay only when it will change something
-                    if Overlay.dispatcherNameToOverlayName dispatcherName <> overlayName then
-                        let facetNames = World.getEntityFacetNamesReflectively entityState
-                        Overlayer.applyOverlay id dispatcherName overlayName facetNames entityState overlayer
-                    else entityState
-                | None -> entityState
-
-            // try to read entity name
-            let entityNameOpt = EntityDescriptor.getNameOpt entityDescriptor
-
-            // read the entity state's values
-            let entityState = Reflection.readPropertiesToTarget id entityDescriptor.EntityProperties entityState
-
-            // configure the name and surnames
-            let (name, surnames) =
-                match nameOpt with
-                | Some name -> (name, Array.add name parent.SimulantAddress.Names)
-                | None ->
-                    match entityNameOpt with
-                    | Some entityName -> (entityName, Array.add entityName parent.SimulantAddress.Names)
-                    | None ->
-                        let name = Gen.name
-                        let surnames = Array.add name parent.SimulantAddress.Names
-                        (name, surnames)
-            let entityState = { entityState with Surnames = surnames }
-
-            // make entity address
-            let entityAddress = parent.SimulantAddress.Names |> Array.add name |> rtoa
-
-            // make entity reference
-            let entity = Entity entityAddress
-
-            // add entity's state to world
-            let world =
-                if World.getEntityExists entity world then
-                    if World.getEntityDestroying entity world
-                    then World.destroyEntityImmediate entity world
-                    else failwith ("Entity '" + scstring entity + "' already exists and cannot be created."); world
-                else world
-            let world = World.addEntity true entityState entity world
-
-            // update optimization flags
-#if !DISABLE_ENTITY_PRE_UPDATE
-            let world = World.updateEntityPublishPreUpdateFlag entity world |> snd'
-#endif
-            let world = World.updateEntityPublishUpdateFlag entity world |> snd'
-#if !DISABLE_ENTITY_POST_UPDATE
-            let world = World.updateEntityPublishPostUpdateFlag entity world |> snd'
-#endif
-
-            // update mount hierarchy
-            let mountOpt = World.getEntityMountOpt entity world
-            let world = World.addEntityToMounts mountOpt entity world
-
-            // read the entity's children
-            let world = World.readEntities entityDescriptor.EntityDescriptors entity world |> snd
-
-            // fin
-            (entity, world)
-
-        /// Read an entity from a file.
-        static member readEntityFromFile (filePath : string) nameOpt group world =
-            let entityDescriptorStr = File.ReadAllText filePath
-            let entityDescriptor = scvalue<EntityDescriptor> entityDescriptorStr
-            World.readEntity entityDescriptor nameOpt group world
-
-        /// Read multiple entities.
-        static member readEntities (entityDescriptors : EntityDescriptor list) (parent : Simulant) world =
-            let (entitiesRev, world) =
-                List.fold
-                    (fun (entities, world) entityDescriptor ->
-                        let nameOpt = EntityDescriptor.getNameOpt entityDescriptor
-                        let (entity, world) = World.readEntity entityDescriptor nameOpt parent world
-                        (entity :: entities, world))
-                        ([], world)
-                        entityDescriptors
-            (List.rev entitiesRev, world)
-
         static member private generateEntitySequentialName2 dispatcherName existingEntityNames =
             let mutable name = Gen.nameForEditor dispatcherName
             if Set.contains name existingEntityNames
@@ -1003,29 +825,34 @@ module WorldEntityModule =
 
         /// Copy an entity to the world's clipboard.
         static member copyEntityToClipboard entity world =
-            let entityDescriptor = World.writeEntity entity EntityDescriptor.empty world
-            Clipboard <- Some entityDescriptor
+            let entityDescriptor = World.writeEntity true EntityDescriptor.empty entity world
+            Clipboard <- Some (false, entityDescriptor, entity)
 
         /// Cut an entity to the world's clipboard.
         static member cutEntityToClipboard (entity : Entity) world =
-            World.copyEntityToClipboard entity world
+            let entityDescriptor = World.writeEntity true EntityDescriptor.empty entity world
+            Clipboard <- Some (true, entityDescriptor, entity)
             World.destroyEntityImmediate entity world
 
         /// Paste an entity from the world's clipboard.
-        static member pasteEntityFromClipboard pasteType (distance : single) rightClickPosition snapsEir (parent : Simulant) world =
+        static member pasteEntityFromClipboard forwardPropagationSource (distance : single) rightClickPosition positionSnapEir pasteType (parent : Simulant) world =
             match Clipboard with
-            | Some entityDescriptor ->
+            | Some (cut, entityDescriptor, entitySource) ->
                 let nameOpt =
-                    match entityDescriptor.EntityProperties.TryGetValue Constants.Engine.NamePropertyName with
-                    | (true, nameSymbol) ->
-                        let name = symbolToValue nameSymbol
-                        let entityProposed = parent.Names |> Array.add name |> Entity
-                        if World.getEntityExists entityProposed world
-                        then Some (World.generateEntitySequentialName entityDescriptor.EntityDispatcherName entityProposed.Group world)
-                        else Some name
-                    | (_, _) -> failwithumf () // entity descriptor should always have a name property
+                    if cut then // try to preserve name only if cut
+                        match entityDescriptor.EntityProperties.TryGetValue Constants.Engine.NamePropertyName with
+                        | (true, nameSymbol) ->
+                            let name = symbolToValue nameSymbol
+                            let entityProposed = parent.Names |> Array.add name |> Entity
+                            if World.getEntityExists entityProposed world
+                            then Some (World.generateEntitySequentialName entityDescriptor.EntityDispatcherName entityProposed.Group world)
+                            else Some name
+                        | (_, _) -> Log.info "EntityDescriptor missing its Name property."; None
+                    else
+                        let group = Group (Array.take 3 parent.Names)
+                        Some (World.generateEntitySequentialName entityDescriptor.EntityDispatcherName group world) // otherwise use generated name
                 let (entity, world) = World.readEntity entityDescriptor nameOpt parent world
-                let (position, snapsOpt) =
+                let (position, positionSnapOpt) =
                     let absolute = entity.GetAbsolute world
                     if entity.GetIs2d world then
                         let viewport = World.getViewport world
@@ -1036,8 +863,8 @@ module WorldEntityModule =
                             | PasteAtMouse -> (viewport.MouseToWorld2d (absolute, rightClickPosition, eyeCenter, eyeSize)).V3
                             | PasteAtLook -> (viewport.MouseToWorld2d (absolute, World.getEye2dSize world, eyeCenter, eyeSize)).V3
                             | PasteAt position -> position
-                        match snapsEir with
-                        | Left (positionSnap, degreesSnap, scaleSnap) -> (position, Some (positionSnap, degreesSnap, scaleSnap))
+                        match positionSnapEir with
+                        | Left positionSnap -> (position, Some positionSnap)
                         | Right _ -> (position, None)
                     else
                         let eyeCenter = World.getEye3dCenter world
@@ -1053,15 +880,24 @@ module WorldEntityModule =
                                 intersectionOpt.Value
                             | PasteAtLook -> eyeCenter + Vector3.Transform (v3Forward, eyeRotation) * distance
                             | PasteAt position -> position
-                        match snapsEir with
-                        | Right (positionSnap, degreesSnap, scaleSnap) -> (position, Some (positionSnap, degreesSnap, scaleSnap))
+                        match positionSnapEir with
+                        | Right positionSnap -> (position, Some positionSnap)
                         | Left _ -> (position, None)
                 let mutable transform = entity.GetTransform world
                 transform.Position <- position
-                match snapsOpt with
-                | Some (positionSnap, degreesSnap, scaleSnap) -> transform.Snap (positionSnap, degreesSnap, scaleSnap)
+                match positionSnapOpt with
+                | Some positionSnap -> transform.SnapPosition positionSnap
                 | None -> ()
                 let world = entity.SetTransform transform world
+                let world =
+                    if forwardPropagationSource then
+                        match entity.GetPropagationSourceOpt world with
+                        | None ->
+                            if entitySource.Exists world
+                            then entity.SetPropagationSourceOpt (Some entitySource) world
+                            else world
+                        | Some _ -> world
+                    else entity.SetPropagationSourceOpt None world
                 let mountOpt = match parent with :? Entity -> Some (Relation.makeParent ()) | _ -> None
                 let world = entity.SetMountOpt mountOpt world
                 (Some entity, world)

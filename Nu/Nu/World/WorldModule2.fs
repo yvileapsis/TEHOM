@@ -69,12 +69,6 @@ module WorldModule2 =
 
     type World with
 
-        static member internal makeQuadtree () =
-            Quadtree.make Constants.Engine.QuadtreeDepth Constants.Engine.QuadtreeSize
-
-        static member internal makeOctree () =
-            Octree.make Constants.Engine.OctreeDepth Constants.Engine.OctreeSize
-
         static member internal rebuildQuadtree world =
             let quadtree = World.getQuadtree world
             Quadtree.clear quadtree
@@ -98,28 +92,30 @@ module WorldModule2 =
             world
 
         static member internal rebuildOctree world =
-            let octree = World.getOctree world
-            Octree.clear octree
-            let omniEntities =
-                match World.getOmniScreenOpt world with
-                | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat
-                | None -> Seq.empty
-            let selectedEntities =
-                match World.getSelectedScreenOpt world with
-                | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat
-                | None -> Seq.empty
-            let entities =
-                Seq.append omniEntities selectedEntities
-            for entity in entities do
-                let bounds = entity.GetBounds world
-                let visible = entity.GetVisible world || entity.GetAlwaysRender world
-                let static_ = entity.GetStatic world
-                let lightProbe = entity.GetLightProbe world
-                let light = entity.GetLight world
-                let presence = entity.GetPresence world
-                if entity.GetIs3d world then
-                    let element = Octelement.make visible static_ lightProbe light presence bounds entity
-                    Octree.addElement presence bounds element octree
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.clear octree
+                let omniEntities =
+                    match World.getOmniScreenOpt world with
+                    | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat
+                    | None -> Seq.empty
+                let selectedEntities =
+                    match World.getSelectedScreenOpt world with
+                    | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat
+                    | None -> Seq.empty
+                let entities =
+                    Seq.append omniEntities selectedEntities
+                for entity in entities do
+                    let bounds = entity.GetBounds world
+                    let visible = entity.GetVisible world || entity.GetAlwaysRender world
+                    let static_ = entity.GetStatic world
+                    let lightProbe = entity.GetLightProbe world
+                    let light = entity.GetLight world
+                    let presence = entity.GetPresence world
+                    if entity.GetIs3d world then
+                        let element = Octelement.make visible static_ lightProbe light presence bounds entity
+                        Octree.addElement presence bounds element octree
+            | None -> ()
             world
 
         /// Select the given screen without transitioning, even if another transition is taking place.
@@ -423,6 +419,176 @@ module WorldModule2 =
         static member createSlideScreen<'d when 'd :> ScreenDispatcher> nameOpt slideDescriptor destination world =
             World.createSlideScreen6 typeof<'d>.Name nameOpt slideDescriptor destination world
 
+        static member private mapEntityDescriptors entityDescriptors =
+            entityDescriptors |>
+            List.map (fun descriptor ->
+                match descriptor.EntityProperties.[Constants.Engine.NamePropertyName] with
+                | Atom (entityName, _) | Text (entityName, _) -> (entityName, descriptor)
+                | _ -> failwithumf ()) |>
+            Map.ofList
+
+        static member private propagateEntityDescriptor previousDescriptor currentDescriptor targetDescriptor world =
+
+            // propagate dispatcher at this level
+            let propagatedDescriptor =
+                if String.notEmpty previousDescriptor.EntityDispatcherName then
+                    if targetDescriptor.EntityDispatcherName = previousDescriptor.EntityDispatcherName
+                    then { targetDescriptor with EntityDispatcherName = currentDescriptor.EntityDispatcherName }
+                    else targetDescriptor
+                else { targetDescriptor with EntityDispatcherName = currentDescriptor.EntityDispatcherName }
+
+            // propagate properties at this level
+            let propertyNames =
+                Set.ofSeq currentDescriptor.EntityProperties.Keys |>
+                Set.addMany propagatedDescriptor.EntityProperties.Keys
+            let propagatedDescriptor =
+                Seq.fold (fun targetDescriptor propertyName ->
+                    if  propertyName <> nameof Entity.Name &&
+                        propertyName <> nameof Entity.Position &&
+                        propertyName <> nameof Entity.Rotation &&
+                        propertyName <> nameof Entity.Elevation &&
+                        propertyName <> nameof Entity.Visible &&
+                        propertyName <> nameof Entity.PropagationSourceOpt &&
+                        propertyName <> nameof Entity.PropagatedDescriptorOpt then
+                        let currentPropertySymbolOpt =
+                            match currentDescriptor.EntityProperties.TryGetValue propertyName with
+                            | (true, currentPropertySymbol) -> Some currentPropertySymbol
+                            | (false, _) ->
+                                let overlayName =
+                                    match currentDescriptor.EntityProperties.TryGetValue Constants.Engine.OverlayNameOptPropertyName with
+                                    | (true, overlayNameOptSymbol) ->
+                                        try let overlayNameOpt = symbolToValue<string option> overlayNameOptSymbol
+                                            match overlayNameOpt with
+                                            | Some overlayName -> overlayName
+                                            | None -> Overlay.dispatcherNameToOverlayName currentDescriptor.EntityDispatcherName
+                                        with _ -> Overlay.dispatcherNameToOverlayName currentDescriptor.EntityDispatcherName
+                                    | (false, _) -> Overlay.dispatcherNameToOverlayName currentDescriptor.EntityDispatcherName
+                                let facetNames =
+                                    match currentDescriptor.EntityProperties.TryGetValue Constants.Engine.FacetNamesPropertyName with
+                                    | (true, facetNamesSymbol) -> symbolToValue<string Set> facetNamesSymbol
+                                    | (false, _) -> Set.empty
+                                let overlayer = World.getOverlayer world
+                                let overlaySymbols = Overlayer.getOverlaySymbols overlayName facetNames overlayer
+                                match overlaySymbols.TryGetValue propertyName with
+                                | (true, overlayPropertySymbol) -> Some overlayPropertySymbol
+                                | (false, _) -> None
+                        match currentPropertySymbolOpt with
+                        | Some currentPropertySymbol ->
+                            match previousDescriptor.EntityProperties.TryGetValue propertyName with
+                            | (true, previousPropertySymbol) ->
+                                match targetDescriptor.EntityProperties.TryGetValue propertyName with
+                                | (true, targetPropertySymbol) ->
+                                    if targetPropertySymbol = previousPropertySymbol
+                                    then { targetDescriptor with EntityProperties = Map.add propertyName currentPropertySymbol targetDescriptor.EntityProperties }
+                                    else targetDescriptor
+                                | (false, _) -> { targetDescriptor with EntityProperties = Map.add propertyName currentPropertySymbol targetDescriptor.EntityProperties }
+                            | (false, _) ->
+                                match targetDescriptor.EntityProperties.TryGetValue propertyName with
+                                | (true, targetPropertySymbol) ->
+                                    let overlayName =
+                                        match targetDescriptor.EntityProperties.TryGetValue Constants.Engine.OverlayNameOptPropertyName with
+                                        | (true, overlayNameOptSymbol) ->
+                                            try let overlayNameOpt = symbolToValue<string option> overlayNameOptSymbol
+                                                match overlayNameOpt with
+                                                | Some overlayName -> overlayName
+                                                | None -> Overlay.dispatcherNameToOverlayName targetDescriptor.EntityDispatcherName
+                                            with _ -> Overlay.dispatcherNameToOverlayName targetDescriptor.EntityDispatcherName
+                                        | (false, _) -> Overlay.dispatcherNameToOverlayName targetDescriptor.EntityDispatcherName
+                                    let facetNames =
+                                        match targetDescriptor.EntityProperties.TryGetValue Constants.Engine.FacetNamesPropertyName with
+                                        | (true, facetNamesSymbol) -> symbolToValue<string Set> facetNamesSymbol
+                                        | (false, _) -> Set.empty
+                                    let overlayer = World.getOverlayer world
+                                    let overlaySymbols = Overlayer.getOverlaySymbols overlayName facetNames overlayer
+                                    match overlaySymbols.TryGetValue propertyName with
+                                    | (true, overlayPropertySymbol) ->
+                                        if targetPropertySymbol = overlayPropertySymbol // property unchanged from default value
+                                        then { targetDescriptor with EntityProperties = Map.add propertyName currentPropertySymbol targetDescriptor.EntityProperties }
+                                        else targetDescriptor
+                                    | (false, _) -> { targetDescriptor with EntityProperties = Map.add propertyName currentPropertySymbol targetDescriptor.EntityProperties }
+                                | (false, _) -> { targetDescriptor with EntityProperties = Map.add propertyName currentPropertySymbol targetDescriptor.EntityProperties }
+                        | None -> targetDescriptor
+                    else targetDescriptor)
+                    propagatedDescriptor
+                    propertyNames
+
+            // attempt to propagate entity descriptors
+            let propagatedDescriptorOpts =
+                let previousDescriptorMap = World.mapEntityDescriptors previousDescriptor.EntityDescriptors
+                let currentDescriptorMap = World.mapEntityDescriptors currentDescriptor.EntityDescriptors
+                let targetDescriptorMap = World.mapEntityDescriptors targetDescriptor.EntityDescriptors
+                let keys = Set.ofSeq (previousDescriptorMap.Keys |> Seq.append currentDescriptorMap.Keys |> Seq.append targetDescriptorMap.Keys)
+                let entityDescriptorsList = [for key in keys do (previousDescriptorMap.TryFind key, currentDescriptorMap.TryFind key, targetDescriptorMap.TryFind key)]
+                List.map (fun (previousDescriptorOpt, currentDescriptorOpt, targetDescriptorOpt) ->
+                    match (previousDescriptorOpt, currentDescriptorOpt, targetDescriptorOpt) with
+                    | (Some previousDescriptor, Some currentDescriptor, Some targetDescriptor) ->
+                        Some (World.propagateEntityDescriptor previousDescriptor currentDescriptor targetDescriptor world)
+                    | (Some previousDescriptor, Some currentDescriptor, None) ->
+                        Some (World.propagateEntityDescriptor previousDescriptor currentDescriptor EntityDescriptor.empty world)
+                    | (Some _, None, None) ->
+                        None
+                    | (Some _, None, Some _) ->
+                        None
+                    | (None, None, Some targetDescriptor) ->
+                        Some targetDescriptor
+                    | (None, Some currentDescriptor, None) ->
+                        Some currentDescriptor
+                    | (None, Some currentDescriptor, Some targetDescriptor) ->
+                        Some (World.propagateEntityDescriptor EntityDescriptor.empty currentDescriptor targetDescriptor world)
+                    | (None, None, None) -> None)
+                    entityDescriptorsList
+
+            // compose fully propagated descriptor in the order they are found in the current descriptor
+            let currentDescriptorsOrder =
+                currentDescriptor.EntityDescriptors |>
+                Seq.mapi (fun i currentDescriptor ->
+                    match currentDescriptor.EntityProperties.[Constants.Engine.NamePropertyName] with
+                    | Atom (entityName, _) | Text (entityName, _) -> (entityName, i)
+                    | _ -> ("", Int32.MaxValue)) |>
+                Map.ofSeq
+            let propagatedDescriptors =
+                propagatedDescriptorOpts |>
+                List.definitize |>
+                List.filter (fun propagatedDescriptor -> String.notEmpty propagatedDescriptor.EntityDispatcherName) |>
+                List.sortBy (fun propagatedDescriptor ->
+                    match propagatedDescriptor.EntityProperties.[Constants.Engine.NamePropertyName] with
+                    | (Atom (entityName, _) | Text (entityName, _)) ->
+                        match currentDescriptorsOrder.TryGetValue entityName with
+                        | (true, order) -> order
+                        | (false, _) -> Int32.MaxValue
+                    | _ -> Int32.MaxValue)
+            { propagatedDescriptor with EntityDescriptors = propagatedDescriptors }
+
+        /// Propagate the structure of an entity to all other entities with it as their propagation source.
+        static member propagateEntityStructure entity world =
+            let targets = World.getPropagationTargets entity world
+            let currentDescriptor = World.writeEntity true EntityDescriptor.empty entity world
+            let previousDescriptor = Option.defaultValue EntityDescriptor.empty (entity.GetPropagatedDescriptorOpt world)
+            let world =
+                Seq.fold (fun world target ->
+                    if World.getEntityExists target world then
+                        let targetDescriptor = World.writeEntity true EntityDescriptor.empty target world
+                        let propagatedDescriptor = World.propagateEntityDescriptor previousDescriptor currentDescriptor targetDescriptor world
+                        let order = target.GetOrder world
+                        let world = World.destroyEntityImmediate target world
+                        let world = World.readEntity propagatedDescriptor (Some target.Name) target.Parent world |> snd
+                        let world = World.propagateEntityAffineMatrix target world
+                        let world = target.SetOrder order world
+                        world
+                    else world)
+                    world targets
+            let currentDescriptor = { currentDescriptor with EntityProperties = Map.remove (nameof Entity.PropagatedDescriptorOpt) currentDescriptor.EntityProperties }
+            entity.SetPropagatedDescriptorOpt (Some currentDescriptor) world
+
+        /// Clear all propagation targets pointing back to the given entity.
+        static member clearPropagationTargets entity world =
+            let targets = World.getPropagationTargets entity world
+            Seq.fold (fun world target ->
+                if World.getEntityExists target world
+                then target.SetPropagationSourceOpt None world
+                else world)
+                world targets
+
         static member internal makeIntrinsicOverlays facets entityDispatchers =
             let requiresFacetNames = fun sourceType -> sourceType = typeof<EntityDispatcher>
             let facets = facets |> Map.toValueList |> List.map box
@@ -430,6 +596,171 @@ module WorldModule2 =
             let sources = facets @ entityDispatchers
             let sourceTypes = List.map (fun source -> source.GetType ()) sources
             Overlay.makeIntrinsicOverlays requiresFacetNames sourceTypes
+
+        static member internal handleSubscribeAndUnsubscribeEvent subscribing (eventAddress : obj Address) (_ : Simulant) world =
+            // here we need to update the event publish flags for entities based on whether there are subscriptions to
+            // these events. These flags exists solely for efficiency reasons. We also look for subscription patterns
+            // that these optimizations do not support, and warn the developer if they are invoked. Additionally, we
+            // warn if the user attempts to subscribe to a Change event with a wildcard as doing so is not supported.
+            let eventNames = Address.getNames eventAddress
+            let eventNamesLength = Array.length eventNames
+            let world =
+                if eventNamesLength >= 6 then
+                    let eventFirstName = eventNames.[0]
+                    match eventFirstName with
+#if !DISABLE_ENTITY_PRE_UPDATE
+                    | "PreUpdate" ->
+#if DEBUG
+                        if  Array.contains Address.WildcardName eventNames ||
+                            Array.contains Address.EllipsisName eventNames then
+                            Log.debug
+                                ("Subscribing to entity pre-update events with a wildcard or ellipsis is not supported. " +
+                                 "This will cause a bug where some entity pre-update events are not published.")
+#endif
+                        let entity = Nu.Entity (Array.skip 2 eventNames)
+                        World.updateEntityPublishPreUpdateFlag entity world |> snd'
+#endif
+                    | "Update" ->
+#if DEBUG
+                        if  Array.contains Address.WildcardName eventNames ||
+                            Array.contains Address.EllipsisName eventNames then
+                            Log.debug
+                                ("Subscribing to entity update events with a wildcard or ellipsis is not supported. " +
+                                 "This will cause a bug where some entity update events are not published.")
+#endif
+                        let entity = Nu.Entity (Array.skip 2 eventNames)
+                        World.updateEntityPublishUpdateFlag entity world |> snd'
+#if !DISABLE_ENTITY_POST_UPDATE
+                    | "PostUpdate" ->
+#if DEBUG
+                        if  Array.contains Address.WildcardName eventNames ||
+                            Array.contains Address.EllipsisName eventNames then
+                            Log.debug
+                                ("Subscribing to entity post-update events with a wildcard or ellipsis is not supported. " +
+                                 "This will cause a bug where some entity post-update events are not published.")
+#endif
+                        let entity = Nu.Entity (Array.skip 2 eventNames)
+                        World.updateEntityPublishPostUpdateFlag entity world |> snd'
+#endif
+                    | "BodyCollision" | "BodySeparationExplicit" ->
+                        let entity = Nu.Entity (Array.skip 2 eventNames)
+                        World.updateBodyObservable subscribing entity world
+                    | _ -> world
+                else world
+            let world =
+                if eventNamesLength >= 4 then
+                    match eventNames.[0] with
+                    | "Change" ->
+                        let world =
+                            if eventNamesLength >= 6 then
+                                let entityAddress = rtoa (Array.skip 3 eventNames)
+                                let entity = Nu.Entity entityAddress
+                                match World.tryGetKeyedValueFast<Guid, UMap<Entity Address, int>> (EntityChangeCountsId, world) with
+                                | (true, entityChangeCounts) ->
+                                    match entityChangeCounts.TryGetValue entityAddress with
+                                    | (true, entityChangeCount) ->
+                                        let entityChangeCount = if subscribing then inc entityChangeCount else dec entityChangeCount
+                                        let entityChangeCounts =
+                                            if entityChangeCount = 0
+                                            then UMap.remove entityAddress entityChangeCounts
+                                            else UMap.add entityAddress entityChangeCount entityChangeCounts
+                                        let world =
+                                            if entity.Exists world then
+                                                if entityChangeCount = 0 then World.setEntityPublishChangeEvents false entity world |> snd'
+                                                elif entityChangeCount = 1 then World.setEntityPublishChangeEvents true entity world |> snd'
+                                                else world
+                                            else world
+                                        World.addKeyedValue EntityChangeCountsId entityChangeCounts world
+                                    | (false, _) ->
+                                        if not subscribing then failwithumf ()
+                                        let world = if entity.Exists world then World.setEntityPublishChangeEvents true entity world |> snd' else world
+                                        World.addKeyedValue EntityChangeCountsId (UMap.add entityAddress 1 entityChangeCounts) world
+                                | (false, _) ->
+                                    if not subscribing then failwithumf ()
+                                    let config = World.getCollectionConfig world
+                                    let entityChangeCounts = UMap.makeEmpty HashIdentity.Structural config
+                                    let world = if entity.Exists world then World.setEntityPublishChangeEvents true entity world |> snd' else world
+                                    World.addKeyedValue EntityChangeCountsId (UMap.add entityAddress 1 entityChangeCounts) world
+                            else world
+                        if  Array.contains Address.WildcardName eventNames ||
+                            Array.contains Address.EllipsisName eventNames then
+                            Log.debug "Subscribing to change events with a wildcard or ellipsis is not supported."
+                        world
+                    | _ -> world
+                else world
+            world
+
+        static member internal sortSubscriptionsByElevation subscriptions world =
+            EventGraph.sortSubscriptionsBy
+                (fun (simulant : Simulant) _ ->
+                    match simulant with
+                    | :? Entity as entity -> { SortElevation = entity.GetElevation world; SortHorizon = 0.0f; SortTarget = entity } :> IComparable
+                    | :? Group as group -> { SortElevation = Constants.Engine.GroupSortPriority; SortHorizon = 0.0f; SortTarget = group } :> IComparable
+                    | :? Screen as screen -> { SortElevation = Constants.Engine.ScreenSortPriority; SortHorizon = 0.0f; SortTarget = screen } :> IComparable
+                    | :? Game | :? GlobalSimulantGeneralized -> { SortElevation = Constants.Engine.GameSortPriority; SortHorizon = 0.0f; SortTarget = Game } :> IComparable
+                    | _ -> failwithumf ())
+                subscriptions
+                world
+
+        static member internal admitScreenElements screen world =
+            let entities = World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat |> SList.ofSeq
+            let (entities2d, entities3d) = SList.partition (fun (entity : Entity) -> entity.GetIs2d world) entities
+            let quadtree = World.getQuadtree world
+            for entity in entities2d do
+                let entityState = World.getEntityState entity world
+                let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
+                Quadtree.addElement entityState.Presence entityState.Bounds.Box2 element quadtree
+            if SList.notEmpty entities3d then
+                let octree = World.getOrCreateOctree world
+                for entity in entities3d do
+                    let entityState = World.getEntityState entity world
+                    let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
+                    Octree.addElement entityState.Presence entityState.Bounds element octree
+            world
+                
+        static member internal evictScreenElements screen world =
+            let entities = World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat |> SArray.ofSeq
+            let (entities2d, entities3d) = SArray.partition (fun (entity : Entity) -> entity.GetIs2d world) entities
+            let quadtree = World.getQuadtree world
+            for entity in entities2d do
+                let entityState = World.getEntityState entity world
+                let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
+                Quadtree.removeElement entityState.Presence entityState.Bounds.Box2 element quadtree
+            if SArray.notEmpty entities3d then
+                let octree = World.getOrCreateOctree world
+                for entity in entities3d do
+                    let entityState = World.getEntityState entity world
+                    let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
+                    Octree.removeElement entityState.Presence entityState.Bounds element octree
+            world
+
+        static member internal registerScreenPhysics screen world =
+            let entities =
+                World.getGroups screen world |>
+                Seq.map (flip World.getEntities world) |>
+                Seq.concat |>
+                SList.ofSeq
+            SList.fold (fun world (entity : Entity) ->
+                World.registerEntityPhysics entity world)
+                world entities
+
+        static member internal unregisterScreenPhysics screen world =
+            let entities =
+                World.getGroups screen world |>
+                Seq.map (flip World.getEntities world) |>
+                Seq.concat |>
+                SList.ofSeq
+            SList.fold (fun world (entity : Entity) ->
+                World.unregisterEntityPhysics entity world)
+                world entities
+
+        static member internal signalFn (signalObj : obj) (simulant : Simulant) world =
+            match simulant with
+            | :? Entity as entity -> (entity.GetDispatcher world).Signal (signalObj, entity, world)
+            | :? Group as group -> (group.GetDispatcher world).Signal (signalObj, group, world)
+            | :? Screen as screen -> (screen.GetDispatcher world).Signal (signalObj, screen, world)
+            | :? Game as game -> (game.GetDispatcher world).Signal (signalObj, game, world)
+            | _ -> failwithumf ()
 
         /// Try to reload the overlayer currently in use by the world.
         static member tryReloadOverlayer inputDirectory outputDirectory world =
@@ -447,17 +778,8 @@ module WorldModule2 =
                 match Overlayer.tryMakeFromFile intrinsicOverlays outputOverlayerFilePath with
                 | Right overlayer ->
 
-                    // update overlayer and overlay router
-                    let overlays = Overlayer.getIntrinsicOverlays overlayer @ Overlayer.getExtrinsicOverlays overlayer
-                    let overlayRoutes =
-                        overlays |>
-                        List.map (fun overlay -> overlay.OverlaidTypeNames |> List.map (fun typeName -> (typeName, overlay.OverlayName))) |>
-                        List.concat
-                    let overlayRouter = OverlayRouter.make overlayRoutes
+                    // update and apply overlays to all entities
                     let world = World.setOverlayer overlayer world
-                    let world = World.setOverlayRouter overlayRouter world
-
-                    // apply overlays to all entities
                     let entities = World.getEntities1 world
                     let world = Seq.fold (World.applyEntityOverlay overlayerOld overlayer) world entities
                     (Right overlayer, world)
@@ -793,9 +1115,11 @@ module WorldModule2 =
             World.getEntities2dBy (Quadtree.getElements set) world
 
         static member private getElements3dBy (getElementsFromOctree : Entity Octree -> Entity Octelement seq) world =
-            let octree = World.getOctree world
-            let elements = getElementsFromOctree octree
-            (elements, world)
+            match World.getOctreeOpt world with
+            | Some octree ->
+                let elements = getElementsFromOctree octree
+                (elements, world)
+            | None -> (Seq.empty, world)
 
         static member private getElements3dInPlay set world =
             let struct (playBox, playFrustum) = World.getPlayBounds3d world
@@ -815,10 +1139,12 @@ module WorldModule2 =
             World.getElements3dBy (Octree.getElements set) world
 
         static member private getEntities3dBy getElementsFromOctree world =
-            let octree = World.getOctree world
-            let elements = getElementsFromOctree octree
-            let entities = Seq.map (fun (element : Entity Octelement) -> element.Entry) elements
-            (entities, world)
+            match World.getOctreeOpt world with
+            | Some octree ->
+                let elements = getElementsFromOctree octree
+                let entities = Seq.map (fun (element : Entity Octelement) -> element.Entry) elements
+                (entities, world)
+            | None -> (Seq.empty, world)
 
         /// Get all 3d entities in the given bounds, including all uncullable entities.
         static member getEntities3dInBounds bounds set world =
@@ -1636,8 +1962,7 @@ module EntityPropertyDescriptor =
         let propertyName = propertyDescriptor.PropertyName
         let baseProperties = Reflection.getPropertyDefinitions typeof<EntityDispatcher>
         let rigidBodyProperties = Reflection.getPropertyDefinitions typeof<RigidBodyFacet>
-        if propertyName = "Name" || propertyName = "Surnames" || propertyName = "Model" || propertyName = "MountOpt" || propertyName = "OverlayNameOpt" then "Ambient Properties"
-        elif propertyName = "FacetNames" then "Applied Facets"
+        if propertyName = "Name" || propertyName = "Surnames" || propertyName = "Model" || propertyName = "MountOpt" || propertyName = "PropagationSourceOpt" || propertyName = "OverlayNameOpt" then "Ambient Properties"
         elif propertyName = "Degrees" || propertyName = "DegreesLocal" ||
              propertyName = "Elevation" || propertyName = "ElevationLocal" ||
              propertyName = "Offset" || propertyName = "Overflow" ||
@@ -1649,15 +1974,21 @@ module EntityPropertyDescriptor =
              "Basic Transform Properties"
         elif List.exists (fun (property : PropertyDefinition) -> propertyName = property.PropertyName) baseProperties then "Configuration Properties"
         elif propertyName = "MaterialProperties" || propertyName = "Material" then "Material Properties"
+        elif propertyName = "NavShape" || propertyName = "Nav3dConfig" then "Navigation Properties"
         elif List.exists (fun (property : PropertyDefinition) -> propertyName = property.PropertyName) rigidBodyProperties then "Physics Properties"
         else "Uncategorized Properties"
 
-    // HACK: we show degrees instead of rotation in editor.
     let getEditable propertyDescriptor =
         let propertyName = propertyDescriptor.PropertyName
-        if propertyName = "Rotation" || propertyName = "RotationLocal" then false
+        if  propertyName = Constants.Engine.OverlayNameOptPropertyName ||
+            propertyName = Constants.Engine.FacetNamesPropertyName ||
+            propertyName = Constants.Engine.PropagatedDescriptorOptPropertyName ||
+            propertyName = "Rotation" ||
+            propertyName = "RotationLocal" then
+            false
         else
-            propertyName = "Degrees" || propertyName = "DegreesLocal" ||
+            propertyName = "Degrees" ||
+            propertyName = "DegreesLocal" ||
             not (Reflection.isPropertyNonPersistentByName propertyName)
 
     let getValue propertyDescriptor (entity : Entity) world : obj =

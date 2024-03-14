@@ -32,10 +32,6 @@ type HeightMapMetadata =
       PositionsAndTexCoordses : struct (Vector3 * Vector2) array }
 
 /// A height map for terrain.
-[<Syntax
-    ("ImageHeightMap RawHeightMap", "", "", "", "",
-     Constants.PrettyPrinter.DefaultThresholdMin,
-     Constants.PrettyPrinter.DefaultThresholdMax)>]
 type HeightMap =
     | ImageHeightMap of Image AssetTag // only supports 8-bit depth on Red channel
     | RawHeightMap of RawHeightMap
@@ -238,7 +234,7 @@ type [<NoEquality; NoComparison>] BodyUserObject =
 
 /// Describes the substantial nature of a body in terms of mass or density.
 [<Syntax
-    ("Mass Density", "", "", "", "",
+    ("", "", "", "", "",
      Constants.PrettyPrinter.DefaultThresholdMin,
      Constants.PrettyPrinter.SimpleThresholdMax)>]
 type [<Struct>] Substance =
@@ -247,7 +243,7 @@ type [<Struct>] Substance =
 
 /// Describe the form of collision detection to use.
 [<Syntax
-    ("DiscontinuousDetection ContinuousDetection", "", "", "", "",
+    ("", "", "", "", "",
      Constants.PrettyPrinter.DefaultThresholdMin,
      Constants.PrettyPrinter.SimpleThresholdMax)>]
 type [<Struct>] CollisionDetection =
@@ -282,32 +278,35 @@ type BodyBoxRounded =
       TransformOpt : Affine option
       PropertiesOpt : BodyShapeProperties option }
 
-/// The shape of a triangulated physics body convex hull.
-type BodyConvexHull =
-    { Vertices : Vector3 array
+/// The shape of a convex physics body defined by body-relative points.
+type BodyPoints =
+    { Points : Vector3 array
       TransformOpt : Affine option
       PropertiesOpt : BodyShapeProperties option }
 
-/// The shape of a triangulated physics body static model.
+/// The shape of a physics body in terms of triangle faces.
+type BodyGeometry =
+    { Vertices : Vector3 array
+      Convex : bool
+      TransformOpt : Affine option
+      PropertiesOpt : BodyShapeProperties option }
+
+/// The shape of a physics body in terms of a static model.
 type BodyStaticModel =
     { StaticModel : StaticModel AssetTag
+      Convex : bool
       TransformOpt : Affine option
       PropertiesOpt : BodyShapeProperties option }
 
-/// The shape of a triangulated physics body static model surface.
+/// The shape of a physics body in terms of a static model surface.
 type BodyStaticModelSurface =
     { SurfaceIndex : int
       StaticModel : StaticModel AssetTag
+      Convex : bool
       TransformOpt : Affine option
       PropertiesOpt : BodyShapeProperties option }
 
-/// The shape of a triangulated physics body geometry.
-type BodyGeometry =
-    { Vertices : Vector3 array
-      TransformOpt : Affine option
-      PropertiesOpt : BodyShapeProperties option }
-
-/// The shape of a triangulated physics body terrain.
+/// The shape of a physics body in terms of a terrain height map.
 type BodyTerrain =
     { Resolution : Vector2i
       Bounds : Box3
@@ -316,8 +315,9 @@ type BodyTerrain =
       PropertiesOpt : BodyShapeProperties option }
 
 /// The shape of a physics body.
+/// TODO: consider renaming this family of types from Body___ to ___Shape.
 [<Syntax
-    ("BodyEmpty BodyBox BodySphere BodyCapsule BodyConvexHull BodyShapes", "", "", "", "",
+    ("", "", "", "", "",
      Constants.PrettyPrinter.DefaultThresholdMin,
      Constants.PrettyPrinter.DetailedThresholdMax)>]
 type BodyShape =
@@ -326,16 +326,16 @@ type BodyShape =
     | BodySphere of BodySphere
     | BodyCapsule of BodyCapsule
     | BodyBoxRounded of BodyBoxRounded
-    | BodyConvexHull of BodyConvexHull
+    | BodyPoints of BodyPoints
+    | BodyGeometry of BodyGeometry
     | BodyStaticModel of BodyStaticModel
     | BodyStaticModelSurface of BodyStaticModelSurface
-    | BodyGeometry of BodyGeometry
     | BodyTerrain of BodyTerrain
     | BodyShapes of BodyShape list
 
 /// The type of a physics body; Static, Kinematic, or Dynamic.
 [<Syntax
-    ("Static Kinematic Dynamic", "", "", "", "",
+    ("", "", "", "", "",
      Constants.PrettyPrinter.DefaultThresholdMin,
      Constants.PrettyPrinter.SimpleThresholdMax)>]
 type BodyType =
@@ -348,6 +348,7 @@ type BodyProperties =
     { BodyIndex : int
       Center : Vector3
       Rotation : Quaternion
+      Scale : Vector3
       BodyType : BodyType
       BodyShape : BodyShape
       SleepingAllowed : bool
@@ -437,9 +438,9 @@ type JointWheel =
       Anchor2 : Vector3 }
 
 /// A joint on physics bodies.
+/// TODO: consider renaming this family of types from Joint___ to ___Joint.
 [<Syntax
-    ("JointAngle JointDistance JointFriction JointGear JointMotor JointPrismatic JointPulley JointRevolute JointRope JointWheel",
-     "", "", "", "",
+    ("", "", "", "", "",
      Constants.PrettyPrinter.DefaultThresholdMin,
      Constants.PrettyPrinter.DetailedThresholdMax)>]
 type JointDevice =
@@ -670,9 +671,9 @@ module Physics =
         | BodySphere bodySphere -> BodySphere { bodySphere with Radius = size.X * bodySphere.Radius; TransformOpt = scaleTranslation size bodySphere.TransformOpt }
         | BodyCapsule bodyCapsule -> BodyCapsule { bodyCapsule with Height = size.Y * bodyCapsule.Height; Radius = size.Y * bodyCapsule.Radius; TransformOpt = scaleTranslation size bodyCapsule.TransformOpt }
         | BodyBoxRounded bodyBoxRounded -> BodyBoxRounded { bodyBoxRounded with Size = Vector3.Multiply (size, bodyBoxRounded.Size); Radius = size.X * bodyBoxRounded.Radius; TransformOpt = scaleTranslation size bodyBoxRounded.TransformOpt }
-        | BodyConvexHull bodyConvexHull -> BodyConvexHull { bodyConvexHull with Vertices = Array.map (fun vertex -> size * vertex) bodyConvexHull.Vertices; TransformOpt = scaleTranslation size bodyConvexHull.TransformOpt }
+        | BodyPoints bodyPoints -> BodyPoints { bodyPoints with Points = Array.map (fun vertex -> size * vertex) bodyPoints.Points; TransformOpt = scaleTranslation size bodyPoints.TransformOpt }
+        | BodyGeometry _ as bodyGeometry -> bodyGeometry
         | BodyStaticModel _ as bodyStaticModel -> bodyStaticModel
         | BodyStaticModelSurface _ as bodyStaticModelSurface -> bodyStaticModelSurface
-        | BodyGeometry _ as bodyGeometry -> bodyGeometry
         | BodyTerrain _ as bodyTerrain -> bodyTerrain
         | BodyShapes bodyShapes -> BodyShapes (List.map (localizeBodyShape size) bodyShapes)
