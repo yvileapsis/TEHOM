@@ -69,15 +69,15 @@ type [<SymbolicExpansion>] Nav3dConfig =
       CellHeight : single
       AgentHeight : single
       AgentRadius : single
-      AgentMaxClimb : single
-      AgentMaxSlope : single
-      RegionMinSize : int
-      RegionMergeSize : int
-      EdgeMaxLength : single
-      EdgeMaxError : single
+      AgentClimbMax : single
+      AgentSlopeMax : single
+      RegionSizeMin : int
+      RegionSizeMerge : int
+      EdgeLengthMax : single
+      EdgeErrorMax : single
       VertsPerPolygon : int
       DetailSampleDistance : single
-      DetailSampleMaxError : single
+      DetailSampleErrorMax : single
       FilterLowHangingObstacles : bool
       FilterLedgeSpans : bool
       FilterWalkableLowHeightSpans : bool
@@ -89,15 +89,15 @@ type [<SymbolicExpansion>] Nav3dConfig =
           CellHeight = 0.1f
           AgentHeight = 1.5f
           AgentRadius = 0.35f // same as default character 3d radius (maybe should be slightly more?)
-          AgentMaxClimb = 0.35f
-          AgentMaxSlope = 45.0f
-          RegionMinSize = 8
-          RegionMergeSize = 20
-          EdgeMaxLength = 6.0f
-          EdgeMaxError = 1.3f
+          AgentClimbMax = 0.4f
+          AgentSlopeMax = 45.0f
+          RegionSizeMin = 8
+          RegionSizeMerge = 20
+          EdgeLengthMax = 6.0f
+          EdgeErrorMax = 1.3f
           VertsPerPolygon = 6
           DetailSampleDistance = 6.0f
-          DetailSampleMaxError = 1.0f
+          DetailSampleErrorMax = 1.0f
           FilterLowHangingObstacles = true
           FilterLedgeSpans = true
           FilterWalkableLowHeightSpans = true
@@ -120,6 +120,13 @@ type Nav3dInputGeomProvider (vertices, indices, bounds : Box3) =
         member this.AddOffMeshConnection (start, end_, radius, bidir, area, flags) = offMeshConnections.Add (RcOffMeshConnection (start, end_, radius, bidir, area, flags))
         member this.RemoveOffMeshConnections filter = offMeshConnections.RemoveAll filter |> ignore<int>
         end
+
+/// The result of a navigation computation.
+type NavOutput =
+    { NavPosition : Vector3
+      NavRotation : Quaternion
+      NavLinearVelocity : Vector3
+      NavAngularVelocity : Vector3 }
 
 /// The manner in which a gui entity may be docked by a parent entity.
 type DockType =
@@ -216,6 +223,7 @@ type [<ReferenceEquality>] WorldConfig =
     { Imperative : bool
       Accompanied : bool
       Advancing : bool
+      FramePacing : bool
       ModeOpt : string option
       SdlConfig : SdlConfig }
 
@@ -228,6 +236,7 @@ type [<ReferenceEquality>] WorldConfig =
         { Imperative = true
           Accompanied = false
           Advancing = true
+          FramePacing = false
           ModeOpt = None
           SdlConfig = SdlConfig.defaultConfig }
 
@@ -237,6 +246,7 @@ module AmbientState =
     let [<Literal>] private ImperativeMask =    0b0001u
     let [<Literal>] private AccompaniedMask =   0b0010u
     let [<Literal>] private AdvancingMask =     0b0100u
+    let [<Literal>] private FramePacingMask =   0b1000u
 
     /// The ambient state of the world.
     type [<ReferenceEquality>] 'w AmbientState =
@@ -263,6 +273,7 @@ module AmbientState =
         member this.Imperative = this.Flags &&& ImperativeMask <> 0u
         member this.Accompanied = this.Flags &&& AccompaniedMask <> 0u
         member this.Advancing = this.Flags &&& AdvancingMask <> 0u
+        member this.FramePacing = this.Flags &&& FramePacingMask <> 0u
 
     /// Get the the liveness state of the engine.
     let getLiveness state =
@@ -274,6 +285,10 @@ module AmbientState =
             if advancing then state.TickWatch.Start () else state.TickWatch.Stop ()
             { state with Flags = if advancing then state.Flags ||| AdvancingMask else state.Flags &&& ~~~AdvancingMask }
         else state
+
+    /// Set whether the world's frame rate is being explicitly paced based on clock progression.
+    let setFramePacing framePacing (state : _ AmbientState) =
+        { state with Flags = if framePacing then state.Flags ||| FramePacingMask else state.Flags &&& ~~~FramePacingMask }
 
     /// Get the collection config value.
     let getConfig (state : 'w AmbientState) =
@@ -462,11 +477,12 @@ module AmbientState =
         { state with UnculledRenderRequested = true }
 
     /// Make an ambient state value.
-    let make imperative accompanied advancing symbolics overlayer sdlDepsOpt =
+    let make imperative accompanied advancing framePacing symbolics overlayer sdlDepsOpt =
         let flags =
             (if imperative then ImperativeMask else 0u) |||
             (if accompanied then AccompaniedMask else 0u) |||
-            (if advancing then AdvancingMask else 0u)
+            (if advancing then AdvancingMask else 0u) |||
+            (if framePacing then FramePacingMask else 0u)
         let config = if imperative then TConfig.Imperative else TConfig.Functional
         { Flags = flags
           Liveness = Live

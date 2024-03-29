@@ -27,9 +27,6 @@ module WorldModule2 =
     let private PreUpdateGameTimer = Stopwatch ()
     let private PreUpdateScreensTimer = Stopwatch ()
     let private PreUpdateGroupsTimer = Stopwatch ()
-#if !DISABLE_ENTITY_PRE_UPDATE
-    let private PreUpdateEntitiesTimer = Stopwatch ()
-#endif
     let private UpdateTimer = Stopwatch ()
     let private UpdateGatherTimer = Stopwatch ()
     let private UpdateGameTimer = Stopwatch ()
@@ -41,9 +38,6 @@ module WorldModule2 =
     let private PostUpdateGameTimer = Stopwatch ()
     let private PostUpdateScreensTimer = Stopwatch ()
     let private PostUpdateGroupsTimer = Stopwatch ()
-#if !DISABLE_ENTITY_POST_UPDATE
-    let private PostUpdateEntitiesTimer = Stopwatch ()
-#endif
     let private TaskletsTimer = Stopwatch ()
     let private DestructionTimer = Stopwatch ()
     let private PerProcessTimer = Stopwatch ()
@@ -66,6 +60,10 @@ module WorldModule2 =
     let private CachedHashSet2dNormal = HashSet (QuadelementEqualityComparer ())
     let private CachedHashSet3dNormal = HashSet (OctelementEqualityComparer ())
     let private CachedHashSet3dShadow = HashSet (OctelementEqualityComparer ())
+
+    (* Frame Pacing *)
+    let mutable private FramePaceIssues = 0
+    let mutable private FramePaceChecks = 0
 
     type World with
 
@@ -427,7 +425,7 @@ module WorldModule2 =
                 | _ -> failwithumf ()) |>
             Map.ofList
 
-        static member private propagateEntityDescriptor previousDescriptor currentDescriptor targetDescriptor world =
+        static member private propagateEntityDescriptor previousDescriptor currentDescriptor targetDescriptor (currentEntityOpt : Entity option) world =
 
             // propagate dispatcher at this level
             let propagatedDescriptor =
@@ -437,11 +435,26 @@ module WorldModule2 =
                     else targetDescriptor
                 else { targetDescriptor with EntityDispatcherName = currentDescriptor.EntityDispatcherName }
 
-            // propagate properties at this level
-            let propertyNames =
-                Set.ofSeq currentDescriptor.EntityProperties.Keys |>
-                Set.addMany propagatedDescriptor.EntityProperties.Keys
+            // consider using current entity as propagation source at this level
             let propagatedDescriptor =
+                let propagatedDescriptor = { propagatedDescriptor with EntityProperties = Map.remove Constants.Engine.PropagatedDescriptorOptPropertyName propagatedDescriptor.EntityProperties }
+                let considerUsingCurrentEntityAsPropagationSource =
+                    match currentDescriptor.EntityProperties.TryGetValue Constants.Engine.PropagationSourceOptPropertyName with
+                    | (true, propagationSourceOptSymbol) -> propagationSourceOptSymbol |> symbolToValue<string option> |> Option.isNone
+                    | (false, _) -> true
+                if considerUsingCurrentEntityAsPropagationSource then
+                    match currentEntityOpt with
+                    | Some currentEntity ->
+                        if currentEntity.Exists world && World.hasPropagationTargets currentEntity world
+                        then { propagatedDescriptor with EntityProperties = Map.add Constants.Engine.PropagationSourceOptPropertyName (valueToSymbol (Some currentEntity)) propagatedDescriptor.EntityProperties }
+                        else propagatedDescriptor
+                    | None -> propagatedDescriptor
+                else propagatedDescriptor
+
+            // propagate properties at this level
+            let propagatedDescriptor =
+                Set.ofSeq currentDescriptor.EntityProperties.Keys |>
+                Set.addMany propagatedDescriptor.EntityProperties.Keys |>
                 Seq.fold (fun targetDescriptor propertyName ->
                     if  propertyName <> nameof Entity.Name &&
                         propertyName <> nameof Entity.Position &&
@@ -510,7 +523,6 @@ module WorldModule2 =
                         | None -> targetDescriptor
                     else targetDescriptor)
                     propagatedDescriptor
-                    propertyNames
 
             // attempt to propagate entity descriptors
             let propagatedDescriptorOpts =
@@ -518,13 +530,30 @@ module WorldModule2 =
                 let currentDescriptorMap = World.mapEntityDescriptors currentDescriptor.EntityDescriptors
                 let targetDescriptorMap = World.mapEntityDescriptors targetDescriptor.EntityDescriptors
                 let keys = Set.ofSeq (previousDescriptorMap.Keys |> Seq.append currentDescriptorMap.Keys |> Seq.append targetDescriptorMap.Keys)
-                let entityDescriptorsList = [for key in keys do (previousDescriptorMap.TryFind key, currentDescriptorMap.TryFind key, targetDescriptorMap.TryFind key)]
+                let entityDescriptorOptsList = [for key in keys do (previousDescriptorMap.TryFind key, currentDescriptorMap.TryFind key, targetDescriptorMap.TryFind key)]
                 List.map (fun (previousDescriptorOpt, currentDescriptorOpt, targetDescriptorOpt) ->
+                    let currentEntityOpt =
+                        match currentEntityOpt with
+                        | Some currentEntity ->
+                            match currentDescriptorOpt with
+                            | Some currentDescriptor ->
+                                match currentDescriptor.EntityProperties.TryGetValue Constants.Engine.NamePropertyName with
+                                | (true, nameSymbol) ->
+                                    match nameSymbol with
+                                    | Atom (name, _) | Text (name, _) ->
+                                        let currentEntity = currentEntity / name
+                                        if currentEntity.Exists world
+                                        then Some currentEntity
+                                        else None
+                                    | _ -> None
+                                | (false, _) -> None
+                            | None -> None
+                        | None -> None
                     match (previousDescriptorOpt, currentDescriptorOpt, targetDescriptorOpt) with
                     | (Some previousDescriptor, Some currentDescriptor, Some targetDescriptor) ->
-                        Some (World.propagateEntityDescriptor previousDescriptor currentDescriptor targetDescriptor world)
+                        Some (World.propagateEntityDescriptor previousDescriptor currentDescriptor targetDescriptor currentEntityOpt world)
                     | (Some previousDescriptor, Some currentDescriptor, None) ->
-                        Some (World.propagateEntityDescriptor previousDescriptor currentDescriptor EntityDescriptor.empty world)
+                        Some (World.propagateEntityDescriptor previousDescriptor currentDescriptor EntityDescriptor.empty currentEntityOpt world)
                     | (Some _, None, None) ->
                         None
                     | (Some _, None, Some _) ->
@@ -534,9 +563,9 @@ module WorldModule2 =
                     | (None, Some currentDescriptor, None) ->
                         Some currentDescriptor
                     | (None, Some currentDescriptor, Some targetDescriptor) ->
-                        Some (World.propagateEntityDescriptor EntityDescriptor.empty currentDescriptor targetDescriptor world)
+                        Some (World.propagateEntityDescriptor EntityDescriptor.empty currentDescriptor targetDescriptor currentEntityOpt world)
                     | (None, None, None) -> None)
-                    entityDescriptorsList
+                    entityDescriptorOptsList
 
             // compose fully propagated descriptor in the order they are found in the current descriptor
             let currentDescriptorsOrder =
@@ -560,15 +589,18 @@ module WorldModule2 =
             { propagatedDescriptor with EntityDescriptors = propagatedDescriptors }
 
         /// Propagate the structure of an entity to all other entities with it as their propagation source.
+        /// TODO: expose this through Entity API.
         static member propagateEntityStructure entity world =
+
+            // propagate entity
             let targets = World.getPropagationTargets entity world
             let currentDescriptor = World.writeEntity true EntityDescriptor.empty entity world
             let previousDescriptor = Option.defaultValue EntityDescriptor.empty (entity.GetPropagatedDescriptorOpt world)
             let world =
                 Seq.fold (fun world target ->
                     if World.getEntityExists target world then
-                        let targetDescriptor = World.writeEntity true EntityDescriptor.empty target world
-                        let propagatedDescriptor = World.propagateEntityDescriptor previousDescriptor currentDescriptor targetDescriptor world
+                        let targetDescriptor = World.writeEntity false EntityDescriptor.empty target world
+                        let propagatedDescriptor = World.propagateEntityDescriptor previousDescriptor currentDescriptor targetDescriptor (Some entity) world
                         let order = target.GetOrder world
                         let world = World.destroyEntityImmediate target world
                         let world = World.readEntity propagatedDescriptor (Some target.Name) target.Parent world |> snd
@@ -578,7 +610,21 @@ module WorldModule2 =
                     else world)
                     world targets
             let currentDescriptor = { currentDescriptor with EntityProperties = Map.remove (nameof Entity.PropagatedDescriptorOpt) currentDescriptor.EntityProperties }
-            entity.SetPropagatedDescriptorOpt (Some currentDescriptor) world
+            let world = entity.SetPropagatedDescriptorOpt (Some currentDescriptor) world
+
+            // propagate sourced ancestor entities
+            seq {
+                for target in World.getPropagationTargets entity world do
+                    if target.Exists world then
+                        for ancestor in World.getEntityAncestors target world do
+                            if ancestor.Exists world && World.hasPropagationTargets ancestor world then
+                                ancestor } |>
+            Set.ofSeq |>
+            Set.fold (fun world ancestor ->
+                if ancestor.Exists world && World.hasPropagationTargets ancestor world
+                then World.propagateEntityStructure ancestor world
+                else world)
+                world
 
         /// Clear all propagation targets pointing back to the given entity.
         static member clearPropagationTargets entity world =
@@ -608,18 +654,6 @@ module WorldModule2 =
                 if eventNamesLength >= 6 then
                     let eventFirstName = eventNames.[0]
                     match eventFirstName with
-#if !DISABLE_ENTITY_PRE_UPDATE
-                    | "PreUpdate" ->
-#if DEBUG
-                        if  Array.contains Address.WildcardName eventNames ||
-                            Array.contains Address.EllipsisName eventNames then
-                            Log.debug
-                                ("Subscribing to entity pre-update events with a wildcard or ellipsis is not supported. " +
-                                 "This will cause a bug where some entity pre-update events are not published.")
-#endif
-                        let entity = Nu.Entity (Array.skip 2 eventNames)
-                        World.updateEntityPublishPreUpdateFlag entity world |> snd'
-#endif
                     | "Update" ->
 #if DEBUG
                         if  Array.contains Address.WildcardName eventNames ||
@@ -630,21 +664,6 @@ module WorldModule2 =
 #endif
                         let entity = Nu.Entity (Array.skip 2 eventNames)
                         World.updateEntityPublishUpdateFlag entity world |> snd'
-#if !DISABLE_ENTITY_POST_UPDATE
-                    | "PostUpdate" ->
-#if DEBUG
-                        if  Array.contains Address.WildcardName eventNames ||
-                            Array.contains Address.EllipsisName eventNames then
-                            Log.debug
-                                ("Subscribing to entity post-update events with a wildcard or ellipsis is not supported. " +
-                                 "This will cause a bug where some entity post-update events are not published.")
-#endif
-                        let entity = Nu.Entity (Array.skip 2 eventNames)
-                        World.updateEntityPublishPostUpdateFlag entity world |> snd'
-#endif
-                    | "BodyCollision" | "BodySeparationExplicit" ->
-                        let entity = Nu.Entity (Array.skip 2 eventNames)
-                        World.updateBodyObservable subscribing entity world
                     | _ -> world
                 else world
             let world =
@@ -1055,7 +1074,8 @@ module WorldModule2 =
                                 let rotation = bodyTransformMessage.Rotation
                                 let linearVelocity = bodyTransformMessage.LinearVelocity
                                 let angularVelocity = bodyTransformMessage.AngularVelocity
-                                if entity.GetModelDriven world || bodyId.BodyIndex <> Constants.Physics.InternalIndex then
+                                let physicsMotion = entity.GetPhysicsMotion world
+                                if physicsMotion = ManualMotion|| bodyId.BodyIndex <> Constants.Physics.InternalIndex then
                                     let transformData =
                                         { BodyCenter = center
                                           BodyRotation = rotation
@@ -1197,10 +1217,6 @@ module WorldModule2 =
             let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
             let screens = List.rev screens
             let groups = Seq.concat (List.map (flip World.getGroups world) screens)
-#if !DISABLE_ENTITY_PRE_UPDATE
-            let (elements3d, world) = World.getElementsInPlay3d CachedHashSet3d world
-            let (elements2d, world) = World.getElementsInPlay2d CachedHashSet2d world
-#endif
             PreUpdateGatherTimer.Stop ()
 
             // pre-update game
@@ -1217,29 +1233,6 @@ module WorldModule2 =
             PreUpdateGroupsTimer.Start ()
             let world = Seq.fold (fun world group -> if advancing then World.preUpdateGroup group world else world) world groups
             PreUpdateGroupsTimer.Stop ()
-
-#if !DISABLE_ENTITY_PRE_UPDATE
-            // pre-update entities
-            PreUpdateEntitiesTimer.Start ()
-            let advancing = world.Advancing
-            let world =
-                Seq.fold (fun world (element : Entity Octelement) ->
-                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
-                    then World.preUpdateEntity element.Entry world
-                    else world)
-                    world elements3d
-            let world =
-                Seq.fold (fun world (element : Entity Quadelement) ->
-                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
-                    then World.preUpdateEntity element.Entry world
-                    else world)
-                    world elements2d
-            PreUpdateEntitiesTimer.Stop ()
-
-            // clear cached hash sets
-            CachedHashSet3d.Clear ()
-            CachedHashSet2d.Clear ()
-#endif
 
             // fin
             world
@@ -1306,20 +1299,6 @@ module WorldModule2 =
             let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
             let screens = List.rev screens
             let groups = Seq.concat (List.map (flip World.getGroups world) screens)
-#if !DISABLE_ENTITY_POST_UPDATE
-            let world =
-                Seq.fold (fun world (element : Entity Octelement) ->
-                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
-                    then World.postUpdateEntity element.Entry world
-                    else world)
-                    world elements3d
-            let world =
-                Seq.fold (fun world (element : Entity Quadelement) ->
-                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
-                    then World.postUpdateEntity element.Entry world
-                    else world)
-                    world elements2d
-#endif
             PostUpdateGatherTimer.Stop ()
 
             // post-update game
@@ -1336,19 +1315,6 @@ module WorldModule2 =
             PostUpdateGroupsTimer.Start ()
             let world = Seq.fold (fun world group -> if advancing then World.postUpdateGroup group world else world) world groups
             PostUpdateGroupsTimer.Stop ()
-
-#if !DISABLE_ENTITY_POST_UPDATE
-            // post-update entities
-            PostUpdateEntitiesTimer.Start ()
-            let advancing = world.Advancing
-            let world = Seq.fold (fun world (element : Entity Octelement) -> if not (element.Entry.GetStatic world) && (element.Entry.GetAlwaysUpdate world || advancing) then World.postUpdateEntity element.Entry world else world) world elements3d
-            let world = Seq.fold (fun world (element : Entity Quadelement) -> if not (element.Entry.GetStatic world) && (element.Entry.GetAlwaysUpdate world || advancing) then World.postUpdateEntity element.Entry world else world) world elements2d
-            PostUpdateEntitiesTimer.Stop ()
-
-            // clear cached hash sets
-            CachedHashSet3d.Clear ()
-            CachedHashSet2d.Clear ()
-#endif
 
             // fin
             world
@@ -1539,19 +1505,23 @@ module WorldModule2 =
 
         static member private processPhysics2d world =
             let physicsEngine = World.getPhysicsEngine2d world
-            let integrationMessages = physicsEngine.Integrate world.GameDelta
-            let eventTrace = EventTrace.debug "World" "processPhysics2d" "" EventTrace.empty
-            let world = World.publishPlus { IntegrationMessages = integrationMessages } Nu.Game.Handle.IntegrationEvent eventTrace Nu.Game.Handle false false world
-            let world = Seq.fold (flip World.processIntegrationMessage) world integrationMessages
-            world
+            match physicsEngine.TryIntegrate world.GameDelta with
+            | Some integrationMessages ->
+                let eventTrace = EventTrace.debug "World" "processPhysics2d" "" EventTrace.empty
+                let world = World.publishPlus { IntegrationMessages = integrationMessages } Nu.Game.Handle.IntegrationEvent eventTrace Nu.Game.Handle false false world
+                let world = Seq.fold (flip World.processIntegrationMessage) world integrationMessages
+                world
+            | None -> world
 
         static member private processPhysics3d world =
             let physicsEngine = World.getPhysicsEngine3d world
-            let integrationMessages = physicsEngine.Integrate world.GameDelta
-            let eventTrace = EventTrace.debug "World" "processPhysics3d" "" EventTrace.empty
-            let world = World.publishPlus { IntegrationMessages = integrationMessages } Nu.Game.Handle.IntegrationEvent eventTrace Nu.Game.Handle false false world
-            let world = Seq.fold (flip World.processIntegrationMessage) world integrationMessages
-            world
+            match physicsEngine.TryIntegrate world.GameDelta with
+            | Some integrationMessages ->
+                let eventTrace = EventTrace.debug "World" "processPhysics3d" "" EventTrace.empty
+                let world = World.publishPlus { IntegrationMessages = integrationMessages } Nu.Game.Handle.IntegrationEvent eventTrace Nu.Game.Handle false false world
+                let world = Seq.fold (flip World.processIntegrationMessage) world integrationMessages
+                world
+            | None -> world
 
         static member private processPhysics world =
             let world = World.processPhysics3d world
@@ -1650,7 +1620,7 @@ module WorldModule2 =
                                                         match World.getLiveness world with
                                                         | Live ->
 
-                                                            // render simulants, skipping culling upon request (like if a light probe needs to be rendered)
+                                                            // render simulants, skipping culling upon request (like when a light probe needs to be rendered)
                                                             RenderTimer.Start ()
                                                             let skipCulling = World.getUnculledRenderRequested world
                                                             let world = World.acknowledgeUnculledRenderRequest world
@@ -1674,6 +1644,34 @@ module WorldModule2 =
                                                                 let rendererProcess = World.getRendererProcess world
                                                                 if not firstFrame then rendererProcess.Swap ()
 
+                                                                // process frame pacing mechanics
+                                                                let world =
+                                                                    if FrameTimer.IsRunning then
+
+                                                                        // automatically enable frame pacing when need is detected
+                                                                        let world =
+                                                                            if not world.FramePacing then
+                                                                                if FrameTimer.Elapsed.TotalSeconds < Constants.GameTime.DesiredFrameTimeMinimum * 0.9 then FramePaceIssues <- inc FramePaceIssues
+                                                                                FramePaceChecks <- inc FramePaceChecks
+                                                                                let world = if FramePaceIssues = 15 then World.setFramePacing true world else world
+                                                                                if FramePaceChecks % 30 = 0 then FramePaceIssues <- 0
+                                                                                world
+                                                                            else world
+
+                                                                        // pace frame when enabled
+                                                                        if world.FramePacing then
+                                                                            while FrameTimer.Elapsed.TotalSeconds < Constants.GameTime.DesiredFrameTimeMinimum do
+                                                                                let timeToSleep = Constants.GameTime.DesiredFrameTimeMinimum - FrameTimer.Elapsed.TotalSeconds
+                                                                                if timeToSleep > 0.008 then Thread.Sleep 7
+                                                                                elif timeToSleep > 0.004 then Thread.Sleep 3
+                                                                                elif timeToSleep > 0.002 then Thread.Sleep 1
+                                                                                else Thread.Yield () |> ignore<bool> // NOTE: this seems to cause 100% core utilizaiton on linux. Perhaps we should special case for linux to use Sleep 0|1 instead?
+                                                                        
+                                                                        // fin
+                                                                        world
+                                                                    else world
+                                                                FrameTimer.Restart ()
+
                                                                 // process imgui frame
                                                                 let imGui = World.getImGui world
                                                                 if not firstFrame then imGui.EndFrame ()
@@ -1682,18 +1680,6 @@ module WorldModule2 =
                                                                 let world = imGuiProcess world
                                                                 imGui.InputFrame ()
                                                                 let drawData = imGui.RenderFrame ()
-
-                                                                // avoid updating faster than desired
-                                                                if FrameTimer.IsRunning then
-                                                                    while FrameTimer.Elapsed.TotalSeconds < Constants.GameTime.DesiredFrameTimeMinimum do
-                                                                        let timeToSleep = Constants.GameTime.DesiredFrameTimeMinimum - FrameTimer.Elapsed.TotalSeconds
-                                                                        if timeToSleep > 0.016 then Thread.Sleep 16
-                                                                        elif timeToSleep > 0.008 then Thread.Sleep 8
-                                                                        elif timeToSleep > 0.004 then Thread.Sleep 4
-                                                                        elif timeToSleep > 0.002 then Thread.Sleep 2
-                                                                        elif timeToSleep > 0.001 then Thread.Sleep 1
-                                                                        else Thread.Yield () |> ignore<bool>
-                                                                FrameTimer.Restart ()
 
                                                                 // process rendering (2/2)
                                                                 rendererProcess.SubmitMessages
@@ -1715,11 +1701,27 @@ module WorldModule2 =
 
                                                                 // update time and recur
                                                                 TotalTimer.Stop ()
-                                                                let world = World.updateTime world
                                                                 WorldModule.TaskletProcessingStarted <- false
-                                                                World.runWithoutCleanUp runWhile preProcess perProcess postProcess imGuiProcess imGuiPostProcess liveness false world
+                                                                let world = World.updateTime world
+                                                                let world =
+                                                                    if world.Advancing then
+                                                                        let world = World.publish () (Events.TimeUpdateEvent --> Game) Game world
+                                                                        match World.getSelectedScreenOpt world with
+                                                                        | Some selectedScreen ->
+                                                                            let world = World.publish () (Events.TimeUpdateEvent --> selectedScreen) selectedScreen world
+                                                                            let groups = World.getGroups selectedScreen world
+                                                                            Seq.fold (fun world (group : Group) ->
+                                                                                if group.Exists world
+                                                                                then World.publish () (Events.TimeUpdateEvent --> group) group world
+                                                                                else world)
+                                                                                world groups
+                                                                        | None -> world
+                                                                    else world
 
-                                                            // fin
+                                                                // recur or return
+                                                                match World.getLiveness world with
+                                                                | Live -> World.runWithoutCleanUp runWhile preProcess perProcess postProcess imGuiProcess imGuiPostProcess liveness false world
+                                                                | Dead -> world
                                                             | Dead -> world
                                                         | Dead -> world
                                                     | Dead -> world
@@ -1792,7 +1794,9 @@ module EntityDispatcherModule2 =
                 | :? 'model as model -> model
                 | null -> null :> obj :?> 'model
                 | modelObj ->
-                    try modelObj |> valueToSymbol |> symbolToValue
+                    try let model = modelObj |> valueToSymbol |> symbolToValue
+                        property.DesignerValue <- model
+                        model
                     with _ ->
                         Log.debugOnce "Could not convert existing model to new type. Falling back on initial model value."
                         makeInitial world
@@ -2093,7 +2097,9 @@ module GroupDispatcherModule =
                 | :? 'model as model -> model
                 | null -> null :> obj :?> 'model
                 | modelObj ->
-                    try modelObj |> valueToSymbol |> symbolToValue
+                    try let model = modelObj |> valueToSymbol |> symbolToValue
+                        property.DesignerValue <- model
+                        model
                     with _ ->
                         Log.debugOnce "Could not convert existing model to new type. Falling back on initial model value."
                         makeInitial world
@@ -2262,7 +2268,9 @@ module ScreenDispatcherModule =
                 | :? 'model as model -> model
                 | null -> null :> obj :?> 'model
                 | modelObj ->
-                    try modelObj |> valueToSymbol |> symbolToValue
+                    try let model = modelObj |> valueToSymbol |> symbolToValue
+                        property.DesignerValue <- model
+                        model
                     with _ ->
                         Log.debugOnce "Could not convert existing model to new type. Falling back on initial model value."
                         makeInitial world
@@ -2438,7 +2446,9 @@ module GameDispatcherModule =
                 | :? 'model as model -> model
                 | null -> null :> obj :?> 'model
                 | modelObj ->
-                    try modelObj |> valueToSymbol |> symbolToValue
+                    try let model = modelObj |> valueToSymbol |> symbolToValue
+                        property.DesignerValue <- model
+                        model
                     with _ ->
                         Log.debugOnce "Could not convert existing model to new type. Falling back on initial model value."
                         makeInitial world
@@ -2644,7 +2654,7 @@ module WorldModule2' =
                         else
                             let facets = entityState.Facets.Clone () :?> Facet array
                             facets.[index] <- facet
-                            let entityState = { entityState with Facets = Array.ofSeq entityState.Facets }
+                            let entityState = { entityState with Facets = facets }
                             World.setEntityState entityState entity world
                     | None -> world
                 | :? EntityDispatcher as entityDispatcher ->

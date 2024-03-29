@@ -326,11 +326,11 @@ module Character2dDispatcherModule =
             [define Entity.CelSize (v2 28.0f 28.0f)
              define Entity.CelRun 8
              define Entity.AnimationDelay (GameTime.ofSeconds (1.0f / 15.0f))
-             define Entity.AngularFactor v3Zero
-             define Entity.GravityOverride (Some (Constants.Physics.Gravity2dDefault * 3.0f))
              define Entity.BodyType Dynamic
              define Entity.SleepingAllowed false
-             define Entity.BodyShape (BodyCapsule { Height = 0.5f; Radius = 0.25f; TransformOpt = None; PropertiesOpt = None })
+             define Entity.AngularFactor v3Zero
+             define Entity.GravityOverride (Some (Constants.Physics.Gravity2dDefault * 3.0f))
+             define Entity.BodyShape (CapsuleShape { Height = 0.5f; Radius = 0.25f; TransformOpt = None; PropertiesOpt = None })
              define Entity.Character2dIdleImage Assets.Default.Character2dIdleImage
              define Entity.Character2dJumpImage Assets.Default.Character2dJumpImage
              define Entity.Character2dWalkSheet Assets.Default.Character2dWalkImage
@@ -350,7 +350,7 @@ module Character2dDispatcherModule =
         override this.Render (_, entity, world) =
             let bodyId = entity.GetBodyId world
             let facingLeft = entity.GetCharacter2dFacingLeft world
-            let velocity = World.getBodyLinearVelocity bodyId world
+            let velocity = entity.GetLinearVelocity world
             let celSize = entity.GetCelSize world
             let celRun = entity.GetCelRun world
             let animationDelay = entity.GetAnimationDelay world
@@ -545,9 +545,9 @@ module RigidModelDispatcherModule =
             let entity = evt.Subscriber : Entity
             let bodyShape = entity.GetBodyShape world
             let staticModel = entity.GetStaticModel world
-            if (match bodyShape with BodyStaticModel body -> body.StaticModel <> staticModel | _ -> false) then
-                let bodyStaticModel = { StaticModel = staticModel; Convex = true; TransformOpt = None; PropertiesOpt = None }
-                let world = entity.SetBodyShape (BodyStaticModel bodyStaticModel) world
+            if (match bodyShape with StaticModelShape staticModelShape -> staticModelShape.StaticModel <> staticModel | _ -> false) then
+                let staticModelShape = { StaticModel = staticModel; Convex = true; TransformOpt = None; PropertiesOpt = None }
+                let world = entity.SetBodyShape (StaticModelShape staticModelShape) world
                 (Cascade, world)
             else (Cascade, world)
 
@@ -555,8 +555,8 @@ module RigidModelDispatcherModule =
             let entity = evt.Subscriber : Entity
             let world =
                 match entity.GetBodyType world with
-                | Static -> entity.SetNavShape BoundsShape world
-                | Dynamic | Kinematic -> entity.SetNavShape EmptyShape world
+                | Static -> entity.SetNavShape BoundsNavShape world
+                | Kinematic | KinematicCharacter | Dynamic | DynamicCharacter -> entity.SetNavShape NavShape.EmptyNavShape world
             (Cascade, world)
 
         static member Facets =
@@ -566,11 +566,11 @@ module RigidModelDispatcherModule =
 
         static member Properties =
             [define Entity.BodyType Static
-             define Entity.BodyShape (BodyStaticModel { StaticModel = Assets.Default.StaticModel; Convex = true; TransformOpt = None; PropertiesOpt = None })
+             define Entity.BodyShape (StaticModelShape { StaticModel = Assets.Default.StaticModel; Convex = true; TransformOpt = None; PropertiesOpt = None })
              define Entity.MaterialProperties MaterialProperties.empty
              define Entity.StaticModel Assets.Default.StaticModel
              define Entity.RenderStyle Deferred
-             define Entity.NavShape BoundsShape]
+             define Entity.NavShape BoundsNavShape]
 
         override this.Register (entity, world) =
             let world = World.monitor updateBodyShape (entity.GetChangeEvent (nameof entity.StaticModel)) entity world
@@ -594,7 +594,7 @@ module StaticModelSurfaceDispatcherModule =
              define Entity.SurfaceIndex 0
              define Entity.StaticModel Assets.Default.StaticModel
              define Entity.RenderStyle Deferred
-             define Entity.NavShape BoundsShape]
+             define Entity.NavShape BoundsNavShape]
 
 [<AutoOpen>]
 module RigidModelSurfaceDispatcherModule =
@@ -608,9 +608,9 @@ module RigidModelSurfaceDispatcherModule =
             let bodyShape = entity.GetBodyShape world
             let surfaceIndex = entity.GetSurfaceIndex world
             let staticModel = entity.GetStaticModel world
-            if (match bodyShape with BodyStaticModelSurface body -> body.SurfaceIndex <> surfaceIndex || body.StaticModel <> staticModel | _ -> false) then
-                let bodyStaticModel = { StaticModel = staticModel; SurfaceIndex = surfaceIndex; Convex = true; TransformOpt = None; PropertiesOpt = None }
-                let world = entity.SetBodyShape (BodyStaticModelSurface bodyStaticModel) world
+            if (match bodyShape with StaticModelSurfaceShape staticModelSurfaceShape -> staticModelSurfaceShape.SurfaceIndex <> surfaceIndex || staticModelSurfaceShape.StaticModel <> staticModel | _ -> false) then
+                let staticModelShape = { StaticModel = staticModel; SurfaceIndex = surfaceIndex; Convex = true; TransformOpt = None; PropertiesOpt = None }
+                let world = entity.SetBodyShape (StaticModelSurfaceShape staticModelShape) world
                 (Cascade, world)
             else (Cascade, world)
 
@@ -622,7 +622,7 @@ module RigidModelSurfaceDispatcherModule =
         static member Properties =
             [define Entity.InsetOpt None
              define Entity.BodyType Static
-             define Entity.BodyShape (BodyStaticModelSurface { StaticModel = Assets.Default.StaticModel; SurfaceIndex = 0; Convex = true; TransformOpt = None; PropertiesOpt = None })
+             define Entity.BodyShape (StaticModelSurfaceShape { StaticModel = Assets.Default.StaticModel; SurfaceIndex = 0; Convex = true; TransformOpt = None; PropertiesOpt = None })
              define Entity.MaterialProperties MaterialProperties.empty
              define Entity.SurfaceIndex 0
              define Entity.StaticModel Assets.Default.StaticModel
@@ -672,7 +672,7 @@ module Block3dDispatcherModule =
         static member Properties =
             [define Entity.BodyType Static
              define Entity.StaticModel Assets.Default.StaticModel
-             define Entity.NavShape BoundsShape]
+             define Entity.NavShape BoundsNavShape]
 
 [<AutoOpen>]
 module Box3dDispatcherModule =
@@ -688,10 +688,18 @@ module Box3dDispatcherModule =
         static member Properties =
             [define Entity.BodyType Dynamic
              define Entity.StaticModel Assets.Default.StaticModel
-             define Entity.NavShape BoundsShape]
+             define Entity.NavShape BoundsNavShape]
 
 [<AutoOpen>]
 module Character3dDispatcherModule =
+
+    type Entity with
+        member this.GetLinearVelocityPrevious world : Vector3 = this.Get (nameof this.LinearVelocityPrevious) world
+        member this.SetLinearVelocityPrevious (value : Vector3) world = this.Set (nameof this.LinearVelocityPrevious) value world
+        member this.LinearVelocityPrevious = lens (nameof this.LinearVelocityPrevious) this this.GetLinearVelocityPrevious this.SetLinearVelocityPrevious
+        member this.GetAngularVelocityPrevious world : Vector3 = this.Get (nameof this.AngularVelocityPrevious) world
+        member this.SetAngularVelocityPrevious (value : Vector3) world = this.Set (nameof this.AngularVelocityPrevious) value world
+        member this.AngularVelocityPrevious = lens (nameof this.AngularVelocityPrevious) this this.GetAngularVelocityPrevious this.SetAngularVelocityPrevious
 
     /// Gives an entity the base behavior of a 3d character.
     type Character3dDispatcher () =
@@ -704,39 +712,44 @@ module Character3dDispatcherModule =
         static member Properties =
             [define Entity.MaterialProperties MaterialProperties.empty
              define Entity.AnimatedModel Assets.Default.AnimatedModel
-             define Entity.BodyType Dynamic
+             define Entity.BodyType KinematicCharacter
              define Entity.SleepingAllowed false
-             define Entity.Friction 1.0f
-             define Entity.LinearDamping 0.5f
-             define Entity.AngularDamping 0.999f
-             define Entity.AngularFactor (v3 0.0f 0.1f 0.0f)
-             define Entity.BodyShape (BodyCapsule { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None })]
-
+             define Entity.BodyShape (CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None })
+             define Entity.PhysicsMotion SynchronizedMotion
+             define Entity.LinearVelocityPrevious v3Zero
+             define Entity.AngularVelocityPrevious v3Zero]
+             
         override this.Update (entity, world) =
-            let bodyId = entity.GetBodyId world
             let rotation = entity.GetRotation world
-            let linearVelocity = World.getBodyLinearVelocity bodyId world
-            let angularVelocity = World.getBodyAngularVelocity bodyId world
-            let forwardness = (Vector3.Dot (linearVelocity, rotation.Forward))
-            let backness = (Vector3.Dot (linearVelocity, -rotation.Forward))
-            let rightness = (Vector3.Dot (linearVelocity, rotation.Right))
-            let leftness = (Vector3.Dot (linearVelocity, -rotation.Right))
-            let turnRightness = (angularVelocity * v3Up).Length ()
+            let linearVelocity = entity.GetLinearVelocity world
+            let linearVelocityPrevious = entity.GetLinearVelocityPrevious world
+            let linearVelocityAvg = (linearVelocity + linearVelocityPrevious) * 0.5f
+            let angularVelocity = entity.GetAngularVelocity world
+            let angularVelocityPrevious = entity.GetAngularVelocityPrevious world
+            let angularVelocityAvg = (angularVelocity + angularVelocityPrevious) * 0.5f
+            let forwardness = (Vector3.Dot (linearVelocityAvg * 32.0f, rotation.Forward))
+            let backness = (Vector3.Dot (linearVelocityAvg * 32.0f, -rotation.Forward))
+            let rightness = (Vector3.Dot (linearVelocityAvg * 32.0f, rotation.Right))
+            let leftness = (Vector3.Dot (linearVelocityAvg * 32.0f, -rotation.Right))
+            let turnRightness = (angularVelocityAvg * v3Up).Length () * 48.0f
             let turnLeftness = -turnRightness
             let animations = [{ StartTime = 0L; LifeTimeOpt = None; Name = "Armature|Idle"; Playback = Loop; Rate = 1.0f; Weight = 0.5f; BoneFilterOpt = None }]
             let animations =
-                if forwardness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkForward"; Playback = Loop; Rate = 1.0f; Weight = forwardness; BoneFilterOpt = None } :: animations
-                elif backness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkBack"; Playback = Loop; Rate = 1.0f; Weight = backness; BoneFilterOpt = None } :: animations
+                if forwardness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkForward"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f forwardness; BoneFilterOpt = None } :: animations
+                elif backness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkBack"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f backness; BoneFilterOpt = None } :: animations
                 else animations
             let animations =
-                if rightness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkRight"; Playback = Loop; Rate = 1.0f; Weight = rightness; BoneFilterOpt = None } :: animations
-                elif leftness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkLeft"; Playback = Loop; Rate = 1.0f; Weight = leftness; BoneFilterOpt = None } :: animations
+                if rightness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkRight"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f rightness; BoneFilterOpt = None } :: animations
+                elif leftness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkLeft"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f leftness; BoneFilterOpt = None } :: animations
                 else animations
             let animations =
-                if turnRightness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnRight"; Playback = Loop; Rate = 1.0f; Weight = turnRightness; BoneFilterOpt = None } :: animations
-                elif turnLeftness >= 0.1f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnLeft"; Playback = Loop; Rate = 1.0f; Weight = turnLeftness; BoneFilterOpt = None } :: animations
+                if turnRightness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnRight"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f turnRightness; BoneFilterOpt = None } :: animations
+                elif turnLeftness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnLeft"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f turnLeftness; BoneFilterOpt = None } :: animations
                 else animations
-            entity.SetAnimations (List.toArray animations) world
+            let world = entity.SetAnimations (List.toArray animations) world
+            let world = entity.SetLinearVelocityPrevious linearVelocityAvg world
+            let world = entity.SetAngularVelocityPrevious angularVelocityAvg world
+            world
 
 [<AutoOpen>]
 module TerrainDispatcherModule =

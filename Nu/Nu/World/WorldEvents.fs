@@ -53,22 +53,22 @@ type TransformData =
 
 /// The data for a collision event.
 type BodyCollisionData =
-    { BodyShapeCollider : ShapeIndex
-      BodyShapeCollidee : ShapeIndex
+    { BodyShapeCollider : BodyShapeIndex
+      BodyShapeCollidee : BodyShapeIndex
       Normal : Vector3 }
+
+/// The explicit data for a separation event.
+/// Unfortunately, due to the fact that physics system itself does not raise separation events until the following
+/// frame, we need both an implicit and explicit body separation representation and the user MUST handle both!
+type BodySeparationExplicitData =
+    { BodyShapeSeparator : BodyShapeIndex
+      BodyShapeSeparatee : BodyShapeIndex }
 
 /// The implicit data for a separation event.
 /// Unfortunately, due to the fact that physics system itself does not raise separation events until the following
 /// frame, we need both an implicit and explicit body separation representation and the user MUST handle both!
 type BodySeparationImplicitData =
     { BodyId : BodyId }
-
-/// The explicit data for a separation event.
-/// Unfortunately, due to the fact that physics system itself does not raise separation events until the following
-/// frame, we need both an implicit and explicit body separation representation and the user MUST handle both!
-type BodySeparationExplicitData =
-    { BodyShapeSeparator : ShapeIndex
-      BodyShapeSeparatee : ShapeIndex }
 
 /// Tje data for describing a change in transform.
 type BodyTransformData =
@@ -98,6 +98,7 @@ module Events =
     let PreUpdateEvent = stoa<unit> "PreUpdate/Event"
     let UpdateEvent = stoa<unit> "Update/Event"
     let PostUpdateEvent = stoa<unit> "PostUpdate/Event"
+    let TimeUpdateEvent = stoa<unit> "TimeUpdate/Event"
     let SelectEvent = stoa<unit> "Select/Event"
     let DeselectingEvent = stoa<unit> "Deselecting/Event"
     let MountEvent = stoa<MountData> "Mount/Event"
@@ -106,8 +107,8 @@ module Events =
     let BodyAddingEvent = stoa<BodyId> "Body/Adding/Event"
     let BodyRemovingEvent = stoa<BodyId> "Body/Removing/Event"
     let BodyCollisionEvent = stoa<BodyCollisionData> "BodyCollision/Event"
-    let BodySeparationImplicitEvent = stoa<BodySeparationImplicitData> "BodySeparationImplicit/Event"
     let BodySeparationExplicitEvent = stoa<BodySeparationExplicitData> "BodySeparationExplicit/Event"
+    let BodySeparationImplicitEvent = stoa<BodySeparationImplicitData> "BodySeparationImplicit/Event"
     let BodyTransformEvent = stoa<BodyTransformData> "BodyTransform/Event"
     let ClickEvent = stoa<unit> "Click/Event"
     let DownEvent = stoa<unit> "Down/Event"

@@ -6,7 +6,7 @@ open Nu
 [<AutoOpen>]
 module Gameplay =
 
-    // this represents that state of the simulation during gameplay.
+    // this represents that state of gameplay simulation.
     type GameplayState =
         | Playing
         | Quitting
@@ -22,7 +22,7 @@ module Gameplay =
 
     // this is our MMCC message type.
     type GameplayMessage =
-        | Update
+        | TimeUpdate
         | StartQuitting
         | FinishQuitting
         interface Message
@@ -40,20 +40,20 @@ module Gameplay =
 
         // here we define the screen's properties and event handling
         override this.Initialize (_, _) =
-            [Screen.UpdateEvent => Update
+            [Screen.TimeUpdateEvent => TimeUpdate
              Screen.DeselectingEvent => FinishQuitting]
 
         // here we handle the above messages
         override this.Message (gameplay, message, _, world) =
             match message with
-            | Update ->
+            | TimeUpdate ->
                 just { gameplay with GameplayTime = gameplay.GameplayTime + (let d = world.GameDelta in d.Updates) }
             | StartQuitting ->
                 just { gameplay with GameplayState = Quitting }
             | FinishQuitting ->
                 just { gameplay with GameplayState = Quit }
 
-        // here we describe the content of the game including the level, the hud, and the player
+        // here we describe the content of the game including the hud, the scene, and the player
         override this.Content (gameplay, _) =
 
             [// the gui group

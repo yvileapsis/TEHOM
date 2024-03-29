@@ -155,12 +155,20 @@ module WorldPhysics =
         /// Check that the body with the given physics id is on the ground.
         static member getBodyGrounded bodyId world =
             if world.Subsystems.PhysicsEngine3d.GetBodyExists bodyId then
-                world.Subsystems.PhysicsEngine3d.IsBodyOnGround bodyId
+                world.Subsystems.PhysicsEngine3d.GetBodyGrounded bodyId
             elif world.Subsystems.PhysicsEngine2d.GetBodyExists bodyId then
-                world.Subsystems.PhysicsEngine2d.IsBodyOnGround bodyId
+                world.Subsystems.PhysicsEngine2d.GetBodyGrounded bodyId
             else
                 Log.info ("Body for '" + scstring bodyId + "' not found.")
                 false
+
+        /// Ray cast against 3d physics bodies.
+        static member rayCast3dBodies start stop collisionCategories collisionMask closestOnly world =
+            world.Subsystems.PhysicsEngine3d.RayCast (start, stop, collisionCategories, collisionMask, closestOnly)
+
+        /// Ray cast against 2d physics bodies.
+        static member rayCast2dBodies start stop collisionCategories collisionMask closestOnly world =
+            world.Subsystems.PhysicsEngine2d.RayCast (start, stop, collisionCategories, collisionMask, closestOnly)
 
         /// Send a physics message to create a physics body.
         static member createBody is2d bodyId (bodyProperties : BodyProperties) world =
@@ -191,32 +199,32 @@ module WorldPhysics =
             else World.handlePhysicsMessage2d destroyBodiesMessage world
 
         /// Send a physics message to create a physics joint.
-        static member createJoint is2d jointSource jointProperties world =
-            let createJointMessage = CreateJointMessage { JointSource = jointSource; JointProperties = jointProperties }
+        static member createBodyJoint is2d bodyJointSource bodyJointProperties world =
+            let createBodyJointMessage = CreateBodyJointMessage { BodyJointSource = bodyJointSource; BodyJointProperties = bodyJointProperties }
             if not is2d
-            then World.handlePhysicsMessage3d createJointMessage world
-            else World.handlePhysicsMessage2d createJointMessage world
+            then World.handlePhysicsMessage3d createBodyJointMessage world
+            else World.handlePhysicsMessage2d createBodyJointMessage world
 
         /// Send a physics message to create physics joints.
-        static member createJoints is2d jointSource jointsProperties world =
-            let createJointsMessage = CreateJointsMessage { JointsSource = jointSource; JointsProperties = jointsProperties }
+        static member createBodyJoints is2d bodyJointSource bodyJointsProperties world =
+            let createBodyJointsMessage = CreateBodyJointsMessage { BodyJointsSource = bodyJointSource; BodyJointsProperties = bodyJointsProperties }
             if not is2d
-            then World.handlePhysicsMessage3d createJointsMessage world
-            else World.handlePhysicsMessage2d createJointsMessage world
+            then World.handlePhysicsMessage3d createBodyJointsMessage world
+            else World.handlePhysicsMessage2d createBodyJointsMessage world
 
         /// Send a physics message to destroy a physics joint.
-        static member destroyJoint is2d jointId world =
-            let destroyJointMessage = DestroyJointMessage { JointId = jointId }
+        static member destroyBodyJoint is2d bodyJointId world =
+            let destroyBodyJointMessage = DestroyBodyJointMessage { BodyJointId = bodyJointId }
             if not is2d
-            then World.handlePhysicsMessage3d destroyJointMessage world
-            else World.handlePhysicsMessage2d destroyJointMessage world
+            then World.handlePhysicsMessage3d destroyBodyJointMessage world
+            else World.handlePhysicsMessage2d destroyBodyJointMessage world
 
         /// Send a physics message to destroy physics joints.
-        static member destroyJoints is2d jointIds world =
-            let destroyJointsMessage = DestroyJointsMessage { JointIds = jointIds }
+        static member destroyBodyJoints is2d bodyJointIds world =
+            let destroyBodyJointsMessage = DestroyBodyJointsMessage { BodyJointIds = bodyJointIds }
             if not is2d
-            then World.handlePhysicsMessage3d destroyJointsMessage world
-            else World.handlePhysicsMessage2d destroyJointsMessage world
+            then World.handlePhysicsMessage3d destroyBodyJointsMessage world
+            else World.handlePhysicsMessage2d destroyBodyJointsMessage world
 
         /// Send a physics message to set the enabled-ness of a body with the given physics id.
         static member setBodyEnabled enabled bodyId world =
@@ -280,32 +288,10 @@ module WorldPhysics =
             let world = World.handlePhysicsMessage3d applyBodyTorqueMessage world
             let world = World.handlePhysicsMessage2d applyBodyTorqueMessage world
             world
-            
-        static member private setBodyObservableInternal allowInternalIndexing observable (bodyId : BodyId) world =
-            if allowInternalIndexing || bodyId.BodyIndex <> Constants.Physics.InternalIndex then
-                let setBodyObservableMessage = SetBodyObservableMessage { BodyId = bodyId; Observable = observable }
-                let world = World.handlePhysicsMessage3d setBodyObservableMessage world
-                let world = World.handlePhysicsMessage2d setBodyObservableMessage world
-                world
-            else
-                Log.debug "Set the observability of an internally indexed body from outside the engine is prohibited."
-                world
 
-        /// Send a physics message to set the observability of a body.
-        /// Disabling observability where it's not needed can significantly increase performance.
-        static member setBodyObservable observable bodyId world =
-            World.setBodyObservableInternal false observable bodyId world
-
-        static member internal updateBodyObservable subscribing (bodySource : Entity) world =
-            let observable =
-                subscribing ||
-                let collisionEventAddress = atooa bodySource.BodyCollisionEvent
-                match (World.getSubscriptions world).TryGetValue collisionEventAddress with
-                | (true, subscriptions) -> OMap.notEmpty subscriptions
-                | (false, _) ->
-                    let separationEventAddress = atooa bodySource.BodySeparationExplicitEvent
-                    match (World.getSubscriptions world).TryGetValue separationEventAddress with
-                    | (true, subscriptions) -> OMap.notEmpty subscriptions
-                    | (false, _) -> false
-            let bodyId = { BodySource = bodySource; BodyIndex = Constants.Physics.InternalIndex }
-            World.setBodyObservableInternal true observable bodyId world
+        /// Send a physics message to jump to a body with the given physics id (KinematicCharacter only).
+        static member jumpBody canJumpInAir jumpSpeed bodyId world =
+            let jumpBodyMessage = JumpBodyMessage { BodyId = bodyId; CanJumpInAir = canJumpInAir; JumpSpeed = jumpSpeed }
+            let world = World.handlePhysicsMessage3d jumpBodyMessage world
+            let world = World.handlePhysicsMessage2d jumpBodyMessage world
+            world

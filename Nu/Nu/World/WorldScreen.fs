@@ -3,12 +3,15 @@
 
 namespace Nu
 open System
+open System.Collections.Generic
 open System.IO
 open System.Numerics
+open DotRecast.Core.Numerics
 open DotRecast.Detour
 open DotRecast.Recast
 open DotRecast.Recast.Geom
 open DotRecast.Recast.Toolset.Builder
+open DotRecast.Recast.Toolset.Tools
 open Prime
 
 [<AutoOpen>]
@@ -53,6 +56,7 @@ module WorldScreenModule =
         member this.PreUpdateEvent = Events.PreUpdateEvent --> this
         member this.UpdateEvent = Events.UpdateEvent --> this
         member this.PostUpdateEvent = Events.PostUpdateEvent --> this
+        member this.TimeUpdateEvent = Events.TimeUpdateEvent --> this
         member this.SelectEvent = Events.SelectEvent --> this
         member this.DeselectingEvent = Events.DeselectingEvent --> this
         member this.IncomingStartEvent = Events.IncomingStartEvent --> this
@@ -361,15 +365,15 @@ module WorldScreenModule =
         static member internal getNav3dDescriptors contents =
             [for (bounds, affineMatrix, staticModel, surfaceIndex, content) in contents do
                 match content with
-                | EmptyShape -> ()
-                | BoundsShape -> Left bounds
-                | StaticModelSurfaceShape ->
+                | NavShape.EmptyNavShape -> ()
+                | NavShape.BoundsNavShape -> Left bounds
+                | NavShape.StaticModelSurfaceNavShape ->
                     match Metadata.tryGetStaticModelMetadata staticModel with
                     | Some physicallyBasedModel ->
                         if surfaceIndex >= 0 && surfaceIndex < physicallyBasedModel.Surfaces.Length then
                             Right (bounds, affineMatrix, physicallyBasedModel.Surfaces.[surfaceIndex])
                     | None -> ()
-                | StaticModelShape ->
+                | NavShape.StaticModelNavShape ->
                     match Metadata.tryGetStaticModelMetadata staticModel with
                     | Some physicallyBasedModel ->
                         for surface in physicallyBasedModel.Surfaces do
@@ -457,16 +461,16 @@ module WorldScreenModule =
                     RcConfig
                         (config.PartitionType,
                          config.CellSize, config.CellHeight,
-                         config.AgentMaxSlope, config.AgentHeight, config.AgentRadius, config.AgentMaxClimb,
-                         config.RegionMinSize, config.RegionMergeSize,
-                         config.EdgeMaxLength, config.EdgeMaxError,
-                         config.VertsPerPolygon, config.DetailSampleDistance, config.DetailSampleMaxError,
+                         config.AgentSlopeMax, config.AgentHeight, config.AgentRadius, config.AgentClimbMax,
+                         config.RegionSizeMin, config.RegionSizeMerge,
+                         config.EdgeLengthMax, config.EdgeErrorMax,
+                         config.VertsPerPolygon, config.DetailSampleDistance, config.DetailSampleErrorMax,
                          config.FilterLowHangingObstacles, config.FilterLedgeSpans, config.FilterWalkableLowHeightSpans,
                          SampleAreaModifications.SAMPLE_AREAMOD_WALKABLE, true)
                 let rcBuilderConfig = RcBuilderConfig (rcConfig, geomProvider.GetMeshBoundsMin (), geomProvider.GetMeshBoundsMax ())
                 let rcBuilder = RcBuilder ()
                 let rcBuilderResult = rcBuilder.Build (geomProvider, rcBuilderConfig)
-                let dtCreateParams = DemoNavMeshBuilder.GetNavMeshCreateParams (geomProvider, config.CellSize, config.CellHeight, config.AgentHeight, config.AgentRadius, config.AgentMaxClimb, rcBuilderResult)
+                let dtCreateParams = DemoNavMeshBuilder.GetNavMeshCreateParams (geomProvider, config.CellSize, config.CellHeight, config.AgentHeight, config.AgentRadius, config.AgentClimbMax, rcBuilderResult)
                 match DtNavMeshBuilder.CreateNavMeshData dtCreateParams with
                 | null -> None // some sort of argument issue
                 | dtMeshData ->
@@ -528,5 +532,91 @@ module WorldScreenModule =
         static member tryQueryNav3d query screen world =
             let nav3d = World.getScreenNav3d screen world
             match nav3d.Nav3dMeshOpt with
-            | Some (_, _, dtQuery) -> Some (query dtQuery)
+            | Some (_, dtNavMesh, dtQuery) -> Some (query nav3d.Nav3dConfig dtNavMesh dtQuery)
             | None -> None
+
+        /// A nav3d query that attempts to compute navigation information that results in following the given destination.
+        static member tryNav3dFollowQuery moveSpeed (startPosition : Vector3) (endPosition : Vector3) navConfig (navMesh : DtNavMesh) (query : DtNavMeshQuery) =
+
+            // attempt to compute start position information
+            let mutable startRef = 0L
+            let mutable startPosition = RcVec3f (startPosition.X, startPosition.Y, startPosition.Z)
+            let mutable startIsOverPoly = false
+            let mutable startStatus = DtStatus.DT_IN_PROGRESS
+            let filter = DtQueryDefaultFilter (int SampleAreaModifications.SAMPLE_POLYFLAGS_ALL, int SampleAreaModifications.SAMPLE_POLYFLAGS_DISABLED, [||])
+            while startStatus = DtStatus.DT_IN_PROGRESS do
+                startStatus <- query.FindNearestPoly (startPosition, RcVec3f (2f, 4f, 2f), filter, &startRef, &startPosition, &startIsOverPoly)
+
+            // attempt to compute end position information
+            let mutable endRef = 0L
+            let mutable endPosition = RcVec3f (endPosition.X, endPosition.Y, endPosition.Z)
+            let mutable endIsOverPoly = false
+            let mutable endStatus = DtStatus.DT_IN_PROGRESS
+            while endStatus = DtStatus.DT_IN_PROGRESS do
+                endStatus <- query.FindNearestPoly (endPosition, RcVec3f (2f, 4f, 2f), filter, &endRef, &endPosition, &endIsOverPoly)
+
+            // attempt to compute path
+            if startStatus = DtStatus.DT_SUCCESS && endStatus = DtStatus.DT_SUCCESS then
+                let navMeshTool = RcTestNavMeshTool ()
+                let mutable polys = List ()
+                let mutable path = List ()
+                let mutable pathStatus = DtStatus.DT_IN_PROGRESS
+                while pathStatus = DtStatus.DT_IN_PROGRESS do
+                    pathStatus <- navMeshTool.FindFollowPath (navMesh, query, startRef, endRef, startPosition, endPosition, filter, true, &polys, &path)
+                if pathStatus = DtStatus.DT_SUCCESS && path.Count > 0 then
+                    let mutable pathIndex = 0
+                    let mutable travel = 0.0f
+                    let mutable step = RcVec3f.Zero
+                    while pathIndex < path.Count && travel < moveSpeed do
+                        let substep = path.[pathIndex] - startPosition
+                        let substepTrunc =
+                            if travel + substep.Length () > moveSpeed then
+                                let travelOver = travel + substep.Length () - moveSpeed
+                                let travelDelta = substep.Length () - travelOver + 0.0001f
+                                RcVec3f.Normalize substep * travelDelta
+                            else substep
+                        travel <- travel + substepTrunc.Length ()
+                        step <- step + substepTrunc
+                        pathIndex <- inc pathIndex
+                    let stepPosition = startPosition + step
+                    Some (v3 stepPosition.X (stepPosition.Y - navConfig.CellHeight) stepPosition.Z)
+                else None
+            else None
+
+        /// Compute (navRotation, navAngularVelocity) for the given turn speed and navDirection.
+        static member nav3dFace turnSpeed (rotation : Quaternion) (navDirection : Vector3) =
+            let navRotation = Quaternion.CreateFromAxisAngle (v3Up, atan2 navDirection.X navDirection.Z + MathF.PI)
+            let navAngularVelocityYOpt = rotation.Forward.AngleBetween navRotation.Forward
+            let navAngularVelocityY = if Single.IsNaN navAngularVelocityYOpt then 0.0f else navAngularVelocityYOpt
+            let navRotation =
+                if navAngularVelocityY > turnSpeed then
+                    let sign = (Vector3.Cross (rotation.Forward, navRotation.Forward)).Y
+                    rotation * Quaternion.CreateFromAxisAngle (v3Up, MathF.CopySign (turnSpeed, sign))
+                else navRotation
+            let navAngularVelocityYOpt = rotation.Forward.AngleBetween navRotation.Forward
+            let navAngularVelocityY = if Single.IsNaN navAngularVelocityYOpt then 0.0f else navAngularVelocityYOpt
+            let navAngularVelocity = v3Up * navAngularVelocityY
+            (navRotation, navAngularVelocity)
+
+        /// Compute navigation information that results in following the given destination.
+        static member nav3dFollow distanceMinOpt distanceMaxOpt moveSpeed turnSpeed (position : Vector3) (rotation : Quaternion) (destination : Vector3) screen world =
+            let distance = (destination - position).Magnitude
+            if  (Option.isNone distanceMinOpt || distance > distanceMinOpt.Value) &&
+                (Option.isNone distanceMaxOpt || distance <= distanceMaxOpt.Value) then
+                match World.tryQueryNav3d (World.tryNav3dFollowQuery moveSpeed position destination) screen world with
+                | Some (Some navPosition) ->
+                    // TODO: consider doing an offset physics ray cast to align navPosition with near
+                    // ground. Additionally, consider removing the CellHeight offset in the above query so
+                    // that we don't need to do an offset here at all.
+                    let navLinearVelocity = navPosition - position
+                    let (navRotation, navAngularVelocity) = World.nav3dFace turnSpeed rotation navLinearVelocity
+                    { NavPosition = navPosition; NavRotation = navRotation; NavLinearVelocity = navLinearVelocity; NavAngularVelocity = navAngularVelocity }
+                | _ ->
+                    let navDirection = destination - position
+                    let (navRotation, navAngularVelocity) = World.nav3dFace turnSpeed rotation navDirection
+                    { NavPosition = position; NavRotation = navRotation; NavLinearVelocity = v3Zero; NavAngularVelocity = navAngularVelocity }
+            elif Option.isNone distanceMaxOpt || distance <= distanceMaxOpt.Value then
+                let navDirection = destination - position
+                let (navRotation, navAngularVelocity) = World.nav3dFace turnSpeed rotation navDirection
+                { NavPosition = position; NavRotation = navRotation; NavLinearVelocity = v3Zero; NavAngularVelocity = navAngularVelocity }
+            else { NavPosition = position; NavRotation = rotation; NavLinearVelocity = v3Zero; NavAngularVelocity = v3Zero }

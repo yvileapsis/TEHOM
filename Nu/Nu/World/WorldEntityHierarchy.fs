@@ -77,7 +77,7 @@ module WorldEntityHierarchy =
                             let (child, world) =
                                 if rigid then
                                     let (child, world) = World.createEntity<RigidModelSurfaceDispatcher> DefaultOverlay (Some surnames) group world
-                                    let shape = OpenGL.PhysicallyBased.PhysicallyBasedSurfaceFns.extractNavShape BoundsShape staticModelMetadata.SceneOpt surface
+                                    let shape = OpenGL.PhysicallyBased.PhysicallyBasedSurfaceFns.extractNavShape BoundsNavShape staticModelMetadata.SceneOpt surface
                                     let world = child.SetNavShape shape world
                                     (child, world)
                                 else World.createEntity<StaticModelSurfaceDispatcher> DefaultOverlay (Some surnames) group world
@@ -216,7 +216,7 @@ module WorldEntityHierarchy =
             world
 
 [<AutoOpen>]
-module FreezeFacetModule =
+module FreezerFacetModule =
 
     type Entity with
         member this.GetFrozenRenderLightProbes3d world : LightProbe3dValue array = this.Get (nameof this.FrozenRenderLightProbes3d) world

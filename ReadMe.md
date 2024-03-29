@@ -16,7 +16,7 @@ This repository hosts several projects, including -
 - the sample 2D puzzle game ['Twenty48'](https://github.com/bryanedds/Nu/tree/master/Projects/Twenty48).
 - the sample 2D action game ['BlazeVector'](https://github.com/bryanedds/Nu/tree/master/Projects/BlazeVector).
 - the sample 3D project ['TerraFirma'](https://github.com/bryanedds/Nu/tree/master/Projects/TerraFirma).
-- the game demo for ['OmniBlade'](https://github.com/bryanedds/Nu/tree/master/Projects/OmniBlade) available free for Windows and Linux here - https://github.com/bryanedds/Nu/releases/tag/v10.6.2
+- the game demo for ['OmniBlade'](https://github.com/bryanedds/Nu/tree/master/Projects/OmniBlade) available free for Windows and Linux here - https://github.com/bryanedds/Nu/releases/tag/v13.0.1
 
 Getting Started with Nu
 =======================
@@ -48,6 +48,9 @@ Directly editing the entire game state in the new editor.
 
 ![image](https://github.com/bryanedds/Nu/assets/1625560/69cd30f1-06fe-450e-a83f-8a7a9fd504d0)
 Algebraic terrain rendering thanks to contributions from **[@deanjl](https://github.com/deanjl)**.
+
+![image](https://github.com/bryanedds/Nu/assets/1625560/1d3ebe11-da94-46ad-bae1-22fc5f7c9b3e)
+Our little 3D dog-fooding demo, TerraFirma.
 
 ![image](https://github.com/bryanedds/Nu/assets/1625560/e8571dd1-bdd1-4663-b2ae-87abeef179d9)
 Recursive Prefab-like functionality via Entity Structure Propagation.

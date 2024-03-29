@@ -292,6 +292,7 @@ module WorldEntityModule =
             Cached.EnabledLocal <- lens (nameof Cached.EnabledLocal) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.Visible <- lens (nameof Cached.Visible) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.VisibleLocal <- lens (nameof Cached.VisibleLocal) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
+            Cached.Pickable <- lens (nameof Cached.Pickable) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.AlwaysUpdate <- lens (nameof Cached.AlwaysUpdate) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.AlwaysRender <- lens (nameof Cached.AlwaysRender) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
             Cached.Persistent <- lens (nameof Cached.Persistent) Unchecked.defaultof<_> Unchecked.defaultof<_> Unchecked.defaultof<_>
@@ -313,13 +314,7 @@ module WorldEntityModule =
         member this.RegisterEvent = Events.RegisterEvent --> this
         member this.UnregisteringEvent = Events.UnregisteringEvent --> this
         member this.ChangeEvent propertyName = Events.ChangeEvent propertyName --> this
-#if !DISABLE_ENTITY_PRE_UPDATE
-        member this.PreUpdateEvent = Events.PreUpdateEvent --> this
-#endif
         member this.UpdateEvent = Events.UpdateEvent --> this
-#if !DISABLE_ENTITY_POST_UPDATE
-        member this.PostUpdateEvent = Events.PostUpdateEvent --> this
-#endif
         member this.MountEvent = Events.MountEvent --> this
         member this.UnmountEvent = Events.UnmountEvent --> this
         member this.BodyCollisionEvent = Events.BodyCollisionEvent --> this
@@ -540,6 +535,9 @@ module WorldEntityModule =
         /// Traverse an entity's children.
         member this.TraverseChildren effect world = World.traverseEntityChildren effect this world
 
+        /// Get an entity's descendants.
+        member this.GetDescendants world = World.getEntityDescendants this world
+
         /// Apply physics changes to an entity.
         member this.ApplyPhysics (center : Vector3) rotation linearVelocity angularVelocity world =
             let mutable transformOld = this.GetTransform world
@@ -590,51 +588,21 @@ module WorldEntityModule =
 
     type World with
 
-#if !DISABLE_ENTITY_PRE_UPDATE
-        static member internal preUpdateEntity (entity : Entity) world =
-            let dispatcher = entity.GetDispatcher world
-            let world = dispatcher.PreUpdate (entity, world)
-            let facets = entity.GetFacets world
-            let world =
-                if Array.notEmpty facets // OPTIMIZATION: avoid lambda allocation.
-                then Array.fold (fun world (facet : Facet) -> facet.PreUpdate (entity, world)) world facets
-                else world
-            if World.getEntityPublishPreUpdates entity world then
-                let eventTrace = EventTrace.debug "World" "preUpdateEntity" "" EventTrace.empty
-                World.publishPlus () entity.PreUpdateEvent eventTrace entity false false world
-            else world
-#endif
-
-#if !DISABLE_ENTITY_POST_UPDATE
-        static member internal postUpdateEntity (entity : Entity) world =
-            let dispatcher = entity.GetDispatcher world
-            let world = dispatcher.PostUpdate (entity, world)
-            let facets = entity.GetFacets world
-            let world =
-                if Array.notEmpty facets // OPTIMIZATION: avoid lambda allocation.
-                then Array.fold (fun world (facet : Facet) -> facet.PostUpdate (entity, world)) world facets
-                else world
-            if World.getEntityPublishPostUpdates entity world then
-                let eventTrace = EventTrace.debug "World" "postUpdateEntity" "" EventTrace.empty
-                World.publishPlus () entity.PostUpdateEvent eventTrace entity false false world
-            else world
-#endif
-
         static member internal renderEntity renderPass (entity : Entity) world =
-            let dispatcher = entity.GetDispatcher world
-            dispatcher.Render (renderPass, entity, world)
             let facets = entity.GetFacets world
             for facet in facets do
                 facet.Render (renderPass, entity, world)
+            let dispatcher = entity.GetDispatcher world
+            dispatcher.Render (renderPass, entity, world)
 
         static member internal updateEntity (entity : Entity) world =
-            let dispatcher = entity.GetDispatcher world
-            let world = dispatcher.Update (entity, world)
             let facets = entity.GetFacets world
             let world =
                 if Array.notEmpty facets // OPTIMIZATION: avoid lambda allocation.
                 then Array.fold (fun world (facet : Facet) -> facet.Update (entity, world)) world facets
                 else world
+            let dispatcher = entity.GetDispatcher world
+            let world = dispatcher.Update (entity, world)
             if World.getEntityPublishUpdates entity world then
                 let eventTrace = EventTrace.debug "World" "updateEntity" "" EventTrace.empty
                 World.publishPlus () entity.UpdateEvent eventTrace entity false false world
@@ -643,12 +611,13 @@ module WorldEntityModule =
         /// Edit an entity with the given operation using the ImGui APIs.
         /// Intended only to be called by editors like Gaia.
         static member editEntity operation (entity : Entity) world =
-            let dispatcher = entity.GetDispatcher world
-            let world = dispatcher.Edit (operation, entity, world)
             let facets = entity.GetFacets world
-            if Array.notEmpty facets // OPTIMIZATION: avoid lambda allocation.
-            then Array.fold (fun world (facet : Facet) -> facet.Edit (operation, entity, world)) world facets
-            else world
+            let world =
+                if Array.notEmpty facets // OPTIMIZATION: avoid lambda allocation.
+                then Array.fold (fun world (facet : Facet) -> facet.Edit (operation, entity, world)) world facets
+                else world
+            let dispatcher = entity.GetDispatcher world
+            dispatcher.Edit (operation, entity, world)
 
         /// Attempt to truncate an entity model.
         static member tryTruncateEntityModel<'model> (model : 'model) (entity : Entity) world =
@@ -825,7 +794,7 @@ module WorldEntityModule =
 
         /// Copy an entity to the world's clipboard.
         static member copyEntityToClipboard entity world =
-            let entityDescriptor = World.writeEntity true EntityDescriptor.empty entity world
+            let entityDescriptor = World.writeEntity false EntityDescriptor.empty entity world
             Clipboard <- Some (false, entityDescriptor, entity)
 
         /// Cut an entity to the world's clipboard.
@@ -835,7 +804,7 @@ module WorldEntityModule =
             World.destroyEntityImmediate entity world
 
         /// Paste an entity from the world's clipboard.
-        static member pasteEntityFromClipboard forwardPropagationSource (distance : single) rightClickPosition positionSnapEir pasteType (parent : Simulant) world =
+        static member pasteEntityFromClipboard tryForwardPropagationSource (distance : single) rightClickPosition positionSnapEir pasteType (parent : Simulant) world =
             match Clipboard with
             | Some (cut, entityDescriptor, entitySource) ->
                 let nameOpt =
@@ -890,7 +859,7 @@ module WorldEntityModule =
                 | None -> ()
                 let world = entity.SetTransform transform world
                 let world =
-                    if forwardPropagationSource then
+                    if tryForwardPropagationSource && not cut then
                         match entity.GetPropagationSourceOpt world with
                         | None ->
                             if entitySource.Exists world
@@ -898,6 +867,21 @@ module WorldEntityModule =
                             else world
                         | Some _ -> world
                     else entity.SetPropagationSourceOpt None world
+                let rec getDescendantPairs source entity world =
+                    [for child in World.getEntityChildren entity world do
+                        let childSource = source / child.Name
+                        yield (childSource, child)
+                        yield! getDescendantPairs childSource child world]
+                let world =
+                    getDescendantPairs entitySource entity world |>
+                    List.fold (fun world (descendantSource, descendentEntity) ->
+                        if descendentEntity.Exists world then
+                            let world = World.setEntityPropagatedDescriptorOpt None descendentEntity world |> snd'
+                            if descendantSource.Exists world && World.hasPropagationTargets descendantSource world
+                            then World.setEntityPropagationSourceOpt (Some descendantSource) descendentEntity world |> snd'
+                            else world
+                        else world)
+                        world
                 let mountOpt = match parent with :? Entity -> Some (Relation.makeParent ()) | _ -> None
                 let world = entity.SetMountOpt mountOpt world
                 (Some entity, world)

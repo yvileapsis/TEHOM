@@ -13,8 +13,9 @@ type Nu () =
 
     static let mutable Initialized = false
 
-    /// Initialize the Nu game engine.
-    static member init () =
+    /// Initialize the Nu game engine, allowing for additional user-defined initialization after setting up logging
+    /// and function / lens references but before performing initialization involving values stored in constants.
+    static member initPlus userInit =
 
         // init only if needed
         if not Initialized then
@@ -25,22 +26,11 @@ type Nu () =
             // init logging
             Log.init (Some "Log.txt")
 
-            // init reflection module
-            Reflection.init ()
-
             // init math module
             Math.Init ()
 
-            // init vsync
-            Vsync.Init Constants.Engine.RunSynchronously
-
-            // init OpenGL assert mechanism
-            OpenGL.Hl.InitAssert
-#if DEBUG
-                Constants.OpenGL.HlAssert
-#else
-                false
-#endif
+            // init reflection module
+            Reflection.init ()
 
             // init simulant modules
             WorldModuleGame.init ()
@@ -81,8 +71,32 @@ type Nu () =
             WorldModule.destroy <- fun simulant world -> World.destroy simulant world
             WorldModule.getEmptyEffect <- fun () -> Effect.empty :> obj
 
+            // init user-defined initialization process
+            let result = userInit ()
+
+            // init vsync
+            Vsync.Init Constants.Engine.RunSynchronously
+
+            // init OpenGL assert mechanism
+            OpenGL.Hl.InitAssert
+#if DEBUG
+                Constants.OpenGL.HlAssert
+#else
+                false
+#endif
+
             // mark init flag
             Initialized <- true
+
+            // fin
+            result
+
+        // already init'd
+        else userInit ()
+
+    /// Initialize the Nu game engine.
+    static member init () =
+        Nu.initPlus (fun () -> ())
 
 [<AutoOpen>]
 module WorldModule3 =
@@ -172,6 +186,7 @@ module WorldModule3 =
                  TerrainFacet ()
                  NavBodyFacet ()
                  Nav3dConfigFacet ()
+                 FollowerFacet ()
                  FreezerFacet ()]
 
         /// Update late bindings internally stored by the engine from types found in the given assemblies.
@@ -299,9 +314,8 @@ module WorldModule3 =
             let audioPlayer = StubAudioPlayer.make ()
 
             // make the world's ambient state
-            let ambientState =
-                let symbolics = Symbolics.makeEmpty ()
-                AmbientState.make config.Imperative config.Accompanied true symbolics Overlayer.empty None
+            let symbolics = Symbolics.makeEmpty ()
+            let ambientState = AmbientState.make config.Imperative config.Accompanied true false symbolics Overlayer.empty None
 
             // make the world's quadtree
             let quadtree = Quadtree.make Constants.Engine.QuadtreeDepth Constants.Engine.QuadtreeSize
@@ -386,9 +400,8 @@ module WorldModule3 =
                 | Right overlayer ->
 
                     // make the world's ambient state
-                    let ambientState =
-                        let symbolics = Symbolics.makeEmpty ()
-                        AmbientState.make config.Imperative config.Accompanied config.Advancing symbolics overlayer (Some sdlDeps)
+                    let symbolics = Symbolics.makeEmpty ()
+                    let ambientState = AmbientState.make config.Imperative config.Accompanied config.Advancing config.FramePacing symbolics overlayer (Some sdlDeps)
 
                     // make the world's quadtree
                     let quadtree = Quadtree.make Constants.Engine.QuadtreeDepth Constants.Engine.QuadtreeSize

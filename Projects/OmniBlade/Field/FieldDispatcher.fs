@@ -24,9 +24,9 @@ module FieldDispatcher =
             // NOTE: no special conditions in demo.
             song
 
-        static let isIntersectedProp (collider : ShapeIndex) (collidee : ShapeIndex) world =
+        static let isIntersectedProp (collider : BodyShapeIndex) (collidee : BodyShapeIndex) world =
             let collideeEntity = collidee.BodyId.BodySource :?> Entity
-            if (collider.ShapeIndex = Constants.Field.AvatarCollisionShapeIndex &&
+            if (collider.BodyShapeIndex = Constants.Field.AvatarCollisionShapeIndex &&
                 collideeEntity.Exists world &&
                 collideeEntity.Is<PropDispatcher> world &&
                 match (collideeEntity.GetPropPlus world).Prop.PropData with
@@ -34,7 +34,7 @@ module FieldDispatcher =
                 | Sensor _ -> true
                 | _ -> false) then
                 true
-            elif (collider.ShapeIndex = Constants.Field.AvatarSensorShapeIndex &&
+            elif (collider.BodyShapeIndex = Constants.Field.AvatarSensorShapeIndex &&
                   collideeEntity.Exists world &&
                   collideeEntity.Is<PropDispatcher> world &&
                   match (collideeEntity.GetPropPlus world).Prop.PropData with
@@ -57,8 +57,8 @@ module FieldDispatcher =
              Screen.OutgoingFinishEvent => ScreenTransitioning false
              Simulants.FieldAvatar.BodyTransformEvent =|> fun evt -> AvatarBodyTransform evt.Data |> signal
              Simulants.FieldAvatar.BodyCollisionEvent =|> fun evt -> AvatarBodyCollision evt.Data |> signal
-             Simulants.FieldAvatar.BodySeparationImplicitEvent =|> fun evt -> AvatarBodySeparationImplicit evt.Data |> signal
-             Simulants.FieldAvatar.BodySeparationExplicitEvent =|> fun evt -> AvatarBodySeparationExplicit evt.Data |> signal]
+             Simulants.FieldAvatar.BodySeparationExplicitEvent =|> fun evt -> AvatarBodySeparationExplicit evt.Data |> signal
+             Simulants.FieldAvatar.BodySeparationImplicitEvent =|> fun evt -> AvatarBodySeparationImplicit evt.Data |> signal]
 
         override this.Message (field, message, _, world) =
 
@@ -138,21 +138,19 @@ module FieldDispatcher =
             | AvatarBodyTransform transform ->
 
                 // update avatar from transform if warped
-                if field.AvatarWarped then
-                    let time = world.UpdateTime
-                    let avatar = field.Avatar
-                    let avatar = Avatar.updateCenter (constant transform.BodyCenter) avatar
-                    let avatar =
-                        let direction = Direction.ofVector3Biased transform.BodyLinearVelocity
-                        let speed = transform.BodyLinearVelocity.Magnitude
-                        if speed > Constants.Field.AvatarIdleSpeedMax then
-                            if direction <> avatar.Direction || avatar.CharacterAnimationType = IdleAnimation then
-                                let avatar = Avatar.updateDirection (constant direction) avatar
-                                Avatar.animate time WalkAnimation avatar
-                            else avatar
-                        else Avatar.animate time IdleAnimation avatar
-                    just (Field.updateAvatar (constant avatar) field)
-                else just field
+                let time = world.UpdateTime
+                let avatar = field.Avatar
+                let avatar = Avatar.updateCenter (constant transform.BodyCenter) avatar
+                let avatar =
+                    let direction = Direction.ofVector3Biased transform.BodyLinearVelocity
+                    let speed = transform.BodyLinearVelocity.Magnitude
+                    if speed > Constants.Field.AvatarIdleSpeedMax then
+                        if direction <> avatar.Direction || avatar.CharacterAnimationType = IdleAnimation then
+                            let avatar = Avatar.updateDirection (constant direction) avatar
+                            Avatar.animate time WalkAnimation avatar
+                        else avatar
+                    else Avatar.animate time IdleAnimation avatar
+                just (Field.updateAvatar (constant avatar) field)
 
             | AvatarBodyCollision collision ->
 
@@ -161,6 +159,17 @@ module FieldDispatcher =
                     if isIntersectedProp collision.BodyShapeCollider collision.BodyShapeCollidee world then
                         let field = Field.updateAvatarCollidedPropIds (List.cons ((collision.BodyShapeCollidee.BodyId.BodySource :?> Entity).GetPropPlus world).Prop.PropId) field
                         let field = Field.updateAvatarIntersectedPropIds (List.cons ((collision.BodyShapeCollidee.BodyId.BodySource :?> Entity).GetPropPlus world).Prop.PropId) field
+                        field
+                    else field
+                just field
+
+            | AvatarBodySeparationExplicit separation ->
+
+                // add separated body shape
+                let field =
+                    if isIntersectedProp separation.BodyShapeSeparator separation.BodyShapeSeparatee world then
+                        let field = Field.updateAvatarSeparatedPropIds (List.cons ((separation.BodyShapeSeparatee.BodyId.BodySource :?> Entity).GetPropPlus world).Prop.PropId) field
+                        let field = Field.updateAvatarIntersectedPropIds (List.remove ((=) ((separation.BodyShapeSeparatee.BodyId.BodySource :?> Entity).GetPropPlus world).Prop.PropId)) field
                         field
                     else field
                 just field
@@ -176,17 +185,6 @@ module FieldDispatcher =
                     let field = Field.updateAvatarSeparatedPropIds ((@) separatedPropIds) field
                     just field
                 | _ -> just field
-
-            | AvatarBodySeparationExplicit separation ->
-
-                // add separated body shape
-                let field =
-                    if isIntersectedProp separation.BodyShapeSeparator separation.BodyShapeSeparatee world then
-                        let field = Field.updateAvatarSeparatedPropIds (List.cons ((separation.BodyShapeSeparatee.BodyId.BodySource :?> Entity).GetPropPlus world).Prop.PropId) field
-                        let field = Field.updateAvatarIntersectedPropIds (List.remove ((=) ((separation.BodyShapeSeparatee.BodyId.BodySource :?> Entity).GetPropPlus world).Prop.PropId)) field
-                        field
-                    else field
-                just field
 
             | ScreenTransitioning transitioning ->
                 let field = Field.updateScreenTransitioning (constant transitioning) field
@@ -320,12 +318,24 @@ module FieldDispatcher =
                 just field
 
             | MenuOptionsOpen ->
-                let state = MenuOptions
+                let state = MenuOptions false
                 let field = Field.updateMenu (fun menu -> { menu with MenuState = state }) field
                 just field
 
             | MenuOptionsSelectBattleSpeed battleSpeed ->
                 let field = Field.updateOptions (constant { BattleSpeed = battleSpeed }) field
+                just field
+
+            | MenuOptionsQuitPrompt ->
+                let field = Field.quitPrompt field
+                just field
+
+            | MenuOptionsQuitConfirm ->
+                let field = Field.quitConfirm field
+                withSignal (FadeOutSong 60L) field
+
+            | MenuOptionsQuitCancel ->
+                let field = Field.quitCancel field
                 just field
 
             | MenuClose ->
@@ -519,7 +529,6 @@ module FieldDispatcher =
             | WarpAvatar bottom ->
                 let bodyBottomOffset = v3Up * Constants.Gameplay.CharacterSize.Y * 0.5f
                 let world = World.setBodyCenter (bottom + bodyBottomOffset) (Simulants.FieldAvatar.GetBodyId world) world
-                let world = Simulants.Field.Field.Update (Field.updateAvatarWarped tautology) world
                 just world
 
             | MoveAvatar force ->
@@ -898,35 +907,72 @@ module FieldDispatcher =
                              Entity.ClickEvent => MenuKeyItemsPageDown]]
 
                  // options
-                 | MenuOptions ->
+                 | MenuOptions quitPrompt ->
                     Content.panel "Options"
                         [Entity.Position == v3 -450.0f -255.0f 0.0f; Entity.Elevation == Constants.Field.GuiElevation; Entity.Size == v3 900.0f 510.0f 0.0f
                          Entity.LabelImage == Assets.Gui.DialogXXLImage]
                         [Content.sidebar "Sidebar" (v3 24.0f 417.0f 0.0f) field (fun () -> MenuTeamOpen) (fun () -> MenuInventoryOpen) (fun () -> MenuTechsOpen) (fun () -> MenuKeyItemsOpen) (fun () -> MenuOptionsOpen) (fun () -> MenuClose)
-                         Content.text "BattleSpeed"
-                            [Entity.PositionLocal == v3 384.0f 432.0f 0.0f; Entity.ElevationLocal == 1.0f
-                             Entity.Text == "Battle Speed"]
-                         Content.radioButton "Wait"
-                            [Entity.PositionLocal == v3 180.0f 372.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 144.0f 48.0f 0.0f
-                             Entity.UndialedImage == Assets.Gui.ButtonShortUpImage
-                             Entity.DialedImage == Assets.Gui.ButtonShortDownImage
-                             Entity.Text == "Wait"
-                             Entity.Dialed := match field.Options.BattleSpeed with WaitSpeed -> true | _ -> false
-                             Entity.DialedEvent => MenuOptionsSelectBattleSpeed WaitSpeed]
-                         Content.radioButton "Paced"
-                            [Entity.PositionLocal == v3 408.0f 372.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 144.0f 48.0f 0.0f
-                             Entity.UndialedImage == Assets.Gui.ButtonShortUpImage
-                             Entity.DialedImage == Assets.Gui.ButtonShortDownImage
-                             Entity.Text == "Paced"
-                             Entity.Dialed := match field.Options.BattleSpeed with PacedSpeed -> true | _ -> false
-                             Entity.DialedEvent => MenuOptionsSelectBattleSpeed PacedSpeed]
-                         Content.radioButton "Swift"
-                            [Entity.PositionLocal == v3 636.0f 372.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 144.0f 48.0f 0.0f
-                             Entity.UndialedImage == Assets.Gui.ButtonShortUpImage
-                             Entity.DialedImage == Assets.Gui.ButtonShortDownImage
-                             Entity.Text == "Swift"
-                             Entity.Dialed := match field.Options.BattleSpeed with SwiftSpeed -> true | _ -> false
-                             Entity.DialedEvent => MenuOptionsSelectBattleSpeed SwiftSpeed]]
+                         if not quitPrompt then
+                            Content.text "BattleSpeed"
+                                [Entity.PositionLocal == v3 384.0f 432.0f 0.0f; Entity.ElevationLocal == 1.0f
+                                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                                 Entity.Text == "Battle Speed"]
+                            Content.radioButton "Wait"
+                                [Entity.PositionLocal == v3 180.0f 372.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 144.0f 48.0f 0.0f
+                                 Entity.UndialedImage == Assets.Gui.ButtonShortUpImage
+                                 Entity.DialedImage == Assets.Gui.ButtonShortDownImage
+                                 Entity.Text == "Wait"
+                                 Entity.Dialed := match field.Options.BattleSpeed with WaitSpeed -> true | _ -> false
+                                 Entity.DialedEvent => MenuOptionsSelectBattleSpeed WaitSpeed]
+                            Content.radioButton "Paced"
+                                [Entity.PositionLocal == v3 408.0f 372.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 144.0f 48.0f 0.0f
+                                 Entity.UndialedImage == Assets.Gui.ButtonShortUpImage
+                                 Entity.DialedImage == Assets.Gui.ButtonShortDownImage
+                                 Entity.Text == "Paced"
+                                 Entity.Dialed := match field.Options.BattleSpeed with PacedSpeed -> true | _ -> false
+                                 Entity.DialedEvent => MenuOptionsSelectBattleSpeed PacedSpeed]
+                            Content.radioButton "Swift"
+                                [Entity.PositionLocal == v3 636.0f 372.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 144.0f 48.0f 0.0f
+                                 Entity.UndialedImage == Assets.Gui.ButtonShortUpImage
+                                 Entity.DialedImage == Assets.Gui.ButtonShortDownImage
+                                 Entity.Text == "Swift"
+                                 Entity.Dialed := match field.Options.BattleSpeed with SwiftSpeed -> true | _ -> false
+                                 Entity.DialedEvent => MenuOptionsSelectBattleSpeed SwiftSpeed]
+                            Content.text "Quit Game"
+                                [Entity.PositionLocal == v3 384.0f 312.0f 0.0f; Entity.ElevationLocal == 1.0f
+                                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                                 Entity.Text == "Quit Game"]
+                            Content.button "Quit"
+                                [Entity.PositionLocal == v3 408.0f 252.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 144.0f 48.0f 0.0f
+                                 Entity.UpImage == Assets.Gui.ButtonShortUpImage
+                                 Entity.DownImage == Assets.Gui.ButtonShortDownImage
+                                 Entity.Text == "Quit"
+                                 Entity.ClickEvent => MenuOptionsQuitPrompt]
+                            Content.text "TitleAndVersion"
+                                [Entity.PositionLocal == v3 240.0f 120.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 480.0f 48.0f 0.0f
+                                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                                 Entity.Text == "OmniBlade Demo v0.9.0"]
+                            Content.text "TitleAndVersionInfo"
+                                [Entity.PositionLocal == v3 180.0f 0.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 640.0f 108.0f 0.0f
+                                 Entity.Justification == Unjustified true
+                                 Entity.Text == "This build of OmniBlade contains only the first few hours of content."]
+                         else
+                            Content.text "Confirm Quit:"
+                                [Entity.PositionLocal == v3 384.0f 312.0f 0.0f; Entity.ElevationLocal == 1.0f
+                                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                                 Entity.Text == "Confirm Quit:"]
+                            Content.button "Cancel"
+                                [Entity.PositionLocal == v3 252.0f 252.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 144.0f 48.0f 0.0f
+                                 Entity.UpImage == Assets.Gui.ButtonShortUpImage
+                                 Entity.DownImage == Assets.Gui.ButtonShortDownImage
+                                 Entity.Text == "Cancel"
+                                 Entity.ClickEvent => MenuOptionsQuitCancel]
+                            Content.button "Quit!"
+                                [Entity.PositionLocal == v3 564.0f 252.0f 0.0f; Entity.ElevationLocal == 1.0f; Entity.Size == v3 144.0f 48.0f 0.0f
+                                 Entity.UpImage == Assets.Gui.ButtonShortUpImage
+                                 Entity.DownImage == Assets.Gui.ButtonShortDownImage
+                                 Entity.Text == "Quit!"
+                                 Entity.ClickEvent => MenuOptionsQuitConfirm]]
 
                  // closed
                  | MenuClosed -> ()

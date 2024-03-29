@@ -531,6 +531,17 @@ module Quaternion =
         member this.RollPitchYaw =
             Math.RollPitchYaw &this
 
+        /// Derive an axis angle from the quaternion.
+        member this.AxisAngle =
+            let w = this.W
+            let angle = 2.0f * acos w
+            let magnitude = sqrt (1.0f - w * w)
+            let axis =
+                if magnitude >= 0.0001f
+                then v3 (this.X / magnitude) (this.Y / magnitude) (this.Z / magnitude)
+                else v3Up // any unit vector can be chosen
+            (axis, angle)
+
         /// Normalize the quaternion.
         member this.Normalized =
             Quaternion.Normalize this
@@ -814,6 +825,49 @@ type Box2iConverter () =
         | :? Box2 -> source
         | _ -> failconv "Invalid Box2iConverter conversion from source." None
 
+/// Converts Matrix4x4 types.
+type Matrix4x4Converter () =
+    inherit TypeConverter ()
+
+    override this.CanConvertTo (_, destType) =
+        destType = typeof<Symbol> ||
+        destType = typeof<Matrix4x4>
+
+    override this.ConvertTo (_, _, source, destType) =
+        if destType = typeof<Symbol> then
+            let v4 = source :?> Matrix4x4
+            Symbols
+                ([Number (string v4.M11, ValueNone); Number (string v4.M12, ValueNone); Number (string v4.M13, ValueNone); Number (string v4.M14, ValueNone)
+                  Number (string v4.M21, ValueNone); Number (string v4.M22, ValueNone); Number (string v4.M23, ValueNone); Number (string v4.M24, ValueNone)
+                  Number (string v4.M31, ValueNone); Number (string v4.M32, ValueNone); Number (string v4.M33, ValueNone); Number (string v4.M34, ValueNone)
+                  Number (string v4.M41, ValueNone); Number (string v4.M42, ValueNone); Number (string v4.M43, ValueNone); Number (string v4.M44, ValueNone)],
+                 ValueNone) :> obj
+        elif destType = typeof<Matrix4x4> then source
+        else failconv "Invalid Matrix4x4Converter conversion to source." None
+
+    override this.CanConvertFrom (_, sourceType) =
+        sourceType = typeof<Symbol> ||
+        sourceType = typeof<Matrix4x4>
+
+    override this.ConvertFrom (_, _, source) =
+        match source with
+        | :? Symbol as symbol ->
+            match symbol with
+            | Symbols
+                ([Number (m11, _); Number (m12, _); Number (m13, _); Number (m14, _)
+                  Number (m21, _); Number (m22, _); Number (m23, _); Number (m24, _)
+                  Number (m31, _); Number (m32, _); Number (m33, _); Number (m34, _)
+                  Number (m41, _); Number (m42, _); Number (m43, _); Number (m44, _)],
+                 _) ->
+                Matrix4x4
+                    (Single.Parse m11, Single.Parse m12, Single.Parse m13, Single.Parse m14,
+                     Single.Parse m21, Single.Parse m22, Single.Parse m23, Single.Parse m24,
+                     Single.Parse m31, Single.Parse m32, Single.Parse m33, Single.Parse m34,
+                     Single.Parse m41, Single.Parse m42, Single.Parse m43, Single.Parse m44) :> obj
+            | _ -> failconv "Invalid Matrix4x4Converter conversion from source." (Some symbol)
+        | :? Matrix4x4 -> source
+        | _ -> failconv "Invalid Matrix4x4Converter conversion from source." None
+
 [<AutoOpen>]
 module Matrix4x4 =
 
@@ -1025,16 +1079,31 @@ type [<Struct>] Affine =
     { mutable Translation : Vector3
       mutable Rotation : Quaternion
       mutable Scale : Vector3 }
+    
     member this.Matrix =
         Matrix4x4.CreateFromTrs (this.Translation, this.Rotation, this.Scale)
+    
     static member make translation rotation scale =
         { Translation = translation; Rotation = rotation; Scale = scale }
+    
+    static member makeFromMatrix affineMatrix =
+        let mutable scale = v3One
+        let mutable rotation = quatIdentity
+        let mutable translation = v3Zero
+        if not (Matrix4x4.Decompose (affineMatrix, &scale, &rotation, &translation)) then
+            Log.info "Matrix4x4.Decompose failed to find determinant. Using identity instead."
+            Affine.Identity
+        else Affine.make translation rotation scale
+    
     static member makeTranslation translation =
         Affine.make translation quatIdentity v3One
+    
     static member makeRotation translation =
         Affine.make v3Zero translation v3One
+    
     static member makeScale scale =
         Affine.make v3Zero quatIdentity scale
+    
     static member Identity =
         Affine.make v3Zero quatIdentity v3One
 
@@ -1050,18 +1119,6 @@ type LightType =
     | PointLight
     | DirectionalLight
     | SpotLight of ConeInner : single * ConeOuter : single
-
-/// The input for a 2d ray cast operation.
-type [<Struct>] RayCast2Input =
-    { RayBegin : Vector2
-      RayEnd : Vector2 }
-      
-/// The output of a 2d ray cast operation.
-type [<Struct>] RayCast2Output =
-    { mutable Normal : Vector2
-      mutable Fraction : single }
-    static member inline defaultOutput =
-        Unchecked.defaultof<RayCast2Output>
 
 [<RequireQualifiedAccess>]
 module Math =
@@ -1081,6 +1138,7 @@ module Math =
             assignTypeConverter<Box2, Box2Converter> ()
             assignTypeConverter<Box3, Box3Converter> ()
             assignTypeConverter<Box2i, Box2iConverter> ()
+            assignTypeConverter<Matrix4x4, Matrix4x4Converter> ()
             assignTypeConverter<Color, ColorConverter> ()
             Initialized <- true
 
@@ -1135,25 +1193,25 @@ module Math =
         Vector3 (SnapDegree offset v3.X, SnapDegree offset v3.Y, SnapDegree offset v3.Z)
 
     /// Find the the union of a line segment and a frustum if one exists.
-    let tryUnionSegmentAndFrustum (beginPoint : Vector3) (endPoint : Vector3) (frustum : Frustum) =
-        let beginContained = frustum.Contains beginPoint <> ContainmentType.Disjoint
-        let endContained = frustum.Contains endPoint <> ContainmentType.Disjoint
-        if beginContained || endContained then
-            let beginPoint =
-                if not beginContained then
-                    let ray = Ray3 (beginPoint, (endPoint - beginPoint).Normalized)
+    let tryUnionSegmentAndFrustum (start : Vector3) (stop : Vector3) (frustum : Frustum) =
+        let startContained = frustum.Contains start <> ContainmentType.Disjoint
+        let stopContained = frustum.Contains stop <> ContainmentType.Disjoint
+        if startContained || stopContained then
+            let start =
+                if not startContained then
+                    let ray = Ray3 (start, (stop - start).Normalized)
                     let tOpt = frustum.Intersects ray
                     if tOpt.HasValue
-                    then Vector3.Lerp (beginPoint, endPoint, tOpt.Value)
-                    else beginPoint // TODO: figure out why intersection could fail here.
-                else beginPoint
-            let endPoint =
-                if not endContained then
-                    let ray = Ray3 (endPoint, (beginPoint - endPoint).Normalized)
+                    then Vector3.Lerp (start, stop, tOpt.Value)
+                    else start // TODO: figure out why intersection could fail here.
+                else start
+            let stop =
+                if not stopContained then
+                    let ray = Ray3 (stop, (start - stop).Normalized)
                     let tOpt = frustum.Intersects ray
                     if tOpt.HasValue
-                    then Vector3.Lerp (endPoint, beginPoint, tOpt.Value)
-                    else endPoint // TODO: figure out why intersection could fail here.
-                else endPoint
-            Some (beginPoint, endPoint)
+                    then Vector3.Lerp (stop, start, tOpt.Value)
+                    else stop // TODO: figure out why intersection could fail here.
+                else stop
+            Some (start, stop)
         else None

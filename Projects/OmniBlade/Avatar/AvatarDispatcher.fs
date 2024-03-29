@@ -3,7 +3,6 @@
 
 namespace OmniBlade
 open System
-open System.Numerics
 open Prime
 open Nu
 
@@ -30,8 +29,8 @@ module AvatarDispatcher =
         override this.Initialize (avatar, _) =
             let bodyShape =
                 BodyShapes
-                    [BodySphere { Radius = 0.172f; TransformOpt = Some (Affine.makeTranslation (v3 -0.013f -0.355f 0.0f)); PropertiesOpt = Some { BodyShapeProperties.empty with ShapeIndex = Constants.Field.AvatarCollisionShapeIndex }}
-                     BodySphere { Radius = 0.320f; TransformOpt = Some (Affine.makeTranslation (v3 -0.013f -0.355f 0.0f)); PropertiesOpt = Some { BodyShapeProperties.empty with ShapeIndex = Constants.Field.AvatarSensorShapeIndex; SensorOpt = Some true }}]
+                    [SphereShape { Radius = 0.172f; TransformOpt = Some (Affine.makeTranslation (v3 -0.013f -0.355f 0.0f)); PropertiesOpt = Some { BodyShapeProperties.empty with BodyShapeIndex = Constants.Field.AvatarCollisionShapeIndex }}
+                     SphereShape { Radius = 0.320f; TransformOpt = Some (Affine.makeTranslation (v3 -0.013f -0.355f 0.0f)); PropertiesOpt = Some { BodyShapeProperties.empty with BodyShapeIndex = Constants.Field.AvatarSensorShapeIndex; SensorOpt = Some true }}]
             [Entity.Perimeter := avatar.Perimeter
              Entity.Presence == Omnipresent
              Entity.LinearDamping == 19.0f
@@ -39,7 +38,7 @@ module AvatarDispatcher =
              Entity.GravityOverride == Some v3Zero
              Entity.BodyType == Dynamic
              Entity.BodyShape := bodyShape
-             Entity.ModelDriven == true]
+             Entity.PhysicsMotion == ManualMotion]
 
         override this.Render (avatar, _, entity, world) =
             if entity.GetVisible world then

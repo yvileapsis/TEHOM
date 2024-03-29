@@ -1217,7 +1217,6 @@ module EffectFacetModule =
             let world = setEffect (entity.GetEffectSymbolOpt world) entity world
             (Cascade, world)
 
-#if DISABLE_ENTITY_PRE_UPDATE
         static let handlePreUpdate evt world =
             let entity = evt.Subscriber : Entity
             let world =
@@ -1227,9 +1226,7 @@ module EffectFacetModule =
                     | _ -> world
                 else world
             (Cascade, world)
-#endif
 
-#if DISABLE_ENTITY_POST_UPDATE
         static let handlePostUpdate evt world =
             let entity = evt.Subscriber : Entity
             let world =
@@ -1239,7 +1236,6 @@ module EffectFacetModule =
                     | _ -> world
                 else world
             (Cascade, world)
-#endif
 
         static member Properties =
             [define Entity.ParticleSystem Particles.ParticleSystem.empty
@@ -1263,27 +1259,10 @@ module EffectFacetModule =
             let world = World.sense handleEffectDescriptorChange (entity.GetChangeEvent (nameof entity.EffectDescriptor)) entity (nameof EffectFacet) world
             let world = World.sense handleEffectsChange (entity.GetChangeEvent (nameof entity.EffectSymbolOpt)) entity (nameof EffectFacet) world
             let world = World.sense handleAssetsReload Nu.Game.Handle.AssetsReloadEvent entity (nameof EffectFacet) world
-#if DISABLE_ENTITY_PRE_UPDATE
             let world = World.sense handlePreUpdate entity.Group.PreUpdateEvent entity (nameof EffectFacet) world
-#endif
-#if DISABLE_ENTITY_POST_UPDATE
             let world = World.sense handlePostUpdate entity.Group.PostUpdateEvent entity (nameof EffectFacet) world
-#endif
             world
 
-#if !DISABLE_ENTITY_PRE_UPDATE
-        override this.PreUpdate (entity, world) =
-            if entity.GetEnabled world && entity.GetRunMode world = RunEarly
-            then run entity world
-            else world
-#endif
-
-#if !DISABLE_ENTITY_POST_UPDATE
-        override this.PostUpdate (entity, world) =
-            if entity.GetEnabled world && entity.GetRunMode world = RunLate
-            then run entity world
-            else world
-#endif
         override this.Render (renderPass, entity, world) =
 
             // render effect data token
@@ -1361,6 +1340,9 @@ module RigidBodyFacetModule =
         member this.GetGravityOverride world : Vector3 option = this.Get (nameof this.GravityOverride) world
         member this.SetGravityOverride (value : Vector3 option) world = this.Set (nameof this.GravityOverride) value world
         member this.GravityOverride = lens (nameof this.GravityOverride) this this.GetGravityOverride this.SetGravityOverride
+        member this.GetCharacterProperties world : CharacterProperties = this.Get (nameof this.CharacterProperties) world
+        member this.SetCharacterProperties (value : CharacterProperties) world = this.Set (nameof this.CharacterProperties) value world
+        member this.CharacterProperties = lens (nameof this.CharacterProperties) this this.GetCharacterProperties this.SetCharacterProperties
         member this.GetCollisionDetection world : CollisionDetection = this.Get (nameof this.CollisionDetection) world
         member this.SetCollisionDetection (value : CollisionDetection) world = this.Set (nameof this.CollisionDetection) value world
         member this.CollisionDetection = lens (nameof this.CollisionDetection) this this.GetCollisionDetection this.SetCollisionDetection
@@ -1373,17 +1355,20 @@ module RigidBodyFacetModule =
         member this.GetBodyShape world : BodyShape = this.Get (nameof this.BodyShape) world
         member this.SetBodyShape (value : BodyShape) world = this.Set (nameof this.BodyShape) value world
         member this.BodyShape = lens (nameof this.BodyShape) this this.GetBodyShape this.SetBodyShape
+        member this.GetPhysicsMotion world : PhysicsMotion = this.Get (nameof this.PhysicsMotion) world
+        member this.SetPhysicsMotion (value : PhysicsMotion) world = this.Set (nameof this.PhysicsMotion) value world
+        member this.PhysicsMotion = lens (nameof this.PhysicsMotion) this this.GetPhysicsMotion this.SetPhysicsMotion
         member this.GetSensor world : bool = this.Get (nameof this.Sensor) world
         member this.SetSensor (value : bool) world = this.Set (nameof this.Sensor) value world
         member this.Sensor = lens (nameof this.Sensor) this this.GetSensor this.SetSensor
-        member this.GetModelDriven world : bool = this.Get (nameof this.ModelDriven) world
-        member this.SetModelDriven (value : bool) world = this.Set (nameof this.ModelDriven) value world
-        member this.ModelDriven = lens (nameof this.ModelDriven) this this.GetModelDriven this.SetModelDriven
+        member this.GetObservable world : bool = this.Get (nameof this.Observable) world
+        member this.SetObservable (value : bool) world = this.Set (nameof this.Observable) value world
+        member this.Observable = lens (nameof this.Observable) this this.GetObservable this.SetObservable
         member this.GetBodyId world : BodyId = this.Get (nameof this.BodyId) world
         member this.BodyId = lensReadOnly (nameof this.BodyId) this this.GetBodyId
         member this.BodyCollisionEvent = Events.BodyCollisionEvent --> this
-        member this.BodySeparationImplicitEvent = Events.BodySeparationImplicitEvent --> Game
         member this.BodySeparationExplicitEvent = Events.BodySeparationExplicitEvent --> this
+        member this.BodySeparationImplicitEvent = Events.BodySeparationImplicitEvent --> Game
         member this.BodyTransformEvent = Events.BodyTransformEvent --> this
 
     /// Augments an entity with a physics-driven rigid body.
@@ -1396,6 +1381,38 @@ module RigidBodyFacetModule =
             if entity.GetIs2d world
             then World.localizeBodyShape scalar bodyShape
             else bodyShape
+
+        static let propagatePhysicsPosition (entity : Entity) (evt : Event<ChangeData, Entity>) world =
+            if entity.GetPhysicsMotion world <> ManualMotion then
+                let bodyId = entity.GetBodyId world
+                let position = evt.Data.Value :?> Vector3
+                (Cascade, World.setBodyCenter position bodyId world)
+            else (Cascade, world)
+
+        static let propagatePhysicsRotation (entity : Entity) (evt : Event<ChangeData, Entity>) world =
+            if entity.GetPhysicsMotion world <> ManualMotion then
+                let bodyId = entity.GetBodyId world
+                let rotation = evt.Data.Value :?> Quaternion
+                (Cascade, World.setBodyRotation rotation bodyId world)
+            else (Cascade, world)
+
+        static let propagatePhysicsLinearVelocity (entity : Entity) (evt : Event<ChangeData, Entity>) world =
+            if entity.GetPhysicsMotion world <> ManualMotion then
+                let bodyId = entity.GetBodyId world
+                let linearVelocity = evt.Data.Value :?> Vector3
+                (Cascade, World.setBodyLinearVelocity linearVelocity bodyId world)
+            else (Cascade, world)
+
+        static let propagatePhysicsAngularVelocity (entity : Entity) (evt : Event<ChangeData, Entity>) world =
+            if entity.GetPhysicsMotion world <> ManualMotion then
+                let bodyId = entity.GetBodyId world
+                let angularVelocity = evt.Data.Value :?> Vector3
+                (Cascade, World.setBodyAngularVelocity angularVelocity bodyId world)
+            else (Cascade, world)
+
+        static let propagatePhysics (entity : Entity) (_ : Event<ChangeData, Entity>) world =
+            let world = entity.PropagatePhysics world
+            (Cascade, world)
 
         static member Properties =
             [define Entity.BodyEnabled true
@@ -1410,41 +1427,46 @@ module RigidBodyFacetModule =
              define Entity.AngularFactor v3One
              define Entity.Substance (Mass 1.0f)
              define Entity.GravityOverride None
+             define Entity.CharacterProperties CharacterProperties.defaultProperties
              define Entity.CollisionDetection Discontinuous
              define Entity.CollisionCategories "1"
              define Entity.CollisionMask Constants.Physics.CollisionWildcard
-             define Entity.BodyShape (BodyBox { Size = v3One; TransformOpt = None; PropertiesOpt = None })
+             define Entity.BodyShape (BoxShape { Size = v3One; TransformOpt = None; PropertiesOpt = None })
+             define Entity.PhysicsMotion SynchronizedMotion
              define Entity.Sensor false
-             define Entity.ModelDriven false
+             define Entity.Observable false
              computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = Constants.Physics.InternalIndex }) None]
 
         override this.Register (entity, world) =
 
             // OPTIMIZATION: using manual unsubscription in order to use less live objects for subscriptions.
-            let subIds = Array.init 24 (fun _ -> makeGuid ())
-            let world = World.subscribePlus subIds.[0] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.Position)) entity world |> snd
-            let world = World.subscribePlus subIds.[1] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.Rotation)) entity world |> snd
-            let world = World.subscribePlus subIds.[2] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.LinearVelocity)) entity world |> snd
-            let world = World.subscribePlus subIds.[3] (fun _ world -> (Cascade, if not (entity.GetModelDriven world) then entity.PropagatePhysics world else world)) (entity.ChangeEvent (nameof entity.AngularVelocity)) entity world |> snd
-            let world = World.subscribePlus subIds.[4] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Scale)) entity world |> snd
-            let world = World.subscribePlus subIds.[5] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Offset)) entity world |> snd
-            let world = World.subscribePlus subIds.[6] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Size)) entity world |> snd
-            let world = World.subscribePlus subIds.[7] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.PerimeterCentered)) entity world |> snd
-            let world = World.subscribePlus subIds.[8] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyEnabled)) entity world |> snd
-            let world = World.subscribePlus subIds.[9] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyType)) entity world |> snd
-            let world = World.subscribePlus subIds.[10] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.SleepingAllowed)) entity world |> snd
-            let world = World.subscribePlus subIds.[11] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Friction)) entity world |> snd
-            let world = World.subscribePlus subIds.[12] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Restitution)) entity world |> snd
-            let world = World.subscribePlus subIds.[13] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.LinearDamping)) entity world |> snd
-            let world = World.subscribePlus subIds.[14] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.AngularDamping)) entity world |> snd
-            let world = World.subscribePlus subIds.[15] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.AngularFactor)) entity world |> snd
-            let world = World.subscribePlus subIds.[16] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Substance)) entity world |> snd
-            let world = World.subscribePlus subIds.[17] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.GravityOverride)) entity world |> snd
-            let world = World.subscribePlus subIds.[18] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionDetection)) entity world |> snd
-            let world = World.subscribePlus subIds.[19] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity world |> snd
-            let world = World.subscribePlus subIds.[20] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity world |> snd
-            let world = World.subscribePlus subIds.[21] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyShape)) entity world |> snd
-            let world = World.subscribePlus subIds.[23] (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Sensor)) entity world |> snd
+            // OPTIMIZATION: share lambdas to reduce live object count.
+            let subIds = Array.init 26 (fun _ -> makeGuid ())
+            let world = World.subscribePlus subIds.[0] (propagatePhysicsPosition entity) (entity.ChangeEvent (nameof entity.Position)) entity world |> snd
+            let world = World.subscribePlus subIds.[1] (propagatePhysicsRotation entity) (entity.ChangeEvent (nameof entity.Rotation)) entity world |> snd
+            let world = World.subscribePlus subIds.[2] (propagatePhysicsLinearVelocity entity) (entity.ChangeEvent (nameof entity.LinearVelocity)) entity world |> snd
+            let world = World.subscribePlus subIds.[3] (propagatePhysicsAngularVelocity entity) (entity.ChangeEvent (nameof entity.AngularVelocity)) entity world |> snd
+            let world = World.subscribePlus subIds.[4] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Scale)) entity world |> snd
+            let world = World.subscribePlus subIds.[5] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Offset)) entity world |> snd
+            let world = World.subscribePlus subIds.[6] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Size)) entity world |> snd
+            let world = World.subscribePlus subIds.[7] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.PerimeterCentered)) entity world |> snd
+            let world = World.subscribePlus subIds.[8] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.BodyEnabled)) entity world |> snd
+            let world = World.subscribePlus subIds.[9] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.BodyType)) entity world |> snd
+            let world = World.subscribePlus subIds.[10] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.SleepingAllowed)) entity world |> snd
+            let world = World.subscribePlus subIds.[11] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Friction)) entity world |> snd
+            let world = World.subscribePlus subIds.[12] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Restitution)) entity world |> snd
+            let world = World.subscribePlus subIds.[13] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.LinearDamping)) entity world |> snd
+            let world = World.subscribePlus subIds.[14] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.AngularDamping)) entity world |> snd
+            let world = World.subscribePlus subIds.[15] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.AngularFactor)) entity world |> snd
+            let world = World.subscribePlus subIds.[16] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Substance)) entity world |> snd
+            let world = World.subscribePlus subIds.[17] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.GravityOverride)) entity world |> snd
+            let world = World.subscribePlus subIds.[18] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.CharacterProperties)) entity world |> snd
+            let world = World.subscribePlus subIds.[19] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.CollisionDetection)) entity world |> snd
+            let world = World.subscribePlus subIds.[10] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity world |> snd
+            let world = World.subscribePlus subIds.[21] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.CollisionMask)) entity world |> snd
+            let world = World.subscribePlus subIds.[23] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.BodyShape)) entity world |> snd
+            let world = World.subscribePlus subIds.[24] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Sensor)) entity world |> snd
+            let world = World.subscribePlus subIds.[25] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Observable)) entity world |> snd
             let unsubscribe = fun world ->
                 Array.fold (fun world subId -> World.unsubscribe subId world) world subIds
             let callback = fun evt world ->
@@ -1478,48 +1500,48 @@ module RigidBodyFacetModule =
                   AngularFactor = entity.GetAngularFactor world
                   Substance = entity.GetSubstance world
                   GravityOverride = entity.GetGravityOverride world
+                  CharacterProperties = entity.GetCharacterProperties world
                   CollisionDetection = entity.GetCollisionDetection world
                   CollisionCategories = Physics.categorizeCollisionMask (entity.GetCollisionCategories world)
                   CollisionMask = Physics.categorizeCollisionMask (entity.GetCollisionMask world)
-                  Sensor = entity.GetSensor world }
-            let world = World.createBody (entity.GetIs2d world) (entity.GetBodyId world) bodyProperties world
-            let world = World.updateBodyObservable false entity world
-            world
+                  Sensor = entity.GetSensor world
+                  Observable = entity.GetObservable world }
+            World.createBody (entity.GetIs2d world) (entity.GetBodyId world) bodyProperties world
 
         override this.UnregisterPhysics (entity, world) =
             World.destroyBody (entity.GetIs2d world) (entity.GetBodyId world) world
 
 [<AutoOpen>]
-module JointFacetModule =
+module BodyJointFacetModule =
 
     type Entity with
-        member this.GetJointDevice world : JointDevice = this.Get (nameof this.JointDevice) world
-        member this.SetJointDevice (value : JointDevice) world = this.Set (nameof this.JointDevice) value world
-        member this.JointDevice = lens (nameof this.JointDevice) this this.GetJointDevice this.SetJointDevice
-        member this.GetJointId world : JointId = this.Get (nameof this.JointId) world
-        member this.JointId = lensReadOnly (nameof this.JointId) this this.GetJointId
+        member this.GetBodyJoint world : BodyJoint = this.Get (nameof this.BodyJoint) world
+        member this.SetBodyJoint (value : BodyJoint) world = this.Set (nameof this.BodyJoint) value world
+        member this.BodyJoint = lens (nameof this.BodyJoint) this this.GetBodyJoint this.SetBodyJoint
+        member this.GetBodyJointId world : BodyJointId = this.Get (nameof this.BodyJointId) world
+        member this.BodyJointId = lensReadOnly (nameof this.BodyJointId) this this.GetBodyJointId
 
     /// Augments an entity with a physics-driven joint.
-    type JointFacet () =
+    type BodyJointFacet () =
         inherit Facet (true)
 
         static member Properties =
-            [define Entity.JointDevice JointEmpty
-             computed Entity.JointId (fun (entity : Entity) _ -> { JointSource = entity; JointIndex = Constants.Physics.InternalIndex }) None]
+            [define Entity.BodyJoint EmptyJoint
+             computed Entity.BodyJointId (fun (entity : Entity) _ -> { BodyJointSource = entity; BodyJointIndex = Constants.Physics.InternalIndex }) None]
 
         override this.Register (entity, world) =
-            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Transform)) entity (nameof JointFacet) world
-            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.JointDevice)) entity (nameof JointFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Transform)) entity (nameof BodyJointFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyJoint)) entity (nameof BodyJointFacet) world
             world
 
         override this.RegisterPhysics (entity, world) =
-            let jointProperties =
-                { JointIndex = (entity.GetJointId world).JointIndex
-                  JointDevice = (entity.GetJointDevice world) }
-            World.createJoint (entity.GetIs2d world) entity jointProperties world
+            let bodyJointProperties =
+                { BodyJointIndex = (entity.GetBodyJointId world).BodyJointIndex
+                  BodyJoint = (entity.GetBodyJoint world) }
+            World.createBodyJoint (entity.GetIs2d world) entity bodyJointProperties world
 
         override this.UnregisterPhysics (entity, world) =
-            World.destroyJoint (entity.GetIs2d world) (entity.GetJointId world) world
+            World.destroyBodyJoint (entity.GetIs2d world) (entity.GetBodyJointId world) world
 
 [<AutoOpen>]
 module TileMapFacetModule =
@@ -1549,7 +1571,8 @@ module TileMapFacetModule =
              define Entity.Restitution 0.0f
              define Entity.CollisionCategories "1"
              define Entity.CollisionMask Constants.Physics.CollisionWildcard
-             define Entity.ModelDriven false
+             define Entity.Observable false
+             define Entity.PhysicsMotion SynchronizedMotion
              define Entity.Color Color.One
              define Entity.Emission Color.Zero
              define Entity.TileLayerClearance 2.0f
@@ -1566,6 +1589,7 @@ module TileMapFacetModule =
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Restitution)) entity (nameof TileMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity (nameof TileMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity (nameof TileMapFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Observable)) entity (nameof TileMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.TileMap)) entity (nameof TileMapFacet) world
             let world =
                 World.sense (fun _ world ->
@@ -1595,6 +1619,7 @@ module TileMapFacetModule =
                         (entity.GetRestitution world)
                         (entity.GetCollisionCategories world)
                         (entity.GetCollisionMask world)
+                        (entity.GetObservable world)
                         (entity.GetBodyId world).BodyIndex
                         tileMapDescriptor
                 World.createBody (entity.GetIs2d world) (entity.GetBodyId world) bodyProperties world
@@ -1651,7 +1676,8 @@ module TmxMapFacetModule =
              define Entity.Restitution 0.0f
              define Entity.CollisionCategories "1"
              define Entity.CollisionMask Constants.Physics.CollisionWildcard
-             define Entity.ModelDriven false
+             define Entity.Observable false
+             define Entity.PhysicsMotion SynchronizedMotion
              define Entity.Color Color.One
              define Entity.Emission Color.Zero
              define Entity.TileLayerClearance 2.0f
@@ -1668,6 +1694,7 @@ module TmxMapFacetModule =
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Restitution)) entity (nameof TmxMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity (nameof TmxMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity (nameof TmxMapFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Observable)) entity (nameof TmxMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.TmxMap)) entity (nameof TmxMapFacet) world
             let world =
                 World.sense (fun _ world ->
@@ -1696,6 +1723,7 @@ module TmxMapFacetModule =
                     (entity.GetRestitution world)
                     (entity.GetCollisionCategories world)
                     (entity.GetCollisionMask world)
+                    (entity.GetObservable world)
                     (entity.GetBodyId world).BodyIndex
                     tmxMapDescriptor
             World.createBody (entity.GetIs2d world) (entity.GetBodyId world) bodyProperties world
@@ -2630,6 +2658,9 @@ module AnimatedModelFacetModule =
         member this.GetAnimatedModel world : AnimatedModel AssetTag = this.Get (nameof this.AnimatedModel) world
         member this.SetAnimatedModel (value : AnimatedModel AssetTag) world = this.Set (nameof this.AnimatedModel) value world
         member this.AnimatedModel = lens (nameof this.AnimatedModel) this this.GetAnimatedModel this.SetAnimatedModel
+        member this.GetBoneOffsetsOpt world : Matrix4x4 array option = this.Get (nameof this.BoneOffsetsOpt) world
+        member this.SetBoneOffsetsOpt (value : Matrix4x4 array option) world = this.Set (nameof this.BoneOffsetsOpt) value world
+        member this.BoneOffsetsOpt = lens (nameof this.BoneOffsetsOpt) this this.GetBoneOffsetsOpt this.SetBoneOffsetsOpt
         member this.GetBoneTransformsOpt world : Matrix4x4 array option = this.Get (nameof this.BoneTransformsOpt) world
         member this.SetBoneTransformsOpt (value : Matrix4x4 array option) world = this.Set (nameof this.BoneTransformsOpt) value world
         member this.BoneTransformsOpt = lens (nameof this.BoneTransformsOpt) this this.GetBoneTransformsOpt this.SetBoneTransformsOpt
@@ -2638,11 +2669,11 @@ module AnimatedModelFacetModule =
     type AnimatedModelFacet () =
         inherit Facet (false)
 
-        static let tryComputeBoneTransforms time animations (sceneOpt : Assimp.Scene option) =
+        static let tryComputeBoneOffsetsAndTransforms time animations (sceneOpt : Assimp.Scene option) =
             match sceneOpt with
             | Some scene when scene.Meshes.Count > 0 ->
-                let boneTransforms = scene.ComputeBoneTransforms (time, animations, scene.Meshes.[0])
-                Some boneTransforms
+                let (boneOffsets, boneTransforms) = scene.ComputeBoneOffsetsAndTransforms (time, animations, scene.Meshes.[0])
+                Some (boneOffsets, boneTransforms)
             | Some _ | None -> None
 
         static let tryAnimateBones (entity : Entity) (world : World) =
@@ -2650,8 +2681,12 @@ module AnimatedModelFacetModule =
             let animations = entity.GetAnimations world
             let animatedModel = entity.GetAnimatedModel world
             let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with Some model -> model.SceneOpt | None -> None
-            let boneTransformsOpt = tryComputeBoneTransforms time animations sceneOpt
-            entity.SetBoneTransformsOpt boneTransformsOpt world
+            match tryComputeBoneOffsetsAndTransforms time animations sceneOpt with
+            | Some (boneOffsets, boneTransforms) ->
+                let world = entity.SetBoneOffsetsOpt (Some boneOffsets) world
+                let world = entity.SetBoneTransformsOpt (Some boneTransforms) world
+                world
+            | None -> world
 
         static member Properties =
             [define Entity.StartTime GameTime.zero
@@ -2659,10 +2694,15 @@ module AnimatedModelFacetModule =
              define Entity.MaterialProperties MaterialProperties.empty
              define Entity.Animations [|{ StartTime = GameTime.zero; LifeTimeOpt = None; Name = "Armature"; Playback = Loop; Rate = 1.0f; Weight = 1.0f; BoneFilterOpt = None }|]
              define Entity.AnimatedModel Assets.Default.AnimatedModel
+             nonPersistent Entity.BoneOffsetsOpt None
              nonPersistent Entity.BoneTransformsOpt None]
 
         override this.Register (entity, world) =
             let world = tryAnimateBones entity world
+            let world =
+                World.sense
+                    (fun evt world -> (Cascade, if world.Halted then tryAnimateBones evt.Subscriber world else world))
+                    (entity.ChangeEvent (nameof entity.Animations)) entity (nameof AnimatedModelFacet) world
             let world =
                 World.sense
                     (fun evt world -> (Cascade, tryAnimateBones evt.Subscriber world))
@@ -2674,15 +2714,18 @@ module AnimatedModelFacetModule =
             let animations = entity.GetAnimations world
             let animatedModel = entity.GetAnimatedModel world
             let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with Some model -> model.SceneOpt | None -> None
-            let boneTransformsOpt =
+            let boneOffsetsAndTransformsOpt =
                 match World.tryAwaitJob (world.DateTime + TimeSpan.FromSeconds 0.001) (entity, nameof AnimatedModelFacet) world with
-                | Some (JobCompletion (_, _, (:? (Matrix4x4 array option) as boneTransformsOpt))) -> boneTransformsOpt
+                | Some (JobCompletion (_, _, (:? ((Matrix4x4 array * Matrix4x4 array) option) as boneOffsetsAndTransformsOpt))) -> boneOffsetsAndTransformsOpt
                 | _ -> None
             let world =
-                if boneTransformsOpt.IsSome
-                then entity.SetBoneTransformsOpt boneTransformsOpt world
-                else world
-            let job = Job.make (entity, nameof AnimatedModelFacet) (fun () -> tryComputeBoneTransforms time animations sceneOpt)
+                match boneOffsetsAndTransformsOpt with
+                | Some (boneOffsets, boneTransforms) ->
+                    let world = entity.SetBoneOffsetsOpt (Some boneOffsets) world
+                    let world = entity.SetBoneTransformsOpt (Some boneTransforms) world
+                    world
+                | None -> world
+            let job = Job.make (entity, nameof AnimatedModelFacet) (fun () -> tryComputeBoneOffsetsAndTransforms time animations sceneOpt)
             World.enqueueJob 1.0f job world
             world
 
@@ -2729,6 +2772,20 @@ module AnimatedModelFacetModule =
                         animatedModelMetadata.Surfaces
                 Array.concat intersectionses
             | None -> [||]
+
+        override this.Edit (op, entity, world) =
+            match op with
+            | OverlayViewport _ ->
+                match (entity.GetBoneOffsetsOpt world, entity.GetBoneTransformsOpt world) with
+                | (Some offsets, Some transforms) ->
+                    let affineMatrix = entity.GetAffineMatrix world
+                    for i in 0 .. dec offsets.Length do
+                        let offset = offsets.[i]
+                        let transform = transforms.[i]
+                        World.imGuiCircle3d false (offset.Inverted * transform * affineMatrix).Translation 2.0f false Color.Yellow world
+                    world
+                | (_, _) -> world
+            | _ -> world
 
 [<AutoOpen>]
 module TerrainFacetModule =
@@ -2807,6 +2864,7 @@ module TerrainFacetModule =
              define Entity.Tiles (v2 256.0f 256.0f)
              define Entity.HeightMap (RawHeightMap { Resolution = v2i 513 513; RawFormat = RawUInt16 LittleEndian; RawAsset = Assets.Default.HeightMap })
              define Entity.Segments v2iOne
+             define Entity.Observable false
              computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = 0 }) None]
 
         override this.Register (entity, world) =
@@ -2823,7 +2881,7 @@ module TerrainFacetModule =
             match entity.TryGetTerrainResolution world with
             | Some resolution ->
                 let mutable transform = entity.GetTransform world
-                let bodyTerrain =
+                let terrainShape =
                     { Resolution = resolution
                       Bounds = transform.Bounds3d
                       HeightMap = entity.GetHeightMap world
@@ -2834,7 +2892,7 @@ module TerrainFacetModule =
                       Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
                       Rotation = transform.Rotation
                       Scale = transform.Scale
-                      BodyShape = BodyTerrain bodyTerrain
+                      BodyShape = TerrainShape terrainShape
                       BodyType = Static
                       SleepingAllowed = true
                       Enabled = entity.GetBodyEnabled world
@@ -2847,10 +2905,12 @@ module TerrainFacetModule =
                       AngularFactor = v3Zero
                       Substance = Mass 0.0f
                       GravityOverride = None
+                      CharacterProperties = CharacterProperties.defaultProperties
                       CollisionDetection = Discontinuous
                       CollisionCategories = Physics.categorizeCollisionMask (entity.GetCollisionCategories world)
                       CollisionMask = Physics.categorizeCollisionMask (entity.GetCollisionMask world)
-                      Sensor = false }
+                      Sensor = false
+                      Observable = entity.GetObservable world }
                 World.createBody false (entity.GetBodyId world) bodyProperties world
             | None -> world
 
@@ -2896,7 +2956,7 @@ module NavBodyFacetModule =
 
         static let propagateNavBody (entity : Entity) world =
             match entity.GetNavShape world with
-            | EmptyShape ->
+            | NavShape.EmptyNavShape ->
                 if entity.GetIs2d world
                 then world // TODO: implement for 2d navigation when it's available.
                 else World.setNav3dBodyOpt None entity world
@@ -2913,7 +2973,7 @@ module NavBodyFacetModule =
         static member Properties =
             [define Entity.StaticModel Assets.Default.StaticModel
              define Entity.SurfaceIndex 0
-             define Entity.NavShape BoundsShape]
+             define Entity.NavShape BoundsNavShape]
 
         override this.Register (entity, world) =
 
@@ -2927,8 +2987,8 @@ module NavBodyFacetModule =
                 let entity = evt.Subscriber : Entity
                 let previous = evt.Data.Previous :?> NavShape
                 let shape = evt.Data.Value :?> NavShape
-                let world = match previous with EmptyShape -> world | _ -> unsubscribe world
-                let world = match shape with EmptyShape -> world | _ -> subscribe world
+                let world = match previous with NavShape.EmptyNavShape -> world | _ -> unsubscribe world
+                let world = match shape with NavShape.EmptyNavShape -> world | _ -> subscribe world
                 let world = propagateNavBody entity world
                 (Cascade, world)
             let callback2 evt world =
@@ -2937,7 +2997,7 @@ module NavBodyFacetModule =
                     (Cascade, unsubscribe world)
                 else (Cascade, world)
             let callback3 _ world = (Cascade, unsubscribe world)
-            let world = match entity.GetNavShape world with EmptyShape -> world | _ -> subscribe world
+            let world = match entity.GetNavShape world with NavShape.EmptyNavShape -> world | _ -> subscribe world
             let world = World.sense callback (entity.ChangeEvent (nameof entity.NavShape)) entity (nameof NavBodyFacet) world
             let world = World.sense callback2 entity.FacetNames.ChangeEvent entity (nameof NavBodyFacet) world
             let world = World.sense callback3 entity.UnregisteringEvent entity (nameof NavBodyFacet) world
@@ -2984,83 +3044,104 @@ module Nav3dConfigFacetModule =
                 match nav3d.Nav3dMeshOpt with
                 | Some (builderResult, _, _) ->
 
+                    // draw exterior edges
+                    let dmesh = builderResult.GetMeshDetail ()
+                    let mutable segmentsMinY = Single.MaxValue
+                    let mutable segmentsMaxY = Single.MinValue
+                    let segments =
+                        SArray.ofSeq
+                            (seq {
+                                for i in 0 .. dec dmesh.nmeshes do
+                                    let m = i * 4
+                                    let bverts = dmesh.meshes.[m]
+                                    let btris = dmesh.meshes.[m + 2]
+                                    let ntris = dmesh.meshes.[m + 3]
+                                    let verts = bverts * 3
+                                    let tris = btris * 4
+                                    for j in 0 .. dec ntris do
+                                        let t = tris + j * 4
+                                        let mutable k = 0
+                                        let mutable kp = 2
+                                        while k < 3 do
+                                            let ef = (dmesh.tris.[t + 3] >>> (kp * 2)) &&& 0x3
+                                            if ef <> 0 then
+                                                let start =
+                                                    v3
+                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3]
+                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 1]
+                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 2]
+                                                let stop =
+                                                    v3
+                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3]
+                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 1]
+                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 2]
+                                                if segmentsMinY > start.Y then segmentsMinY <- start.Y
+                                                if segmentsMaxY < start.Y then segmentsMaxY <- start.Y
+                                                if segmentsMinY > stop.Y then segmentsMinY <- stop.Y
+                                                if segmentsMaxY < stop.Y then segmentsMaxY <- stop.Y
+                                                struct (start, stop)
+                                            kp <- k
+                                            k <- inc k })
+                    let computeSegmentColor (segment : struct (Vector3 * Vector3)) =
+                        let middleY = (fst' segment).Y + (snd' segment).Y * 0.5f
+                        let height = Math.Lerp (0.0f, 1.0f, (middleY - segmentsMinY) / (segmentsMaxY - segmentsMinY))
+                        Color (1.0f, 1.0f - height, height, 1.0f)
+                    World.imGuiSegments3dPlus false segments 1.0f computeSegmentColor world
+
                     // draw interior edges
                     let dmesh = builderResult.GetMeshDetail ()
                     let segments =
-                        seq {
-                            for i in 0 .. dec dmesh.nmeshes do
-                                let m = i * 4
-                                let bverts = dmesh.meshes.[m]
-                                let btris = dmesh.meshes.[m + 2]
-                                let ntris = dmesh.meshes.[m + 3]
-                                let verts = bverts * 3
-                                let tris = btris * 4
-                                for j in 0 .. dec ntris do
-                                    let t = tris + j * 4
-                                    let mutable k = 0
-                                    let mutable kp = 2
-                                    while k < 3 do
-                                        let ef = (dmesh.tris.[t + 3] >>> (kp * 2)) &&& 0x3
-                                        if ef = 0 then
-                                            let begin_ =
-                                                v3
-                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3]
-                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 1]
-                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 2]
-                                            let end_ =
-                                                v3
-                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3]
-                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 1]
-                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 2]
-                                            struct (begin_, end_)
-                                        kp <- k
-                                        k <- inc k }
-                    World.imGuiSegments3d false segments 1.0f (Color.Yellow.MapR((*) 0.85f).MapG((*) 0.85f)) world
-
-                    // draw exterior edges
-                    let dmesh = builderResult.GetMeshDetail ()
-                    let segments =
-                        seq {
-                            for i in 0 .. dec dmesh.nmeshes do
-                                let m = i * 4
-                                let bverts = dmesh.meshes.[m]
-                                let btris = dmesh.meshes.[m + 2]
-                                let ntris = dmesh.meshes.[m + 3]
-                                let verts = bverts * 3
-                                let tris = btris * 4
-                                for j in 0 .. dec ntris do
-                                    let t = tris + j * 4
-                                    let mutable k = 0
-                                    let mutable kp = 2
-                                    while k < 3 do
-                                        let ef = (dmesh.tris.[t + 3] >>> (kp * 2)) &&& 0x3
-                                        if ef <> 0 then
-                                            let begin_ =
-                                                v3
-                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3]
-                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 1]
-                                                    dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 2]
-                                            let end_ =
-                                                v3
-                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3]
-                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 1]
-                                                    dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 2]
-                                            struct (begin_, end_)
-                                        kp <- k
-                                        k <- inc k }
-                    World.imGuiSegments3d false segments 1.0f Color.Yellow world
+                        SArray.ofSeq
+                            (seq {
+                                for i in 0 .. dec dmesh.nmeshes do
+                                    let m = i * 4
+                                    let bverts = dmesh.meshes.[m]
+                                    let btris = dmesh.meshes.[m + 2]
+                                    let ntris = dmesh.meshes.[m + 3]
+                                    let verts = bverts * 3
+                                    let tris = btris * 4
+                                    for j in 0 .. dec ntris do
+                                        let t = tris + j * 4
+                                        let mutable k = 0
+                                        let mutable kp = 2
+                                        while k < 3 do
+                                            let ef = (dmesh.tris.[t + 3] >>> (kp * 2)) &&& 0x3
+                                            if ef = 0 then
+                                                let start =
+                                                    v3
+                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3]
+                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 1]
+                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 2]
+                                                let stop =
+                                                    v3
+                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3]
+                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 1]
+                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 2]
+                                                struct (start, stop)
+                                            kp <- k
+                                            k <- inc k })
+                    World.imGuiSegments3dPlus false segments 1.0f computeSegmentColor world
 
                     // draw points
+                    let mutable pointsMinY = Single.MaxValue
+                    let mutable pointsMaxY = Single.MinValue
                     let points =
-                        seq {
-                            for i in 0 .. dec dmesh.nmeshes do
-                                let m = i * 4
-                                let bverts = dmesh.meshes.[m]
-                                let nverts = dmesh.meshes.[m + 1]
-                                let verts = bverts * 3
-                                for j in 0 .. dec nverts do
-                                    v3 dmesh.verts.[verts + j * 3] dmesh.verts.[verts + j * 3 + 1] dmesh.verts.[verts + j * 3 + 2] }
-                    World.imGuiCircles3d false points 3.0f Color.LightYellow true world
+                        SArray.ofSeq
+                            (seq {
+                                for i in 0 .. dec dmesh.nmeshes do
+                                    let m = i * 4
+                                    let bverts = dmesh.meshes.[m]
+                                    let nverts = dmesh.meshes.[m + 1]
+                                    let verts = bverts * 3
+                                    for j in 0 .. dec nverts do
+                                        let point = v3 dmesh.verts.[verts + j * 3] dmesh.verts.[verts + j * 3 + 1] dmesh.verts.[verts + j * 3 + 2]
+                                        if pointsMinY > point.Y then pointsMinY <- point.Y
+                                        if pointsMaxY < point.Y then pointsMaxY <- point.Y
+                                        point })
+                    let computePointColor (point : Vector3) =
+                        let height = Math.Lerp (0.0f, 1.0f, (point.Y - pointsMinY) / (pointsMaxY - pointsMinY))
+                        Color (1.0f, 1.0f - height, height, 1.0f)
+                    World.imGuiCircles3dPlus false points 2.5f true computePointColor world
                     world
 
                 | None -> world
@@ -3068,3 +3149,69 @@ module Nav3dConfigFacetModule =
 
         override this.GetAttributesInferred (_, _) =
             AttributesInferred.unimportant
+
+[<AutoOpen>]
+module FollowerFacetModule =
+
+    type Entity with
+        member this.GetFollowing world : bool = this.Get (nameof this.Following) world
+        member this.SetFollowing (value : bool) world = this.Set (nameof this.Following) value world
+        member this.Following = lens (nameof this.Following) this this.GetFollowing this.SetFollowing
+        member this.GetFollowMoveSpeed world : single = this.Get (nameof this.FollowMoveSpeed) world
+        member this.SetFollowMoveSpeed (value : single) world = this.Set (nameof this.FollowMoveSpeed) value world
+        member this.FollowMoveSpeed = lens (nameof this.FollowMoveSpeed) this this.GetFollowMoveSpeed this.SetFollowMoveSpeed
+        member this.GetFollowTurnSpeed world : single = this.Get (nameof this.FollowTurnSpeed) world
+        member this.SetFollowTurnSpeed (value : single) world = this.Set (nameof this.FollowTurnSpeed) value world
+        member this.FollowTurnSpeed = lens (nameof this.FollowTurnSpeed) this this.GetFollowTurnSpeed this.SetFollowTurnSpeed
+        member this.GetFollowDistanceMinOpt world : single option = this.Get (nameof this.FollowDistanceMinOpt) world
+        member this.SetFollowDistanceMinOpt (value : single option) world = this.Set (nameof this.FollowDistanceMinOpt) value world
+        member this.FollowDistanceMinOpt = lens (nameof this.FollowDistanceMinOpt) this this.GetFollowDistanceMinOpt this.SetFollowDistanceMinOpt
+        member this.GetFollowDistanceMaxOpt world : single option = this.Get (nameof this.FollowDistanceMaxOpt) world
+        member this.SetFollowDistanceMaxOpt (value : single option) world = this.Set (nameof this.FollowDistanceMaxOpt) value world
+        member this.FollowDistanceMaxOpt = lens (nameof this.FollowDistanceMaxOpt) this this.GetFollowDistanceMaxOpt this.SetFollowDistanceMaxOpt
+        member this.GetFollowTargetOpt world : Entity option = this.Get (nameof this.FollowTargetOpt) world
+        member this.SetFollowTargetOpt (value : Entity option) world = this.Set (nameof this.FollowTargetOpt) value world
+        member this.FollowTargetOpt = lens (nameof this.FollowTargetOpt) this this.GetFollowTargetOpt this.SetFollowTargetOpt
+
+    type FollowerFacet () =
+        inherit Facet (false)
+
+        static member Properties =
+            [define Entity.Following true
+             define Entity.FollowMoveSpeed 2.0f
+             define Entity.FollowTurnSpeed 3.0f
+             define Entity.FollowDistanceMinOpt None
+             define Entity.FollowDistanceMaxOpt None
+             define Entity.FollowTargetOpt None]
+
+        override this.Update (entity, world) =
+            let following = entity.GetFollowing world
+            if following then
+                let targetOpt = entity.GetFollowTargetOpt world
+                match targetOpt with
+                | Some target when target.Exists world ->
+                    let moveSpeed = entity.GetFollowMoveSpeed world * (let gd = world.GameDelta in gd.Seconds)
+                    let turnSpeed = entity.GetFollowTurnSpeed world * (let gd = world.GameDelta in gd.Seconds)
+                    let distanceMinOpt = entity.GetFollowDistanceMinOpt world
+                    let distanceMaxOpt = entity.GetFollowDistanceMaxOpt world
+                    let position = entity.GetPosition world
+                    let destination = target.GetPosition world
+                    let distance = (destination - position).Magnitude
+                    let rotation = entity.GetRotation world
+                    if  (distanceMinOpt.IsNone || distance > distanceMinOpt.Value) &&
+                        (distanceMaxOpt.IsNone || distance <= distanceMaxOpt.Value) then
+                        if entity.GetIs2d world
+                        then world // TODO: implement for 2d navigation when it's available.
+                        else
+                            // TODO: consider doing an offset physics ray cast to align nav position with near
+                            // ground. Additionally, consider removing the CellHeight offset in the above query so
+                            // that we don't need to do an offset here at all.
+                            let followOutput = World.nav3dFollow distanceMinOpt distanceMaxOpt moveSpeed turnSpeed position rotation destination entity.Screen world
+                            let world = entity.SetPosition followOutput.NavPosition world
+                            let world = entity.SetRotation followOutput.NavRotation world
+                            let world = entity.SetLinearVelocity followOutput.NavLinearVelocity world
+                            let world = entity.SetAngularVelocity followOutput.NavAngularVelocity world
+                            world
+                    else world
+                | _ -> world
+            else world
