@@ -432,21 +432,30 @@ type [<ReferenceEquality>] RenderTerrain =
       TerrainDescriptor : TerrainDescriptor
       RenderPass : RenderPass }
 
-/// Configures lighting.
-type [<ReferenceEquality>] LightingConfig =
+/// Configures lighting and ssao.
+type [<ReferenceEquality; SymbolicExpansion>] LightingConfig =
     { LightCutoffMargin : single
       LightShadowBiasAcne : single
       LightShadowBiasBleed : single
-      LightMappingEnabled : bool }
-
-/// Configures SSAO.
-type [<ReferenceEquality>] SsaoConfig =
-    { SsaoEnabled : bool
+      LightMappingEnabled : bool
+      SsaoEnabled : bool
       SsaoIntensity : single
       SsaoBias : single
       SsaoRadius : single
       SsaoDistanceMax : single
       SsaoSampleCount : int }
+
+    static member defaultConfig =
+        { LightCutoffMargin = Constants.Render.LightCutoffMarginDefault
+          LightShadowBiasAcne = Constants.Render.LightShadowBiasAcneDefault
+          LightShadowBiasBleed = Constants.Render.LightShadowBiasBleedDefault
+          LightMappingEnabled = Constants.Render.LightMappingEnabledDefault
+          SsaoEnabled = Constants.Render.SsaoEnabledDefault
+          SsaoIntensity = Constants.Render.SsaoIntensityDefault
+          SsaoBias = Constants.Render.SsaoBiasDefault
+          SsaoRadius = Constants.Render.SsaoRadiusDefault
+          SsaoDistanceMax = Constants.Render.SsaoDistanceMaxDefault
+          SsaoSampleCount = Constants.Render.SsaoSampleCountDefault }
 
 /// A message to the 3d renderer.
 type [<ReferenceEquality>] RenderMessage3d =
@@ -469,7 +478,6 @@ type [<ReferenceEquality>] RenderMessage3d =
     | RenderCachedAnimatedModel of CachedAnimatedModelMessage
     | RenderTerrain of RenderTerrain
     | ConfigureLighting of LightingConfig
-    | ConfigureSsao of SsaoConfig
     | LoadRenderPackage3d of string
     | UnloadRenderPackage3d of string
     | ReloadRenderAssets3d
@@ -634,16 +642,18 @@ type [<ReferenceEquality>] RenderTasks =
       RenderLightProbes : Dictionary<uint64, struct (bool * Vector3 * Box3 * bool)>
       RenderLightMaps : SortableLightMap List
       RenderLights : SortableLight List
-      RenderDeferredStaticAbsolute : Dictionary<OpenGL.PhysicallyBased.PhysicallyBasedSurface, struct (Matrix4x4 * Presence * Box2 * MaterialProperties) SList>
-      RenderDeferredStaticRelative : Dictionary<OpenGL.PhysicallyBased.PhysicallyBasedSurface, struct (Matrix4x4 * Presence * Box2 * MaterialProperties) SList>
-      RenderDeferredAnimatedAbsolute : Dictionary<AnimatedModelSurfaceKey, struct (Matrix4x4 * Presence * Box2 * MaterialProperties) SList>
-      RenderDeferredAnimatedRelative : Dictionary<AnimatedModelSurfaceKey, struct (Matrix4x4 * Presence * Box2 * MaterialProperties) SList>
-      RenderDeferredTerrainsAbsolute : struct (TerrainDescriptor * OpenGL.PhysicallyBased.PhysicallyBasedGeometry) SList
-      RenderDeferredTerrainsRelative : struct (TerrainDescriptor * OpenGL.PhysicallyBased.PhysicallyBasedGeometry) SList
-      RenderForwardStaticAbsolute : struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) SList
-      RenderForwardStaticRelative : struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) SList
-      RenderForwardStaticAbsoluteSorted : struct (Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) SList
-      RenderForwardStaticRelativeSorted : struct (Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) SList }
+      RenderDeferredStaticAbsolute : Dictionary<OpenGL.PhysicallyBased.PhysicallyBasedSurface, struct (Matrix4x4 * Presence * Box2 * MaterialProperties) List>
+      RenderDeferredStaticRelative : Dictionary<OpenGL.PhysicallyBased.PhysicallyBasedSurface, struct (Matrix4x4 * Presence * Box2 * MaterialProperties) List>
+      RenderDeferredAnimatedAbsolute : Dictionary<AnimatedModelSurfaceKey, struct (Matrix4x4 * Presence * Box2 * MaterialProperties) List>
+      RenderDeferredAnimatedRelative : Dictionary<AnimatedModelSurfaceKey, struct (Matrix4x4 * Presence * Box2 * MaterialProperties) List>
+      RenderDeferredTerrainsAbsolute : struct (TerrainDescriptor * OpenGL.PhysicallyBased.PhysicallyBasedGeometry) List
+      RenderDeferredTerrainsRelative : struct (TerrainDescriptor * OpenGL.PhysicallyBased.PhysicallyBasedGeometry) List
+      RenderForwardStaticAbsolute : struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) List
+      RenderForwardStaticRelative : struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) List
+      RenderForwardStaticAbsoluteSorted : struct (Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) List
+      RenderForwardStaticRelativeSorted : struct (Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) List
+      RenderDeferredStaticRemovals : OpenGL.PhysicallyBased.PhysicallyBasedSurface List
+      RenderDeferredAnimatedRemovals : AnimatedModelSurfaceKey List }
 
     static member make () =
         { RenderSkyBoxes = List ()
@@ -654,22 +664,53 @@ type [<ReferenceEquality>] RenderTasks =
           RenderDeferredStaticRelative = dictPlus OpenGL.PhysicallyBased.PhysicallyBasedSurfaceFns.comparer []
           RenderDeferredAnimatedAbsolute = dictPlus AnimatedModelSurfaceKey.comparer []
           RenderDeferredAnimatedRelative = dictPlus AnimatedModelSurfaceKey.comparer []
-          RenderDeferredTerrainsAbsolute = SList.make ()
-          RenderDeferredTerrainsRelative = SList.make ()
-          RenderForwardStaticAbsolute = SList.make ()
-          RenderForwardStaticRelative = SList.make ()
-          RenderForwardStaticAbsoluteSorted = SList.make ()
-          RenderForwardStaticRelativeSorted = SList.make () }
+          RenderDeferredTerrainsAbsolute = List ()
+          RenderDeferredTerrainsRelative = List ()
+          RenderForwardStaticAbsolute = List ()
+          RenderForwardStaticRelative = List ()
+          RenderForwardStaticAbsoluteSorted = List ()
+          RenderForwardStaticRelativeSorted = List ()
+          RenderDeferredStaticRemovals = List ()
+          RenderDeferredAnimatedRemovals = List () }
 
     static member clear renderTasks =
         renderTasks.RenderSkyBoxes.Clear ()
         renderTasks.RenderLightProbes.Clear ()
         renderTasks.RenderLightMaps.Clear ()
         renderTasks.RenderLights.Clear ()
-        renderTasks.RenderDeferredStaticAbsolute.Clear ()
-        renderTasks.RenderDeferredStaticRelative.Clear ()
-        renderTasks.RenderDeferredAnimatedAbsolute.Clear ()
-        renderTasks.RenderDeferredAnimatedRelative.Clear ()
+
+        for entry in renderTasks.RenderDeferredStaticAbsolute do
+            if entry.Value.Count = 0
+            then renderTasks.RenderDeferredStaticRemovals.Add entry.Key
+            else entry.Value.Clear ()
+        for removal in renderTasks.RenderDeferredStaticRemovals do
+            renderTasks.RenderDeferredStaticAbsolute.Remove removal |> ignore<bool>
+        renderTasks.RenderDeferredStaticRemovals.Clear ()
+
+        for entry in renderTasks.RenderDeferredStaticRelative do
+            if entry.Value.Count = 0
+            then renderTasks.RenderDeferredStaticRemovals.Add entry.Key
+            else entry.Value.Clear ()
+        for removal in renderTasks.RenderDeferredStaticRemovals do
+            renderTasks.RenderDeferredStaticRelative.Remove removal |> ignore<bool>
+        renderTasks.RenderDeferredStaticRemovals.Clear ()
+
+        for entry in renderTasks.RenderDeferredAnimatedAbsolute do
+            if entry.Value.Count = 0
+            then renderTasks.RenderDeferredAnimatedRemovals.Add entry.Key
+            else entry.Value.Clear ()
+        for removal in renderTasks.RenderDeferredAnimatedRemovals do
+            renderTasks.RenderDeferredAnimatedAbsolute.Remove removal |> ignore<bool>
+        renderTasks.RenderDeferredAnimatedRemovals.Clear ()
+
+        for entry in renderTasks.RenderDeferredAnimatedRelative do
+            if entry.Value.Count = 0
+            then renderTasks.RenderDeferredAnimatedRemovals.Add entry.Key
+            else entry.Value.Clear ()
+        for removal in renderTasks.RenderDeferredAnimatedRemovals do
+            renderTasks.RenderDeferredAnimatedRelative.Remove removal |> ignore<bool>
+        renderTasks.RenderDeferredAnimatedRemovals.Clear ()
+
         renderTasks.RenderForwardStaticAbsoluteSorted.Clear ()
         renderTasks.RenderForwardStaticRelativeSorted.Clear ()
         renderTasks.RenderDeferredTerrainsAbsolute.Clear ()
@@ -750,7 +791,6 @@ type [<ReferenceEquality>] GlRenderer3d =
           PhysicallyBasedMaterial : OpenGL.PhysicallyBased.PhysicallyBasedMaterial
           LightMaps : Dictionary<uint64, OpenGL.LightMap.LightMap>
           mutable LightingConfig : LightingConfig
-          mutable SsaoConfig : SsaoConfig
           mutable InstanceFields : single array
           mutable UserDefinedStaticModelFields : single array
           LightsDesiringShadows : Dictionary<uint64, SortableLight>
@@ -964,7 +1004,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         if  renderer.RenderAssetCached.CachedAssetTagOpt :> obj |> notNull &&
             assetEq assetTag renderer.RenderAssetCached.CachedAssetTagOpt then
             renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag // NOTE: this isn't redundant because we want to trigger refEq early-out.
-            Some renderer.RenderAssetCached.CachedRenderAsset
+            ValueSome renderer.RenderAssetCached.CachedRenderAsset
         elif
             renderer.RenderPackageCachedOpt :> obj |> notNull &&
             renderer.RenderPackageCachedOpt.CachedPackageName = assetTag.PackageName then
@@ -973,8 +1013,8 @@ type [<ReferenceEquality>] GlRenderer3d =
                 let asset = Triple.thd assetInfo
                 renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag
                 renderer.RenderAssetCached.CachedRenderAsset <- asset
-                Some asset
-            else None
+                ValueSome asset
+            else ValueNone
         else
             match Dictionary.tryFind assetTag.PackageName renderer.RenderPackages with
             | Some package ->
@@ -983,8 +1023,8 @@ type [<ReferenceEquality>] GlRenderer3d =
                     let asset = Triple.thd assetInfo
                     renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag
                     renderer.RenderAssetCached.CachedRenderAsset <- asset
-                    Some asset
-                else None
+                    ValueSome asset
+                else ValueNone
             | None ->
                 Log.info ("Loading Render3d package '" + assetTag.PackageName + "' for asset '" + assetTag.AssetName + "' on the fly.")
                 GlRenderer3d.tryLoadRenderPackage assetTag.PackageName renderer
@@ -995,20 +1035,20 @@ type [<ReferenceEquality>] GlRenderer3d =
                         let asset = Triple.thd assetInfo
                         renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag
                         renderer.RenderAssetCached.CachedRenderAsset <- asset
-                        Some asset
-                    else None
-                | (false, _) -> None
+                        ValueSome asset
+                    else ValueNone
+                | (false, _) -> ValueNone
 
     static member private tryGetFilePath (assetTag : AssetTag) renderer =
         match GlRenderer3d.tryGetRenderAsset assetTag renderer with
-        | Some _ ->
+        | ValueSome _ ->
             match renderer.RenderPackages.TryGetValue assetTag.PackageName with
             | (true, package) ->
                 match package.Assets.TryGetValue assetTag.AssetName with
                 | (true, (_, filePath, _)) -> Some filePath
                 | (false, _) -> None
             | (false, _) -> None
-        | None -> None
+        | ValueNone -> None
 
     static member private tryGetTextureData (assetTag : Image AssetTag) renderer =
         match GlRenderer3d.tryGetFilePath assetTag renderer with
@@ -1026,11 +1066,11 @@ type [<ReferenceEquality>] GlRenderer3d =
         match heightMap with
         | ImageHeightMap image ->
             match GlRenderer3d.tryGetRenderAsset image renderer with
-            | Some renderAsset ->
+            | ValueSome renderAsset ->
                 match renderAsset with
                 | TextureAsset (metadata, _) -> Some (metadata.TextureWidth, metadata.TextureHeight)
                 | _ -> None
-            | None -> None
+            | ValueNone -> None
         | RawHeightMap map -> Some (map.Resolution.X, map.Resolution.Y)
 
     static member private tryDestroyUserDefinedStaticModel assetTag renderer =
@@ -1072,7 +1112,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                 // get albedo metadata and texture
                 let (albedoMetadata, albedoTexture) =
                     match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.AlbedoImage renderer with
-                    | Some (TextureAsset (textureMetadata, texture)) -> (textureMetadata, texture)
+                    | ValueSome (TextureAsset (textureMetadata, texture)) -> (textureMetadata, texture)
                     | _ -> (renderer.PhysicallyBasedMaterial.AlbedoMetadata, renderer.PhysicallyBasedMaterial.AlbedoTexture)
 
                 // make material properties
@@ -1090,12 +1130,12 @@ type [<ReferenceEquality>] GlRenderer3d =
                 let material : OpenGL.PhysicallyBased.PhysicallyBasedMaterial =
                     { AlbedoMetadata = albedoMetadata
                       AlbedoTexture = albedoTexture
-                      RoughnessTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.RoughnessImage renderer with Some (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.RoughnessTexture
-                      MetallicTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.MetallicImage renderer with Some (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.MetallicTexture
-                      AmbientOcclusionTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.AmbientOcclusionImage renderer with Some (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.AmbientOcclusionTexture
-                      EmissionTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.EmissionImage renderer with Some (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.EmissionTexture
-                      NormalTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.NormalImage renderer with Some (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.NormalTexture
-                      HeightTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.HeightImage renderer with Some (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.HeightTexture
+                      RoughnessTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.RoughnessImage renderer with ValueSome (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.RoughnessTexture
+                      MetallicTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.MetallicImage renderer with ValueSome (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.MetallicTexture
+                      AmbientOcclusionTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.AmbientOcclusionImage renderer with ValueSome (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.AmbientOcclusionTexture
+                      EmissionTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.EmissionImage renderer with ValueSome (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.EmissionTexture
+                      NormalTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.NormalImage renderer with ValueSome (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.NormalTexture
+                      HeightTexture = match GlRenderer3d.tryGetRenderAsset surfaceDescriptor.HeightImage renderer with ValueSome (TextureAsset (_, texture)) -> texture | _ -> renderer.PhysicallyBasedMaterial.HeightTexture
                       TwoSided = surfaceDescriptor.TwoSided }
 
                 // create vertex data, truncating it when required
@@ -1382,12 +1422,12 @@ type [<ReferenceEquality>] GlRenderer3d =
                 let mutable renderOps = Unchecked.defaultof<_> // OPTIMIZATION: TryGetValue using the auto-pairing syntax of F# allocation when the 'TValue is a struct tuple.
                 if renderTasks.RenderDeferredStaticAbsolute.TryGetValue (billboardSurface, &renderOps)
                 then renderOps.Add struct (billboardMatrix, presence, texCoordsOffset, properties)
-                else renderTasks.RenderDeferredStaticAbsolute.Add (billboardSurface, SList.singleton (billboardMatrix, presence, texCoordsOffset, properties))
+                else renderTasks.RenderDeferredStaticAbsolute.Add (billboardSurface, List ([struct (billboardMatrix, presence, texCoordsOffset, properties)]))
             else
                 let mutable renderOps = Unchecked.defaultof<_> // OPTIMIZATION: TryGetValue using the auto-pairing syntax of F# allocation when the 'TValue is a struct tuple.
                 if renderTasks.RenderDeferredStaticRelative.TryGetValue (billboardSurface, &renderOps)
                 then renderOps.Add struct (billboardMatrix, presence, texCoordsOffset, properties)
-                else renderTasks.RenderDeferredStaticRelative.Add (billboardSurface, SList.singleton (billboardMatrix, presence, texCoordsOffset, properties))
+                else renderTasks.RenderDeferredStaticRelative.Add (billboardSurface, List ([struct (billboardMatrix, presence, texCoordsOffset, properties)]))
         | ForwardRenderType (subsort, sort) ->
             if absolute
             then renderTasks.RenderForwardStaticAbsolute.Add struct (subsort, sort, billboardMatrix, presence, texCoordsOffset, properties, billboardSurface)
@@ -1426,12 +1466,12 @@ type [<ReferenceEquality>] GlRenderer3d =
                 let mutable renderOps = Unchecked.defaultof<_> // OPTIMIZATION: TryGetValue using the auto-pairing syntax of F# allocation when the 'TValue is a struct tuple.
                 if renderTasks.RenderDeferredStaticAbsolute.TryGetValue (surface, &renderOps)
                 then renderOps.Add struct (model, presence, texCoordsOffset, properties)
-                else renderTasks.RenderDeferredStaticAbsolute.Add (surface, SList.singleton (model, presence, texCoordsOffset, properties))
+                else renderTasks.RenderDeferredStaticAbsolute.Add (surface, List ([struct (model, presence, texCoordsOffset, properties)]))
             else
                 let mutable renderOps = Unchecked.defaultof<_> // OPTIMIZATION: TryGetValue using the auto-pairing syntax of F# allocation when the 'TValue is a struct tuple.
                 if renderTasks.RenderDeferredStaticRelative.TryGetValue (surface, &renderOps)
                 then renderOps.Add struct (model, presence, texCoordsOffset, properties)
-                else renderTasks.RenderDeferredStaticRelative.Add (surface, SList.singleton (model, presence, texCoordsOffset, properties))
+                else renderTasks.RenderDeferredStaticRelative.Add (surface, List ([struct (model, presence, texCoordsOffset, properties)]))
         | ForwardRenderType (subsort, sort) ->
             if absolute
             then renderTasks.RenderForwardStaticAbsolute.Add struct (subsort, sort, model, presence, texCoordsOffset, properties, surface)
@@ -1450,7 +1490,7 @@ type [<ReferenceEquality>] GlRenderer3d =
          renderPass : RenderPass,
          renderer) =
         match GlRenderer3d.tryGetRenderAsset staticModel renderer with
-        | Some renderAsset ->
+        | ValueSome renderAsset ->
             match renderAsset with
             | StaticModelAsset (_, modelAsset) ->
                 if surfaceIndex > -1 && surfaceIndex < modelAsset.Surfaces.Length then
@@ -1462,7 +1502,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                         else surface
                     GlRenderer3d.categorizeStaticModelSurface (absolute, &model, presence, &insetOpt, &properties, surface, renderType, renderPass, None, renderer)
             | _ -> Log.infoOnce ("Cannot render static model surface with a non-static model asset for '" + scstring staticModel + "'.")
-        | None -> Log.infoOnce ("Cannot render static model surface due to unloadable asset(s) for '" + scstring staticModel + "'.")
+        | ValueNone -> Log.infoOnce ("Cannot render static model surface due to unloadable asset(s) for '" + scstring staticModel + "'.")
 
     static member private categorizeStaticModel
         (skipCulling : bool,
@@ -1481,7 +1521,7 @@ type [<ReferenceEquality>] GlRenderer3d =
          renderer) =
         let renderStyle = match renderType with DeferredRenderType -> Deferred | ForwardRenderType (subsort, sort) -> Forward (subsort, sort)
         match GlRenderer3d.tryGetRenderAsset staticModel renderer with
-        | Some renderAsset ->
+        | ValueSome renderAsset ->
             match renderAsset with
             | StaticModelAsset (_, modelAsset) ->
                 let renderTasks = GlRenderer3d.getRenderTasks renderPass renderer
@@ -1524,7 +1564,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                     if skipCulling || unculled then
                         GlRenderer3d.categorizeStaticModelSurface (absolute, &surfaceMatrix, presence, &insetOpt, &properties, surface, renderType, renderPass, Some renderTasks, renderer)
             | _ -> Log.infoOnce ("Cannot render static model with a non-static model asset for '" + scstring staticModel + "'.")
-        | None -> Log.infoOnce ("Cannot render static model due to unloadable asset(s) for '" + scstring staticModel + "'.")
+        | ValueNone -> Log.infoOnce ("Cannot render static model due to unloadable asset(s) for '" + scstring staticModel + "'.")
 
     static member private categorizeAnimatedModel
         (absolute : bool,
@@ -1539,7 +1579,7 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // ensure we have the required animated model
         match GlRenderer3d.tryGetRenderAsset animatedModel renderer with
-        | Some renderAsset ->
+        | ValueSome renderAsset ->
             match renderAsset with
             | AnimatedModelAsset modelAsset ->
 
@@ -1566,16 +1606,16 @@ type [<ReferenceEquality>] GlRenderer3d =
                         let animatedModelSurfaceKey = { BoneTransforms = boneTransforms; AnimatedModelSurface = surface }
                         match renderTasks.RenderDeferredAnimatedAbsolute.TryGetValue animatedModelSurfaceKey with
                         | (true, renderOps) -> renderOps.Add struct (model, presence, texCoordsOffset, properties)
-                        | (false, _) -> renderTasks.RenderDeferredAnimatedAbsolute.Add (animatedModelSurfaceKey, SList.singleton struct (model, presence, texCoordsOffset, properties))
+                        | (false, _) -> renderTasks.RenderDeferredAnimatedAbsolute.Add (animatedModelSurfaceKey, List ([struct (model, presence, texCoordsOffset, properties)]))
                     else
                         let animatedModelSurfaceKey = { BoneTransforms = boneTransforms; AnimatedModelSurface = surface }
                         match renderTasks.RenderDeferredAnimatedRelative.TryGetValue animatedModelSurfaceKey with
                         | (true, renderOps) -> renderOps.Add struct (model, presence, texCoordsOffset, properties)
-                        | (false, _) -> renderTasks.RenderDeferredAnimatedRelative.Add (animatedModelSurfaceKey, SList.singleton struct (model, presence, texCoordsOffset, properties))
+                        | (false, _) -> renderTasks.RenderDeferredAnimatedRelative.Add (animatedModelSurfaceKey, List ([struct (model, presence, texCoordsOffset, properties)]))
 
             // unable to render
             | _ -> Log.infoOnce ("Cannot render animated model with a non-animated model asset '" + scstring animatedModel + "'.")
-        | None -> Log.infoOnce ("Cannot render animated model due to unloadable asset(s) for '" + scstring animatedModel + "'.")
+        | ValueNone -> Log.infoOnce ("Cannot render animated model due to unloadable asset(s) for '" + scstring animatedModel + "'.")
 
     static member private categorizeAnimatedModels
         (absolute : bool,
@@ -1587,7 +1627,7 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // ensure we have the required animated model
         match GlRenderer3d.tryGetRenderAsset animatedModel renderer with
-        | Some renderAsset ->
+        | ValueSome renderAsset ->
             match renderAsset with
             | AnimatedModelAsset modelAsset ->
 
@@ -1617,16 +1657,16 @@ type [<ReferenceEquality>] GlRenderer3d =
                             let animatedModelSurfaceKey = { BoneTransforms = boneTransforms; AnimatedModelSurface = surface }
                             match renderTasks.RenderDeferredAnimatedAbsolute.TryGetValue animatedModelSurfaceKey with
                             | (true, renderOps) -> renderOps.Add struct (model, presence, texCoordsOffset, properties)
-                            | (false, _) -> renderTasks.RenderDeferredAnimatedAbsolute.Add (animatedModelSurfaceKey, SList.singleton struct (model, presence, texCoordsOffset, properties))
+                            | (false, _) -> renderTasks.RenderDeferredAnimatedAbsolute.Add (animatedModelSurfaceKey, List ([struct (model, presence, texCoordsOffset, properties)]))
                         else
                             let animatedModelSurfaceKey = { BoneTransforms = boneTransforms; AnimatedModelSurface = surface }
                             match renderTasks.RenderDeferredAnimatedRelative.TryGetValue animatedModelSurfaceKey with
                             | (true, renderOps) -> renderOps.Add struct (model, presence, texCoordsOffset, properties)
-                            | (false, _) -> renderTasks.RenderDeferredAnimatedRelative.Add (animatedModelSurfaceKey, SList.singleton struct (model, presence, texCoordsOffset, properties))
+                            | (false, _) -> renderTasks.RenderDeferredAnimatedRelative.Add (animatedModelSurfaceKey, List ([struct (model, presence, texCoordsOffset, properties)]))
 
             // unable to render
             | _ -> Log.infoOnce ("Cannot render animated model with a non-animated model asset '" + scstring animatedModel + "'.")
-        | None -> Log.infoOnce ("Cannot render animated model due to unloadable asset(s) for '" + scstring animatedModel + "'.")
+        | ValueNone -> Log.infoOnce ("Cannot render animated model due to unloadable asset(s) for '" + scstring animatedModel + "'.")
 
     static member private categorizeTerrain
         (absolute : bool,
@@ -1663,7 +1703,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         match Seq.tryLast renderTasks.RenderSkyBoxes with
         | Some (lightAmbientColor, lightAmbientBrightness, cubeMapColor, cubeMapBrightness, cubeMapAsset) ->
             match GlRenderer3d.tryGetRenderAsset cubeMapAsset renderer with
-            | Some asset ->
+            | ValueSome asset ->
                 match asset with
                 | CubeMapAsset (_, cubeMap, cubeMapIrradianceAndEnvironmentMapOptRef) ->
                     let cubeMapOpt = Some (cubeMapColor, cubeMapBrightness, cubeMap, cubeMapIrradianceAndEnvironmentMapOptRef)
@@ -1671,14 +1711,14 @@ type [<ReferenceEquality>] GlRenderer3d =
                 | _ ->
                     Log.info "Could not utilize sky box due to mismatched cube map asset."
                     (lightAmbientColor, lightAmbientBrightness, None)
-            | None ->
+            | ValueNone ->
                 Log.info "Could not utilize sky box due to non-existent cube map asset."
                 (lightAmbientColor, lightAmbientBrightness, None)
         | None -> (Color.White, 1.0f, None)
 
     static member private sortForwardSurfaces
         eyeCenter
-        (surfaces : struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) SList)
+        (surfaces : struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) List)
         (forwardSurfacesComparer : IComparer<struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface * single)>)
         (forwardSurfacesSortBuffer : struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface * single) List) =
         for struct (subsort, sort, model, presence, texCoordsOffset, properties, surface) in surfaces do
@@ -1687,37 +1727,37 @@ type [<ReferenceEquality>] GlRenderer3d =
         forwardSurfacesSortBuffer
 
     static member private renderPhysicallyBasedShadowSurfaces
-        batchPhase viewArray projectionArray bonesArray (parameters : struct (Matrix4x4 * Presence * Box2 * MaterialProperties) SList)
+        batchPhase viewArray projectionArray bonesArray (parameters : struct (Matrix4x4 * Presence * Box2 * MaterialProperties) List)
         (surface : OpenGL.PhysicallyBased.PhysicallyBasedSurface) shader renderer =
 
         // ensure we have a large enough instance fields array
         let mutable length = renderer.InstanceFields.Length
-        while parameters.Length * Constants.Render.InstanceFieldCount > length do length <- length * 2
+        while parameters.Count * Constants.Render.InstanceFieldCount > length do length <- length * 2
         if renderer.InstanceFields.Length < length then
             renderer.InstanceFields <- Array.zeroCreate<single> length
 
         // blit parameters to instance fields
-        for i in 0 .. dec parameters.Length do
+        for i in 0 .. dec parameters.Count do
             let struct (model, _, _, _) = parameters.[i]
             model.ToArray (renderer.InstanceFields, i * Constants.Render.InstanceFieldCount)
 
         // draw surfaces
         OpenGL.PhysicallyBased.DrawPhysicallyBasedShadowSurfaces
-            (batchPhase, viewArray, projectionArray, bonesArray, parameters.Length,
+            (batchPhase, viewArray, projectionArray, bonesArray, parameters.Count,
              renderer.InstanceFields, surface.PhysicallyBasedGeometry, shader)
 
     static member private renderPhysicallyBasedDeferredSurfaces
-        batchPhase viewArray projectionArray bonesArray eyeCenter (parameters : struct (Matrix4x4 * Presence * Box2 * MaterialProperties) SList)
+        batchPhase viewArray projectionArray bonesArray eyeCenter (parameters : struct (Matrix4x4 * Presence * Box2 * MaterialProperties) List)
         (surface : OpenGL.PhysicallyBased.PhysicallyBasedSurface) shader renderer =
 
         // ensure we have a large enough instance fields array
         let mutable length = renderer.InstanceFields.Length
-        while parameters.Length * Constants.Render.InstanceFieldCount > length do length <- length * 2
+        while parameters.Count * Constants.Render.InstanceFieldCount > length do length <- length * 2
         if renderer.InstanceFields.Length < length then
             renderer.InstanceFields <- Array.zeroCreate<single> length
 
         // blit parameters to instance fields
-        for i in 0 .. dec parameters.Length do
+        for i in 0 .. dec parameters.Count do
             let struct (model, presence, texCoordsOffset, properties) = parameters.[i]
             model.ToArray (renderer.InstanceFields, i * Constants.Render.InstanceFieldCount)
             renderer.InstanceFields.[i * Constants.Render.InstanceFieldCount + 16] <- texCoordsOffset.Min.X
@@ -1747,7 +1787,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         // draw deferred surfaces
         OpenGL.PhysicallyBased.DrawPhysicallyBasedDeferredSurfaces
             (batchPhase, viewArray, projectionArray, bonesArray, eyeCenter,
-             parameters.Length, renderer.InstanceFields, surface.SurfaceMaterial, surface.PhysicallyBasedGeometry, shader)
+             parameters.Count, renderer.InstanceFields, surface.SurfaceMaterial, surface.PhysicallyBasedGeometry, shader)
 
     static member private renderPhysicallyBasedForwardSurfaces
         blending viewArray projectionArray bonesArray (parameters : struct (Matrix4x4 * Presence * Box2 * MaterialProperties) SList)
@@ -1824,24 +1864,24 @@ type [<ReferenceEquality>] GlRenderer3d =
                             renderer.PhysicallyBasedMaterial
                         let (albedoMetadata, albedoTexture) =
                             match GlRenderer3d.tryGetRenderAsset layer.AlbedoImage renderer with
-                            | Some renderAsset -> match renderAsset with TextureAsset (metadata, texture) -> (metadata, texture) | _ -> (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
-                            | None -> (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
+                            | ValueSome renderAsset -> match renderAsset with TextureAsset (metadata, texture) -> (metadata, texture) | _ -> (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
+                            | ValueNone -> (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
                         let roughnessTexture =
                             match GlRenderer3d.tryGetRenderAsset layer.RoughnessImage renderer with
-                            | Some renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.RoughnessTexture
-                            | None -> defaultMaterial.RoughnessTexture
+                            | ValueSome renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.RoughnessTexture
+                            | ValueNone -> defaultMaterial.RoughnessTexture
                         let ambientOcclusionTexture =
                             match GlRenderer3d.tryGetRenderAsset layer.AmbientOcclusionImage renderer with
-                            | Some renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.AmbientOcclusionTexture
-                            | None -> defaultMaterial.AmbientOcclusionTexture
+                            | ValueSome renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.AmbientOcclusionTexture
+                            | ValueNone -> defaultMaterial.AmbientOcclusionTexture
                         let normalTexture =
                             match GlRenderer3d.tryGetRenderAsset layer.NormalImage renderer with
-                            | Some renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.NormalTexture
-                            | None -> defaultMaterial.NormalTexture
+                            | ValueSome renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.NormalTexture
+                            | ValueNone -> defaultMaterial.NormalTexture
                         let heightTexture =
                             match GlRenderer3d.tryGetRenderAsset layer.HeightImage renderer with
-                            | Some renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.HeightTexture
-                            | None -> defaultMaterial.HeightTexture
+                            | ValueSome renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.HeightTexture
+                            | ValueNone -> defaultMaterial.HeightTexture
                         texelWidthAvg <- texelWidthAvg + albedoMetadata.TextureTexelWidth
                         texelHeightAvg <- texelHeightAvg + albedoMetadata.TextureTexelHeight
                         { defaultMaterial with
@@ -1859,24 +1899,24 @@ type [<ReferenceEquality>] GlRenderer3d =
                     renderer.PhysicallyBasedMaterial
                 let (albedoMetadata, albedoTexture) =
                     match GlRenderer3d.tryGetRenderAsset flatMaterial.AlbedoImage renderer with
-                    | Some renderAsset -> match renderAsset with TextureAsset (metadata, texture) -> (metadata, texture) | _ -> (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
-                    | None -> (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
+                    | ValueSome renderAsset -> match renderAsset with TextureAsset (metadata, texture) -> (metadata, texture) | _ -> (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
+                    | ValueNone -> (defaultMaterial.AlbedoMetadata, defaultMaterial.AlbedoTexture)
                 let roughnessTexture =
                     match GlRenderer3d.tryGetRenderAsset flatMaterial.RoughnessImage renderer with
-                    | Some renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.RoughnessTexture
-                    | None -> defaultMaterial.RoughnessTexture
+                    | ValueSome renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.RoughnessTexture
+                    | ValueNone -> defaultMaterial.RoughnessTexture
                 let ambientOcclusionTexture =
                     match GlRenderer3d.tryGetRenderAsset flatMaterial.AmbientOcclusionImage renderer with
-                    | Some renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.AmbientOcclusionTexture
-                    | None -> defaultMaterial.AmbientOcclusionTexture
+                    | ValueSome renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.AmbientOcclusionTexture
+                    | ValueNone -> defaultMaterial.AmbientOcclusionTexture
                 let normalTexture =
                     match GlRenderer3d.tryGetRenderAsset flatMaterial.NormalImage renderer with
-                    | Some renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.NormalTexture
-                    | None -> defaultMaterial.NormalTexture
+                    | ValueSome renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.NormalTexture
+                    | ValueNone -> defaultMaterial.NormalTexture
                 let heightTexture =
                     match GlRenderer3d.tryGetRenderAsset flatMaterial.HeightImage renderer with
-                    | Some renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.HeightTexture
-                    | None -> defaultMaterial.HeightTexture
+                    | ValueSome renderAsset -> match renderAsset with TextureAsset (_, texture) -> texture | _ -> defaultMaterial.HeightTexture
+                    | ValueNone -> defaultMaterial.HeightTexture
                 let material =
                     { defaultMaterial with
                         AlbedoMetadata = albedoMetadata
@@ -1912,31 +1952,31 @@ type [<ReferenceEquality>] GlRenderer3d =
     static member private makeBillboardMaterial (properties : MaterialProperties inref, material : Material inref, renderer) =
         let struct (albedoMetadata, albedoTexture) =
             match GlRenderer3d.tryGetRenderAsset material.AlbedoImage renderer with
-            | Some (TextureAsset (metadata, texture)) -> struct (metadata, texture)
+            | ValueSome (TextureAsset (metadata, texture)) -> struct (metadata, texture)
             | _ -> struct (OpenGL.Texture.TextureMetadata.empty, renderer.PhysicallyBasedMaterial.AlbedoTexture)
         let roughnessTexture =
             match GlRenderer3d.tryGetRenderAsset material.RoughnessImage renderer with
-            | Some (TextureAsset (_, texture)) -> texture
+            | ValueSome (TextureAsset (_, texture)) -> texture
             | _ -> renderer.PhysicallyBasedMaterial.RoughnessTexture
         let metallicTexture =
             match GlRenderer3d.tryGetRenderAsset material.MetallicImage renderer with
-            | Some (TextureAsset (_, texture)) -> texture
+            | ValueSome (TextureAsset (_, texture)) -> texture
             | _ -> renderer.PhysicallyBasedMaterial.MetallicTexture
         let ambientOcclusionTexture =
             match GlRenderer3d.tryGetRenderAsset material.AmbientOcclusionImage renderer with
-            | Some (TextureAsset (_, texture)) -> texture
+            | ValueSome (TextureAsset (_, texture)) -> texture
             | _ -> renderer.PhysicallyBasedMaterial.AmbientOcclusionTexture
         let emissionTexture =
             match GlRenderer3d.tryGetRenderAsset material.EmissionImage renderer with
-            | Some (TextureAsset (_, texture)) -> texture
+            | ValueSome (TextureAsset (_, texture)) -> texture
             | _ -> renderer.PhysicallyBasedMaterial.EmissionTexture
         let normalTexture =
             match GlRenderer3d.tryGetRenderAsset material.NormalImage renderer with
-            | Some (TextureAsset (_, texture)) -> texture
+            | ValueSome (TextureAsset (_, texture)) -> texture
             | _ -> renderer.PhysicallyBasedMaterial.NormalTexture
         let heightTexture =
             match GlRenderer3d.tryGetRenderAsset material.HeightImage renderer with
-            | Some (TextureAsset (_, texture)) -> texture
+            | ValueSome (TextureAsset (_, texture)) -> texture
             | _ -> renderer.PhysicallyBasedMaterial.HeightTexture
         let properties : OpenGL.PhysicallyBased.PhysicallyBasedMaterialProperties =
             { Albedo = properties.Albedo
@@ -1964,49 +2004,49 @@ type [<ReferenceEquality>] GlRenderer3d =
             match material.AlbedoImageOpt with
             | Some image ->
                 match GlRenderer3d.tryGetRenderAsset image renderer with
-                | Some (TextureAsset (metadata, texture)) -> struct (metadata, texture)
+                | ValueSome (TextureAsset (metadata, texture)) -> struct (metadata, texture)
                 | _ -> struct (surfaceMaterial.AlbedoMetadata, surfaceMaterial.AlbedoTexture)
             | None -> struct (surfaceMaterial.AlbedoMetadata, surfaceMaterial.AlbedoTexture)
         let roughnessTexture =
             match material.RoughnessImageOpt with
             | Some image ->
                 match GlRenderer3d.tryGetRenderAsset image renderer with
-                | Some (TextureAsset (_, texture)) -> texture
+                | ValueSome (TextureAsset (_, texture)) -> texture
                 | _ -> surfaceMaterial.RoughnessTexture
             | None -> surfaceMaterial.RoughnessTexture
         let metallicTexture =
             match material.MetallicImageOpt with
             | Some image ->
                 match GlRenderer3d.tryGetRenderAsset image renderer with
-                | Some (TextureAsset (_, texture)) -> texture
+                | ValueSome (TextureAsset (_, texture)) -> texture
                 | _ -> surfaceMaterial.MetallicTexture
             | None -> surfaceMaterial.MetallicTexture
         let ambientOcclusionTexture =
             match material.AmbientOcclusionImageOpt with
             | Some image ->
                 match GlRenderer3d.tryGetRenderAsset image renderer with
-                | Some (TextureAsset (_, texture)) -> texture
+                | ValueSome (TextureAsset (_, texture)) -> texture
                 | _ -> surfaceMaterial.AmbientOcclusionTexture
             | None -> surfaceMaterial.AmbientOcclusionTexture
         let emissionTexture =
             match material.EmissionImageOpt with
             | Some image ->
                 match GlRenderer3d.tryGetRenderAsset image renderer with
-                | Some (TextureAsset (_, texture)) -> texture
+                | ValueSome (TextureAsset (_, texture)) -> texture
                 | _ -> surfaceMaterial.EmissionTexture
             | None -> surfaceMaterial.EmissionTexture
         let normalTexture =
             match material.NormalImageOpt with
             | Some image ->
                 match GlRenderer3d.tryGetRenderAsset image renderer with
-                | Some (TextureAsset (_, texture)) -> texture
+                | ValueSome (TextureAsset (_, texture)) -> texture
                 | _ -> surfaceMaterial.NormalTexture
             | None -> surfaceMaterial.NormalTexture
         let heightTexture =
             match material.HeightImageOpt with
             | Some image ->
                 match GlRenderer3d.tryGetRenderAsset image renderer with
-                | Some (TextureAsset (_, texture)) -> texture
+                | ValueSome (TextureAsset (_, texture)) -> texture
                 | _ -> surfaceMaterial.HeightTexture
             | None -> surfaceMaterial.HeightTexture
         let twoSided =
@@ -2122,16 +2162,16 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // forward render static surface shadows w/ absolute transforms to filter buffer if in top level render
         if topLevelRender then
-            for (model, presence, texCoordsOffset, properties, surface) in renderTasks.RenderForwardStaticAbsoluteSorted do
+            for struct (model, presence, texCoordsOffset, properties, surface) in renderTasks.RenderForwardStaticAbsoluteSorted do
                 GlRenderer3d.renderPhysicallyBasedShadowSurfaces
-                    SingletonPhase lightViewAbsoluteArray lightProjectionArray [||] (SList.singleton (model, presence, texCoordsOffset, properties))
+                    SingletonPhase lightViewAbsoluteArray lightProjectionArray [||] (List ([struct (model, presence, texCoordsOffset, properties)]))
                     surface renderer.PhysicallyBasedShadowStaticShader renderer
                 OpenGL.Hl.Assert ()
 
         // forward render static surface shadows w/ relative transforms to filter buffer
-        for (model, presence, texCoordsOffset, properties, surface) in renderTasks.RenderForwardStaticRelativeSorted do
+        for struct (model, presence, texCoordsOffset, properties, surface) in renderTasks.RenderForwardStaticRelativeSorted do
             GlRenderer3d.renderPhysicallyBasedShadowSurfaces
-                SingletonPhase lightViewRelativeArray lightProjectionArray [||] (SList.singleton (model, presence, texCoordsOffset, properties))
+                SingletonPhase lightViewRelativeArray lightProjectionArray [||] (List ([struct (model, presence, texCoordsOffset, properties)]))
                 surface renderer.PhysicallyBasedShadowStaticShader renderer
             OpenGL.Hl.Assert ()
 
@@ -2157,7 +2197,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         (framebuffer : uint) =
 
         // compute geometry frustum
-        let geometryFrustum = geometryViewport.Frustum (Constants.Render.NearPlaneDistanceInterior, Constants.Render.FarPlaneDistanceExterior, eyeCenter, eyeRotation)
+        let geometryFrustum = geometryViewport.Frustum (eyeCenter, eyeRotation)
 
         // compute matrix arrays
         let viewAbsoluteArray = viewAbsolute.ToArray ()
@@ -2464,7 +2504,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         let ssaoTextureFiltered =
 
             // but only if needed
-            if renderer.SsaoConfig.SsaoEnabled then
+            if renderer.LightingConfig.SsaoEnabled then
 
                 // setup unfiltered ssao buffer and viewport
                 let (ssaoTextureUnfiltered, ssaoRenderbuffer, ssaoFramebuffer) = renderer.SsaoBuffersUnfiltered
@@ -2480,7 +2520,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                     (viewRelativeArray, rasterProjectionArray,
                      positionTexture, normalPlusTexture,
                      [|Constants.Render.SsaoResolution.X; Constants.Render.SsaoResolution.Y|],
-                     renderer.SsaoConfig.SsaoIntensity, renderer.SsaoConfig.SsaoBias, renderer.SsaoConfig.SsaoRadius, renderer.SsaoConfig.SsaoDistanceMax, renderer.SsaoConfig.SsaoSampleCount,
+                     renderer.LightingConfig.SsaoIntensity, renderer.LightingConfig.SsaoBias, renderer.LightingConfig.SsaoRadius, renderer.LightingConfig.SsaoDistanceMax, renderer.LightingConfig.SsaoSampleCount,
                      renderer.PhysicallyBasedQuad, renderer.PhysicallyBasedDeferredSsaoShader)
                 OpenGL.Hl.Assert ()
 
@@ -2688,8 +2728,6 @@ type [<ReferenceEquality>] GlRenderer3d =
                 GlRenderer3d.categorizeTerrain (rt.Absolute, rt.Visible, rt.TerrainDescriptor, rt.RenderPass, renderer)
             | ConfigureLighting lc ->
                 renderer.LightingConfig <- lc
-            | ConfigureSsao sc ->
-                renderer.SsaoConfig <- sc
             | LoadRenderPackage3d packageName ->
                 GlRenderer3d.handleLoadRenderPackage packageName renderer
             | UnloadRenderPackage3d packageName ->
@@ -2759,7 +2797,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         let viewAbsolute = viewport.View3d (true, eyeCenter, eyeRotation)
         let viewRelative = viewport.View3d (false, eyeCenter, eyeRotation)
         let viewSkyBox = Matrix4x4.CreateFromQuaternion (Quaternion.Inverse eyeRotation)
-        let projection = viewport.Projection3d Constants.Render.NearPlaneDistanceOmnipresent Constants.Render.FarPlaneDistanceOmnipresent
+        let projection = viewport.Projection3d
 
         // top-level geometry pass
         let renderPass = NormalPass skipCulling
@@ -2908,7 +2946,7 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // create filter buffers
         let filterBuffers =
-            match OpenGL.Framebuffer.TryCreateFilterBuffers (Constants.Render.ResolutionX, Constants.Render.ResolutionY) with
+            match OpenGL.Framebuffer.TryCreateFilterBuffers (Constants.Render.Resolution.X, Constants.Render.Resolution.Y) with
             | Right filterBuffers -> filterBuffers
             | Left error -> failwith ("Could not create GlRenderer3d due to: " + error + ".")
         OpenGL.Hl.Assert ()
@@ -2982,22 +3020,6 @@ type [<ReferenceEquality>] GlRenderer3d =
               HeightTexture = OpenGL.Texture.TryCreateTextureFiltered (true, "Assets/Default/MaterialHeight.dds") |> Either.getRight |> snd
               TwoSided = false }
 
-        // make light mapping config
-        let lightingConfig =
-            { LightCutoffMargin = Constants.Render.LightCutoffMarginDefault
-              LightShadowBiasAcne = Constants.Render.LightShadowBiasAcneDefault
-              LightShadowBiasBleed = Constants.Render.LightShadowBiasBleedDefault
-              LightMappingEnabled = Constants.Render.LightMappingEnabledDefault }
-
-        // make ssao config
-        let ssaoConfig =
-            { SsaoEnabled = Constants.Render.SsaoEnabledDefault
-              SsaoIntensity = Constants.Render.SsaoIntensityDefault
-              SsaoBias = Constants.Render.SsaoBiasDefault
-              SsaoRadius = Constants.Render.SsaoRadiusDefault
-              SsaoDistanceMax = Constants.Render.SsaoDistanceMaxDefault
-              SsaoSampleCount = Constants.Render.SsaoSampleCountDefault }
-
         // create forward surfaces comparer
         let forwardSurfacesComparer =
             { new IComparer<struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface * single)> with
@@ -3060,8 +3082,7 @@ type [<ReferenceEquality>] GlRenderer3d =
               EnvironmentFilterMap = environmentFilterMap
               PhysicallyBasedMaterial = physicallyBasedMaterial
               LightMaps = dictPlus HashIdentity.Structural []
-              LightingConfig = lightingConfig
-              SsaoConfig = ssaoConfig
+              LightingConfig = LightingConfig.defaultConfig
               InstanceFields = Array.zeroCreate<single> (Constants.Render.InstanceFieldCount * Constants.Render.InstanceBatchPrealloc)
               UserDefinedStaticModelFields = [||]
               LightsDesiringShadows = dictPlus HashIdentity.Structural []

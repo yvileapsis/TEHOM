@@ -38,11 +38,11 @@ type MyGameDispatcher () =
         let (group, world) = World.createGroup (Some "Default") screen world
         let (fps, world) = World.createEntity<FpsDispatcher> DefaultOverlay (Some [|"Fps"|]) group world
         let world = World.createEntity<SkyBoxDispatcher> DefaultOverlay None group world |> snd
-        let world = fps.SetPosition (v3 200.0f -250.0f 0.0f) world
-        let positions = // 50,000 entities (goal: 60FPS, current 47FPS)
+        let world = fps.SetPosition (v3 134.0f -168.0f 0.0f) world
+        let positions = // 37,500 entities (goal: 60FPS, current 60FPS)
             [|for i in 0 .. dec 50 do
                 for j in 0 .. dec 50 do
-                    for k in 0 .. dec 20 do
+                    for k in 0 .. dec 15 do
                         yield v3 (single i * 0.5f) (single j * 0.5f) (single k * 0.5f)|]
         let world =
             Array.fold (fun world position ->
@@ -52,8 +52,7 @@ type MyGameDispatcher () =
                 let world = entity.SetScale (v3Dup 0.1f) world
                 world)
                 world positions
-        let world = World.selectScreen (IdlingState world.GameTime) screen world
-        world
+        World.selectScreen (IdlingState world.GameTime) screen world
 #else
 type [<ReferenceEquality>] Ints =
     { Ints : Map<int, int> }
@@ -75,9 +74,9 @@ type Message =
     interface Nu.Message
 
 type MmccGameDispatcher () =
-    inherit GameDispatcher<Intss, Message, Command> (Intss.init 118) // 13,924 MMCC entities (goal: 60FPS, current: 59FPS)
+    inherit GameDispatcher<Intss, Message, Command> (Intss.init 110) // 12,100 MMCC entities (goal: 60FPS, current: 58FPS)
 
-    override this.Initialize (_, _) =
+    override this.Definitions (_, _) =
         [Game.UpdateEvent => Inc]
 
     override this.Message (intss, message, _, _) =
@@ -96,7 +95,7 @@ type MmccGameDispatcher () =
                              Entity.Presence == Omnipresent]|]
               Content.group "Other" []
                 [Content.skyBox "SkyBox" []
-                 Content.fps "Fps" [Entity.Position := v3 200.0f -250.0f 0.0f]]|]]
+                 Content.fps "Fps" [Entity.Position := v3 134.0f -168.0f 0.0f]]|]]
 #endif
 
 type MetricsPlugin () =

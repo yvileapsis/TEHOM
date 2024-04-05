@@ -4,6 +4,10 @@ open System.Numerics
 open Prime
 open Nu
 
+type CharacterType =
+    | Player
+    | Enemy
+
 type JumpState =
     { LastTime : int64
       LastTimeOnGround : int64 }
@@ -32,7 +36,7 @@ type ActionState =
     | WoundedState
 
 type [<ReferenceEquality; SymbolicExpansion>] Character =
-    { Player : bool
+    { CharacterType : CharacterType
       PositionPrevious : Vector3 Queue
       RotationPrevious : Quaternion Queue
       LinearVelocityPrevious : Vector3 Queue
@@ -50,7 +54,7 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
         if not (Queue.isEmpty this.PositionPrevious) then
             let positions = Queue.conj position this.PositionPrevious
             Seq.sum positions / single positions.Length
-            else position
+        else position
 
     member this.RotationInterp rotation =
         if not (Queue.isEmpty this.RotationPrevious) then
@@ -73,7 +77,12 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
             Seq.sum angularVelocities / single angularVelocities.Length
         else angularVelocity
 
-    static member private computeTraversalAnimations (rotation : Quaternion) (linearVelocity : Vector3) (angularVelocity : Vector3) (character : Character) =
+    member this.CharacterProperties =
+        match this.CharacterType with
+        | Player -> CharacterProperties.defaultProperties
+        | Enemy -> { CharacterProperties.defaultProperties with PenetrationDepthMax = 0.1f }
+
+    static member private computeTraversalAnimations rotation linearVelocity angularVelocity character =
         if character.ActionState <> WoundedState then
             let rotationInterp = character.RotationInterp rotation
             let linearVelocityInterp = character.LinearVelocityInterp linearVelocity
@@ -116,13 +125,9 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
             Some (soundOpt, animation)
         | InjuryState injury ->
             let localTime = time - injury.InjuryTime
-            let soundOpt =
-                match localTime with
-                | 1L -> Some Assets.Gameplay.InjureSound
-                | _ -> None
             let animationStartTime = GameTime.ofUpdates (time - localTime % 55L)
             let animation = { StartTime = animationStartTime; LifeTimeOpt = None; Name = "Armature|WalkBack"; Playback = Once; Rate = 1.0f; Weight = 32.0f; BoneFilterOpt = None }
-            (Some (soundOpt, animation))
+            (Some (None, animation))
         | NormalState | WoundedState -> None
 
     static member private updateInterps position rotation linearVelocity angularVelocity character =
@@ -152,7 +157,8 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
         let character = { character with Character.JumpState.LastTimeOnGround = lastTimeOnGround }
 
         // update traversal
-        if character.Player then
+        match character.CharacterType with
+        | Player ->
 
             // player traversal
             if character.ActionState = NormalState || not grounded then
@@ -178,43 +184,52 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
 
             else (position, rotation, v3Zero, v3Zero, character)
 
-        else // enemy traversal
+        | Enemy ->
+        
+            // enemy traversal
             if character.ActionState = NormalState then
-                let followOutput = nav3dFollow (Some 1.0f) (Some 10.0f) 0.04f 0.1f position rotation playerPosition
+                let sphere = Sphere (playerPosition, 0.75f)
+                let nearest = sphere.Nearest position
+                let followOutput = nav3dFollow (Some 1.0f) (Some 10.0f) 0.04f 0.1f position rotation nearest
                 (followOutput.NavPosition, followOutput.NavRotation, followOutput.NavLinearVelocity, followOutput.NavAngularVelocity, character)
             else (position, rotation, v3Zero, v3Zero, character)
 
-    static member private updateActionState time (position : Vector3) (rotation : Quaternion) (playerPosition : Vector3) character =
-        let actionState =
+    static member private updateAction time (position : Vector3) (rotation : Quaternion) (playerPosition : Vector3) character =
+        match character.CharacterType with
+        | Enemy ->
             match character.ActionState with
-            | AttackState attack ->
+            | NormalState ->
+                let rotationForwardFlat = rotation.Forward.WithY(0.0f).Normalized
+                let positionFlat = position.WithY 0.0f
+                let playerPositionFlat = playerPosition.WithY 0.0f
+                if  Vector3.Distance (playerPosition, position) < 1.75f &&
+                    rotationForwardFlat.AngleBetween (playerPositionFlat - positionFlat) < 0.2f && 
+                    playerPosition.Y - position.Y < 1.3f &&
+                    position.Y - playerPosition.Y < 1.3f then
+                    { character with ActionState = AttackState (AttackState.make time) }
+                else character
+            | _ -> character
+        | Player -> character
+
+    static member private updateState time character =
+        match character.ActionState with
+        | AttackState attack ->
+            let actionState =
                 let localTime = time - attack.AttackTime
                 if localTime < 55 || localTime < 110 && attack.FollowUpBuffered
                 then AttackState attack
                 else NormalState
-            | InjuryState injury ->
+            { character with ActionState = actionState }
+        | InjuryState injury ->
+            let actionState =
                 let localTime = time - injury.InjuryTime
-                let injuryTime = if character.Player then 20 else 40
+                let injuryTime = match character.CharacterType with Player -> 30 | Enemy -> 40
                 if localTime < injuryTime
                 then InjuryState injury
                 else NormalState
-            | NormalState -> NormalState
-            | WoundedState -> WoundedState
-        let actionState =
-            if not character.Player then
-                match actionState with
-                | NormalState when not character.Player ->
-                    let positionFlat = position.WithY 0.0f
-                    let playerPositionFlat = playerPosition.WithY 0.0f
-                    if  Vector3.Distance (playerPosition, position) < 1.5f &&
-                        rotation.Forward.AngleBetween (playerPositionFlat - positionFlat) < 0.2f && 
-                        playerPosition.Y - position.Y < 1.3f &&
-                        position.Y - playerPosition.Y < 0.8f then
-                        AttackState (AttackState.make time)
-                    else actionState
-                | _ -> actionState
-            else actionState
-        { character with ActionState = actionState }
+            { character with ActionState = actionState }
+        | NormalState -> character
+        | WoundedState -> character
 
     static member private computeAnimations time position rotation linearVelocity angularVelocity character =
         ignore<Vector3> position
@@ -241,14 +256,19 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
         | _ -> (Set.empty, character)
 
     static member updateInputKey time keyboardKeyData character =
-        if character.Player then
-            let sinceJump = time - character.JumpState.LastTime
-            let sinceOnGround = time - character.JumpState.LastTimeOnGround
+        match character.CharacterType with
+        | Player ->
+
+            // jumping
             if keyboardKeyData.KeyboardKey = KeyboardKey.Space && not keyboardKeyData.Repeated then
+                let sinceJump = time - character.JumpState.LastTime
+                let sinceOnGround = time - character.JumpState.LastTimeOnGround
                 if sinceJump >= 12L && sinceOnGround < 10L && character.ActionState = NormalState then
                     let character = { character with Character.JumpState.LastTime = time }
                     (true, character)
                 else (false, character)
+
+            // attacking
             elif keyboardKeyData.KeyboardKey = KeyboardKey.Rshift && not keyboardKeyData.Repeated then
                 let character =
                     match character.ActionState with
@@ -262,18 +282,20 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
                     | InjuryState _ | WoundedState -> character
                 (false, character)
             else (false, character)
-        else (false, character)
+
+        | Enemy -> (false, character)
 
     static member update isKeyboardKeyDown nav3dFollow time position rotation linearVelocity angularVelocity grounded playerPosition character =
         let character = Character.updateInterps position rotation linearVelocity angularVelocity character
         let (position, rotation, linearVelocity, angularVelocity, character) = Character.updateMotion isKeyboardKeyDown nav3dFollow time position rotation grounded playerPosition character
-        let character = Character.updateActionState time position rotation playerPosition character
-        let (soundOpt, animations) = Character.computeAnimations time position rotation linearVelocity angularVelocity character
+        let character = Character.updateAction time position rotation playerPosition character
+        let character = Character.updateState time character
         let (attackedCharacters, character) = Character.updateAttackedCharacters time character
+        let (soundOpt, animations) = Character.computeAnimations time position rotation linearVelocity angularVelocity character
         (soundOpt, animations, attackedCharacters, position, rotation, character)
 
-    static member initial =
-        { Player = false
+    static member initial characterType =
+        { CharacterType = characterType
           PositionPrevious = Queue.empty
           RotationPrevious = Queue.empty
           LinearVelocityPrevious = Queue.empty
@@ -288,7 +310,7 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
           WeaponModel = Assets.Gameplay.GreatSwordModel }
 
     static member initialPlayer =
-        { Character.initial with WalkSpeed = 0.06f; Player = true }
+        { Character.initial Player with WalkSpeed = 0.06f }
 
     static member initialEnemy =
-        { Character.initial with HitPoints = 3 }
+        { Character.initial Enemy with HitPoints = 3 }

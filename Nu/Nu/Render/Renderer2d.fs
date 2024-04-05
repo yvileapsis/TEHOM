@@ -313,7 +313,7 @@ type [<ReferenceEquality>] GlRenderer2d =
         if  renderer.RenderAssetCached.CachedAssetTagOpt :> obj |> notNull &&
             assetEq assetTag renderer.RenderAssetCached.CachedAssetTagOpt then
             renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag // NOTE: this isn't redundant because we want to trigger refEq early-out.
-            Some renderer.RenderAssetCached.CachedRenderAsset
+            ValueSome renderer.RenderAssetCached.CachedRenderAsset
         elif
             renderer.RenderPackageCachedOpt :> obj |> notNull &&
             renderer.RenderPackageCachedOpt.CachedPackageName = assetTag.PackageName then
@@ -322,8 +322,8 @@ type [<ReferenceEquality>] GlRenderer2d =
                 let asset = Triple.thd assetInfo
                 renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag
                 renderer.RenderAssetCached.CachedRenderAsset <- asset
-                Some asset
-            else None
+                ValueSome asset
+            else ValueNone
         else
             match Dictionary.tryFind assetTag.PackageName renderer.RenderPackages with
             | Some package ->
@@ -332,8 +332,8 @@ type [<ReferenceEquality>] GlRenderer2d =
                     let asset = Triple.thd assetInfo
                     renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag
                     renderer.RenderAssetCached.CachedRenderAsset <- asset
-                    Some asset
-                else None
+                    ValueSome asset
+                else ValueNone
             | None ->
                 Log.info ("Loading Render2d package '" + assetTag.PackageName + "' for asset '" + assetTag.AssetName + "' on the fly.")
                 GlRenderer2d.tryLoadRenderPackage assetTag.PackageName renderer
@@ -344,9 +344,9 @@ type [<ReferenceEquality>] GlRenderer2d =
                         let asset = Triple.thd assetInfo
                         renderer.RenderAssetCached.CachedAssetTagOpt <- assetTag
                         renderer.RenderAssetCached.CachedRenderAsset <- asset
-                        Some asset
-                    else None
-                | (false, _) -> None
+                        ValueSome asset
+                    else ValueNone
+                | (false, _) -> ValueNone
 
     static member private handleLoadRenderPackage hintPackageName renderer =
         GlRenderer2d.tryLoadRenderPackage hintPackageName renderer
@@ -475,22 +475,22 @@ type [<ReferenceEquality>] GlRenderer2d =
          renderer) =
         let absolute = transform.Absolute
         let perimeter = transform.Perimeter
-        let min = perimeter.Min.V2 * Constants.Render.VirtualScalar2
-        let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2
-        let pivot = transform.PerimeterPivot.V2 * Constants.Render.VirtualScalar2
+        let min = perimeter.Min.V2 * Constants.Render.VirtualScalar2F
+        let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2F
+        let pivot = transform.PerimeterPivot.V2 * Constants.Render.VirtualScalar2F
         let rotation = -transform.Angles.Z
         match GlRenderer2d.tryGetRenderAsset image renderer with
-        | Some renderAsset ->
+        | ValueSome renderAsset ->
             match renderAsset with
             | TextureAsset (textureMetadata, texture) ->
                 GlRenderer2d.batchSprite absolute min size pivot rotation insetOpt textureMetadata texture color blend emission flip renderer
             | _ -> Log.infoOnce ("Cannot render sprite with a non-texture asset for '" + scstring image + "'.")
-        | None -> Log.infoOnce ("Sprite failed to render due to unloadable asset for '" + scstring image + "'.")
+        | ValueNone -> Log.infoOnce ("Sprite failed to render due to unloadable asset for '" + scstring image + "'.")
 
     /// Render sprite particles.
     static member renderSpriteParticles (blend : Blend, image : Image AssetTag, particles : Particle SArray, renderer) =
         match GlRenderer2d.tryGetRenderAsset image renderer with
-        | Some renderAsset ->
+        | ValueSome renderAsset ->
             match renderAsset with
             | TextureAsset (textureMetadata, texture) ->
                 let mutable index = 0
@@ -499,9 +499,9 @@ type [<ReferenceEquality>] GlRenderer2d =
                     let transform = &particle.Transform
                     let absolute = transform.Absolute
                     let perimeter = transform.Perimeter
-                    let min = perimeter.Min.V2 * Constants.Render.VirtualScalar2
-                    let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2
-                    let pivot = transform.PerimeterPivot.V2 * Constants.Render.VirtualScalar2
+                    let min = perimeter.Min.V2 * Constants.Render.VirtualScalar2F
+                    let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2F
+                    let pivot = transform.PerimeterPivot.V2 * Constants.Render.VirtualScalar2F
                     let rotation = -transform.Angles.Z
                     let color = &particle.Color
                     let emission = &particle.Emission
@@ -510,7 +510,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                     GlRenderer2d.batchSprite absolute min size pivot rotation insetOpt textureMetadata texture color blend emission flip renderer
                     index <- inc index
             | _ -> Log.infoOnce ("Cannot render sprite particle with a non-texture asset for '" + scstring image + "'.")
-        | None -> Log.infoOnce ("Sprite particles failed to render due to unloadable asset for '" + scstring image + "'.")
+        | ValueNone -> Log.infoOnce ("Sprite particles failed to render due to unloadable asset for '" + scstring image + "'.")
 
     /// Render tiles.
     static member renderTiles
@@ -529,22 +529,22 @@ type [<ReferenceEquality>] GlRenderer2d =
         // gather context for rendering tiles
         let absolute = transform.Absolute
         let perimeter = transform.Perimeter
-        let min = perimeter.Min.V2 * Constants.Render.VirtualScalar2
-        let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2
-        let eyeCenter = eyeCenter * Constants.Render.VirtualScalar2
-        let eyeSize = eyeSize * Constants.Render.VirtualScalar2
-        let tileSize = tileSize * Constants.Render.VirtualScalar2
+        let min = perimeter.Min.V2 * Constants.Render.VirtualScalar2F
+        let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2F
+        let eyeCenter = eyeCenter * Constants.Render.VirtualScalar2F
+        let eyeSize = eyeSize * Constants.Render.VirtualScalar2F
+        let tileSize = tileSize * Constants.Render.VirtualScalar2F
         let tilePivot = tileSize * 0.5f // just rotate around center
         let mutable tileSetTexturesAllFound = true
         let tileSetTextures =
             tileAssets |>
             Array.map (fun struct (tileSet, tileSetImage) ->
                 match GlRenderer2d.tryGetRenderAsset tileSetImage renderer with
-                | Some asset ->
+                | ValueSome asset ->
                     match asset with
                     | TextureAsset (tileSetTexture, tileSetTextureMetadata) -> ValueSome struct (tileSet, tileSetImage, tileSetTexture, tileSetTextureMetadata)
                     | _ -> tileSetTexturesAllFound <- false; ValueNone
-                | None -> tileSetTexturesAllFound <- false; ValueNone) |>
+                | ValueNone -> tileSetTexturesAllFound <- false; ValueNone) |>
             Array.filter ValueOption.isSome |>
             Array.map ValueOption.get
 
@@ -1005,12 +1005,12 @@ type [<ReferenceEquality>] GlRenderer2d =
                 let mutable transform = transform
                 let absolute = transform.Absolute
                 let perimeter = transform.Perimeter
-                let position = perimeter.Min.V2 * Constants.Render.VirtualScalar2
-                let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2
+                let position = perimeter.Min.V2 * Constants.Render.VirtualScalar2F
+                let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2F
                 let viewport = Constants.Render.Viewport
                 let viewProjection = viewport.ViewProjection2d (absolute, eyeCenter, eyeSize)
                 match GlRenderer2d.tryGetRenderAsset font renderer with
-                | Some renderAsset ->
+                | ValueSome renderAsset ->
                     match renderAsset with
                     | FontAsset (fontSizeDefault, font) ->
 
@@ -1117,7 +1117,7 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     // fin
                     | _ -> Log.infoOnce ("Cannot render text with a non-font asset for '" + scstring font + "'.")
-                | None -> Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring font + "'.")
+                | ValueNone -> Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring font + "'.")
             OpenGL.Hl.Assert ()
 
     static member private renderDescriptor descriptor eyeCenter eyeSize renderer =

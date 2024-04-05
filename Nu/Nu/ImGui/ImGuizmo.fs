@@ -21,7 +21,7 @@ module ImGuizmo =
         let drawList = ImGui.GetBackgroundDrawList ()
         let viewport = Constants.Render.Viewport
         let view = viewport.View3d (absolute, eyeCenter, eyeRotation)
-        let projection = viewport.Projection3d Constants.Render.NearPlaneDistanceOmnipresent Constants.Render.FarPlaneDistanceOmnipresent
+        let projection = viewport.Projection3d
         let viewProjection = view * projection
         let corners = box.Corners
         let segments =
@@ -42,7 +42,7 @@ module ImGuizmo =
             | Some (a, b) ->
                 let aWindow = ImGui.PositionToWindow (viewProjection, a)
                 let bWindow = ImGui.PositionToWindow (viewProjection, b)
-                let xWindow = box2 v2Zero Constants.Render.ResolutionF
+                let xWindow = box2 v2Zero Constants.Render.Resolution.V2
                 if  xWindow.Contains aWindow <> ContainmentType.Disjoint &&
                     xWindow.Contains bWindow <> ContainmentType.Disjoint then
                     drawList.AddLine (aWindow, bWindow, uint 0xFF00CFCF)

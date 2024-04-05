@@ -3,6 +3,7 @@
 
 namespace Nu
 open System
+open System.Diagnostics
 open System.Reflection
 open System.Threading
 open SDL2
@@ -12,6 +13,11 @@ open Prime
 type Nu () =
 
     static let mutable Initialized = false
+
+    // NOTE: extracted from Nu.initPlus to shorten stack trace.
+    [<DebuggerHidden>]
+    static member private worldModuleSignal (signalObj : obj) (simulant : Simulant) world =
+        World.signal (signalObj :?> Signal) simulant world
 
     /// Initialize the Nu game engine, allowing for additional user-defined initialization after setting up logging
     /// and function / lens references but before performing initialization involving values stored in constants.
@@ -64,9 +70,9 @@ type Nu () =
             WorldModule.evictScreenElements <- fun screen world -> World.evictScreenElements screen world
             WorldModule.registerScreenPhysics <- fun screen world -> World.registerScreenPhysics screen world
             WorldModule.unregisterScreenPhysics <- fun screen world -> World.unregisterScreenPhysics screen world
-            WorldModule.signal <- fun signalObj simulant world -> World.signal (signalObj :?> Signal) simulant world
             WorldModule.register <- fun simulant world -> World.register simulant world
             WorldModule.unregister <- fun simulant world -> World.unregister simulant world
+            WorldModule.signal <- Nu.worldModuleSignal
             WorldModule.destroyImmediate <- fun simulant world -> World.destroyImmediate simulant world
             WorldModule.destroy <- fun simulant world -> World.destroy simulant world
             WorldModule.getEmptyEffect <- fun () -> Effect.empty :> obj
@@ -178,6 +184,7 @@ module WorldModule3 =
                  LayoutFacet ()
                  LightProbe3dFacet ()
                  Light3dFacet ()
+                 LightingConfigFacet ()
                  SkyBoxFacet ()
                  StaticBillboardFacet ()
                  StaticModelSurfaceFacet ()
@@ -247,7 +254,7 @@ module WorldModule3 =
             world
 
         /// Make the world.
-        static member make plugin eventGraph jobSystem dispatchers quadtree ambientState imGui physicsEngine2d physicsEngine3d rendererProcess audioPlayer activeGameDispatcher =
+        static member make plugin eventGraph jobGraph dispatchers quadtree ambientState imGui physicsEngine2d physicsEngine3d rendererProcess audioPlayer activeGameDispatcher =
             Nu.init () // ensure game engine is initialized
             let config = AmbientState.getConfig ambientState
             let entityStates = SUMap.makeEmpty HashIdentity.Structural config
@@ -274,7 +281,7 @@ module WorldModule3 =
                   AmbientState = ambientState
                   Subsystems = subsystems
                   Simulants = simulants
-                  JobSystem = jobSystem
+                  JobGraph = jobGraph
                   WorldExtension = worldExtension }
             let world = { world with GameState = Reflection.attachProperties GameState.copy gameState.Dispatcher gameState world }
             World.choose world
@@ -294,8 +301,8 @@ module WorldModule3 =
             // make the default game dispatcher
             let defaultGameDispatcher = World.makeDefaultGameDispatcher ()
 
-            // make the default job system
-            let jobSystem = JobSystemInline ()
+            // make the default job graph
+            let jobGraph = JobGraphInline ()
 
             // make the world's dispatchers
             let dispatchers =
@@ -306,7 +313,7 @@ module WorldModule3 =
                   GameDispatchers = Map.ofList [defaultGameDispatcher] }
 
             // make the world's subsystems
-            let imGui = ImGui (Constants.Render.ResolutionX, Constants.Render.ResolutionY)
+            let imGui = ImGui (Constants.Render.Resolution.X, Constants.Render.Resolution.Y)
             let physicsEngine2d = StubPhysicsEngine.make ()
             let physicsEngine3d = StubPhysicsEngine.make ()
             let rendererProcess = RendererInline () :> RendererProcess
@@ -321,7 +328,7 @@ module WorldModule3 =
             let quadtree = Quadtree.make Constants.Engine.QuadtreeDepth Constants.Engine.QuadtreeSize
 
             // make the world
-            let world = World.make plugin eventGraph jobSystem dispatchers quadtree ambientState imGui physicsEngine2d physicsEngine3d rendererProcess audioPlayer (snd defaultGameDispatcher)
+            let world = World.make plugin eventGraph jobGraph dispatchers quadtree ambientState imGui physicsEngine2d physicsEngine3d rendererProcess audioPlayer (snd defaultGameDispatcher)
 
             // finally, register the game
             World.registerGame Game world
@@ -358,11 +365,11 @@ module WorldModule3 =
                 // make the default game dispatcher
                 let defaultGameDispatcher = World.makeDefaultGameDispatcher ()
 
-                // make the job system
-                let jobSystem =
+                // make the job graph
+                let jobGraph =
                     if Constants.Engine.RunSynchronously
-                    then JobSystemInline () :> JobSystem
-                    else JobSystemParallel (TimeSpan.FromSeconds 0.5) :> JobSystem
+                    then JobGraphInline () :> JobGraph
+                    else JobGraphParallel (TimeSpan.FromSeconds 0.5) :> JobGraph
 
                 // make the world's dispatchers
                 let dispatchers =
@@ -379,9 +386,9 @@ module WorldModule3 =
                     | None -> GameDispatcher ()
 
                 // make the world's subsystems
-                let imGui = ImGui (Constants.Render.ResolutionX, Constants.Render.ResolutionY)
-                let physicsEngine2d = PhysicsEngine2d.make Constants.Physics.Gravity2dDefault
-                let physicsEngine3d = PhysicsEngine3d.make Constants.Physics.Gravity3dDefault Metadata.tryGetFilePath Metadata.tryGetStaticModelMetadata
+                let imGui = ImGui (Constants.Render.Resolution.X, Constants.Render.Resolution.Y)
+                let physicsEngine2d = PhysicsEngine2d.make (Constants.Physics.GravityDefault * Constants.Engine.Meter2d)
+                let physicsEngine3d = PhysicsEngine3d.make Constants.Physics.GravityDefault Metadata.tryGetFilePath Metadata.tryGetStaticModelMetadata
                 let rendererProcess =
                     if Constants.Engine.RunSynchronously
                     then RendererInline () :> RendererProcess
@@ -407,7 +414,7 @@ module WorldModule3 =
                     let quadtree = Quadtree.make Constants.Engine.QuadtreeDepth Constants.Engine.QuadtreeSize
 
                     // make the world
-                    let world = World.make plugin eventGraph jobSystem dispatchers quadtree ambientState imGui physicsEngine2d physicsEngine3d rendererProcess audioPlayer activeGameDispatcher
+                    let world = World.make plugin eventGraph jobGraph dispatchers quadtree ambientState imGui physicsEngine2d physicsEngine3d rendererProcess audioPlayer activeGameDispatcher
 
                     // add the keyed values
                     let (kvps, world) = plugin.MakeKeyedValues world

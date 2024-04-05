@@ -18,7 +18,7 @@ module EntityDispatcherModule =
             Entity2dDispatcher (Constants.Engine.EntityPerimeterCentered2dDefault, physical)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.Entity2dSizeDefault
+            [define Entity.Size Constants.Engine.EntitySize2dDefault
              define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCentered2dDefault]
 
     /// A gui entity dispatcher.
@@ -29,7 +29,7 @@ module EntityDispatcherModule =
             [typeof<LayoutFacet>]
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntityGuiSizeDefault
+            [define Entity.Size Constants.Engine.EntitySizeGuiDefault
              define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCenteredGuiDefault
              define Entity.Absolute true
              define Entity.AlwaysUpdate true
@@ -49,7 +49,7 @@ module EntityDispatcherModule =
             Entity3dDispatcher (physical)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.Entity3dSizeDefault]
+            [define Entity.Size Constants.Engine.EntitySize3dDefault]
 
         override this.RayCast (ray, entity, world) =
             if Array.isEmpty (entity.GetFacets world) then
@@ -63,7 +63,7 @@ module EntityDispatcherModule =
         inherit EntityDispatcher (false, true, false)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntityVuiSizeDefault]
+            [define Entity.Size Constants.Engine.EntitySizeVuiDefault]
 
 [<AutoOpen>]
 module StaticSpriteDispatcherModule =
@@ -93,7 +93,7 @@ module AnimatedSpriteDispatcherModule =
             [typeof<AnimatedSpriteFacet>]
 
         static member Properties =
-            [define Entity.CelSize (Vector2 (48.0f, 48.0f))
+            [define Entity.CelSize (Vector2 (32.0f, 32.0f))
              define Entity.CelCount 16
              define Entity.CelRun 4
              define Entity.AnimationDelay (GameTime.ofSeconds (1.0f / 15.0f))
@@ -121,8 +121,8 @@ module TextDispatcherModule =
             | Some image ->
                 match Metadata.tryGetTextureSizeF image with
                 | Some size -> AttributesInferred.important size.V3 v3Zero
-                | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+                | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
 
 [<AutoOpen>]
 module LabelDispatcherModule =
@@ -329,11 +329,11 @@ module Character2dDispatcherModule =
              define Entity.BodyType Dynamic
              define Entity.SleepingAllowed false
              define Entity.AngularFactor v3Zero
-             define Entity.GravityOverride (Some (Constants.Physics.Gravity2dDefault * 3.0f))
+             define Entity.GravityOverride (Some (Constants.Physics.GravityDefault * Constants.Engine.Meter2d * 3.0f))
              define Entity.BodyShape (CapsuleShape { Height = 0.5f; Radius = 0.25f; TransformOpt = None; PropertiesOpt = None })
-             define Entity.Character2dIdleImage Assets.Default.Character2dIdleImage
-             define Entity.Character2dJumpImage Assets.Default.Character2dJumpImage
-             define Entity.Character2dWalkSheet Assets.Default.Character2dWalkImage
+             define Entity.Character2dIdleImage Assets.Default.Character2dIdle
+             define Entity.Character2dJumpImage Assets.Default.Character2dJump
+             define Entity.Character2dWalkSheet Assets.Default.Character2dWalk
              define Entity.Character2dFacingLeft false]
 
         override this.Update (entity, world) =

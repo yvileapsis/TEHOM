@@ -773,14 +773,6 @@ module WorldModule2 =
                 World.unregisterEntityPhysics entity world)
                 world entities
 
-        static member internal signalFn (signalObj : obj) (simulant : Simulant) world =
-            match simulant with
-            | :? Entity as entity -> (entity.GetDispatcher world).Signal (signalObj, entity, world)
-            | :? Group as group -> (group.GetDispatcher world).Signal (signalObj, group, world)
-            | :? Screen as screen -> (screen.GetDispatcher world).Signal (signalObj, screen, world)
-            | :? Game as game -> (game.GetDispatcher world).Signal (signalObj, game, world)
-            | _ -> failwithumf ()
-
         /// Try to reload the overlayer currently in use by the world.
         static member tryReloadOverlayer inputDirectory outputDirectory world =
             
@@ -1090,10 +1082,9 @@ module WorldModule2 =
                     | _ -> world
             | Dead -> world
 
-        static member private getElements2dBy (getElementsFromQuadree : Entity Quadtree -> Entity Quadelement seq) world =
+        static member private getElements2dBy (getElementsFromQuadree : Entity Quadtree -> unit) world =
             let quadtree = World.getQuadtree world
-            let elements = getElementsFromQuadree quadtree
-            (elements, world)
+            getElementsFromQuadree quadtree
 
         static member private getElements2dInView set world =
             let viewBounds = World.getViewBounds2dRelative world
@@ -1106,33 +1097,37 @@ module WorldModule2 =
         static member private getElements2d set world =
             World.getElements2dBy (Quadtree.getElements set) world
 
-        static member private getEntities2dBy getElementsFromQuadtree world =
-            let quadtree = World.getQuadtree world
-            let elements = getElementsFromQuadtree quadtree
-            let entities = Seq.map (fun (element : Entity Quadelement) -> element.Entry) elements
-            (entities, world)
-
         /// Get all 2d entities in the given bounds, including all uncullable entities.
         static member getEntities2dInBounds bounds set world =
-            World.getEntities2dBy (Quadtree.getElementsInBounds bounds set) world
+            let quadtree = World.getQuadtree world
+            Quadtree.getElementsInBounds bounds set quadtree
+            Seq.map (fun (element : Entity Quadelement) -> element.Entry) set
 
         /// Get all 2d entities at the given point, including all uncullable entities.
         static member getEntities2dAtPoint point set world =
-            World.getEntities2dBy (Quadtree.getElementsAtPoint point set) world
+            let quadtree = World.getQuadtree world
+            Quadtree.getElementsAtPoint point set quadtree
+            Seq.map (fun (element : Entity Quadelement) -> element.Entry) set
 
         /// Get all 2d entities in the current 2d view, including all uncullable entities.
         static member getEntities2dInView set world =
             let viewBounds = World.getViewBounds2dRelative world
-            World.getEntities2dBy (Quadtree.getElementsInView viewBounds set) world
+            let quadtree = World.getQuadtree world
+            Quadtree.getElementsInView viewBounds set quadtree
+            Seq.map (fun (element : Entity Quadelement) -> element.Entry) set
 
         /// Get all 2d entities needing to update for the current 2d play zone, including all uncullable entities.
         static member getEntities2dInPlay set world =
             let playBounds = World.getPlayBounds2dRelative world
-            World.getEntities2dBy (Quadtree.getElementsInPlay playBounds set) world
+            let quadtree = World.getQuadtree world
+            Quadtree.getElementsInPlay playBounds set quadtree
+            Seq.map (fun (element : Entity Quadelement) -> element.Entry) set
 
         /// Get all 2d entities in the current selected screen, including all uncullable entities.
         static member getEntities2d set world =
-            World.getEntities2dBy (Quadtree.getElements set) world
+            let quadtree = World.getQuadtree world
+            Quadtree.getElements set quadtree
+            Seq.map (fun (element : Entity Quadelement) -> element.Entry) set
 
         static member private getElements3dBy (getElementsFromOctree : Entity Octree -> Entity Octelement seq) world =
             match World.getOctreeOpt world with
@@ -1143,69 +1138,109 @@ module WorldModule2 =
 
         static member private getElements3dInPlay set world =
             let struct (playBox, playFrustum) = World.getPlayBounds3d world
-            World.getElements3dBy (Octree.getElementsInPlay playBox playFrustum set) world
-
-        static member private getElements3dInViewFrustum interior exterior frustum set world =
-            World.getElements3dBy (Octree.getElementsInViewFrustum interior exterior frustum set) world
-
-        static member private getElements3dInView set world =
-            let frustumInterior = World.getEye3dFrustumInterior world
-            let frustumExterior = World.getEye3dFrustumExterior world
-            let frustumImposter = World.getEye3dFrustumImposter world
-            let lightBox = World.getLight3dBox world
-            World.getElements3dBy (Octree.getElementsInView frustumInterior frustumExterior frustumImposter lightBox set) world
-
-        static member private getElements3d set world =
-            World.getElements3dBy (Octree.getElements set) world
-
-        static member private getEntities3dBy getElementsFromOctree world =
             match World.getOctreeOpt world with
             | Some octree ->
-                let elements = getElementsFromOctree octree
-                let entities = Seq.map (fun (element : Entity Octelement) -> element.Entry) elements
-                (entities, world)
-            | None -> (Seq.empty, world)
+                Octree.getElementsInPlay playBox playFrustum set octree
+            | None -> ()
+
+        static member private getElements3dInViewFrustum interior exterior frustum set world =
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getElementsInViewFrustum interior exterior frustum set octree
+            | None -> ()
+
+        static member private getElements3dInView set world =
+            let interior = World.getEye3dFrustumInterior world
+            let exterior = World.getEye3dFrustumExterior world
+            let imposter = World.getEye3dFrustumImposter world
+            let lightBox = World.getLight3dBox world
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getElementsInView interior exterior imposter lightBox set octree
+            | None -> ()
+
+        static member private getElements3d set world =
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getElements set octree
+            | None -> ()
 
         /// Get all 3d entities in the given bounds, including all uncullable entities.
         static member getEntities3dInBounds bounds set world =
-            World.getEntities3dBy (Octree.getElementsInBounds bounds set) world
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getElementsInBounds bounds set octree
+                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
+            | None -> Seq.empty
 
         /// Get all 3d entities at the given point, including all uncullable entities.
         static member getEntities3dAtPoint point set world =
-            World.getEntities3dBy (Octree.getElementsAtPoint point set) world
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getElementsAtPoint point set octree
+                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
+            | None -> Seq.empty
 
         /// Get all 3d entities in the current 3d play zone, including all uncullable entities.
         static member getEntities3dInPlay set world =
             let struct (playBox, playFrustum) = World.getPlayBounds3d world
-            World.getEntities3dBy (Octree.getElementsInPlay playBox playFrustum set) world
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getElementsInPlay playBox playFrustum set octree
+                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
+            | None -> Seq.empty
 
         /// Get all 3d entities in the current 3d view, including all uncullable entities.
         static member getEntities3dInView set world =
-            let frustumInterior = World.getEye3dFrustumInterior world
-            let frustumExterior = World.getEye3dFrustumExterior world
-            let frustumImposter = World.getEye3dFrustumImposter world
+            let interior = World.getEye3dFrustumInterior world
+            let exterior = World.getEye3dFrustumExterior world
+            let imposter = World.getEye3dFrustumImposter world
             let lightBox = World.getLight3dBox world
-            World.getEntities3dBy (Octree.getElementsInView frustumInterior frustumExterior frustumImposter lightBox set) world
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getElementsInView interior exterior imposter lightBox set octree
+                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
+            | None -> Seq.empty
 
         /// Get all 3d light probe entities in the current 3d light box, including all uncullable light probes.
         static member getLightProbes3dInFrustum frustum set world =
-            World.getEntities3dBy (Octree.getLightProbesInFrustum frustum set) world
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getLightProbesInFrustum frustum set octree
+                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
+            | None -> Seq.empty
 
         /// Get all 3d light probe entities in the current 3d light box, including all uncullable lights.
         static member getLightProbes3dInBox box set world =
-            World.getEntities3dBy (Octree.getLightProbesInBox box set) world
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getLightProbesInBox box set octree
+                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
+            | None -> Seq.empty
 
         /// Get all 3d light entities in the current 3d light box, including all uncullable lights.
         static member getLights3dInFrustum frustum set world =
-            World.getEntities3dBy (Octree.getLightsInFrustum frustum set) world
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getLightsInFrustum frustum set octree
+                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
+            | None -> Seq.empty
 
         /// Get all 3d light entities in the current 3d light box, including all uncullable lights.
         static member getLights3dInBox box set world =
-            World.getEntities3dBy (Octree.getLightsInBox box set) world
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getLightsInBox box set octree
+                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
+            | None -> Seq.empty
 
         /// Get all 3d entities in the current selected screen, including all uncullable entities.
         static member getEntities3d set world =
-            World.getEntities3dBy (Octree.getElements set) world
+            match World.getOctreeOpt world with
+            | Some octree ->
+                Octree.getElements set octree
+                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
+            | None -> Seq.empty
 
         static member private preUpdateSimulants (world : World) =
 
@@ -1239,55 +1274,59 @@ module WorldModule2 =
 
         static member private updateSimulants (world : World) =
 
-            // gather simulants
-            UpdateGatherTimer.Start ()
-            let game = Nu.Game.Handle
-            let advancing = world.Advancing
-            let screens = match World.getOmniScreenOpt world with Some omniScreen -> [omniScreen] | None -> []
-            let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
-            let screens = List.rev screens
-            let groups = Seq.concat (List.map (flip World.getGroups world) screens)
-            let (elements3d, world) = World.getElements3dInPlay CachedHashSet3dNormal world
-            let (elements2d, world) = World.getElements2dInPlay CachedHashSet2dNormal world
-            UpdateGatherTimer.Stop ()
+            // use a finally block to free cached values
+            try
 
-            // update game
-            UpdateGameTimer.Start ()
-            let world = if advancing then World.updateGame game world else world
-            UpdateGameTimer.Stop ()
+                // gather simulants
+                UpdateGatherTimer.Start ()
+                let game = Nu.Game.Handle
+                let advancing = world.Advancing
+                let screens = match World.getOmniScreenOpt world with Some omniScreen -> [omniScreen] | None -> []
+                let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
+                let screens = List.rev screens
+                let groups = Seq.concat (List.map (flip World.getGroups world) screens)
+                World.getElements3dInPlay CachedHashSet3dNormal world
+                World.getElements2dInPlay CachedHashSet2dNormal world
+                UpdateGatherTimer.Stop ()
+
+                // update game
+                UpdateGameTimer.Start ()
+                let world = if advancing then World.updateGame game world else world
+                UpdateGameTimer.Stop ()
             
-            // update screens
-            UpdateScreensTimer.Start ()
-            let world = List.fold (fun world screen -> if advancing then World.updateScreen screen world else world) world screens
-            UpdateScreensTimer.Stop ()
+                // update screens
+                UpdateScreensTimer.Start ()
+                let world = List.fold (fun world screen -> if advancing then World.updateScreen screen world else world) world screens
+                UpdateScreensTimer.Stop ()
 
-            // update groups
-            UpdateGroupsTimer.Start ()
-            let world = Seq.fold (fun world group -> if advancing then World.updateGroup group world else world) world groups
-            UpdateGroupsTimer.Stop ()
+                // update groups
+                UpdateGroupsTimer.Start ()
+                let world = Seq.fold (fun world group -> if advancing then World.updateGroup group world else world) world groups
+                UpdateGroupsTimer.Stop ()
 
-            // update entities
-            UpdateEntitiesTimer.Start ()
-            let world =
-                Seq.fold (fun world (element : Entity Octelement) ->
-                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
-                    then World.updateEntity element.Entry world
-                    else world)
-                    world elements3d
-            let world =
-                Seq.fold (fun world (element : Entity Quadelement) ->
-                    if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
-                    then World.updateEntity element.Entry world
-                    else world)
-                    world elements2d
-            UpdateEntitiesTimer.Stop ()
+                // update entities
+                UpdateEntitiesTimer.Start ()
+                let world =
+                    Seq.fold (fun world (element : Entity Octelement) ->
+                        if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
+                        then World.updateEntity element.Entry world
+                        else world)
+                        world CachedHashSet3dNormal
+                let world =
+                    Seq.fold (fun world (element : Entity Quadelement) ->
+                        if element.Entry.GetAlwaysUpdate world || advancing && not (element.Entry.GetStatic world)
+                        then World.updateEntity element.Entry world
+                        else world)
+                        world CachedHashSet2dNormal
+                UpdateEntitiesTimer.Stop ()
 
-            // clear cached hash sets
-            CachedHashSet3dNormal.Clear ()
-            CachedHashSet2dNormal.Clear ()
+                // fin
+                world
 
-            // fin
-            world
+            // free cached values
+            finally
+                CachedHashSet3dNormal.Clear ()
+                CachedHashSet2dNormal.Clear ()
 
         static member private postUpdateSimulants (world : World) =
 
@@ -1364,132 +1403,138 @@ module WorldModule2 =
 
         static member private renderSimulantsInternal renderPass world =
 
-            // gather simulants
-            RenderGatherTimer.Start ()
-            let game = Nu.Game.Handle
-            let screens = match World.getOmniScreenOpt world with Some omniScreen -> [omniScreen] | None -> []
-            let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
-            let screens = List.rev screens
-            let groups = Seq.concat (List.map (flip World.getGroups world) screens)
-            let groupsInvisible =
-                if world.Accompanied
-                then hashSetPlus HashIdentity.Structural (Seq.filter (fun (group : Group) -> not (group.GetVisible world)) groups)
-                else hashSetPlus HashIdentity.Structural []
-            let (elements3d, world) =
+            // use a finally block to free cached values
+            try
+
+                // gather simulants
+                RenderGatherTimer.Start ()
+                let game = Nu.Game.Handle
+                let screens = match World.getOmniScreenOpt world with Some omniScreen -> [omniScreen] | None -> []
+                let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
+                let screens = List.rev screens
+                let groups = Seq.concat (List.map (flip World.getGroups world) screens)
+                let groupsInvisible =
+                    if world.Accompanied
+                    then hashSetPlus HashIdentity.Structural (Seq.filter (fun (group : Group) -> not (group.GetVisible world)) groups)
+                    else hashSetPlus HashIdentity.Structural []
                 match renderPass with
                 | NormalPass skipCulling ->
                     if skipCulling
                     then World.getElements3d CachedHashSet3dNormal world
                     else World.getElements3dInView CachedHashSet3dNormal world
                 | ShadowPass (_, shadowDirectional, shadowFrustum) -> World.getElements3dInViewFrustum (not shadowDirectional) true shadowFrustum CachedHashSet3dNormal world
-                | ReflectionPass _ -> (Seq.empty, world)
-            let (elements2d, world) =
+                | ReflectionPass _ -> ()
                 match renderPass with
                 | NormalPass skipCulling ->
                     if skipCulling
                     then World.getElements2d CachedHashSet2dNormal world
                     else World.getElements2dInView CachedHashSet2dNormal world
-                | ShadowPass _ -> (Seq.empty, world)
-                | ReflectionPass _ -> (Seq.empty, world)
-            RenderGatherTimer.Stop ()
+                | ShadowPass _ -> ()
+                | ReflectionPass _ -> ()
+                RenderGatherTimer.Stop ()
 
-            // render simulants breadth-first
-            World.renderGame renderPass game world
-            for screen in screens do
-                World.renderScreen renderPass screen world
-            match World.getSelectedScreenOpt world with Some selectedScreen -> World.renderScreenTransition selectedScreen world | None -> ()
-            for group in groups do
-                if not (groupsInvisible.Contains group) then
-                    World.renderGroup renderPass group world
+                // render simulants breadth-first
+                World.renderGame renderPass game world
+                for screen in screens do
+                    World.renderScreen renderPass screen world
+                match World.getSelectedScreenOpt world with Some selectedScreen -> World.renderScreenTransition selectedScreen world | None -> ()
+                for group in groups do
+                    if not (groupsInvisible.Contains group) then
+                        World.renderGroup renderPass group world
 
-            // render entities
-            RenderEntitiesTimer.Start ()
-            if world.Unaccompanied || groupsInvisible.Count = 0 then
-                for element in elements3d do
-                    if element.Visible then
-                        World.renderEntity renderPass element.Entry world
-            else
-                for element in elements3d do
-                    if element.Visible && not (groupsInvisible.Contains element.Entry.Group) then
-                        World.renderEntity renderPass element.Entry world
-            if world.Unaccompanied || groupsInvisible.Count = 0 then
-                for element in elements2d do
-                    if element.Visible then
-                        World.renderEntity renderPass element.Entry world
-            else
-                for element in elements2d do
-                    if element.Visible && not (groupsInvisible.Contains element.Entry.Group) then
-                        World.renderEntity renderPass element.Entry world
-            RenderEntitiesTimer.Stop ()
+                // render entities
+                RenderEntitiesTimer.Start ()
+                if world.Unaccompanied || groupsInvisible.Count = 0 then
+                    for element in CachedHashSet3dNormal do
+                        if element.Visible then
+                            World.renderEntity renderPass element.Entry world
+                else
+                    for element in CachedHashSet3dNormal do
+                        if element.Visible && not (groupsInvisible.Contains element.Entry.Group) then
+                            World.renderEntity renderPass element.Entry world
+                if world.Unaccompanied || groupsInvisible.Count = 0 then
+                    for element in CachedHashSet2dNormal do
+                        if element.Visible then
+                            World.renderEntity renderPass element.Entry world
+                else
+                    for element in CachedHashSet2dNormal do
+                        if element.Visible && not (groupsInvisible.Contains element.Entry.Group) then
+                            World.renderEntity renderPass element.Entry world
+                RenderEntitiesTimer.Stop ()
 
-            // clear cached hash sets
-            CachedHashSet3dNormal.Clear ()
-            CachedHashSet2dNormal.Clear ()
+                // fin
+                world
 
-            // fin
-            world
+            // free cached values
+            finally
+                CachedHashSet3dNormal.Clear ()
+                CachedHashSet2dNormal.Clear ()
 
         static member private renderSimulants skipCulling world =
 
-            // create shadow pass descriptors
-            let lightBox = World.getLight3dBox world
-            let (lights, world) = World.getLights3dInBox lightBox CachedHashSet3dShadow world // NOTE: this may not be the optimal way to query.
-            let eyeCenter = World.getEye3dCenter world
-            let sortableShadowPassDescriptors =
-                [|for light in lights do
-                    if light.GetDesireShadows world then
-                        let (directional, coneOuter) =
-                            match light.GetLightType world with
-                            | PointLight -> (false, MathF.TWO_PI)
-                            | SpotLight (_, coneOuter)-> (false, coneOuter)
-                            | DirectionalLight -> (true, 0.0f)
-                        let (shadowView, shadowProjection) =
-                            if not directional then
-                                let shadowRotation = light.GetRotation world
-                                let mutable shadowView = Matrix4x4.CreateFromYawPitchRoll (0.0f, -MathF.PI_OVER_2, 0.0f) * Matrix4x4.CreateFromQuaternion shadowRotation
-                                shadowView.Translation <- light.GetPosition world
-                                shadowView <- shadowView.Inverted
-                                let shadowFov = max (min coneOuter Constants.Render.ShadowFovMax) 0.01f
-                                let shadowCutoff = max (light.GetLightCutoff world) 0.1f
-                                let shadowProjection = Matrix4x4.CreatePerspectiveFieldOfView (shadowFov, 1.0f, Constants.Render.NearPlaneDistanceInterior, shadowCutoff)
-                                (shadowView, shadowProjection)
-                            else
-                                let shadowRotation = light.GetRotation world
-                                let mutable shadowView = Matrix4x4.CreateFromYawPitchRoll (0.0f, -MathF.PI_OVER_2, 0.0f) * Matrix4x4.CreateFromQuaternion shadowRotation
-                                shadowView.Translation <- light.GetPosition world
-                                shadowView <- shadowView.Inverted
-                                let shadowCutoff = light.GetLightCutoff world
-                                let shadowProjection = Matrix4x4.CreateOrthographic (shadowCutoff * 2.0f, shadowCutoff * 2.0f, -shadowCutoff, shadowCutoff)
-                                (shadowView, shadowProjection)
-                        let shadowFrustum =
-                            Frustum (shadowView * shadowProjection)
-                        let shadowInView =
-                            let frustumInterior = World.getEye3dFrustumInterior world
-                            let frustumExterior = World.getEye3dFrustumExterior world
-                            let frustumImposter = World.getEye3dFrustumImposter world
-                            match light.GetPresence world with
-                            | Interior -> frustumInterior.Intersects shadowFrustum
-                            | Exterior -> frustumExterior.Intersects shadowFrustum || frustumInterior.Intersects shadowFrustum
-                            | Imposter -> frustumImposter.Intersects shadowFrustum
-                            | Omnipresent -> true
-                        if shadowInView then
-                            let directionalSort = if not directional then 1 else 0
-                            let distanceSquared = Vector3.DistanceSquared (eyeCenter, light.GetPosition world)
-                            struct (struct (directionalSort, distanceSquared), struct (shadowFrustum, light))|]
+            // use a finally block to free cached values
+            try
 
-            // render simulant shadows in descriptor sort order
-            let world =
-                sortableShadowPassDescriptors |>
-                Array.sortBy fst' |>
-                Array.tryTake Constants.Render.ShadowsMax |>
-                Array.fold (fun world struct (struct (directionalSort, _), struct (shadowFrustum, light)) ->
-                    World.renderSimulantsInternal (ShadowPass (light.GetId world, isZero directionalSort, shadowFrustum)) world)
-                    world
+                // create shadow pass descriptors
+                let lightBox = World.getLight3dBox world
+                let lights = World.getLights3dInBox lightBox CachedHashSet3dShadow world // NOTE: this may not be the optimal way to query.
+                let eyeCenter = World.getEye3dCenter world
+                let sortableShadowPassDescriptors =
+                    [|for light in lights do
+                        if light.GetDesireShadows world then
+                            let (directional, coneOuter) =
+                                match light.GetLightType world with
+                                | PointLight -> (false, MathF.TWO_PI)
+                                | SpotLight (_, coneOuter)-> (false, coneOuter)
+                                | DirectionalLight -> (true, 0.0f)
+                            let (shadowView, shadowProjection) =
+                                if not directional then
+                                    let shadowRotation = light.GetRotation world
+                                    let mutable shadowView = Matrix4x4.CreateFromYawPitchRoll (0.0f, -MathF.PI_OVER_2, 0.0f) * Matrix4x4.CreateFromQuaternion shadowRotation
+                                    shadowView.Translation <- light.GetPosition world
+                                    shadowView <- shadowView.Inverted
+                                    let shadowFov = max (min coneOuter Constants.Render.ShadowFovMax) 0.01f
+                                    let shadowCutoff = max (light.GetLightCutoff world) 0.1f
+                                    let shadowProjection = Matrix4x4.CreatePerspectiveFieldOfView (shadowFov, 1.0f, Constants.Render.NearPlaneDistanceInterior, shadowCutoff)
+                                    (shadowView, shadowProjection)
+                                else
+                                    let shadowRotation = light.GetRotation world
+                                    let mutable shadowView = Matrix4x4.CreateFromYawPitchRoll (0.0f, -MathF.PI_OVER_2, 0.0f) * Matrix4x4.CreateFromQuaternion shadowRotation
+                                    shadowView.Translation <- light.GetPosition world
+                                    shadowView <- shadowView.Inverted
+                                    let shadowCutoff = light.GetLightCutoff world
+                                    let shadowProjection = Matrix4x4.CreateOrthographic (shadowCutoff * 2.0f, shadowCutoff * 2.0f, -shadowCutoff, shadowCutoff)
+                                    (shadowView, shadowProjection)
+                            let shadowFrustum =
+                                Frustum (shadowView * shadowProjection)
+                            let shadowInView =
+                                let frustumInterior = World.getEye3dFrustumInterior world
+                                let frustumExterior = World.getEye3dFrustumExterior world
+                                let frustumImposter = World.getEye3dFrustumImposter world
+                                match light.GetPresence world with
+                                | Interior -> frustumInterior.Intersects shadowFrustum
+                                | Exterior -> frustumExterior.Intersects shadowFrustum || frustumInterior.Intersects shadowFrustum
+                                | Imposter -> frustumImposter.Intersects shadowFrustum
+                                | Omnipresent -> true
+                            if shadowInView then
+                                let directionalSort = if not directional then 1 else 0
+                                let distanceSquared = Vector3.DistanceSquared (eyeCenter, light.GetPosition world)
+                                struct (struct (directionalSort, distanceSquared), struct (shadowFrustum, light))|]
 
-            // render simulants normally, remember to clear 3d shadow cache
-            let world = World.renderSimulantsInternal (NormalPass skipCulling) world
-            CachedHashSet3dShadow.Clear ()
-            world
+                // render simulant shadows in descriptor sort order
+                let world =
+                    sortableShadowPassDescriptors |>
+                    Array.sortBy fst' |>
+                    Array.tryTake Constants.Render.ShadowsMax |>
+                    Array.fold (fun world struct (struct (directionalSort, _), struct (shadowFrustum, light)) ->
+                        World.renderSimulantsInternal (ShadowPass (light.GetId world, isZero directionalSort, shadowFrustum)) world)
+                        world
+
+                // render simulants normally, remember to clear 3d shadow cache
+                World.renderSimulantsInternal (NormalPass skipCulling) world
+
+            // free cached values
+            finally CachedHashSet3dShadow.Clear ()
 
         static member private processInput world =
             if SDL.SDL_WasInit SDL.SDL_INIT_TIMER <> 0u then
@@ -1640,6 +1685,9 @@ module WorldModule2 =
                                                                     else world
                                                                 AudioTimer.Stop ()
 
+                                                                //// printing out some variance metrics
+                                                                //printfn "F:%A\tGC:%A" FrameTimer.ElapsedMilliseconds (GC.GetTotalPauseDuration ()).TotalMilliseconds
+
                                                                 // process rendering (1/2)
                                                                 let rendererProcess = World.getRendererProcess world
                                                                 if not firstFrame then rendererProcess.Swap ()
@@ -1752,7 +1800,7 @@ module EntityDispatcherModule2 =
 
     type World with
 
-        static member internal signalEntity<'model, 'message, 'command when 'message :> Message and 'command :> Command> (signal : Signal) (entity : Entity) world =
+        static member inline internal signalEntity<'model, 'message, 'command when 'message :> Message and 'command :> Command> (signal : Signal) (entity : Entity) world =
             match entity.GetDispatcher world with
             | :? EntityDispatcher<'model, 'message, 'command> as dispatcher ->
                 Signal.processSignal dispatcher.Message dispatcher.Command (entity.ModelGeneric<'model> ()) signal entity world
@@ -1806,7 +1854,7 @@ module EntityDispatcherModule2 =
             let model = this.GetModel entity world
             let (signals, model) = this.Physics (center, rotation, linearVelocity, angularVelocity, model, entity, world)
             let world = this.SetModel model entity world
-            Signal.processSignals this.Message this.Command (this.Model entity) signals entity world
+            List.fold (fun world signal -> Signal.processSignal this.Message this.Command (this.Model entity) signal entity world) world signals
 
         override this.Render (renderPass, entity, world) =
             this.Render (this.GetModel entity world, renderPass, entity, world)
@@ -1815,18 +1863,19 @@ module EntityDispatcherModule2 =
             let model = entity.GetModelGeneric<'model> world
             let (signals, model) = this.Edit (model, operation, entity, world)
             let world = this.SetModel model entity world
-            Signal.processSignals this.Message this.Command (this.Model entity) signals entity world
+            List.fold (fun world signal -> Signal.processSignal this.Message this.Command (this.Model entity) signal entity world) world signals
 
+        [<DebuggerHidden>]
         override this.Signal (signalObj : obj, entity, world) =
             match signalObj with
-            | :? 'message as message -> entity.SignalPlus<'model, 'message, 'command> message world
-            | :? 'command as command -> entity.SignalPlus<'model, 'message, 'command> command world
+            | :? 'message as message -> World.signalEntity<'model, 'message, 'command> message entity world
+            | :? 'command as command -> World.signalEntity<'model, 'message, 'command> command entity world
             | _ ->
                 try let message = signalObj |> valueToSymbol |> symbolToValue : 'message
-                    entity.SignalPlus<'model, 'message, 'command> message world
+                    World.signalEntity<'model, 'message, 'command> message entity world
                 with _ ->
                     try let command = signalObj |> valueToSymbol |> symbolToValue : 'command
-                        entity.SignalPlus<'model, 'message, 'command> command world
+                        World.signalEntity<'model, 'message, 'command> command entity world
                     with _ ->
                         Log.debugOnce
                             ("Incompatible signal type received by entity (signal = '" + scstring signalObj + "'; entity = '" + scstring entity + "').\n" +
@@ -1839,9 +1888,9 @@ module EntityDispatcherModule2 =
         override this.TrySynchronize (initializing, entity, world) =
             let contentOld = World.getEntityContent entity world
             let model = this.GetModel entity world
-            let initializers = this.Initialize (model, entity)
+            let definitions = this.Definitions (model, entity)
             let entities = this.Content (model, entity)
-            let content = Content.composite entity.Name initializers entities
+            let content = Content.composite entity.Name definitions entities
             let world = Content.synchronizeEntity initializing contentOld content entity entity world
             World.setEntityContent content entity world
 
@@ -1857,9 +1906,9 @@ module EntityDispatcherModule2 =
                 Some (this.UntruncateModel (current, incoming) :> obj :?> 'a)
             | _ -> None
 
-        /// Initialize the game's own properties.
-        abstract Initialize : 'model * Entity -> InitializerContent list
-        default this.Initialize (_, _) = []
+        /// The entity's own MMCC definitions.
+        abstract Definitions : 'model * Entity -> DefinitionContent list
+        default this.Definitions (_, _) = []
 
         /// The message handler of the MMCC programming model.
         abstract Message : 'model * 'message * Entity * World -> Signal list * 'model
@@ -1907,7 +1956,7 @@ module EntityDispatcherModule2 =
             Entity2dDispatcher<'model, 'message, 'command> (physical, fun _ -> initial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.Entity2dSizeDefault
+            [define Entity.Size Constants.Engine.EntitySize2dDefault
              define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCentered2dDefault]
 
     /// A gui entity dispatcher.
@@ -1921,7 +1970,7 @@ module EntityDispatcherModule2 =
             [typeof<LayoutFacet>]
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntityGuiSizeDefault
+            [define Entity.Size Constants.Engine.EntitySizeGuiDefault
              define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCenteredGuiDefault
              define Entity.Presence Omnipresent
              define Entity.Absolute true
@@ -1941,14 +1990,21 @@ module EntityDispatcherModule2 =
             Entity3dDispatcher<'model, 'message, 'command> (physical, fun _ -> initial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.Entity3dSizeDefault]
+            [define Entity.Size Constants.Engine.EntitySize3dDefault]
+
+        override this.RayCast (ray, entity, world) =
+            if Array.isEmpty (entity.GetFacets world) then
+                let intersectionOpt = ray.Intersects (entity.GetBounds world)
+                if intersectionOpt.HasValue then [|intersectionOpt.Value|]
+                else [||]
+            else base.RayCast (ray, entity, world)
 
     /// A vui dispatcher (gui in 3d).
     and [<AbstractClass>] VuiDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (makeInitial : World -> 'model) =
         inherit EntityDispatcher<'model, 'message, 'command> (false, true, false, makeInitial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntityVuiSizeDefault]
+            [define Entity.Size Constants.Engine.EntitySizeVuiDefault]
 
 [<RequireQualifiedAccess>]
 module EntityPropertyDescriptor =
@@ -2056,7 +2112,7 @@ module GroupDispatcherModule =
 
     type World with
 
-        static member internal signalGroup<'model, 'message, 'command when 'message :> Message and 'command :> Command> signal (group : Group) world =
+        static member inline internal signalGroup<'model, 'message, 'command when 'message :> Message and 'command :> Command> signal (group : Group) world =
             match group.GetDispatcher world with
             | :? GroupDispatcher<'model, 'message, 'command> as dispatcher ->
                 Signal.processSignal dispatcher.Message dispatcher.Command (group.ModelGeneric<'model> ()) signal group world
@@ -2108,16 +2164,17 @@ module GroupDispatcherModule =
         override this.Render (renderPass, group, world) =
             this.Render (this.GetModel group world, renderPass, group, world)
 
+        [<DebuggerHidden>]
         override this.Signal (signalObj : obj, group, world) =
             match signalObj with
-            | :? 'message as message -> group.SignalPlus<'model, 'message, 'command> message world
-            | :? 'command as command -> group.SignalPlus<'model, 'message, 'command> command world
+            | :? 'message as message -> World.signalGroup<'model, 'message, 'command> message group world
+            | :? 'command as command -> World.signalGroup<'model, 'message, 'command> command group world
             | _ ->
                 try let message = signalObj |> valueToSymbol |> symbolToValue : 'message
-                    group.SignalPlus<'model, 'message, 'command> message world
+                    World.signalGroup<'model, 'message, 'command> message group world
                 with _ ->
                     try let command = signalObj |> valueToSymbol |> symbolToValue : 'command
-                        group.SignalPlus<'model, 'message, 'command> command world
+                        World.signalGroup<'model, 'message, 'command> command group world
                     with _ ->
                         Log.debugOnce
                             ("Incompatible signal type received by group (signal = '" + scstring signalObj + "'; group = '" + scstring group + "').\n" +
@@ -2130,9 +2187,9 @@ module GroupDispatcherModule =
         override this.TrySynchronize (initializing, group, world) =
             let contentOld = World.getGroupContent group world
             let model = this.GetModel group world
-            let initializers = this.Initialize (model, group)
+            let definitions = this.Definitions (model, group)
             let entities = this.Content (model, group)
-            let content = Content.group group.Name initializers entities
+            let content = Content.group group.Name definitions entities
             let world = Content.synchronizeGroup initializing contentOld content group group world
             World.setGroupContent content group world
 
@@ -2148,9 +2205,9 @@ module GroupDispatcherModule =
                 Some (this.UntruncateModel (current, incoming) :> obj :?> 'a)
             | _ -> None
 
-        /// Initialize the group's own properties.
-        abstract Initialize : 'model * Group -> InitializerContent list
-        default this.Initialize (_, _) = []
+        /// The group's own MMCC definitions.
+        abstract Definitions : 'model * Group -> DefinitionContent list
+        default this.Definitions (_, _) = []
 
         /// The message handler of the MMCC programming model.
         abstract Message : 'model * 'message * Group * World -> Signal list * 'model
@@ -2227,7 +2284,7 @@ module ScreenDispatcherModule =
 
     type World with
 
-        static member internal signalScreen<'model, 'message, 'command when 'message :> Message and 'command :> Command> signal (screen : Screen) world =
+        static member inline internal signalScreen<'model, 'message, 'command when 'message :> Message and 'command :> Command> signal (screen : Screen) world =
             match screen.GetDispatcher world with
             | :? ScreenDispatcher<'model, 'message, 'command> as dispatcher ->
                 Signal.processSignal dispatcher.Message dispatcher.Command (screen.ModelGeneric<'model> ()) signal screen world
@@ -2279,16 +2336,17 @@ module ScreenDispatcherModule =
         override this.Render (renderPass, screen, world) =
             this.Render (this.GetModel screen world, renderPass, screen, world)
 
+        [<DebuggerHidden>]
         override this.Signal (signalObj : obj, screen, world) =
             match signalObj with
-            | :? 'message as message -> screen.SignalPlus<'model, 'message, 'command> message world
-            | :? 'command as command -> screen.SignalPlus<'model, 'message, 'command> command world
+            | :? 'message as message -> World.signalScreen<'model, 'message, 'command> message screen world
+            | :? 'command as command -> World.signalScreen<'model, 'message, 'command> command screen world
             | _ ->
                 try let message = signalObj |> valueToSymbol |> symbolToValue : 'message
-                    screen.SignalPlus<'model, 'message, 'command> message world
+                    World.signalScreen<'model, 'message, 'command> message screen world
                 with _ ->
                     try let command = signalObj |> valueToSymbol |> symbolToValue : 'command
-                        screen.SignalPlus<'model, 'message, 'command> command world
+                        World.signalScreen<'model, 'message, 'command> command screen world
                     with _ ->
                         Log.debugOnce
                             ("Incompatible signal type received by screen (signal = '" + scstring signalObj + "'; screen = '" + scstring screen + "').\n" +
@@ -2301,9 +2359,9 @@ module ScreenDispatcherModule =
         override this.TrySynchronize (initializing, screen, world) =
             let contentOld = World.getScreenContent screen world
             let model = this.GetModel screen world
-            let initializers = this.Initialize (model, screen)
+            let definitions = this.Definitions (model, screen)
             let group = this.Content (model, screen)
-            let content = Content.screen screen.Name Vanilla initializers group
+            let content = Content.screen screen.Name Vanilla definitions group
             let world = Content.synchronizeScreen initializing contentOld content screen screen world
             World.setScreenContent content screen world
 
@@ -2319,9 +2377,9 @@ module ScreenDispatcherModule =
                 Some (this.UntruncateModel (current, incoming) :> obj :?> 'a)
             | _ -> None
 
-        /// Initialize the screen's own properties.
-        abstract Initialize : 'model * Screen -> InitializerContent list
-        default this.Initialize (_, _) = []
+        /// The screen's own MMCC definitions.
+        abstract Definitions : 'model * Screen -> DefinitionContent list
+        default this.Definitions (_, _) = []
 
         /// The message handler of the MMCC programming model.
         abstract Message : 'model * 'message * Screen * World -> Signal list * 'model
@@ -2398,7 +2456,7 @@ module GameDispatcherModule =
 
     type World with
 
-        static member internal signalGame<'model, 'message, 'command when 'message :> Message and 'command :> Command> signal (game : Game) world =
+        static member inline internal signalGame<'model, 'message, 'command when 'message :> Message and 'command :> Command> signal (game : Game) world =
             match game.GetDispatcher world with
             | :? GameDispatcher<'model, 'message, 'command> as dispatcher ->
                 Signal.processSignal dispatcher.Message dispatcher.Command (game.ModelGeneric<'model> ()) signal game world
@@ -2417,9 +2475,9 @@ module GameDispatcherModule =
         static let synchronize initializing game world (this : GameDispatcher<'model, 'message, 'command>) =
             let contentOld = World.getGameContent game world
             let model = this.GetModel game world
-            let initializers = this.Initialize (model, game)
+            let definitions = this.Definitions (model, game)
             let screens = this.Content (model, game)
-            let content = Content.game game.Name initializers screens
+            let content = Content.game game.Name definitions screens
             let (initialScreenOpt, world) = Content.synchronizeGame World.setScreenSlide initializing contentOld content game game world
             (initialScreenOpt, World.setGameContent content game world)
 
@@ -2457,16 +2515,17 @@ module GameDispatcherModule =
         override this.Render (renderPass, game, world) =
             this.Render (this.GetModel game world, renderPass, game, world)
 
+        [<DebuggerHidden>]
         override this.Signal (signalObj : obj, game, world) =
             match signalObj with
-            | :? 'message as message -> game.SignalPlus<'model, 'message, 'command> message world
-            | :? 'command as command -> game.SignalPlus<'model, 'message, 'command> command world
+            | :? 'message as message -> World.signalGame<'model, 'message, 'command> message game world
+            | :? 'command as command -> World.signalGame<'model, 'message, 'command> command game world
             | _ ->
                 try let message = signalObj |> valueToSymbol |> symbolToValue : 'message
-                    game.SignalPlus<'model, 'message, 'command> message world
+                    World.signalGame<'model, 'message, 'command> message game world
                 with _ ->
                     try let command = signalObj |> valueToSymbol |> symbolToValue : 'command
-                        game.SignalPlus<'model, 'message, 'command> command world
+                        World.signalGame<'model, 'message, 'command> command game world
                     with _ ->
                         Log.debugOnce
                             ("Incompatible signal type received by game (signal = '" + scstring signalObj + "'; game = '" + scstring game + "').\n" +
@@ -2491,9 +2550,9 @@ module GameDispatcherModule =
                 Some (this.UntruncateModel (current, incoming) :> obj :?> 'a)
             | _ -> None
 
-        /// Initialize the game's own properties.
-        abstract Initialize : 'model * Game -> InitializerContent list
-        default this.Initialize (_, _) = []
+        /// The game own MMCC definitions.
+        abstract Definitions : 'model * Game -> DefinitionContent list
+        default this.Definitions (_, _) = []
 
         /// The message handler of the MMCC programming model.
         abstract Message : 'model * 'message * Game * World -> Signal list * 'model
@@ -2624,21 +2683,21 @@ module WorldModule2' =
     type World with
 
         /// Send a signal to a simulant.
-        static member signal (signal : Signal) (simulant : Simulant) world =
+        static member inline signal (signal : Signal) (simulant : Simulant) world =
             match simulant with
-            | :? Entity as entity -> entity.Signal signal world
-            | :? Group as group -> group.Signal signal world
-            | :? Screen as screen -> screen.Signal signal world
-            | :? Game as game -> game.Signal signal world
+            | :? Entity as entity -> (entity.GetDispatcher world).Signal (signal, entity, world)
+            | :? Group as group -> (group.GetDispatcher world).Signal (signal, group, world)
+            | :? Screen as screen -> (screen.GetDispatcher world).Signal (signal, screen, world)
+            | :? Game as game -> (game.GetDispatcher world).Signal (signal, game, world)
             | _ -> failwithumf ()
 
         /// Send a signal to a simulant, explicitly specifing MMCC types.
-        static member signalPlus<'model, 'message, 'command when 'message :> Message and 'command :> Command> signal (simulant : Simulant) world =
+        static member inline signalPlus<'model, 'message, 'command when 'message :> Message and 'command :> Command> signal (simulant : Simulant) world =
             match simulant with
-            | :? Entity as entity -> entity.SignalPlus<'model, 'message, 'command> signal world
-            | :? Group as group -> group.SignalPlus<'model, 'message, 'command> signal world
-            | :? Screen as screen -> screen.SignalPlus<'model, 'message, 'command> signal world
-            | :? Game as game -> game.SignalPlus<'model, 'message, 'command> signal world
+            | :? Entity as entity -> World.signalEntity<'model, 'message, 'command> signal entity world
+            | :? Group as group -> World.signalGroup<'model, 'message, 'command> signal group world
+            | :? Screen as screen -> World.signalScreen<'model, 'message, 'command> signal screen world
+            | :? Game as game -> World.signalGame<'model, 'message, 'command> signal game world
             | _ -> failwithumf ()
 
         static member internal updateLateBindings3 (latebindings : LateBindings) (simulant : Simulant) world =

@@ -7,20 +7,20 @@ open Nu
 module Gameplay =
 
     type GameplayState =
-        | Playing
+        | Commencing
+        | Commence
         | Quitting
         | Quit
 
     type [<SymbolicExpansion>] Gameplay =
-        { GameplayTime : int64
-          GameplayState : GameplayState
+        { GameplayState : GameplayState
           Score : int }
 
     type GameplayMessage =
-        | TimeUpdate
-        | Score of int
+        | FinishCommencing
         | StartQuitting
         | FinishQuitting
+        | Score of int
         interface Message
 
     type GameplayCommand =
@@ -35,25 +35,35 @@ module Gameplay =
         member this.Gameplay = this.ModelGeneric<Gameplay> ()
 
     type GameplayDispatcher () =
-        inherit ScreenDispatcher<Gameplay, GameplayMessage, GameplayCommand> ({ GameplayTime = 0L; GameplayState = Quit; Score = 0 })
+        inherit ScreenDispatcher<Gameplay, GameplayMessage, GameplayCommand> ({ GameplayState = Quit; Score = 0 })
 
         static let [<Literal>] SectionCount = 12
 
-        override this.Initialize (_, _) =
-            [Screen.TimeUpdateEvent => TimeUpdate
-             Screen.SelectEvent => CreateSections
-             Screen.DeselectingEvent => DestroySections
+        override this.Definitions (_, _) =
+            [Screen.SelectEvent => FinishCommencing
+             Screen.DeselectingEvent => FinishQuitting
              Screen.PostUpdateEvent => UpdateEye
-             Simulants.GameplayQuit.ClickEvent => StartQuitting
              for i in 0 .. dec SectionCount do
                 Events.DieEvent --> Simulants.GameplaySection i --> Address.Wildcard => Score 100]
 
         override this.Message (gameplay, message, _, _) =
+
             match message with
-            | TimeUpdate -> just { gameplay with GameplayTime = inc gameplay.GameplayTime }
-            | Score score -> just { gameplay with Score = gameplay.Score + score }
-            | StartQuitting -> just { gameplay with GameplayState = Quitting }
-            | FinishQuitting -> just { gameplay with GameplayState = Quit }
+            | FinishCommencing ->
+                let gameplay = { gameplay with GameplayState = Commence }
+                withSignal CreateSections gameplay
+
+            | StartQuitting ->
+                let gameplay = { gameplay with GameplayState = Quitting }
+                just gameplay
+
+            | FinishQuitting ->
+                let gameplay = { gameplay with GameplayState = Quit }
+                withSignal DestroySections gameplay
+
+            | Score score ->
+                let gameplay = { gameplay with Score = gameplay.Score + score }
+                just gameplay
 
         override this.Command (_, command, _, world) =
 
@@ -69,7 +79,7 @@ module Gameplay =
                     let world = World.readGroupFromFile sectionFilePath (Some section.Name) section.Screen world |> snd
 
                     // shift all entities in the loaded section so that they go after the previously loaded section
-                    let sectionXShift = 2048.0f * single sectionIndex
+                    let sectionXShift = 1024.0f * single sectionIndex
                     let sectionEntities = World.getEntities section world
                     Seq.fold (fun world (sectionEntity : Entity) ->
                         sectionEntity.SetPosition (sectionEntity.GetPosition world + v3 sectionXShift 0.0f 0.0f) world)
@@ -84,9 +94,7 @@ module Gameplay =
                 let world = (world, [0 .. dec SectionCount]) ||> List.fold (fun world sectionIndex ->
                     let section = Simulants.GameplaySection sectionIndex
                     World.destroyGroup section world)
-
-                // finish quitting
-                withSignal FinishQuitting world
+                just world
 
             | UpdateEye ->
 
@@ -106,21 +114,23 @@ module Gameplay =
             [// the gui group
              Content.group Simulants.GameplayGui.Name []
                  [Content.text Simulants.GameplayScore.Name
-                    [Entity.Position == v3 392.0f 232.0f 0.0f
+                    [Entity.Position == v3 260.0f 155.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Text := "Score: " + string gameplay.Score]
                   Content.button Simulants.GameplayQuit.Name
-                    [Entity.Position == v3 336.0f -216.0f 0.0f
+                    [Entity.Position == v3 232.0f -144.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Text == "Quit"
                      Entity.ClickEvent => StartQuitting]]
 
-             // the scene group while playing
+             // the scene group while gameplay commences or quitting
              match gameplay.GameplayState with
-             | Playing | Quitting ->
+             | Commence | Quitting ->
                 Content.group Simulants.GameplayScene.Name []
                     [Content.entity<PlayerDispatcher> Simulants.GameplayPlayer.Name
-                        [Entity.Position == v3 -876.0f -127.6805f 0.0f
+                        [Entity.Position == v3 -390.0f -50.0f 0.0f
                          Entity.Elevation == 1.0f
                          Entity.DieEvent => StartQuitting]]
-             | Quit -> ()]
+
+             // no scene group otherwise
+             | Commencing | Quit -> ()]

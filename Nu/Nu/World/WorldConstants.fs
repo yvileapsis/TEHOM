@@ -4,6 +4,7 @@
 namespace Nu.Constants
 open System
 open System.Configuration
+open System.Numerics
 open Prime
 open Nu
 
@@ -38,6 +39,7 @@ module Override =
                 | nameof GameTime.DesiredFrameRate -> GameTime.DesiredFrameRate <- scvalue value
                 | nameof OpenGL.HlAssert -> OpenGL.HlAssert <- scvalue value
                 | nameof Engine.RunSynchronously -> Engine.RunSynchronously <- scvalue value
+                | nameof Engine.Meter2d -> Engine.Meter2d <- scvalue value
                 | nameof Engine.EntityPerimeterCentered2dDefault -> Engine.EntityPerimeterCentered2dDefault <- scvalue value
                 | nameof Engine.EntityPerimeterCenteredGuiDefault -> Engine.EntityPerimeterCenteredGuiDefault <- scvalue value
                 | nameof Engine.QuadnodeSize -> Engine.QuadnodeSize <- scvalue value
@@ -53,11 +55,23 @@ module Override =
                 | nameof Render.FarPlaneDistanceExterior -> Render.FarPlaneDistanceExterior <- scvalue value
                 | nameof Render.NearPlaneDistanceImposter -> Render.NearPlaneDistanceImposter <- scvalue value
                 | nameof Render.FarPlaneDistanceImposter -> Render.FarPlaneDistanceImposter <- scvalue value
+                | nameof Render.VirtualResolution -> Render.VirtualResolution <- scvalue value
+                | nameof Render.VirtualScalar -> Render.VirtualScalar <- scvalue value
                 | nameof Render.SsaoResolutionDivisor -> Render.SsaoResolutionDivisor <- scvalue value
+                | nameof Render.FieldOfView -> Render.FieldOfView <- scvalue value
                 | nameof Render.ShadowDetailedCount -> Render.ShadowDetailedResolutionScalar <- scvalue value
                 | nameof Render.ShadowDetailedResolutionScalar -> Render.ShadowDetailedResolutionScalar <- scvalue value
                 | nameof Render.ShadowsMax -> Render.ShadowsMax <- min (scvalue value) Constants.Render.ShadowsMaxShader
                 | _ -> ()
+            Constants.Render.NearPlaneDistanceOmnipresent <- Constants.Render.NearPlaneDistanceInterior
+            Constants.Render.FarPlaneDistanceOmnipresent <- Constants.Render.FarPlaneDistanceImposter
+            Constants.Render.VirtualScalar2 <- Vector2i Constants.Render.VirtualScalar
+            Constants.Render.VirtualScalar2F <- Constants.Render.VirtualScalar2.V2
+            Constants.Render.Resolution <- Constants.Render.VirtualResolution * Constants.Render.VirtualScalar
+            Constants.Render.ShadowResolution <- Vector2i (512 * Constants.Render.VirtualScalar)
+            Constants.Render.SsaoResolution <- Constants.Render.Resolution / Constants.Render.SsaoResolutionDivisor
+            Constants.Render.SsaoViewport <- Nu.Viewport (Constants.Render.NearPlaneDistanceOmnipresent, Constants.Render.FarPlaneDistanceOmnipresent, Box2i (v2iZero, Constants.Render.SsaoResolution))
+            Constants.Render.Viewport <- Nu.Viewport (Constants.Render.NearPlaneDistanceOmnipresent, Constants.Render.FarPlaneDistanceOmnipresent, v2iZero, Constants.Render.Resolution)
         with
         | :? ConfigurationErrorsException ->
             Log.info ("Configuration value override failed due to: Could not find App.config file for " + exeFilePath + ".")

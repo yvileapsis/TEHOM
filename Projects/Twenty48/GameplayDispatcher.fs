@@ -8,10 +8,11 @@ module GameplayDispatcher =
 
     // this is our MMCC message type.
     type GameplayMessage =
-        | TimeUpdate
-        | TryShift of Direction
+        | FinishCommencing
         | StartQuitting
         | FinishQuitting
+        | TimeUpdate
+        | TryShift of Direction
         | Nil
         interface Message
 
@@ -25,10 +26,11 @@ module GameplayDispatcher =
     type GameplayDispatcher () =
         inherit ScreenDispatcher<Gameplay, GameplayMessage, Command> (Gameplay.empty)
 
-        // here we define the screen's properties and event handling
-        override this.Initialize (_, _) =
-            [Screen.TimeUpdateEvent => TimeUpdate
+        // here we define the screen's property values and event handling
+        override this.Definitions (_, _) =
+            [Screen.SelectEvent => FinishCommencing
              Screen.DeselectingEvent => FinishQuitting
+             Screen.TimeUpdateEvent => TimeUpdate
              Game.KeyboardKeyDownEvent =|> fun evt ->
                 if not evt.Data.Repeated then
                     match evt.Data.KeyboardKey with
@@ -43,11 +45,23 @@ module GameplayDispatcher =
         override this.Message (gameplay, message, _, world) =
 
             match message with
+            | FinishCommencing ->
+                let gameplay = { gameplay with GameplayState = Commence false }
+                just gameplay
+
+            | StartQuitting ->
+                match gameplay.GameplayState with
+                | Commence _ -> just { gameplay with GameplayState = Quitting }
+                | _ -> just gameplay
+
+            | FinishQuitting ->
+                just { gameplay with GameplayState = Quit }
+
             | TimeUpdate ->
                 just { gameplay with GameplayTime = inc gameplay.GameplayTime }
 
             | TryShift direction ->
-                if world.Advancing && gameplay.GameplayState = Playing then
+                if world.Advancing && gameplay.GameplayState = Commence false then
                     let gameplay' =
                         match direction with
                         | Upward -> Gameplay.shiftUp gameplay
@@ -57,18 +71,10 @@ module GameplayDispatcher =
                     if Gameplay.detectTileChange gameplay gameplay' then
                         let gameplay = Gameplay.addTile gameplay'
                         if not (Gameplay.detectMoveAvailability gameplay)
-                        then just { gameplay with GameplayState = GameOver }
+                        then just { gameplay with GameplayState = Commence true }
                         else just gameplay
                     else just gameplay
                 else just gameplay
-
-            | StartQuitting ->
-                match gameplay.GameplayState with
-                | Playing | GameOver -> just { gameplay with GameplayState = Quitting }
-                | Quitting | Quit -> just gameplay
-
-            | FinishQuitting ->
-                just { gameplay with GameplayState = Quit }
 
             | Nil ->
                 just gameplay
@@ -79,7 +85,7 @@ module GameplayDispatcher =
             [// the gui group
              Content.group Simulants.GameplayGui.Name []
                 [Content.button Simulants.GameplayQuit.Name
-                    [Entity.Position == v3 336.0f -216.0f 0.0f
+                    [Entity.Position == v3 232.0f -144.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Text == "Quit"
                      Entity.ClickEvent => StartQuitting]]
@@ -95,26 +101,26 @@ module GameplayDispatcher =
 
                  // score
                  Content.text "Score"
-                    [Entity.Position == v3 350.0f 232.0f 0.0f
+                    [Entity.Position == v3 232.0f 155.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Text := "Score: " + string gameplay.Score]
 
                  // game over
                  match gameplay.GameplayState with
-                 | GameOver | Quitting ->
+                 | Commence true | Quitting ->
                     Content.text "GameOver"
-                        [Entity.Position == v3 0.0f 232.0f 0.0f
+                        [Entity.Position == v3 0.0f 155.0f 0.0f
                          Entity.Elevation == 10.0f
                          Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                          Entity.Text == "Game Over!"]
-                 | Playing | Quit -> ()
+                 | Commencing | Commence false | Quit -> ()
 
                  // board
-                 let gutter = v3 5.0f 5.0f 0.0f
-                 let tileSize = v3 48.0f 48.0f 0.0f
-                 let tileOffset = (gameplay.BoardSize.V3 * tileSize + gutter * (gameplay.BoardSize.V3 - v3One)) * -0.5f
+                 let gutter = v3 4.0f 4.0f 0.0f
+                 let tileSize = v3 32.0f 32.0f 0.0f
+                 let tileOffset = (gameplay.BoardSize.V3 * tileSize + gutter * (gameplay.BoardSize - v2iOne).V3) * -0.5f
                  Content.panel Simulants.GameplayBoard.Name
-                    [Entity.Size == v3 217.0f 217.0f 0.0f
+                    [Entity.Size == v3 148.0f 148.0f 0.0f
                      Entity.Elevation == 1.0f
                      Entity.LabelImage == Assets.Gameplay.BoardImage]
                     [for tile in gameplay.Tiles do
@@ -125,6 +131,6 @@ module GameplayDispatcher =
                              Entity.Text := string tile.Value
                              Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                              Entity.Font == Assets.Gui.ClearSansFont
-                             Entity.FontSizing := if tile.Value < 16384 then Some 18 else Some 12
+                             Entity.FontSizing := if tile.Value < 16384 then Some 12 else Some 8
                              Entity.TextColor := if tile.Value < 8 then Color.Gray else Color.GhostWhite
                              Entity.BackdropImageOpt := Some (Assets.Gameplay.TileImage tile.Value)]]]]

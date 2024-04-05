@@ -21,7 +21,7 @@ module TerraFirma =
         | ShowGameplay
         | Update
         interface Nu.Message
-        
+
     // this is our MMCC command type. Commands are used instead of messages when the world is to be
     // transformed.
     type Command =
@@ -40,7 +40,7 @@ module TerraFirma =
         inherit GameDispatcher<Model, Message, Command> (Splash)
 
         // here we define the game's properties and event handling
-        override this.Initialize (model, _) =
+        override this.Definitions (model, _) =
             [Game.DesiredScreen :=
                 match model with
                 | Splash -> Desire Simulants.Splash
@@ -48,7 +48,7 @@ module TerraFirma =
                 | Credits -> Desire Simulants.Credits
                 | Gameplay gameplay ->
                     match gameplay.GameplayState with
-                    | Playing -> Desire Simulants.Gameplay
+                    | Commencing | Commence -> Desire Simulants.Gameplay
                     | Quitting | Quit -> Desire Simulants.Title
              match model with Gameplay gameplay -> Simulants.Gameplay.Gameplay := gameplay | _ -> ()
              Game.UpdateEvent => Update
@@ -63,7 +63,7 @@ module TerraFirma =
             match message with
             | ShowTitle -> just Title
             | ShowCredits -> just Credits
-            | ShowGameplay -> just (Gameplay Gameplay.start)
+            | ShowGameplay -> just (Gameplay { GameplayState = Commencing })
             | Update ->
                 match model with
                 | Gameplay gameplay ->

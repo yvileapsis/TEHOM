@@ -49,7 +49,7 @@ module OmniBlade =
             let world = World.setMasterSongVolume 0.5f world
             base.Register (game, world)
 
-        override this.Initialize (model, _) =
+        override this.Definitions (model, _) =
             [Game.DesiredScreen :=
                 match model with
                 | Gui gui ->
@@ -61,7 +61,7 @@ module OmniBlade =
                     | Intro _ -> Desire Simulants.Intro
                 | Field field ->
                     match field.FieldState with
-                    | Playing ->
+                    | Play ->
                         match field.BattleOpt with
                         | Some battle ->
                             match battle.BattleState with

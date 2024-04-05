@@ -13,6 +13,7 @@ type FieldMessage =
     | Update
     | UpdateFieldTransition
     | UpdateAvatarBodyTracking
+    | TimeUpdate
     | AvatarBodyTransform of BodyTransformData
     | AvatarBodyCollision of BodyCollisionData
     | AvatarBodySeparationExplicit of BodySeparationExplicitData
@@ -81,7 +82,7 @@ type [<SymbolicExpansion>] Options =
     { BattleSpeed : BattleSpeed }
 
 type FieldState =
-    | Playing
+    | Play
     | Quitting
     | Quit
 
@@ -718,9 +719,6 @@ module Field =
         | Some dialog ->
             interactDialog dialog field
 
-    let private advanceUpdateTime field =
-        { field with UpdateTime_ = inc field.UpdateTime_ }
-
     let rec private advanceCue (cue : Cue) (definitions : CueDefinitions) (field : Field) :
         Cue * CueDefinitions * (Signal list * Field) =
 
@@ -1172,9 +1170,6 @@ module Field =
         match field.BattleOpt_ with
         | None ->
 
-            // advance field time
-            let field = advanceUpdateTime field
-
             // advance dialog
             let field =
                 match field.DialogOpt_ with
@@ -1254,6 +1249,10 @@ module Field =
             (signals, field)
         | Some _ -> just field
 
+    let advanceUpdateTime field =
+        let field = { field with UpdateTime_ = inc field.UpdateTime_ }
+        just field
+
     let make time viewBounds2dAbsolute fieldType saveSlot randSeedState (avatar : Avatar) team advents inventory =
         let (spiritRate, debugAdvents, debugKeyItems, definitions) =
             match Data.Value.Fields.TryGetValue fieldType with
@@ -1294,7 +1293,7 @@ module Field =
           DialogOpt_ = None
           BattleOpt_ = None
           FieldSongTimeOpt_ = None
-          FieldState_ = Playing }
+          FieldState_ = Play }
 
     let empty viewBounds2dAbsolute =
         { UpdateTime_ = 0L

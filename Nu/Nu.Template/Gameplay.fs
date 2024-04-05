@@ -1,5 +1,6 @@
 ﻿namespace MyGame
 open System
+open System.Numerics
 open Prime
 open Nu
 
@@ -8,23 +9,37 @@ module Gameplay =
 
     // this represents that state of gameplay simulation.
     type GameplayState =
-        | Playing
+        | Commencing
+        | Commence
         | Quitting
         | Quit
 
     // this is our MMCC model type representing gameplay.
     // this model representation uses update time, that is, time based on number of engine updates.
     // if you wish to use clock time instead (https://github.com/bryanedds/Nu/wiki/GameTime-and-its-Polymorphic-Nature),
-    // you could use `GameplayTime : single` instead.
+    // you could use `GameplayTime : single` instead. If you're going to use Split MMCC instead of Pure MMCC, you won't
+    // need this field at all and should remove it, using world.UpdateTime or world.ClockTime instead (see
+    // https://github.com/bryanedds/Nu/wiki/Pure-MMCC-vs.-Split-MMCC)
     type Gameplay =
         { GameplayTime : int64
           GameplayState : GameplayState }
 
+        static member empty =
+            { GameplayTime = 0L
+              GameplayState = Quit }
+
+        static member commencing =
+            { Gameplay.empty with GameplayState = Commencing }
+
+        static member commence =
+            { Gameplay.commencing with GameplayState = Commence }
+
     // this is our MMCC message type.
     type GameplayMessage =
-        | TimeUpdate
+        | FinishCommencing
         | StartQuitting
         | FinishQuitting
+        | TimeUpdate
         interface Message
 
     // this extends the Screen API to expose the above Gameplay model.
@@ -36,22 +51,33 @@ module Gameplay =
     // this is the screen dispatcher that defines the screen where gameplay takes place. Note that we just use the
     // empty Command type because there are no commands needed for this template.
     type GameplayDispatcher () =
-        inherit ScreenDispatcher<Gameplay, GameplayMessage, Command> ({ GameplayTime = 0; GameplayState = Quit })
+        inherit ScreenDispatcher<Gameplay, GameplayMessage, Command> (Gameplay.empty)
 
-        // here we define the screen's properties and event handling
-        override this.Initialize (_, _) =
-            [Screen.TimeUpdateEvent => TimeUpdate
-             Screen.DeselectingEvent => FinishQuitting]
+        // here we define the screen's property values and event handling
+        override this.Definitions (_, _) =
+            [Screen.SelectEvent => FinishCommencing
+             Screen.DeselectingEvent => FinishQuitting
+             Screen.TimeUpdateEvent => TimeUpdate]
 
         // here we handle the above messages
         override this.Message (gameplay, message, _, world) =
+
             match message with
-            | TimeUpdate ->
-                just { gameplay with GameplayTime = gameplay.GameplayTime + (let d = world.GameDelta in d.Updates) }
+            | FinishCommencing ->
+                let gameplay = { gameplay with GameplayState = Commence }
+                just gameplay
+
             | StartQuitting ->
-                just { gameplay with GameplayState = Quitting }
+                let gameplay = { gameplay with GameplayState = Quitting }
+                just gameplay
+
             | FinishQuitting ->
-                just { gameplay with GameplayState = Quit }
+                let gameplay = { gameplay with GameplayState = Quit }
+                just gameplay
+
+            | TimeUpdate ->
+                let gameplay = { gameplay with GameplayTime = gameplay.GameplayTime + (let d = world.GameDelta in d.Updates) }
+                just gameplay
 
         // here we describe the content of the game including the hud, the scene, and the player
         override this.Content (gameplay, _) =
@@ -61,20 +87,22 @@ module Gameplay =
 
                 [// time
                  Content.text Simulants.GameplayTime.Name
-                    [Entity.Position == v3 0.0f 232.0f 0.0f
+                    [Entity.Position == v3 0.0f 150.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                      Entity.Text := string gameplay.GameplayTime]
                  
                  // quit
                  Content.button Simulants.GameplayQuit.Name
-                    [Entity.Position == v3 336.0f -216.0f 0.0f
+                    [Entity.Position == v3 232.0f -144.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Text == "Quit"
                      Entity.ClickEvent => StartQuitting]]
 
-             // the scene group while playing or quitting
+             // the scene group while gameplay commences or quitting
              match gameplay.GameplayState with
-             | Playing | Quitting ->
+             | Commence | Quitting ->
                 Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] []
-             | Quit -> ()]
+
+             // no scene group otherwise
+             | Commencing | Quit -> ()]

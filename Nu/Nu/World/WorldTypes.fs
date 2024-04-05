@@ -497,7 +497,7 @@ and EntityDispatcher (is2d, perimeterCentered, physical) =
          Define? AnglesLocal Vector3.Zero
          Define? Degrees Vector3.Zero
          Define? DegreesLocal Vector3.Zero
-         Define? Size Constants.Engine.Entity3dSizeDefault
+         Define? Size Vector3.One
          Define? Elevation 0.0f
          Define? ElevationLocal 0.0f
          Define? Overflow 1.0f
@@ -560,8 +560,8 @@ and EntityDispatcher (is2d, perimeterCentered, physical) =
     abstract GetAttributesInferred : Entity * World -> AttributesInferred
     default this.GetAttributesInferred (_, _) =
         if this.Is2d
-        then AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
-        else AttributesInferred.important Constants.Engine.Entity3dSizeDefault v3Zero
+        then AttributesInferred.important Constants.Engine.EntitySize2dDefault v3Zero
+        else AttributesInferred.important Constants.Engine.EntitySize3dDefault v3Zero
 
     /// Attempt to pick an entity with a ray.
     abstract RayCast : Ray3 * Entity * World -> single array
@@ -626,8 +626,8 @@ and Facet (physical) =
     abstract GetAttributesInferred : Entity * World -> AttributesInferred
     default this.GetAttributesInferred (entity, world) =
         if WorldTypes.getEntityIs2d entity world
-        then AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
-        else AttributesInferred.important Constants.Engine.Entity3dSizeDefault v3Zero
+        then AttributesInferred.important Constants.Engine.EntitySize2dDefault v3Zero
+        else AttributesInferred.important Constants.Engine.EntitySize3dDefault v3Zero
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
     abstract Edit : EditOperation * Entity * World -> World
@@ -638,18 +638,18 @@ and Facet (physical) =
 
     interface LateBindings
 
-/// Describes a property to the MMCC content system.
+/// Describes property content to the MMCC content system.
 and [<ReferenceEquality>] PropertyContent =
-    { PropertyInitializer : bool
+    { PropertyStatic : bool
       PropertyLens : Lens
       PropertyValue : obj }
-    static member inline make initializer lens value =
-        { PropertyInitializer = initializer
+    static member inline make static_ lens value =
+        { PropertyStatic = static_
           PropertyLens = lens
           PropertyValue = value }
 
-/// Describes an initializer to the MMCC content system.
-and [<ReferenceEquality>] InitializerContent =
+/// Describes definition content to the MMCC content system.
+and [<ReferenceEquality>] DefinitionContent =
     | PropertyContent of PropertyContent
     | EventSignalContent of obj Address * obj
     | EventHandlerContent of PartialEquatable<obj Address, Event -> obj>
@@ -804,7 +804,9 @@ and [<ReferenceEquality; CLIMutable>] GameState =
     static member make (dispatcher : GameDispatcher) =
         let eye3dCenter = Constants.Engine.Eye3dCenterDefault
         let eye3dRotation = quatIdentity
-        let viewport = Constants.Render.Viewport
+        let viewportInterior = Viewport (Constants.Render.NearPlaneDistanceInterior, Constants.Render.FarPlaneDistanceInterior, v2iZero, Constants.Render.Resolution)
+        let viewportExterior = Viewport (Constants.Render.NearPlaneDistanceExterior, Constants.Render.FarPlaneDistanceExterior, v2iZero, Constants.Render.Resolution)
+        let viewportImposter = Viewport (Constants.Render.NearPlaneDistanceImposter, Constants.Render.FarPlaneDistanceImposter, v2iZero, Constants.Render.Resolution)
         { Dispatcher = dispatcher
           Xtension = Xtension.makeFunctional ()
           Model = { DesignerType = typeof<unit>; DesignerValue = () }
@@ -814,12 +816,12 @@ and [<ReferenceEquality; CLIMutable>] GameState =
           DesiredScreen = DesireIgnore
           ScreenTransitionDestinationOpt = None
           Eye2dCenter = v2Zero
-          Eye2dSize = v2 (single Constants.Render.VirtualResolutionX) (single Constants.Render.VirtualResolutionY)
+          Eye2dSize = Constants.Render.VirtualResolution.V2
           Eye3dCenter = eye3dCenter
           Eye3dRotation = eye3dRotation
-          Eye3dFrustumInterior = viewport.Frustum (Constants.Render.NearPlaneDistanceInterior, Constants.Render.FarPlaneDistanceInterior, eye3dCenter, eye3dRotation)
-          Eye3dFrustumExterior = viewport.Frustum (Constants.Render.NearPlaneDistanceExterior, Constants.Render.FarPlaneDistanceExterior, eye3dCenter, eye3dRotation)
-          Eye3dFrustumImposter = viewport.Frustum (Constants.Render.NearPlaneDistanceImposter, Constants.Render.FarPlaneDistanceImposter, eye3dCenter, eye3dRotation)
+          Eye3dFrustumInterior = viewportInterior.Frustum (eye3dCenter, eye3dRotation)
+          Eye3dFrustumExterior = viewportExterior.Frustum (eye3dCenter, eye3dRotation)
+          Eye3dFrustumImposter = viewportImposter.Frustum (eye3dCenter, eye3dRotation)
           Order = Core.getTimeStampUnique ()
           Id = Gen.id }
 
@@ -1699,7 +1701,7 @@ and [<ReferenceEquality>] World =
           AmbientState : World AmbientState
           Subsystems : Subsystems
           Simulants : UMap<Simulant, Simulant USet option> // OPTIMIZATION: using None instead of empty USet to descrease number of USet instances.
-          JobSystem : JobSystem
+          JobGraph : JobGraph
           WorldExtension : WorldExtension }
 
     /// Check that the world is executing with imperative semantics where applicable.
@@ -1953,7 +1955,7 @@ module LensOperators =
 [<RequireQualifiedAccess; CompilationRepresentation (CompilationRepresentationFlags.ModuleSuffix)>]
 module Signal =
 
-    let rec
+    let rec [<DebuggerHidden>]
         processSignal<'model, 'message, 'command, 's when 'message :> Message and 'command :> Command and 's :> Simulant>
         (processMessage : 'model * 'message * 's * World -> Signal list * 'model)
         (processCommand : 'model * 'command * 's * World -> Signal list * World)
@@ -1978,10 +1980,10 @@ module Signal =
             | [] -> world
         | _ -> failwithumf ()
 
-    and processSignals processMessage processCommand modelLens signals simulant world =
-        List.fold
-            (fun world signal -> processSignal processMessage processCommand modelLens signal simulant world)
-            world signals
+    and [<DebuggerHidden>] processSignals processMessage processCommand modelLens signals simulant world =
+        let mutable world = world // NOTE: inlined fold for speed and to shorten stack trace.
+        for signal in signals do world <- processSignal processMessage processCommand modelLens signal simulant world
+        world
 
 [<AutoOpen>]
 module SignalOperators =

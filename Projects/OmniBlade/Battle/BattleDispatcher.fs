@@ -36,9 +36,10 @@ module BattleDispatcher =
                 world)
                 screen world
 
-        override this.Initialize (_, _) =
+        override this.Definitions (_, _) =
             [Screen.UpdateEvent => Update
              Screen.PostUpdateEvent => UpdateEye
+             Screen.TimeUpdateEvent => TimeUpdate
              Simulants.BattleRide.EffectTagTokens.ChangeEvent =|> fun evt -> UpdateRideTokens (evt.Data.Value :?> Map<string, Effects.Slice>)]
 
         override this.Message (battle, message, _, _) =
@@ -57,6 +58,9 @@ module BattleDispatcher =
                         just battle
                     | None -> just battle
                 | None -> just battle
+
+            | TimeUpdate ->
+                Battle.advanceUpdateTime battle
 
             | InteractDialog ->
                 match battle.DialogOpt with
@@ -234,7 +238,7 @@ module BattleDispatcher =
             | DisplaySlashSpike (delay, bottom, targetIndex) ->
                 match Battle.tryGetCharacter targetIndex battle with
                 | Some target ->
-                    let projection = Vector3.Normalize (target.Bottom - bottom) * single Constants.Render.VirtualResolutionX + target.Bottom
+                    let projection = Vector3.Normalize (target.Bottom - bottom) * single Constants.Render.VirtualResolution.X + target.Bottom
                     let world = displayEffect delay (v3 96.0f 96.0f 0.0f) (Bottom bottom) Over (EffectDescriptors.slashSpike bottom projection) screen world
                     just world
                 | None -> just world
@@ -242,7 +246,7 @@ module BattleDispatcher =
             | DisplaySlashTwister (delay, bottom, targetIndex) ->
                 match Battle.tryGetCharacter targetIndex battle with
                 | Some target ->
-                    let projection = Vector3.Normalize (target.Bottom - bottom) * single Constants.Render.VirtualResolutionX + target.Bottom
+                    let projection = Vector3.Normalize (target.Bottom - bottom) * single Constants.Render.VirtualResolution.X + target.Bottom
                     let world = displayEffect delay (v3 96.0f 96.0f 0.0f) (Bottom bottom) Over (EffectDescriptors.slashWind bottom projection) screen world
                     just world
                 | None -> just world

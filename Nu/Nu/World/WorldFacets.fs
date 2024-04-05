@@ -3,6 +3,7 @@
 
 namespace Nu
 open System
+open System.Collections.Generic
 open System.Numerics
 open ImGuiNET
 open TiledSharp
@@ -74,7 +75,7 @@ module StaticSpriteFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetStaticImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntitySize2dDefault v3Zero
 
 [<AutoOpen>]
 module AnimatedSpriteFacetModule =
@@ -124,7 +125,7 @@ module AnimatedSpriteFacetModule =
 
         static member Properties =
             [define Entity.StartTime GameTime.zero
-             define Entity.CelSize (Vector2 (48.0f, 48.0f))
+             define Entity.CelSize (Vector2 (32.0f, 32.0f))
              define Entity.CelCount 16
              define Entity.CelRun 4
              define Entity.AnimationDelay (GameTime.ofSeconds (1.0f / 15.0f))
@@ -337,7 +338,7 @@ module BasicStaticSpriteEmitterFacetModule =
              define Entity.ParticleLifeTimeMaxOpt (GameTime.ofSeconds 1.0f)
              define Entity.ParticleRate (match Constants.GameTime.DesiredFrameRate with StaticFrameRate _ -> 1.0f | DynamicFrameRate _ -> 60.0f)
              define Entity.ParticleMax 60
-             define Entity.BasicParticleSeed { Life = Particles.Life.make GameTime.zero (GameTime.ofSeconds 1.0f); Body = Particles.Body.defaultBody; Size = Constants.Engine.Particle2dSizeDefault; Offset = v3Zero; Inset = box2Zero; Color = Color.One; Emission = Color.Zero; Flip = FlipNone }
+             define Entity.BasicParticleSeed { Life = Particles.Life.make GameTime.zero (GameTime.ofSeconds 1.0f); Body = Particles.Body.defaultBody; Size = Constants.Engine.ParticleSize2dDefault; Offset = v3Zero; Inset = box2Zero; Color = Color.One; Emission = Color.Zero; Flip = FlipNone }
              define Entity.EmitterConstraint Particles.Constraint.empty
              define Entity.EmitterStyle "BasicStaticSpriteEmitter"
              nonPersistent Entity.ParticleSystem Particles.ParticleSystem.empty]
@@ -477,7 +478,7 @@ module TextFacetModule =
                     world
 
         override this.GetAttributesInferred (_, _) =
-            AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+            AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
 
 [<AutoOpen>]
 module BackdroppableFacetModule =
@@ -524,8 +525,8 @@ module BackdroppableFacetModule =
             | Some image ->
                 match Metadata.tryGetTextureSizeF image with
                 | Some size -> AttributesInferred.important size.V3 v3Zero
-                | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
-            | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
+                | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
 
 [<AutoOpen>]
 module LabelFacetModule =
@@ -565,7 +566,7 @@ module LabelFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetLabelImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
 
 [<AutoOpen>]
 module ButtonFacetModule =
@@ -674,7 +675,7 @@ module ButtonFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetUpImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
 
 [<AutoOpen>]
 module ToggleButtonFacetModule =
@@ -801,7 +802,7 @@ module ToggleButtonFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetUntoggledImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
 
 [<AutoOpen>]
 module RadioButtonFacetModule =
@@ -923,7 +924,7 @@ module RadioButtonFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetUndialedImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
 
 [<AutoOpen>]
 module FillBarFacetModule =
@@ -1024,7 +1025,7 @@ module FillBarFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetBorderImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
 
 [<AutoOpen>]
 module FeelerFacetModule =
@@ -1108,7 +1109,7 @@ module FeelerFacetModule =
             else world
 
         override this.GetAttributesInferred (_, _) =
-            AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
+            AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
 
 [<AutoOpen>]
 module EffectFacetModule =
@@ -1550,6 +1551,9 @@ module TileMapFacetModule =
         member this.GetTileLayerClearance world : single = this.Get (nameof this.TileLayerClearance) world
         member this.SetTileLayerClearance (value : single) world = this.Set (nameof this.TileLayerClearance) value world
         member this.TileLayerClearance = lens (nameof this.TileLayerClearance) this this.GetTileLayerClearance this.SetTileLayerClearance
+        member this.GetTileSizeDivisor world : int = this.Get (nameof this.TileSizeDivisor) world
+        member this.SetTileSizeDivisor (value : int) world = this.Set (nameof this.TileSizeDivisor) value world
+        member this.TileSizeDivisor = lens (nameof this.TileSizeDivisor) this this.GetTileSizeDivisor this.SetTileSizeDivisor
         member this.GetTileIndexOffset world : int = this.Get (nameof this.TileIndexOffset) world
         member this.SetTileIndexOffset (value : int) world = this.Set (nameof this.TileIndexOffset) value world
         member this.TileIndexOffset = lens (nameof this.TileIndexOffset) this this.GetTileIndexOffset this.SetTileIndexOffset
@@ -1576,6 +1580,7 @@ module TileMapFacetModule =
              define Entity.Color Color.One
              define Entity.Emission Color.Zero
              define Entity.TileLayerClearance 2.0f
+             define Entity.TileSizeDivisor 1
              define Entity.TileIndexOffset 0
              define Entity.TileIndexOffsetRange (0, 0)
              define Entity.TileMap Assets.Default.TileMap
@@ -1590,6 +1595,7 @@ module TileMapFacetModule =
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity (nameof TileMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity (nameof TileMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Observable)) entity (nameof TileMapFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.TileSizeDivisor)) entity (nameof TileMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.TileMap)) entity (nameof TileMapFacet) world
             let world =
                 World.sense (fun _ world ->
@@ -1611,7 +1617,8 @@ module TileMapFacetModule =
                 let mutable transform = entity.GetTransform world
                 let perimeterUnscaled = transform.PerimeterUnscaled // tile map currently ignores rotation and scale
                 let tileMapPosition = perimeterUnscaled.Min.V2
-                let tileMapDescriptor = TmxMap.getDescriptor tileMapPosition tileMap
+                let tileSizeDivisor = entity.GetTileSizeDivisor world
+                let tileMapDescriptor = TmxMap.getDescriptor tileMapPosition tileSizeDivisor tileMap
                 let bodyProperties =
                     TmxMap.getBodyProperties
                         transform.Enabled
@@ -1645,6 +1652,7 @@ module TileMapFacetModule =
                         (entity.GetColor world)
                         (entity.GetEmission world)
                         (entity.GetTileLayerClearance world)
+                        (entity.GetTileSizeDivisor world)
                         (entity.GetTileIndexOffset world)
                         (entity.GetTileIndexOffsetRange world)
                         tileMapAsset.PackageName
@@ -1654,8 +1662,8 @@ module TileMapFacetModule =
 
         override this.GetAttributesInferred (entity, world) =
             match TmxMap.tryGetTileMap (entity.GetTileMap world) with
-            | Some tileMap -> TmxMap.getAttributesInferred tileMap
-            | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
+            | Some tileMap -> TmxMap.getAttributesInferred (entity.GetTileSizeDivisor world) tileMap
+            | None -> AttributesInferred.important Constants.Engine.EntitySize2dDefault v3Zero
 
 [<AutoOpen>]
 module TmxMapFacetModule =
@@ -1681,6 +1689,7 @@ module TmxMapFacetModule =
              define Entity.Color Color.One
              define Entity.Emission Color.Zero
              define Entity.TileLayerClearance 2.0f
+             define Entity.TileSizeDivisor 1
              define Entity.TileIndexOffset 0
              define Entity.TileIndexOffsetRange (0, 0)
              nonPersistent Entity.TmxMap (TmxMap.makeDefault ())
@@ -1695,6 +1704,7 @@ module TmxMapFacetModule =
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity (nameof TmxMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity (nameof TmxMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Observable)) entity (nameof TmxMapFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.TileSizeDivisor)) entity (nameof TmxMapFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.TmxMap)) entity (nameof TmxMapFacet) world
             let world =
                 World.sense (fun _ world ->
@@ -1713,9 +1723,10 @@ module TmxMapFacetModule =
         override this.RegisterPhysics (entity, world) =
             let mutable transform = entity.GetTransform world
             let perimeterUnscaled = transform.PerimeterUnscaled // tmx map currently ignores rotation and scale
+            let tileSizeDivisor = entity.GetTileSizeDivisor world
             let tmxMap = entity.GetTmxMap world
             let tmxMapPosition = perimeterUnscaled.Min.V2
-            let tmxMapDescriptor = TmxMap.getDescriptor tmxMapPosition tmxMap
+            let tmxMapDescriptor = TmxMap.getDescriptor tmxMapPosition tileSizeDivisor tmxMap
             let bodyProperties =
                 TmxMap.getBodyProperties
                     transform.Enabled
@@ -1747,6 +1758,7 @@ module TmxMapFacetModule =
                     (entity.GetColor world)
                     (entity.GetEmission world)
                     (entity.GetTileLayerClearance world)
+                    (entity.GetTileSizeDivisor world)
                     (entity.GetTileIndexOffset world)
                     (entity.GetTileIndexOffsetRange world)
                     tmxPackage
@@ -1755,7 +1767,7 @@ module TmxMapFacetModule =
 
         override this.GetAttributesInferred (entity, world) =
             let tmxMap = entity.GetTmxMap world
-            TmxMap.getAttributesInferred tmxMap
+            TmxMap.getAttributesInferred (entity.GetTileSizeDivisor world) tmxMap
 
 [<AutoOpen>]
 module LayoutFacetModule =
@@ -2219,6 +2231,29 @@ module Light3dFacetModule =
             | _ -> world
 
 [<AutoOpen>]
+module LightingConfigFacetModule =
+
+    type Entity with
+        member this.GetLightingConfig world : LightingConfig = this.Get (nameof this.LightingConfig) world
+        member this.SetLightingConfig (value : LightingConfig) world = this.Set (nameof this.LightingConfig) value world
+        member this.LightingConfig = lens (nameof this.LightingConfig) this this.GetLightingConfig this.SetLightingConfig
+
+    type LightingConfigFacet () =
+        inherit Facet (false)
+
+        static let configureLighting (entity : Entity) world =
+            let lightingConfig = entity.GetLightingConfig world
+            World.enqueueRenderMessage3d (ConfigureLighting lightingConfig) world
+
+        static member Properties =
+            [define Entity.LightingConfig LightingConfig.defaultConfig]
+
+        override this.Register (entity, world) =
+            let world = World.sense (fun evt world -> configureLighting evt.Subscriber world; (Cascade, world)) (entity.ChangeEvent (nameof entity.LightingConfig)) entity (nameof LightingConfigFacet) world
+            configureLighting entity world
+            world
+
+[<AutoOpen>]
 module StaticBillboardFacetModule =
 
     type Entity with
@@ -2433,7 +2468,7 @@ module BasicStaticBillboardEmitterFacetModule =
              define Entity.ParticleLifeTimeMaxOpt (GameTime.ofSeconds 1.0f)
              define Entity.ParticleRate (match Constants.GameTime.DesiredFrameRate with StaticFrameRate _ -> 1.0f | DynamicFrameRate _ -> 60.0f)
              define Entity.ParticleMax 60
-             define Entity.BasicParticleSeed { Life = Particles.Life.make GameTime.zero (GameTime.ofSeconds 1.0f); Body = Particles.Body.defaultBody; Size = Constants.Engine.Particle3dSizeDefault; Offset = v3Zero; Inset = box2Zero; Color = Color.One; Emission = Color.Zero; Flip = FlipNone }
+             define Entity.BasicParticleSeed { Life = Particles.Life.make GameTime.zero (GameTime.ofSeconds 1.0f); Body = Particles.Body.defaultBody; Size = v3Dup 0.25f; Offset = v3Zero; Inset = box2Zero; Color = Color.One; Emission = Color.Zero; Flip = FlipNone }
              define Entity.EmitterConstraint Particles.Constraint.empty
              define Entity.EmitterStyle "BasicStaticBillboardEmitter"
              nonPersistent Entity.ParticleSystem Particles.ParticleSystem.empty]
@@ -2658,6 +2693,9 @@ module AnimatedModelFacetModule =
         member this.GetAnimatedModel world : AnimatedModel AssetTag = this.Get (nameof this.AnimatedModel) world
         member this.SetAnimatedModel (value : AnimatedModel AssetTag) world = this.Set (nameof this.AnimatedModel) value world
         member this.AnimatedModel = lens (nameof this.AnimatedModel) this this.GetAnimatedModel this.SetAnimatedModel
+        member this.GetBoneIdsOpt world : Dictionary<string, int> option = this.Get (nameof this.BoneIdsOpt) world
+        member this.SetBoneIdsOpt (value : Dictionary<string, int> option) world = this.Set (nameof this.BoneIdsOpt) value world
+        member this.BoneIdsOpt = lens (nameof this.BoneIdsOpt) this this.GetBoneIdsOpt this.SetBoneIdsOpt
         member this.GetBoneOffsetsOpt world : Matrix4x4 array option = this.Get (nameof this.BoneOffsetsOpt) world
         member this.SetBoneOffsetsOpt (value : Matrix4x4 array option) world = this.Set (nameof this.BoneOffsetsOpt) value world
         member this.BoneOffsetsOpt = lens (nameof this.BoneOffsetsOpt) this this.GetBoneOffsetsOpt this.SetBoneOffsetsOpt
@@ -2665,15 +2703,35 @@ module AnimatedModelFacetModule =
         member this.SetBoneTransformsOpt (value : Matrix4x4 array option) world = this.Set (nameof this.BoneTransformsOpt) value world
         member this.BoneTransformsOpt = lens (nameof this.BoneTransformsOpt) this this.GetBoneTransformsOpt this.SetBoneTransformsOpt
 
+        /// Attempt to get the bone ids, offsets, and transforms from an entity that supports boned models.
+        member this.TryGetBoneTransformByName boneName world =
+            match this.GetBoneIdsOpt world with
+            | Some ids ->
+                match ids.TryGetValue boneName with
+                | (true, boneIndex) -> this.TryGetBoneTransformByIndex boneIndex world
+                | (false, _) -> None
+            | None -> None
+
+        /// Attempt to get the bone ids, offsets, and transforms from an entity that supports boned models.
+        member this.TryGetBoneTransformByIndex boneIndex world =
+            match (this.GetBoneOffsetsOpt world, this.GetBoneTransformsOpt world) with
+            | (Some offsets, Some transforms) ->
+                let transform =
+                    offsets.[boneIndex].Inverted *
+                    transforms.[boneIndex] *
+                    this.GetAffineMatrix world
+                Some transform
+            | (_, _) -> None
+
     /// Augments an entity with an animated model.
     type AnimatedModelFacet () =
         inherit Facet (false)
 
-        static let tryComputeBoneOffsetsAndTransforms time animations (sceneOpt : Assimp.Scene option) =
+        static let tryComputeBoneTransforms time animations (sceneOpt : Assimp.Scene option) =
             match sceneOpt with
             | Some scene when scene.Meshes.Count > 0 ->
-                let (boneOffsets, boneTransforms) = scene.ComputeBoneOffsetsAndTransforms (time, animations, scene.Meshes.[0])
-                Some (boneOffsets, boneTransforms)
+                let (boneIds, boneOffsets, boneTransforms) = scene.ComputeBoneTransforms (time, animations, scene.Meshes.[0])
+                Some (boneIds, boneOffsets, boneTransforms)
             | Some _ | None -> None
 
         static let tryAnimateBones (entity : Entity) (world : World) =
@@ -2681,8 +2739,9 @@ module AnimatedModelFacetModule =
             let animations = entity.GetAnimations world
             let animatedModel = entity.GetAnimatedModel world
             let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with Some model -> model.SceneOpt | None -> None
-            match tryComputeBoneOffsetsAndTransforms time animations sceneOpt with
-            | Some (boneOffsets, boneTransforms) ->
+            match tryComputeBoneTransforms time animations sceneOpt with
+            | Some (boneIds, boneOffsets, boneTransforms) ->
+                let world = entity.SetBoneIdsOpt (Some boneIds) world
                 let world = entity.SetBoneOffsetsOpt (Some boneOffsets) world
                 let world = entity.SetBoneTransformsOpt (Some boneTransforms) world
                 world
@@ -2694,6 +2753,7 @@ module AnimatedModelFacetModule =
              define Entity.MaterialProperties MaterialProperties.empty
              define Entity.Animations [|{ StartTime = GameTime.zero; LifeTimeOpt = None; Name = "Armature"; Playback = Loop; Rate = 1.0f; Weight = 1.0f; BoneFilterOpt = None }|]
              define Entity.AnimatedModel Assets.Default.AnimatedModel
+             nonPersistent Entity.BoneIdsOpt None
              nonPersistent Entity.BoneOffsetsOpt None
              nonPersistent Entity.BoneTransformsOpt None]
 
@@ -2714,18 +2774,19 @@ module AnimatedModelFacetModule =
             let animations = entity.GetAnimations world
             let animatedModel = entity.GetAnimatedModel world
             let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with Some model -> model.SceneOpt | None -> None
-            let boneOffsetsAndTransformsOpt =
+            let resultOpt =
                 match World.tryAwaitJob (world.DateTime + TimeSpan.FromSeconds 0.001) (entity, nameof AnimatedModelFacet) world with
-                | Some (JobCompletion (_, _, (:? ((Matrix4x4 array * Matrix4x4 array) option) as boneOffsetsAndTransformsOpt))) -> boneOffsetsAndTransformsOpt
+                | Some (JobCompletion (_, _, (:? ((Dictionary<string, int> * Matrix4x4 array * Matrix4x4 array) option) as boneOffsetsAndTransformsOpt))) -> boneOffsetsAndTransformsOpt
                 | _ -> None
             let world =
-                match boneOffsetsAndTransformsOpt with
-                | Some (boneOffsets, boneTransforms) ->
+                match resultOpt with
+                | Some (boneIds, boneOffsets, boneTransforms) ->
+                    let world = entity.SetBoneIdsOpt (Some boneIds) world
                     let world = entity.SetBoneOffsetsOpt (Some boneOffsets) world
                     let world = entity.SetBoneTransformsOpt (Some boneTransforms) world
                     world
                 | None -> world
-            let job = Job.make (entity, nameof AnimatedModelFacet) (fun () -> tryComputeBoneOffsetsAndTransforms time animations sceneOpt)
+            let job = Job.make (entity, nameof AnimatedModelFacet) (fun () -> tryComputeBoneTransforms time animations sceneOpt)
             World.enqueueJob 1.0f job world
             world
 

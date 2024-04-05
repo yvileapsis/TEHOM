@@ -40,13 +40,16 @@ module BlazeVector =
         inherit GameDispatcher<Model, Message, Command> (Splash)
 
         // here we define the game's properties and event handling
-        override this.Initialize (model, _) =
+        override this.Definitions (model, _) =
             [Game.DesiredScreen :=
                 match model with
                 | Splash -> Desire Simulants.Splash
                 | Title -> Desire Simulants.Title
                 | Credits -> Desire Simulants.Credits
-                | Gameplay gameplay -> match gameplay.GameplayState with Playing -> Desire Simulants.Gameplay | Quitting | Quit -> Desire Simulants.Title
+                | Gameplay gameplay ->
+                    match gameplay.GameplayState with
+                    | Commencing | Commence -> Desire Simulants.Gameplay
+                    | Quitting | Quit -> Desire Simulants.Title
              match model with Gameplay gameplay -> Simulants.Gameplay.Gameplay := gameplay | _ -> ()
              Game.UpdateEvent => Update
              Simulants.Splash.DeselectingEvent => ShowTitle
@@ -60,7 +63,7 @@ module BlazeVector =
             match message with
             | ShowTitle -> just Title
             | ShowCredits -> just Credits
-            | ShowGameplay -> just (Gameplay { GameplayTime = 0L; GameplayState = Playing; Score = 0 })
+            | ShowGameplay -> just (Gameplay { GameplayState = Commencing; Score = 0 })
             | Update ->
                 match model with
                 | Gameplay gameplay ->

@@ -167,10 +167,10 @@ module WorldModuleEntity =
 
         static member internal publishTransformEvents (transformOld : Transform byref, transformNew : Transform byref, is2d, publishChangeEvents, entity : Entity, world) =
             if publishChangeEvents then
-                let positionChanged = v3Neq transformNew.Position transformOld.Position
-                let scaleChanged = v3Neq transformNew.Scale transformOld.Scale
+                let positionChanged = v3NeqApprox transformNew.Position transformOld.Position
+                let rotationChanged = quatNeqApprox transformNew.Rotation transformOld.Rotation
+                let scaleChanged = v3NeqApprox transformNew.Scale transformOld.Scale
                 let offsetChanged = v3Neq transformNew.Offset transformOld.Offset
-                let rotationChanged = quatNeq transformNew.Rotation transformOld.Rotation
                 let sizeChanged = v3Neq transformNew.Size transformOld.Size
                 let elevationChanged = transformNew.Elevation <> transformOld.Elevation
                 let overflowChanged = transformNew.Overflow <> transformOld.Overflow
@@ -2160,11 +2160,10 @@ module WorldModuleEntity =
             let world = World.registerEntityPhysics entity world
             world
 
-        static member internal addEntity mayReplace entityState entity world =
+        static member internal addEntity entityState entity world =
 
             // add entity only if it is new or is explicitly able to be replaced
-            let isNew = not (World.getEntityExists entity world)
-            if isNew || mayReplace then
+            if not (World.getEntityExists entity world) then
 
                 // add entity to world
                 let world = World.addEntityState entityState entity world
@@ -2193,10 +2192,8 @@ module WorldModuleEntity =
                         let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
                         Octree.addElement entityState.Presence entityState.Bounds element octree
 
-                // register entity if needed
-                if isNew
-                then World.registerEntity entity world
-                else world
+                // register entity
+                World.registerEntity entity world
 
             // handle failure
             else failwith ("Adding an entity that the world already contains '" + scstring entity + "'.")
@@ -2224,7 +2221,7 @@ module WorldModuleEntity =
                 // destroy any scheduled tasklets
                 let world = World.removeTasklets entity world
 
-                // mutate entity tree if entity is selected
+                // mutate respective entity tree if entity is selected
                 if WorldModule.getSelected entity world then
                     if World.getEntityIs2d entity world then
                         let quadtree = World.getQuadtree world
@@ -2329,7 +2326,7 @@ module WorldModuleEntity =
                     then World.destroyEntityImmediate entity world
                     else failwith ("Entity '" + scstring entity + "' already exists and cannot be created."); world
                 else world
-            let world = World.addEntity false entityState entity world
+            let world = World.addEntity entityState entity world
 
             // update publish update flag
             let world = World.updateEntityPublishUpdateFlag entity world |> snd'
@@ -2385,7 +2382,7 @@ module WorldModuleEntity =
                 let children = World.getEntityChildren source world
                 let order = World.getEntityOrder source world
                 let world = World.destroyEntityImmediateInternal false source world
-                let world = World.addEntity false entityState destination world
+                let world = World.addEntity entityState destination world
                 let world = World.setEntityOrder order destination world |> snd'
                 let world =
                     Seq.fold (fun world (child : Entity) ->
@@ -2556,14 +2553,14 @@ module WorldModuleEntity =
             // make entity reference
             let entity = Entity entityAddress
 
-            // add entity's state to world
+            // add entity's state to world, destroying any existing entity if appropriate
             let world =
                 if World.getEntityExists entity world then
                     if World.getEntityDestroying entity world
-                    then World.destroyEntityImmediate entity world
+                    then World.destroyEntityImmediateInternal true entity world
                     else failwith ("Entity '" + scstring entity + "' already exists and cannot be created."); world
                 else world
-            let world = World.addEntity true entityState entity world
+            let world = World.addEntity entityState entity world
 
             // update publish update flag
             let world = World.updateEntityPublishUpdateFlag entity world |> snd'

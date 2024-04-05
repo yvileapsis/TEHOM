@@ -17,7 +17,7 @@
 #r "../../../Nu/Nu.Dependencies/SDL2-CS/netstandard2.0/SDL2-CS.dll"
 #r "../../../Nu/Nu.Dependencies/TiledSharp/lib/netstandard2.0/TiledSharp.dll"
 #r "../../../Nu/Nu.Math/bin/Debug/netstandard2.0/Nu.Math.dll"
-#r "../../../Nu/Nu/bin/Debug/net7.0/Nu.dll"
+#r "../../../Nu/Nu/bin/Debug/net8.0/Nu.dll"
 
 namespace Namespace
 open System
@@ -44,7 +44,7 @@ module Template3dDispatcher =
         static member Facets =
             [typeof<StaticModelFacet>]
 
-        override this.Initialize (template, entity) =
+        override this.Definitions (template, entity) =
             [Entity.StaticModel := template.StaticModel
              Entity.UpdateEvent => Update
              Entity.UnregisteringEvent => Unregistering]

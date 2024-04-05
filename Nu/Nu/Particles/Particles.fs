@@ -916,7 +916,7 @@ module BasicStaticSpriteEmitter =
             { Life = Life.make GameTime.zero (GameTime.ofSeconds 2.0f)
               Body = Body.defaultBody
               Offset = v3Zero
-              Size = Constants.Engine.Particle2dSizeDefault
+              Size = Constants.Engine.ParticleSize2dDefault
               Inset = box2Zero
               Color = Color.One
               Emission = Color.Zero
@@ -943,8 +943,8 @@ module BasicStaticSpriteEmitter =
             Output.empty
         let gravity =
             match Constants.GameTime.DesiredFrameRate with
-            | StaticFrameRate frameRate -> v3 0.0f -Constants.Engine.Meter2d 0.0f / single frameRate
-            | DynamicFrameRate _ -> v3 0.0f -Constants.Engine.Meter2d 0.0f * Constants.Engine.Meter2d
+            | StaticFrameRate frameRate -> Constants.Physics.GravityDefault * Constants.Engine.Meter2d / single frameRate
+            | DynamicFrameRate _ -> Constants.Physics.GravityDefault * Constants.Engine.Meter2d
         let particleBehaviors =
             Behaviors.singleton
                 (Behavior.ofSeq BasicParticle.body
@@ -1169,7 +1169,7 @@ module BasicStaticBillboardEmitter =
             { Life = Life.make GameTime.zero (GameTime.ofSeconds 2.0f)
               Body = Body.defaultBody
               Offset = v3Zero
-              Size = Constants.Engine.Particle3dSizeDefault
+              Size = Constants.Engine.ParticleSize3dDefault
               Inset = box2Zero
               Color = Color.One
               Emission = Color.Zero
@@ -1196,8 +1196,8 @@ module BasicStaticBillboardEmitter =
             Output.empty
         let gravity =
             match Constants.GameTime.DesiredFrameRate with
-            | StaticFrameRate frameRate -> v3 0.0f -Constants.Engine.Meter3d 0.0f / single frameRate
-            | DynamicFrameRate _ -> v3 0.0f -Constants.Engine.Meter3d 0.0f * Constants.Engine.Meter3d
+            | StaticFrameRate frameRate -> v3 0.0f -1.0f 0.0f / single frameRate
+            | DynamicFrameRate _ -> v3 0.0f -1.0f 0.0f
         let particleBehaviors =
             Behaviors.singleton
                 (Behavior.ofSeq BasicParticle.body
