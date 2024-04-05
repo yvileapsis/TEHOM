@@ -627,8 +627,8 @@ type [<ReferenceEquality>] GlRenderer2d =
             let mutable transform = transform
             let absolute = transform.Absolute
             let perimeter = transform.Perimeter
-            let position = perimeter.Min.V2 * Constants.Render.VirtualScalar2
-            let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2
+            let position = perimeter.Min.V2 * Constants.Render.VirtualScalar2F
+            let size = perimeter.Size.V2 * Constants.Render.VirtualScalar2F
             let viewport = Constants.Render.Viewport
             let viewProjection = viewport.ViewProjection2d (absolute, eyeCenter, eyeSize)
 

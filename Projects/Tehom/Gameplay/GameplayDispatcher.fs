@@ -21,7 +21,7 @@ module GameplayDispatcher =
         })
 
         // here we define the screen's properties and event handling
-        override this.Initialize (_, _) = [
+        override this.Definitions (_, _) = [
             Screen.UpdateEvent => Update
             Screen.DeselectingEvent => FinishQuitting
         ]

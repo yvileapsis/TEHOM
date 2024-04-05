@@ -20,7 +20,7 @@ module GameplayGui =
         Content.group Simulants.GameplayGui.Name [] [// time
 
             Content.text Simulants.GameplayGametime.Name [
-                Entity.Position == v3 384.0f 240.0f 0.0f
+                Entity.Position == v3 256.0f 160.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                 Entity.Text := string gameplay.GameTime
@@ -30,7 +30,7 @@ module GameplayGui =
             ]
 
             Content.text Simulants.GameplayTime.Name [
-                Entity.Position == v3 240.0f 240.0f 0.0f
+                Entity.Position == v3 160.0f 160.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                 Entity.Text :=
@@ -41,8 +41,8 @@ module GameplayGui =
             ]
 
             richText (Simulants.GameplayTextBox.Name) [
-                Entity.Size == v3 600.0f 100.0f 0.0f
-                Entity.Position == v3 -36.0f 120.0f 0.0f
+                Entity.Size == v3 400.0f 100.0f 0.0f
+                Entity.Position == v3 -36.0f 80.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                 Entity.Text := """
@@ -63,7 +63,7 @@ module GameplayGui =
             ]
 
             TextInput.textInput Simulants.GameplayTextInputBox.Name [
-                Entity.Position == v3 -240.0f -144.0f 0.0f
+                Entity.Position == v3 -160.0f -96.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                 Entity.Text == "Enter your string"
@@ -77,7 +77,7 @@ module GameplayGui =
 
             // Save
             Content.button Simulants.GameplaySave.Name [
-                Entity.Position == v3 384.0f 192.0f 0.0f
+                Entity.Position == v3 256.0f 128.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Text == "Save"
                 Entity.ClickEvent => Save
@@ -85,7 +85,7 @@ module GameplayGui =
 
             // Load
             Content.button Simulants.GameplayLoad.Name [
-                Entity.Position == v3 384.0f 144.0f 0.0f
+                Entity.Position == v3 256.0f 96.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Text == "Load"
                 Entity.ClickEvent => Load
@@ -93,7 +93,7 @@ module GameplayGui =
 
             // quit
             Content.button Simulants.GameplayQuit.Name [
-                Entity.Position == v3 384.0f 96.0f 0.0f
+                Entity.Position == v3 256.0f 64.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Text == "Quit"
                 Entity.ClickEvent => StartQuitting
