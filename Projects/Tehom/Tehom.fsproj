@@ -37,7 +37,6 @@
 		<Compile Include="Simulants.fs" />
 		<Compile Include="Gameplay\InputParser.fs" />
 		<Compile Include="Gameplay\RichText.fs" />
-		<Compile Include="Gameplay\Scene.fs" />
 		<Compile Include="Gameplay\TextInput.fs" />
 		<Compile Include="Gameplay\Time.fs" />
 		<Compile Include="Gameplay\Model.fs" />
