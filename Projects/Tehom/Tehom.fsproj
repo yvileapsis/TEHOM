@@ -57,118 +57,6 @@
 		<Content Include="Overlayer.nuol">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</Content>
-		<Content Include="Assets\Gui\Title.nugroup" />
-		<Content Include="Assets\Gui\Credits.nugroup" />
-		<Content Include="Assets\Gameplay\Scene.nugroup" />
-		<Content Include="Assets\Gameplay\Jump.wav" />
-		<Content Include="Assets\Default\White.bmp" />
-		<Content Include="Assets\Default\TileSet.bmp" />
-		<Content Include="Assets\Default\TileMapEmpty.tmx" />
-		<Content Include="Assets\Default\TileMap.tmx" />
-		<Content Include="Assets\Default\TerrainTint.tiff" />
-		<Content Include="Assets\Default\TerrainLayerRoughness.tiff" />
-		<Content Include="Assets\Default\TerrainLayerNormal.tiff" />
-		<Content Include="Assets\Default\TerrainLayerHeight.tiff" />
-		<Content Include="Assets\Default\TerrainLayerBlend.tiff" />
-		<Content Include="Assets\Default\TerrainLayerAmbientOcclusion.tiff" />
-		<Content Include="Assets\Default\TerrainLayerAlbedo.tiff" />
-		<Content Include="Assets\Default\TerrainLayer2Roughness.tiff" />
-		<Content Include="Assets\Default\TerrainLayer2Normal.tiff" />
-		<Content Include="Assets\Default\TerrainLayer2Height.tiff" />
-		<Content Include="Assets\Default\TerrainLayer2Blend.tiff" />
-		<Content Include="Assets\Default\TerrainLayer2AmbientOcclusion.tiff" />
-		<Content Include="Assets\Default\TerrainLayer2Albedo.tiff" />
-		<Content Include="Assets\Default\StaticModelRoughness.tiff" />
-		<Content Include="Assets\Default\StaticModelMetallic.tiff" />
-		<Content Include="Assets\Default\StaticModelAlbedo.tiff" />
-		<Content Include="Assets\Default\StaticModel.obj" />
-		<Content Include="Assets\Default\StaticModel.mtl" />
-		<Content Include="Assets\Default\Sound.wav" />
-		<Content Include="Assets\Default\Song.ogg" />
-		<Content Include="Assets\Default\SkyBoxTop.tiff" />
-		<Content Include="Assets\Default\SkyBoxTop.png" />
-		<Content Include="Assets\Default\SkyBoxRight.tiff" />
-		<Content Include="Assets\Default\SkyBoxRight.png" />
-		<Content Include="Assets\Default\SkyBoxMap.cbm" />
-		<Content Include="Assets\Default\SkyBoxLeft.tiff" />
-		<Content Include="Assets\Default\SkyBoxLeft.png" />
-		<Content Include="Assets\Default\SkyBoxFront.tiff" />
-		<Content Include="Assets\Default\SkyBoxFront.png" />
-		<Content Include="Assets\Default\SkyBoxBottom.tiff" />
-		<Content Include="Assets\Default\SkyBoxBottom.png" />
-		<Content Include="Assets\Default\SkyBoxBack.tiff" />
-		<Content Include="Assets\Default\SkyBoxBack.png" />
-		<Content Include="Assets\Default\SkyBox.glsl" />
-		<Content Include="Assets\Default\SideViewCharacterWalk.bmp" />
-		<Content Include="Assets\Default\SideViewCharacterJump.bmp" />
-		<Content Include="Assets\Default\SideViewCharacterIdle.bmp" />
-		<Content Include="Assets\Default\PhysicallyBasedFxaa.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedForward.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedDeferredTerrain.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedDeferredStatic.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedDeferredSsao.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedDeferredLightMapping.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedDeferredLighting.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedDeferredIrradiance.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedDeferredEnvironmentFilter.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedDeferredAnimated.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedBlur.glsl" />
-		<Content Include="Assets\Default\NuSlide.bmp" />
-		<Content Include="Assets\Default\MaterialRoughness.tiff" />
-		<Content Include="Assets\Default\MaterialNormal.tiff" />
-		<Content Include="Assets\Default\MaterialMetallic.tiff" />
-		<Content Include="Assets\Default\MaterialHeight.tiff" />
-		<Content Include="Assets\Default\MaterialEmission.tiff" />
-		<Content Include="Assets\Default\MaterialAmbientOcclusion.tiff" />
-		<Content Include="Assets\Default\MaterialAlbedo.tiff" />
-		<Content Include="Assets\Default\LightbulbModelAlbedo.tiff" />
-		<Content Include="Assets\Default\LightbulbModel.obj" />
-		<Content Include="Assets\Default\LightbulbModel.mtl" />
-		<Content Include="Assets\Default\Label.bmp" />
-		<Content Include="Assets\Default\Irradiance.glsl" />
-		<Content Include="Assets\Default\ImageEmpty.bmp" />
-		<Content Include="Assets\Default\Image.bmp" />
-		<Content Include="Assets\Default\HighlightModelEmission.tiff" />
-		<Content Include="Assets\Default\HighlightModelAlbedo.tiff" />
-		<Content Include="Assets\Default\HighlightModel.obj" />
-		<Content Include="Assets\Default\HighlightModel.mtl" />
-		<Content Include="Assets\Default\Highlight.bmp" />
-		<Content Include="Assets\Default\HeightMap.png" />
-		<Content Include="Assets\Default\FreeMonoBold.024.ttf" />
-		<Content Include="Assets\Default\EnvironmentFilter.glsl" />
-		<Content Include="Assets\Default\Effect.nueffect" />
-		<Content Include="Assets\Default\Character2dWalk.bmp" />
-		<Content Include="Assets\Default\Character2dJump.bmp" />
-		<Content Include="Assets\Default\Character2dIdle.bmp" />
-		<Content Include="Assets\Default\ButtonUp.bmp" />
-		<Content Include="Assets\Default\ButtonDown.bmp" />
-		<Content Include="Assets\Default\Brdf.tiff" />
-		<Content Include="Assets\Default\Box.bmp" />
-		<Content Include="Assets\Default\Border.bmp" />
-		<Content Include="Assets\Default\Block.bmp" />
-		<Content Include="Assets\Default\Black.bmp" />
-		<Content Include="Assets\Default\AnimatedModelRoughness.tiff" />
-		<Content Include="Assets\Default\AnimatedModelNormal.tiff" />
-		<Content Include="Assets\Default\AnimatedModelNormal.png" />
-		<Content Include="Assets\Default\AnimatedModelMetallic.tiff" />
-		<Content Include="Assets\Default\AnimatedModelMetallic.png" />
-		<Content Include="Assets\Default\AnimatedModelHeight.tiff" />
-		<Content Include="Assets\Default\AnimatedModelHeight.png" />
-		<Content Include="Assets\Default\AnimatedModelAmbientOcclusion.tiff" />
-		<Content Include="Assets\Default\AnimatedModelAmbientOcclusion.png" />
-		<Content Include="Assets\Default\AnimatedModelAlbedo.tiff" />
-		<Content Include="Assets\Default\AnimatedModelAlbedo.png" />
-		<Content Include="Assets\Default\AnimatedModel.fbx" />
-		<Content Include="Assets\Default\HeightMap.raw" />
-		<Content Include="Assets\Default\LightProbeModel.mtl" />
-		<Content Include="Assets\Default\LightProbeModel.obj" />
-		<Content Include="Assets\Default\LightProbeModelAlbedo.tiff" />
-		<Content Include="Assets\Default\LightProbeModelMetallic.tiff" />
-		<Content Include="Assets\Default\LightProbeModelRoughness.tiff" />
-		<Content Include="Assets\Default\PhysicallyBasedForwardStatic.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedShadowAnimated.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedShadowStatic.glsl" />
-		<Content Include="Assets\Default\PhysicallyBasedShadowTerrain.glsl" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -214,6 +102,7 @@
 
 	<ItemGroup>
 	  <EmbeddedResource Remove="Assets\Actors\**" />
+	  <EmbeddedResource Remove="Assets\**" />
 	</ItemGroup>
 
 </Project>
