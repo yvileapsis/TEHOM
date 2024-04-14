@@ -200,7 +200,7 @@ module Transformer =
     let accelerate (delta : GameTime) (bodies : Body SArray) =
         let mutable i = 0
         let scalar = single delta
-        while i < dec bodies.Length do
+        while i < bodies.Length do
             let body = &bodies.[i]
             body.Position <- body.Position + body.LinearVelocity * scalar
             body.Angles <- body.Angles + body.AngularVelocity * scalar
@@ -212,7 +212,7 @@ module Transformer =
         match c with
         | Sphere (radius, center) ->
             let mutable i = 0
-            while i < dec bodies.Length do
+            while i < bodies.Length do
                 let body = &bodies.[i]
                 let positionNext = body.Position + body.LinearVelocity * scalar
                 let distanceDelta = positionNext - center
@@ -226,7 +226,7 @@ module Transformer =
         | Box box ->
             // TODO: implement properly bouncing angles.
             let mutable i = 0
-            while i < dec bodies.Length do
+            while i < bodies.Length do
                 let body = &bodies.[i]
                 let positionNext = body.Position + body.LinearVelocity * scalar
                 let distanceDelta = positionNext - box.Center
@@ -237,7 +237,7 @@ module Transformer =
                 i <- inc i
         | Constraints constraints ->
             let mutable i = 0
-            while i < dec constraints.Length do
+            while i < constraints.Length do
                 let constrain' = constraints.[i]
                 constrain delta constrain' bodies
                 i <- inc i
@@ -249,7 +249,7 @@ module Transformer =
             | Gravity gravity ->
                 let scalar = single delta
                 let mutable i = 0
-                while i < dec bodies.Length do
+                while i < bodies.Length do
                     let body = &bodies.[i]
                     body.LinearVelocity <- body.LinearVelocity + gravity * scalar
                     i <- inc i
@@ -257,7 +257,7 @@ module Transformer =
             | Attractor (position, radius, force) ->
                 let scalar = single delta
                 let mutable i = 0
-                while i < dec bodies.Length do
+                while i < bodies.Length do
                     let body = &bodies.[i]
                     let direction = position - body.Position
                     let distance = direction.Magnitude
@@ -270,7 +270,7 @@ module Transformer =
             | Drag (linearDrag, angularDrag) ->
                 let scalar = single delta
                 let mutable i = 0
-                while i < dec bodies.Length do
+                while i < bodies.Length do
                     let body = &bodies.[i]
                     let linearDrag = body.LinearVelocity * linearDrag
                     let angularDrag = body.AngularVelocity * angularDrag
@@ -290,7 +290,7 @@ module Transformer =
         | Or value ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     targets.[i] <- struct (targetLife, targetValue || value)
@@ -299,7 +299,7 @@ module Transformer =
         | Nor value ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     targets.[i] <- struct (targetLife, not targetValue && not value)
@@ -308,7 +308,7 @@ module Transformer =
         | Xor value ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     targets.[i] <- struct (targetLife, targetValue <> value)
@@ -317,7 +317,7 @@ module Transformer =
         | And value ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     targets.[i] <- struct (targetLife, targetValue && value)
@@ -326,7 +326,7 @@ module Transformer =
         | Nand value ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     targets.[i] <- struct (targetLife, not (targetValue && value))
@@ -335,7 +335,7 @@ module Transformer =
         | Equal value ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, _) = v
                     targets.[i] <- struct (targetLife, value)
@@ -355,7 +355,7 @@ module Transformer =
         | Constant value ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     targets.[i] <- struct (targetLife, applyRange targetValue value)
@@ -364,7 +364,7 @@ module Transformer =
         | Linear (value, value2) ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     let progress = Life.getProgress3 time range.RangeLife targetLife
@@ -375,7 +375,7 @@ module Transformer =
         | Random (value, value2) ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     let progress = Life.getProgress3 time range.RangeLife targetLife
@@ -388,7 +388,7 @@ module Transformer =
         | Chaos (value, value2) ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     let chaosValue = Gen.randomf
@@ -399,7 +399,7 @@ module Transformer =
         | Ease (value, value2) ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     let progress = Life.getProgress3 time range.RangeLife targetLife
@@ -411,7 +411,7 @@ module Transformer =
         | EaseIn (value, value2) ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     let progress = Life.getProgress3 time range.RangeLife targetLife
@@ -424,7 +424,7 @@ module Transformer =
         | EaseOut (value, value2) ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     let progress = Life.getProgress3 time range.RangeLife targetLife
@@ -437,7 +437,7 @@ module Transformer =
         | Sin (value, value2) ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     let progress = Life.getProgress3 time range.RangeLife targetLife
@@ -450,7 +450,7 @@ module Transformer =
         | SinScaled (scalar, value, value2) ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     let progress = Life.getProgress3 time range.RangeLife targetLife
@@ -463,7 +463,7 @@ module Transformer =
         | Cos (value, value2) ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     let progress = Life.getProgress3 time range.RangeLife targetLife
@@ -476,7 +476,7 @@ module Transformer =
         | CosScaled (scalar, value, value2) ->
             fun _ _ _ targets ->
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     let v = &targets.[i]
                     let struct (targetLife, targetValue) = v
                     let progress = Life.getProgress3 time range.RangeLife targetLife
@@ -531,13 +531,13 @@ module Scope =
             fun (targets : 'a SArray) ->
                 let fields = SArray.zeroCreate targets.Length
                 let mutable i = 0
-                while i < dec targets.Length do
+                while i < targets.Length do
                     getField.Invoke (&targets.[i], &fields.[i])
                     i <- inc i
                 fields
           Out = fun output fields (targets : 'a SArray) ->
             let mutable i = 0
-            while i < dec targets.Length do
+            while i < targets.Length do
                 setField.Invoke (&fields.[i], &targets.[i])
                 i <- inc i
             output }
@@ -856,7 +856,7 @@ module BasicStaticSpriteEmitter =
     let private toParticlesDescriptor time (emitter : BasicStaticSpriteEmitter) =
         let particles =
             SArray.append
-                (if emitter.ParticleWatermark > emitter.ParticleIndex
+                (if emitter.ParticleWatermark >= emitter.ParticleIndex
                  then SArray.skip emitter.ParticleIndex emitter.ParticleRing
                  else SArray.empty)
                 (SArray.take emitter.ParticleIndex emitter.ParticleRing)
@@ -916,7 +916,7 @@ module BasicStaticSpriteEmitter =
             { Life = Life.make GameTime.zero (GameTime.ofSeconds 2.0f)
               Body = Body.defaultBody
               Offset = v3Zero
-              Size = Constants.Engine.ParticleSize2dDefault
+              Size = Constants.Engine.Particle2dSizeDefault
               Inset = box2Zero
               Color = Color.One
               Emission = Color.Zero
@@ -943,8 +943,8 @@ module BasicStaticSpriteEmitter =
             Output.empty
         let gravity =
             match Constants.GameTime.DesiredFrameRate with
-            | StaticFrameRate frameRate -> Constants.Physics.GravityDefault * Constants.Engine.Meter2d / single frameRate
-            | DynamicFrameRate _ -> Constants.Physics.GravityDefault * Constants.Engine.Meter2d
+            | StaticFrameRate frameRate -> Constants.Physics.GravityDefault * Constants.Engine.Meter2d / single frameRate * 0.1f
+            | DynamicFrameRate _ -> Constants.Physics.GravityDefault * Constants.Engine.Meter2d * 0.1f
         let particleBehaviors =
             Behaviors.singleton
                 (Behavior.ofSeq BasicParticle.body
@@ -990,6 +990,7 @@ type [<ReferenceEquality>] StaticBillboardEmitter<'a when 'a :> Particle and 'a 
       Absolute : bool
       MaterialProperties : MaterialProperties
       Material : Material
+      ShadowOffset : single
       RenderType : RenderType
       Life : Life
       ParticleLifeTimeMaxOpt : GameTime // OPTIMIZATION: uses GameTime.zero to represent infinite particle life.
@@ -1059,13 +1060,14 @@ type [<ReferenceEquality>] StaticBillboardEmitter<'a when 'a :> Particle and 'a 
     /// Make a basic particle emitter.
     static member make<'a>
         time body absolute materialProperties material
-        renderType lifeTimeOpt particleLifeTimeMaxOpt particleRate particleMax particleSeed
+        shadowOffset renderType lifeTimeOpt particleLifeTimeMaxOpt particleRate particleMax particleSeed
         constrain particleInitializer particleBehavior particleBehaviors emitterBehavior emitterBehaviors toParticlesDescriptor : 'a StaticBillboardEmitter =
         let particleMax = max 1 particleMax
         { Body = body
           Absolute = absolute
           MaterialProperties = materialProperties
           Material = material
+          ShadowOffset = shadowOffset
           RenderType = renderType
           Life = Life.make time lifeTimeOpt
           ParticleLifeTimeMaxOpt = particleLifeTimeMaxOpt
@@ -1108,7 +1110,7 @@ module BasicStaticBillboardEmitter =
     let private toParticlesDescriptor time (emitter : BasicStaticBillboardEmitter) =
         let particles =
             SArray.append
-                (if emitter.ParticleWatermark > emitter.ParticleIndex
+                (if emitter.ParticleWatermark >= emitter.ParticleIndex
                  then SArray.skip emitter.ParticleIndex emitter.ParticleRing
                  else SArray.empty)
                 (SArray.take emitter.ParticleIndex emitter.ParticleRing)
@@ -1133,6 +1135,7 @@ module BasicStaticBillboardEmitter =
               MaterialProperties = emitter.MaterialProperties
               Material = emitter.Material
               Particles = particles'
+              ShadowOffset = emitter.ShadowOffset
               RenderType = emitter.RenderType }
         descriptor
 
@@ -1143,11 +1146,11 @@ module BasicStaticBillboardEmitter =
     /// Make a basic static billboard particle emitter.
     let make
         time body absolute materialProperties material
-        renderType lifeTimeOpt particleLifeTimeMaxOpt particleRate particleMax particleSeed
+        shadowOffset renderType lifeTimeOpt particleLifeTimeMaxOpt particleRate particleMax particleSeed
         constrain particleInitializer particleBehavior particleBehaviors emitterBehavior emitterBehaviors =
         BasicStaticBillboardEmitter.make
             time body absolute materialProperties material
-            renderType lifeTimeOpt particleLifeTimeMaxOpt particleRate particleMax particleSeed
+            shadowOffset renderType lifeTimeOpt particleLifeTimeMaxOpt particleRate particleMax particleSeed
             constrain particleInitializer particleBehavior particleBehaviors emitterBehavior emitterBehaviors toParticlesDescriptor
 
     /// Make an empty basic billboard particle emitter.
@@ -1160,7 +1163,7 @@ module BasicStaticBillboardEmitter =
         let emitterBehaviors = Behaviors.empty
         make
             time Body.defaultBody false MaterialProperties.defaultProperties Material.defaultMaterial
-            (ForwardRenderType (0.0f, 0.0f)) lifeTimeOpt particleLifeTimeMaxOpt particleRate particleMax particleSeed
+            Constants.Engine.Particle3dShadowOffsetDefault (ForwardRenderType (0.0f, 0.0f)) lifeTimeOpt particleLifeTimeMaxOpt particleRate particleMax particleSeed
             Constraint.empty particleInitializer particleBehavior particleBehaviors emitterBehavior emitterBehaviors
 
     /// Make the default basic billboard particle emitter.
@@ -1169,7 +1172,7 @@ module BasicStaticBillboardEmitter =
             { Life = Life.make GameTime.zero (GameTime.ofSeconds 2.0f)
               Body = Body.defaultBody
               Offset = v3Zero
-              Size = Constants.Engine.ParticleSize3dDefault
+              Size = Constants.Engine.Particle3dSizeDefault
               Inset = box2Zero
               Color = Color.One
               Emission = Color.Zero
@@ -1182,7 +1185,7 @@ module BasicStaticBillboardEmitter =
             let particle = emitter.ParticleSeed
             particle.Body.Position <- emitter.Body.Position
             particle.Body.Angles <- emitter.Body.Angles
-            particle.Body.LinearVelocity <- (v3 (Gen.randomf - 0.25f) Gen.randomf (Gen.randomf - 0.25f)) * v3Dup 20.0f * particleScalar
+            particle.Body.LinearVelocity <- (v3 (Gen.randomf - 0.5f) Gen.randomf (Gen.randomf - 0.5f)) * v3Dup 20.0f * particleScalar
             particle.Body.AngularVelocity <- v3 0.0f 0.0f (Gen.randomf * 30.0f - 15.0f) * particleScalar
             particle
         let particleBehavior = fun time emitter ->
@@ -1210,7 +1213,7 @@ module BasicStaticBillboardEmitter =
             Behaviors.empty
         make
             time Body.defaultBody false MaterialProperties.defaultProperties Material.defaultMaterial
-            (ForwardRenderType (0.0f, 0.0f)) lifeTimeOpt particleLifeTimeMaxOpt particleRate particleMax particleSeed
+            Constants.Engine.Particle3dShadowOffsetDefault (ForwardRenderType (0.0f, 0.0f)) lifeTimeOpt particleLifeTimeMaxOpt particleRate particleMax particleSeed
             Constraint.empty particleInitializer particleBehavior particleBehaviors emitterBehavior emitterBehaviors
 
 /// Describes a billboard emitter.

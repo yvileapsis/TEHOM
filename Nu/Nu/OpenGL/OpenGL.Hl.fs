@@ -30,7 +30,8 @@ module Hl =
             AssertEnabled <- enabled
             Initialized <- true
 
-    /// Assert a lack of Gl error. Has an generic parameter to enable value pass-through.
+    /// Assert a lack of Gl error. Has a generic parameter to enable value pass-through.
+    /// Thread-safe after being initialized.
     let Assert (a : 'a) =
         if AssertEnabled then
             let error = Gl.GetError ()
@@ -67,15 +68,27 @@ module Hl =
         () // nothing to do
 #endif
 
-    /// Create an SDL OpenGL context.
-    let CreateSglContext window =
+    /// Create an SDL OpenGL context with the given window.
+    let CreateSglContextInitial window =
         Gl.Initialize ()
         let glContext = SDL.SDL_GL_CreateContext window
         let swapInterval = if Constants.Render.Vsync then 1 else 0
         SDL.SDL_GL_SetSwapInterval swapInterval |> ignore<int>
+        SDL.SDL_GL_MakeCurrent (window, glContext) |> ignore<int>
         Gl.BindAPI ()
+        Assert ()
         let version = Gl.GetString StringName.Version
         Log.info ("Initialized OpenGL " + version + ".")
+        glContext
+
+    /// Create a SDL OpenGL context with the given window that shares the current context. Originating thread must wait
+    /// on the given WaitOnce object before continuing processing.
+    let CreateSglContextSharedWithCurrentContext (window, sharedContext) =
+        SDL.SDL_GL_MakeCurrent (window, sharedContext) |> ignore<int>
+        SDL.SDL_GL_SetAttribute (SDL.SDL_GLattr.SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1) |> ignore<int>
+        let glContext = SDL.SDL_GL_CreateContext window
+        SDL.SDL_GL_MakeCurrent (window, glContext) |> ignore<int>
+        Gl.BindAPI ()
         Assert ()
         glContext
 

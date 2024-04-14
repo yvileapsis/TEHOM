@@ -14,18 +14,6 @@ open Nu
 [<RequireQualifiedAccess>]
 module CubeMap =
 
-    /// The key identifying a cube map.
-    type CubeMapMemoKey =
-        string * string * string * string * string * string
-
-    /// Memoizes cube map loads.
-    type [<ReferenceEquality>] CubeMapMemo =
-        { CubeMaps : Dictionary<CubeMapMemoKey, Texture.Texture> }
-
-        /// Make a cube map memoizer.
-        static member make () =
-            { CubeMaps = Dictionary HashIdentity.Structural }
-
     /// Attempt to create a cube map from 6 files.
     /// Uses file name-based inferences to look for texture files in case the ones that were hard-coded in the included
     /// files can't be located.
@@ -44,7 +32,7 @@ module CubeMap =
                 let faceFilePath = faceFilePaths.[i]
                 let faceFilePath = if not (File.Exists faceFilePath) then PathF.ChangeExtension (faceFilePath, ".png") else faceFilePath
                 let faceFilePath = if not (File.Exists faceFilePath) then PathF.ChangeExtension (faceFilePath, ".dds") else faceFilePath
-                match Texture.TryCreateTextureData faceFilePath with
+                match Texture.TryCreateTextureData (false, faceFilePath) with
                 | Some textureData ->
                     match textureData with
                     | OpenGL.Texture.TextureData.TextureDataDotNet (metadata, bytes) ->
@@ -73,29 +61,13 @@ module CubeMap =
             Gl.TexParameter (TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapS, int TextureWrapMode.ClampToEdge)
             Gl.TexParameter (TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapT, int TextureWrapMode.ClampToEdge)
             Gl.TexParameter (TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapR, int TextureWrapMode.ClampToEdge)
-            let cubeMap = Texture.CreateTextureFromId cubeMapId
+            Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
+            let cubeMapHandle = Texture.CreateTextureHandle cubeMapId
+            let cubeMap = Texture.EagerTexture { TextureMetadata = Texture.TextureMetadata.empty; TextureId = cubeMapId; TextureHandle = cubeMapHandle }
             Right cubeMap
         | Some error ->
             Gl.DeleteTextures [|cubeMapId|]
             Left error
-
-    /// Attempt to create a cube map from 6 files.
-    let TryCreateCubeMapMemoized (cubeMapMemoKey, cubeMapMemo) =
-
-        // memoize cube map
-        match cubeMapMemo.CubeMaps.TryGetValue cubeMapMemoKey with
-        | (false, _) ->
-
-            // attempt to create cube map
-            let (faceRightFilePath, faceLeftFilePath, faceTopFilePath, faceBottomFilePath, faceBackFilePath, faceFrontFilePath) = cubeMapMemoKey
-            match TryCreateCubeMap (faceRightFilePath, faceLeftFilePath, faceTopFilePath, faceBottomFilePath, faceBackFilePath, faceFrontFilePath) with
-            | Right cubeMap ->
-                cubeMapMemo.CubeMaps.Add (cubeMapMemoKey, cubeMap)
-                Right cubeMap
-            | Left error -> Left error
-
-        // already exists
-        | (true, cubeMap) -> Right cubeMap
 
     /// Describes some cube map geometry that's loaded into VRAM.
     type CubeMapGeometry =
@@ -330,3 +302,32 @@ module CubeMap =
         // teardown state
         Gl.DepthFunc DepthFunction.Less
         Gl.Disable EnableCap.DepthTest
+
+    /// The key identifying a cube map.
+    type CubeMapKey =
+        string * string * string * string * string * string
+
+    /// Memoizes cube map loads (and may at some point potentially thread them).
+    type CubeMapClient () =
+        let cubeMaps = Dictionary HashIdentity.Structural
+
+        /// Memoized cube maps.
+        member this.CubeMaps = cubeMaps
+
+        /// Attempt to create a cube map from 6 files.
+        member this.TryCreateCubeMap cubeMapKey =
+
+            // memoize cube map
+            match cubeMaps.TryGetValue cubeMapKey with
+            | (false, _) ->
+
+                // attempt to create cube map
+                let (faceRightFilePath, faceLeftFilePath, faceTopFilePath, faceBottomFilePath, faceBackFilePath, faceFrontFilePath) = cubeMapKey
+                match TryCreateCubeMap (faceRightFilePath, faceLeftFilePath, faceTopFilePath, faceBottomFilePath, faceBackFilePath, faceFrontFilePath) with
+                | Right cubeMap ->
+                    cubeMaps.Add (cubeMapKey, cubeMap)
+                    Right cubeMap
+                | Left error -> Left error
+
+            // already exists
+            | (true, cubeMap) -> Right cubeMap

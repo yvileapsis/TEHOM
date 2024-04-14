@@ -243,8 +243,10 @@ module FreezerFacetModule =
                 let world = this.SetFrozenRenderLightProbes3d frozenProbes world
                 let world = this.SetFrozenRenderLights3d frozenLights world
                 let world = this.SetFrozenRenderStaticModelSurfaces frozenSurfaces world
+                let world = this.SetStatic true world
                 world
             else
+                let world = this.SetStatic false world
                 let world = this.SetFrozenRenderLightProbes3d [||] world
                 let world = this.SetFrozenRenderLights3d [||] world
                 let world = this.SetFrozenRenderStaticModelSurfaces [||] world
@@ -286,8 +288,8 @@ module FreezerFacetModule =
                 fun probe light presence bounds ->
                     match renderPass with
                     | NormalPass -> Presence.intersects3d interiorOpt exterior imposter lightBoxOpt probe light presence bounds
-                    | LightMapPass _ -> false
-                    | ShadowPass (_, _, frustum) -> not probe && not light && frustum.Intersects bounds
+                    | LightMapPass (_, lightMapBounds) -> not probe && not light && lightMapBounds.Intersects bounds
+                    | ShadowPass (_, _, _, frustum) -> not probe && not light && frustum.Intersects bounds
                     | ReflectionPass (_, _) -> false
 
             // render all probes, clearing staleness when appropriate

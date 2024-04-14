@@ -21,7 +21,6 @@ open DotRecast.Recast
 
 //////////////////////////////////////////////////////////////////////////////////////
 // TODO:                                                                            //
-// Log Output window.                                                               //
 // Perhaps look up (Value)Some-constructed default property values from overlayer.  //
 // Custom properties in order of priority:                                          //
 //  NormalOpt (for terrain)                                                         //
@@ -163,7 +162,7 @@ module Gaia =
     let mutable ofSymbolMemo = new ForgetfulDictionary<struct (Type * Symbol), obj> (HashIdentity.Structural)
 
     (* Fsi Session *)
-    let fsProjectNoWarn = "--nowarn:FS9;FS1178;FS3391;FS3536;FS3560"// TODO: add warnings as errors, too?    
+    let fsProjectNoWarn = "--nowarn:FS9;FS1178;FS3391;FS3536;FS3560"
     let fsiArgs = [|"fsi.exe"; "--debug+"; "--debug:full"; "--optimize-"; "--tailcalls-"; "--multiemit+"; "--gui-"; "--nologo"; fsProjectNoWarn|] // TODO: see if can we use --warnon as well.
     let fsiConfig = Shell.FsiEvaluationSession.GetDefaultConfiguration ()
     let private fsiErrorStream = new StringWriter ()
@@ -446,12 +445,14 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
 
     let private selectScreen screen =
         if screen <> selectedScreen then
+            ImGui.SetWindowFocus "Screen Properties" // make sure group properties are showing
             ImGui.SetWindowFocus null
             newEntityParentOpt <- None
             selectedScreen <- screen
 
     let private selectGroup group =
         if group <> selectedGroup then
+            ImGui.SetWindowFocus "Group Properties" // make sure group properties are showing
             ImGui.SetWindowFocus null
             newEntityParentOpt <- None
             selectedGroup <- group
@@ -483,6 +484,9 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                     | None -> focusedPropertyDescriptorOpt <- None
                 | Some _ | None -> focusedPropertyDescriptorOpt <- None
             | Some _ | None -> ()
+
+            // make sure entity properties are showing5
+            if entityOpt.IsSome then ImGui.SetWindowFocus "Entity Properties"
 
             // HACK: in order to keep the property of one simulant from being copied to another when the selected
             // simulant is changed, we have to move focus away from the property windows. We chose to focus on the
@@ -651,6 +655,17 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         then (Resolve, world)
         else (Cascade, world)
 
+    let private handleNuLifeCycleGroup (evt : Event<LifeCycleData, Game>) wtemp =
+        world <- wtemp
+        match evt.Data with
+        | RegisterData simulant ->
+            match simulant with
+            | :? Group as group when group.Selected world && group.Name = "Scene" ->
+                selectGroup group // select newly created Scene group since it's more likely to be the group the user wants to edit.
+            | _ -> ()
+        | _ -> ()
+        (Cascade, world)
+
     let private handleNuSelectedScreenOptChange (evt : Event<ChangeData, Game>) wtemp =
         world <- wtemp
         match evt.Data.Value :?> Screen option with
@@ -659,9 +674,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             selectGroupInitial screen
             selectEntityOpt None
             (Cascade, world)
-        | None ->
-            // just keep current group selection and screen if no screen selected
-            (Cascade, world)
+        | None -> (Cascade, world) // just keep current group selection and screen if no screen selected
 
     let private imGuiRender wtemp =
 
@@ -759,7 +772,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             let entityPosition =
                 if atMouse
                 then viewport.MouseToWorld2d (entity.GetAbsolute world, rightClickPosition, eyeCenter, eyeSize)
-                else viewport.MouseToWorld2d (entity.GetAbsolute world, World.getEye2dSize world, eyeCenter, eyeSize)
+                else eyeCenter
             let attributes = entity.GetAttributesInferred world
             entityTransform.Position <- entityPosition.V3
             entityTransform.Size <- attributes.SizeInferred
@@ -1112,7 +1125,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         Array.map (fun line -> PathF.Normalize line) |>
                         Array.map (fun line -> line.Trim ())
                     let fsprojProjectLines = // TODO: see if we can pull these from the fsproj as well...
-                        ["#r \"../../../../../Nu/Nu.Math/bin/" + Constants.Gaia.BuildName + "/netstandard2.0/Nu.Math.dll\""
+                        ["#r \"../../../../../Nu/Nu.Math/bin/" + Constants.Gaia.BuildName + "/netstandard2.1/Nu.Math.dll\""
                          "#r \"../../../../../Nu/Nu.Pipe/bin/" + Constants.Gaia.BuildName + "/net8.0/Nu.Pipe.dll\""
                          "#r \"../../../../../Nu/Nu/bin/" + Constants.Gaia.BuildName + "/net8.0/Nu.dll\""]
                     let fsprojFsFilePaths =
@@ -1260,7 +1273,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
 
     let private tryMakeSdlDeps () =
         let sdlWindowConfig = { SdlWindowConfig.defaultConfig with WindowTitle = "MyGame" }
-        let sdlConfig = { SdlConfig.defaultConfig with ViewConfig = NewWindow sdlWindowConfig }
+        let sdlConfig = { SdlConfig.defaultConfig with WindowConfig = sdlWindowConfig }
         match SdlDeps.tryMake sdlConfig with
         | Left msg -> Left msg
         | Right sdlDeps -> Right (sdlConfig, sdlDeps)
@@ -1507,7 +1520,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                     let eyeRotation = World.getEye3dRotation world
                     let eyeCenterOffset = Vector3.Transform (v3Back * newEntityDistance, eyeRotation)
                     desiredEye3dCenter <- entity.GetPosition world + eyeCenterOffset
-        let popupContextItemTitle = "##popupContextItem" + scstring entity
+        let popupContextItemTitle = "##popupContextItem" + scstringMemo entity
         let mutable openPopupContextItemWhenUnselected = false
         if ImGui.BeginPopupContextItem popupContextItemTitle then
             if ImGui.IsMouseReleased ImGuiMouseButton.Right then openPopupContextItemWhenUnselected <- true
@@ -1547,7 +1560,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         if openPopupContextItemWhenUnselected then
             ImGui.OpenPopup popupContextItemTitle
         if ImGui.BeginDragDropSource () then
-            let entityAddressStr = entity.EntityAddress |> scstring |> Symbol.distill
+            let entityAddressStr = entity.EntityAddress |> scstringMemo  |> Symbol.distill
             dragDropPayloadOpt <- Some entityAddressStr
             ImGui.Text (entity.Name + if ImGui.IsCtrlDown () then " (Copy)" else "")
             ImGui.SetDragDropPayload ("Entity", IntPtr.Zero, 0u) |> ignore<bool>
@@ -1584,7 +1597,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                             let next = Nu.Entity (selectedGroup.GroupAddress <-- Address.makeFromArray entity.Surnames)
                             let previousOpt = World.tryGetPreviousEntity next world
                             let parentOpt = match next.Parent with :? Entity as parent -> Some parent | _ -> None
-                            if not ((scstring parentOpt).Contains (scstring sourceEntity)) then
+                            if not ((scstringMemo  parentOpt).Contains (scstringMemo sourceEntity)) then
                                 let mountOpt = match parentOpt with Some _ -> Some (Relation.makeParent ()) | None -> None
                                 let sourceEntity' = match parentOpt with Some parent -> parent / sourceEntity.Name | None -> selectedGroup / sourceEntity.Name
                                 if sourceEntity'.Exists world then
@@ -1605,7 +1618,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         else
                             let parent = Nu.Entity (selectedGroup.GroupAddress <-- Address.makeFromArray entity.Surnames)
                             let sourceEntity' = parent / sourceEntity.Name
-                            if not ((scstring parent).Contains (scstring sourceEntity)) then
+                            if not ((scstringMemo parent).Contains (scstringMemo sourceEntity)) then
                                 if not (sourceEntity'.Exists world) then
                                     snapshot ()
                                     world <- World.renameEntityImmediate sourceEntity sourceEntity' world
@@ -1629,7 +1642,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 ImGui.SameLine ()
                 separatorInserted <- true
             ImGui.PushStyleColor (ImGuiCol.Button, color.Abgr)
-            ImGui.PushID ("##frozen" + scstring entity)
+            ImGui.PushID ("##frozen" + scstringMemo entity)
             if ImGui.SmallButton text then
                 snapshot ()
                 world <- entity.SetFrozen (not frozen) world
@@ -3323,18 +3336,19 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                     // interactive window
                     if ImGui.Begin ("Interactive", ImGuiWindowFlags.NoNav) then
                         let mutable toBottom = false
-                        let eval = ImGui.Button "Eval" || ImGui.IsAnyItemActive () && ImGui.IsKeyPressed ImGuiKey.Enter && ImGui.IsShiftDown ()
+                        let eval = ImGui.Button "Eval" || ImGui.IsAnyItemActive () && ImGui.IsKeyPressed ImGuiKey.Enter && ImGui.IsCtrlDown () && ImGui.IsShiftUp ()
                         if ImGui.IsItemHovered ImGuiHoveredFlags.DelayNormal && ImGui.BeginTooltip () then
-                            ImGui.Text "Evaluate current expression (Shift+Enter)"
+                            ImGui.Text "Evaluate current expression (Ctrl+Enter)"
                             ImGui.EndTooltip ()
                         ImGui.SameLine ()
-                        let enter = ImGui.Button "Enter" || ImGui.IsAnyItemActive () && ImGui.IsKeyPressed ImGuiKey.Enter && ImGui.IsCtrlDown ()
+                        let enter = ImGui.Button "Enter" || ImGui.IsAnyItemActive () && ImGui.IsKeyPressed ImGuiKey.Enter && ImGui.IsCtrlDown () && ImGui.IsShiftDown ()
                         if ImGui.IsItemHovered ImGuiHoveredFlags.DelayNormal && ImGui.BeginTooltip () then
-                            ImGui.Text "Evaluate current expression, then clear input (Ctrl+Enter)"
+                            ImGui.Text "Evaluate current expression, then clear input (Ctrl+Shift+Enter)"
                             ImGui.EndTooltip ()
                         if eval || enter then
                             snapshot ()
-                            if fsiSession.DynamicAssemblies.Length = 0 then
+                            let initialEntry = fsiSession.DynamicAssemblies.Length = 0
+                            if initialEntry then
                                 let projectDllPathValid = File.Exists projectDllPath
                                 let initial =
                                     "#r \"System.Configuration.ConfigurationManager.dll\"\n" +
@@ -3358,6 +3372,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                     "#r \"Nu.dll\"\n" +
                                     "#r \"Nu.Gaia.dll\"\n" +
                                     (if projectDllPathValid then "#r \"" + PathF.GetFileName projectDllPath + "\"\n" else "") +
+                                    "open System\n" +
+                                    "open System.Numerics\n" +
                                     "open Prime\n" +
                                     "open Nu\n" +
                                     "open Nu.Gaia\n" +
@@ -3377,6 +3393,13 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                 fsiSession.EvalInteraction (interactiveInputStr + ";;")
                                 let errorStr = string fsiErrorStream
                                 let outStr = string fsiOutStream
+                                let outStr =
+                                    if initialEntry then
+                                        let outStr = outStr.Replace ("\r\n> ", "") // TODO: ensure the use of \r\n also works on linux.
+                                        let outStrLines = outStr.Split "\r\n"
+                                        let outStrLines = Array.filter (fun (line : string) -> not (line.Contains "--> Referenced '")) outStrLines
+                                        String.join "\r\n" outStrLines
+                                    else outStr
                                 let outStr =
                                     if selectedEntityOpt.IsNone // HACK: 2/2: strip eval output relating to above 1/2 hack.
                                     then outStr.Replace ("val selectedEntityOpt: Entity option = None\r\n", "")
@@ -3410,7 +3433,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         if enter then interactiveInputStr <- ""
                         if eval || enter then interactiveInputFocusRequested <- true
                         ImGui.Separator ()
-                        ImGui.BeginChild "##interactiveOutputStr" |> ignore<bool>
+                        ImGui.BeginChild ("##interactiveOutputStr", v2Zero, false, ImGuiWindowFlags.HorizontalScrollbar) |> ignore<bool>
                         ImGui.TextUnformatted interactiveOutputStr
                         if toBottom then ImGui.SetScrollHereY 1.0f
                         ImGui.EndChild ()
@@ -4081,6 +4104,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 let world = World.subscribe handleNuMouseButton Game.MouseMiddleUpEvent Game world
                 let world = World.subscribe handleNuMouseButton Game.MouseRightDownEvent Game world
                 let world = World.subscribe handleNuMouseButton Game.MouseRightUpEvent Game world
+                let world = World.subscribe handleNuLifeCycleGroup (Game.LifeCycleEvent (nameof Group)) Game world
                 let world = World.subscribe handleNuSelectedScreenOptChange Game.SelectedScreenOpt.ChangeEvent Game world
                 
                 // run the world

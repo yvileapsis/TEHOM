@@ -3,7 +3,6 @@
 
 namespace Nu
 open System
-open System.Collections
 open System.Collections.Generic
 open System.Numerics
 open Prime
@@ -69,15 +68,51 @@ type OctelementEqualityComparer<'e when 'e : equality> () =
 [<RequireQualifiedAccess>]
 module internal Octnode =
 
-    type internal Octnode<'e when 'e : equality> =
+    type [<Struct>] internal Octchildren<'e when 'e : equality> =
+        | NoChildren
+        | NodeChildren of NodeChildren : 'e Octnode array
+        | ElementChildren of ElementChildren : 'e Octelement HashSet
+
+    and internal Octnode<'e when 'e : equality> =
         private
             { mutable ElementsCount_ : int // OPTIMIZATION: keeps track of total contained elements in order to get an early-out on queries.
               Id_ : uint64
               Depth_ : int
               Bounds_ : Box3
-              Children_ : ValueEither<'e Octnode array, 'e Octelement HashSet> }
+              mutable Children_ : 'e Octchildren
+              Comparer_ : 'e OctelementEqualityComparer
+              Leaves_ : Dictionary<Vector3, 'e Octnode> }
+
+        override this.ToString () =
+            ""
 
         member this.Id = this.Id_
+
+    let internal makeChildren<'e when 'e : equality> node =
+        let childSize = node.Bounds_.Size * 0.5f
+        let childDepth = dec node.Depth_
+        if childDepth > 0 then
+            let nodeChildren =
+                [|for i in 0 .. 1 do
+                    [|for j in 0 .. 1 do
+                        [|for k in 0 .. 1 do
+                            let childOffset = v3 (childSize.X * single i) (childSize.Y * single j) (childSize.Z * single k)
+                            let childMin = node.Bounds_.Min + childOffset
+                            let childBounds = box3 childMin childSize
+                            let child =
+                                { ElementsCount_ = 0
+                                  Id_ = Gen.idForInternal
+                                  Depth_ = childDepth
+                                  Bounds_ = childBounds
+                                  Children_ = NoChildren
+                                  Comparer_ = node.Comparer_
+                                  Leaves_ = node.Leaves_ }
+                            if childDepth = 1 then node.Leaves_.Add (childBounds.Min, child)
+                            child|]|]|]
+            NodeChildren (nodeChildren |> Array.concat |> Array.concat)
+        else
+            let children = HashSet<'e Octelement> node.Comparer_
+            ElementChildren children
 
     let internal atPoint (point : Vector3) (node : 'e Octnode) =
         node.Bounds_.Intersects point
@@ -95,13 +130,16 @@ module internal Octnode =
         let delta =
             if isIntersectingBox bounds node then
                 match node.Children_ with
-                | ValueLeft nodes ->
+                | NoChildren ->
+                    node.Children_ <- makeChildren node
+                    addElement bounds &element node
+                | NodeChildren nodes ->
                     let mutable delta = 0
                     for i in 0 .. dec nodes.Length do
                         let node = nodes.[i]
                         delta <- delta + addElement bounds &element node
                     delta
-                | ValueRight elements ->
+                | ElementChildren elements ->
                     let removed = elements.Remove element
                     let added = elements.Add element
                     if removed
@@ -115,13 +153,15 @@ module internal Octnode =
         let delta =
             if isIntersectingBox bounds node then
                 match node.Children_ with
-                | ValueLeft nodes ->
+                | NoChildren ->
+                    0
+                | NodeChildren nodes ->
                     let mutable delta = 0
                     for i in 0 .. dec nodes.Length do
                         let node = nodes.[i]
                         delta <- delta + removeElement bounds &element node
                     delta
-                | ValueRight elements ->
+                | ElementChildren elements ->
                     if elements.Remove element then -1 else 0
             else 0
         node.ElementsCount_ <- node.ElementsCount_ + delta
@@ -130,14 +170,19 @@ module internal Octnode =
     let rec internal updateElement boundsOld boundsNew (element : 'e Octelement inref) (node : 'e Octnode) =
         let delta =
             match node.Children_ with
-            | ValueLeft nodes ->
+            | NoChildren ->
+                if isIntersectingBox boundsOld node || isIntersectingBox boundsNew node then
+                    node.Children_ <- makeChildren node
+                    updateElement boundsOld boundsNew &element node
+                else 0
+            | NodeChildren nodes ->
                 let mutable delta = 0
                 for i in 0 .. dec nodes.Length do
                     let node = nodes.[i]
                     if isIntersectingBox boundsOld node || isIntersectingBox boundsNew node then
                         delta <- delta + updateElement boundsOld boundsNew &element node
                 delta
-            | ValueRight elements ->
+            | ElementChildren elements ->
                 if isIntersectingBox boundsNew node then
                     let removed = elements.Remove element
                     let added = elements.Add element
@@ -153,21 +198,25 @@ module internal Octnode =
     let rec internal clearElements node =
         node.ElementsCount_ <- 0
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = &nodes.[i]
                 clearElements node
-        | ValueRight children ->
+        | ElementChildren children ->
             children.Clear ()
 
     let rec internal getElementsAtPoint point (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && atPoint point node then
                     getElementsAtPoint point set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 let bounds = element.Bounds
                 if bounds.Intersects point then
@@ -175,12 +224,14 @@ module internal Octnode =
 
     let rec internal getElementsInBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingBox box node then
                     getElementsInBox box set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 let bounds = element.Bounds
                 if bounds.Intersects box then
@@ -188,12 +239,14 @@ module internal Octnode =
 
     let rec internal getElementsInFrustum frustum (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingFrustum frustum node then
                     getElementsInFrustum frustum set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 let bounds = element.Bounds
                 if frustum.Intersects bounds then
@@ -201,12 +254,14 @@ module internal Octnode =
 
     let rec internal getElementsInPlayBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingBox box node then
                     getElementsInPlayBox box set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 if not element.Static then
                     let bounds = element.Bounds
@@ -215,12 +270,14 @@ module internal Octnode =
 
     let rec internal getLightProbesInViewFrustum frustum (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingFrustum frustum node then
                     getLightProbesInViewFrustum frustum set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 if element.LightProbe && element.Visible then
                     let bounds = element.Bounds
@@ -229,12 +286,14 @@ module internal Octnode =
 
     let rec internal getLightProbesInViewBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingBox box node then
                     getLightProbesInViewBox box set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 if element.LightProbe && element.Visible then
                     let bounds = element.Bounds
@@ -243,24 +302,28 @@ module internal Octnode =
 
     let rec internal getLightProbes (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 then
                     getLightProbes set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 if element.LightProbe && element.Visible then
                     set.Add element |> ignore
 
     let rec internal getLightsInViewFrustum frustum (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingFrustum frustum node then
                     getLightsInViewFrustum frustum set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 if element.Light && element.Visible then
                     let bounds = element.Bounds
@@ -269,12 +332,14 @@ module internal Octnode =
 
     let rec internal getLightsInViewBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingBox box node then
                     getLightsInViewBox box set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 if element.Light && element.Visible then
                     let bounds = element.Bounds
@@ -283,12 +348,14 @@ module internal Octnode =
 
     let rec internal getLightsInBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingBox box node then
                     getLightsInBox box set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 if element.Light then
                     let bounds = element.Bounds
@@ -297,12 +364,14 @@ module internal Octnode =
 
     let rec internal getElementsInPlayFrustum frustum (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingFrustum frustum node then
                     getElementsInPlayFrustum frustum set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 if not element.Static then
                     let bounds = element.Bounds
@@ -311,12 +380,14 @@ module internal Octnode =
 
     let rec internal getElementsInViewFrustum interior exterior frustum (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingFrustum frustum node then
                     getElementsInViewFrustum interior exterior frustum set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 if interior then
                     if element.Interior || element.Exterior then
@@ -329,19 +400,23 @@ module internal Octnode =
 
     let rec internal getElementsInViewBox box (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 && isIntersectingBox box node then
                     getElementsInViewBox box set node
-        | ValueRight elements ->
+        | ElementChildren elements ->
             for element in elements do
                 if element.Visible && box.Intersects element.Bounds then
                     set.Add element |> ignore
 
     let rec internal getElementsInView frustumInterior frustumExterior lightBox (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 then
@@ -352,11 +427,13 @@ module internal Octnode =
                         if intersectingExterior then getElementsInViewFrustum false true frustumExterior set node
                     if isIntersectingBox lightBox node then
                         getLightsInViewBox lightBox set node
-        | ValueRight _ -> ()
+        | ElementChildren _ -> ()
 
     let rec internal getElementsInPlay playBox playFrustum (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 then
@@ -364,42 +441,43 @@ module internal Octnode =
                         getElementsInPlayBox playBox set node
                     if isIntersectingFrustum playFrustum node then
                         getElementsInPlayFrustum playFrustum set node
-        | ValueRight _ -> ()
+        | ElementChildren _ -> ()
 
     let rec internal getElements (set : 'e Octelement HashSet) (node : 'e Octnode) =
         match node.Children_ with
-        | ValueLeft nodes ->
+        | NoChildren ->
+            ()
+        | NodeChildren nodes ->
             for i in 0 .. dec nodes.Length do
                 let node = nodes.[i]
                 if node.ElementsCount_ > 0 then
                     getElements set node
-        | ValueRight children ->
+        | ElementChildren children ->
             set.UnionWith children
 
-    let rec internal make<'e when 'e : equality> comparer depth (bounds : Box3) (leaves : Dictionary<Vector3, 'e Octnode>) : 'e Octnode =
+    let rec internal sweep (node : 'e Octnode) =
+        if node.ElementsCount_ = 0 then
+            match node.Children_ with
+            | NoChildren ->
+                ()
+            | NodeChildren nodes ->
+                for i in 0 .. dec nodes.Length do
+                    let node = &nodes.[i]
+                    sweep node
+            | ElementChildren _ ->
+                node.Leaves_.Remove node.Bounds_.Min |> ignore<bool>
+            node.Children_ <- NoChildren
+
+    let internal make<'e when 'e : equality> comparer depth (bounds : Box3) (leaves : Dictionary<Vector3, 'e Octnode>) : 'e Octnode =
         if depth < 1 then failwith "Invalid depth for Octnode. Expected value of at least 1."
-        let granularity = 2
-        let childDepth = depth - 1
-        let childSize = bounds.Size / single granularity
-        let children =
-            if depth > 1 then
-                let nodes =
-                    [|for i in 0 .. dec granularity do
-                        [|for j in 0 .. dec granularity do
-                            [|for k in 0 .. dec granularity do
-                                let childOffset = v3 (childSize.X * single i) (childSize.Y * single j) (childSize.Z * single k)
-                                let childMin = bounds.Min + childOffset
-                                let childBounds = box3 childMin childSize
-                                yield make comparer childDepth childBounds leaves|]|]|]
-                ValueLeft (nodes |> Array.concat |> Array.concat)
-            else ValueRight (HashSet<'e Octelement> (comparer : 'e OctelementEqualityComparer))
         let node =
             { ElementsCount_ = 0
               Id_ = Gen.idForInternal
               Depth_ = depth
               Bounds_ = bounds
-              Children_ = children }
-        if depth = 1 then leaves.Add (bounds.Min, node)
+              Children_ = NoChildren
+              Comparer_ = comparer
+              Leaves_ = leaves }
         node
 
 type internal Octnode<'e when 'e : equality> = Octnode.Octnode<'e>
@@ -602,12 +680,16 @@ module Octree =
     let getBounds tree =
         tree.Bounds
 
+    /// Remove all unused non-root nodes in the tree.
+    let sweep tree =
+        Octnode.sweep tree.Node
+
     /// Create an Octree with the given depth and overall size.
     /// Size dimensions must be a power of two.
     let make<'e when 'e : equality> (depth : int) (size : Vector3) =
-        if  not (Math.IsPowerOfTwo size.X) ||
-            not (Math.IsPowerOfTwo size.Y) ||
-            not (Math.IsPowerOfTwo size.Z) then
+        if  not (Math.PowerOfTwo size.X) ||
+            not (Math.PowerOfTwo size.Y) ||
+            not (Math.PowerOfTwo size.Z) then
             failwith "Invalid size for Octtree. Expected value whose components are a power of two."
         let leafComparer = // OPTIMIZATION: avoid allocation on Equals calls.
             { new IEqualityComparer<Vector3> with

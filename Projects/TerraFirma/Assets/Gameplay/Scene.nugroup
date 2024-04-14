@@ -4,11 +4,7 @@
   [Persistent True]
   [Visible True]]
  [[Entity3dDispatcher
-   [[FacetNames [LightingConfigFacet Nav3dConfigFacet]]
-    [LightingConfig
-     [[LightCutoffMargin 0.333] [LightShadowBiasAcne 2E-07] [LightShadowBiasBleed 0.5] [LightMappingEnabled True] [SsaoEnabled True] [SsaoIntensity 1.35] [SsaoBias 0.025] [SsaoRadius 0.35] [SsaoDistanceMax 0.175] [SsaoSampleCount 16]]]
-    [Name Environment]
-    [Presence Omnipresent]]
+   [[Name Environment] [Presence Omnipresent]]
    [[Light3dDispatcher
      [[AttenuationLinear 0.005050505]
       [AttenuationQuadratic 0.00028058363]
@@ -45,6 +41,17 @@
       [PositionLocal [12.4 5.7 11.4]]
       [ProbeBounds
        [[-21.4 -1.3 -22.8] [63.9 14.1 67.2]]]]
+     []]
+    [Lighting3dConfigDispatcher
+     [[LightingConfig
+       [[LightCutoffMargin 0.333] [LightShadowBiasAcne 2E-07] [LightShadowBiasBleed 0.5] [LightMappingEnabled True] [SsaoEnabled True] [SsaoIntensity 1.35] [SsaoBias 0.025] [SsaoRadius 0.4] [SsaoDistanceMax 0.2] [SsaoSampleCount 12]]]
+      [MountOpt [Some ^]]
+      [Name Lighting3dConfig]]
+     []]
+    [Nav3dConfigDispatcher
+     [[MountOpt [Some ^]]
+      [Name Nav3dConfig]
+      [Size [0 0 0]]]
      []]]]
   [Entity3dDispatcher
    [[Name Villa]
@@ -6699,11 +6706,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -6731,11 +6738,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -6764,11 +6771,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -6797,11 +6804,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -6829,11 +6836,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -6862,11 +6869,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -6895,11 +6902,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -6927,11 +6934,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -6960,11 +6967,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -6993,11 +7000,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -7026,11 +7033,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -7059,11 +7066,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]
@@ -7092,11 +7099,11 @@
      [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
     [Model
      ["TerraFirma.Character, TerraFirma, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      [[PositionPrevious []]
+      [[CharacterType Enemy]
+       [PositionPrevious []]
        [RotationPrevious []]
        [LinearVelocityPrevious []]
        [AngularVelocityPrevious []]
-       [CharacterType Enemy]
        [HitPoints 3]
        [ActionState NormalState]
        [JumpState [0 0]]

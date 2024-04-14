@@ -15,20 +15,23 @@ module Gameplay =
         | Quit
 
     // this is our MMCC model type representing gameplay.
-    type [<ReferenceEquality; SymbolicExpansion>] Gameplay =
-        { GameplayState : GameplayState }
+    type [<SymbolicExpansion>] Gameplay =
+        { GameplayState : GameplayState
+          Score : int }
 
     // this is our MMCC message type.
     type GameplayMessage =
         | FinishCommencing
         | StartQuitting
         | FinishQuitting
+        | Die of Entity
         interface Message
 
     // this is our MMCC command type.
     type GameplayCommand =
         | SetupScene
-        | Attack of Entity
+        | AttackCharacter of Entity
+        | DestroyEnemy of Entity
         | TrackPlayer
         | PlaySound of int64 * single * Sound AssetTag
         interface Command
@@ -41,17 +44,18 @@ module Gameplay =
 
     // this is the screen dispatcher that defines the screen where gameplay takes place.
     type GameplayDispatcher () =
-        inherit ScreenDispatcher<Gameplay, GameplayMessage, GameplayCommand> ({ GameplayState = Quit })
+        inherit ScreenDispatcher<Gameplay, GameplayMessage, GameplayCommand> ({ GameplayState = Quit; Score = 0 })
 
         // here we define the screen's property values and event handling
         override this.Definitions (_, _) =
             [Screen.SelectEvent => FinishCommencing
              Screen.DeselectingEvent => FinishQuitting
              Screen.PostUpdateEvent => TrackPlayer
-             Events.AttackEvent --> Simulants.GameplayScene --> Address.Wildcard =|> fun evt -> Attack evt.Data]
+             Events.AttackEvent --> Simulants.GameplayScene --> Address.Wildcard =|> fun evt -> AttackCharacter evt.Data
+             Events.DieEvent --> Simulants.GameplayScene --> Address.Wildcard =|> fun evt -> Die evt.Data]
 
         // here we handle the gameplay messages
-        override this.Message (gameplay, message, _, _) =
+        override this.Message (gameplay, message, _, world) =
 
             match message with
             | FinishCommencing ->
@@ -66,6 +70,16 @@ module Gameplay =
                 let gameplay = { gameplay with GameplayState = Quit }
                 just gameplay
 
+            | Die deadCharacter ->
+                let character = deadCharacter.GetCharacter world
+                match character.CharacterType with
+                | Player ->
+                    let gameplay = { gameplay with GameplayState = Quitting }
+                    just gameplay
+                | Enemy ->
+                    let gameplay = { gameplay with Score = gameplay.Score + 100 }
+                    withSignal (DestroyEnemy deadCharacter) gameplay
+
         // here we handle the gameplay commands
         // notice how in here we handle events from characters to implement intra-character interactions rather than
         // the more complex approach of having characters talk to each other or handle each other's events.
@@ -77,7 +91,7 @@ module Gameplay =
                 let world = World.synchronizeNav3d screen world
                 just world
 
-            | Attack attackedCharacter ->
+            | AttackCharacter attackedCharacter ->
                 let character = attackedCharacter.GetCharacter world
                 let character = { character with HitPoints = max (dec character.HitPoints) 0 }
                 let (signals, character) =
@@ -89,11 +103,18 @@ module Gameplay =
                             let playSound = PlaySound (0L, Constants.Audio.SoundVolumeDefault, Assets.Gameplay.InjureSound)
                             withSignal playSound character
                     else
-                        let character = { character with ActionState = WoundedState }
-                        let playSound = PlaySound (0L, Constants.Audio.SoundVolumeDefault, Assets.Gameplay.InjureSound)
-                        withSignal playSound character
+                        match character.ActionState with
+                        | WoundState _ -> just character
+                        | _ ->
+                            let character = { character with ActionState = WoundState { WoundTime = world.UpdateTime }}
+                            let playSound = PlaySound (0L, Constants.Audio.SoundVolumeDefault, Assets.Gameplay.InjureSound)
+                            withSignal playSound character
                 let world = attackedCharacter.SetCharacter character world
                 withSignals signals world
+
+            | DestroyEnemy enemy ->
+                let world = World.destroyEntity enemy world
+                just world
 
             | TrackPlayer ->
                 
@@ -121,7 +142,13 @@ module Gameplay =
             [// the gui group
              Content.group Simulants.GameplayGui.Name []
 
-                [// quit
+                [// score
+                 Content.text Simulants.GameplayScore.Name
+                    [Entity.Position == v3 260.0f 155.0f 0.0f
+                     Entity.Elevation == 10.0f
+                     Entity.Text := "Score: " + string gameplay.Score]
+
+                 // quit
                  Content.button Simulants.GameplayQuit.Name
                     [Entity.Position == v3 232.0f -144.0f 0.0f
                      Entity.Elevation == 10.0f
@@ -136,7 +163,7 @@ module Gameplay =
                     [// the player that's always present in the scene
                      Content.entity<PlayerDispatcher> Simulants.GameplayPlayer.Name
                         [Entity.Persistent == false
-                         Entity.DieEvent => StartQuitting]]
+                         Entity.DieEvent => Die Simulants.GameplayPlayer]]
 
              // no scene group otherwise
              | Commencing | Quit -> ()]

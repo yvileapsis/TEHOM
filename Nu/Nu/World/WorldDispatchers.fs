@@ -15,22 +15,22 @@ module EntityDispatcherModule =
         inherit EntityDispatcher (true, perimeterCentered, physical)
 
         new (physical) =
-            Entity2dDispatcher (Constants.Engine.EntityPerimeterCentered2dDefault, physical)
+            Entity2dDispatcher (Constants.Engine.Entity2dPerimeterCenteredDefault, physical)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySize2dDefault
-             define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCentered2dDefault]
+            [define Entity.Size Constants.Engine.Entity2dSizeDefault
+             define Entity.PerimeterCentered Constants.Engine.Entity2dPerimeterCenteredDefault]
 
     /// A gui entity dispatcher.
     type GuiDispatcher () =
-        inherit EntityDispatcher (true, Constants.Engine.EntityPerimeterCenteredGuiDefault, false)
+        inherit EntityDispatcher (true, Constants.Engine.EntityGuiPerimeterCenteredDefault, false)
 
         static member Facets =
             [typeof<LayoutFacet>]
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySizeGuiDefault
-             define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCenteredGuiDefault
+            [define Entity.Size Constants.Engine.EntityGuiSizeDefault
+             define Entity.PerimeterCentered Constants.Engine.EntityGuiPerimeterCenteredDefault
              define Entity.Absolute true
              define Entity.Presence Omnipresent
              define Entity.DisabledColor Constants.Gui.DisabledColor
@@ -48,7 +48,7 @@ module EntityDispatcherModule =
             Entity3dDispatcher (physical)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySize3dDefault]
+            [define Entity.Size Constants.Engine.Entity3dSizeDefault]
 
         override this.RayCast (ray, entity, world) =
             if Array.isEmpty (entity.GetFacets world) then
@@ -62,7 +62,7 @@ module EntityDispatcherModule =
         inherit EntityDispatcher (false, true, false)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySizeVuiDefault]
+            [define Entity.Size Constants.Engine.EntityVuiSizeDefault]
 
 [<AutoOpen>]
 module StaticSpriteDispatcherModule =
@@ -120,8 +120,8 @@ module TextDispatcherModule =
             | Some image ->
                 match Metadata.tryGetTextureSizeF image with
                 | Some size -> AttributesInferred.important size.V3 v3Zero
-                | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+                | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module LabelDispatcherModule =
@@ -442,6 +442,27 @@ module SkyBoxDispatcherModule =
              define Entity.CubeMap Assets.Default.SkyBoxMap]
 
 [<AutoOpen>]
+module Lighting3dConfigDispatcherModule =
+
+    type Entity with
+        member this.GetLightingConfig world : LightingConfig = this.Get (nameof this.LightingConfig) world
+        member this.SetLightingConfig (value : LightingConfig) world = this.Set (nameof this.LightingConfig) value world
+        member this.LightingConfig = lens (nameof this.LightingConfig) this this.GetLightingConfig this.SetLightingConfig
+
+    type Lighting3dConfigDispatcher () =
+        inherit Entity3dDispatcher (false)
+
+        static member Properties =
+            [define Entity.LightingConfig LightingConfig.defaultConfig
+             define Entity.Presence Omnipresent
+             define Entity.AlwaysUpdate true]
+
+        override this.Update (entity, world) =
+            let lightingConfig = entity.GetLightingConfig world
+            World.enqueueRenderMessage3d (ConfigureLighting lightingConfig) world
+            world
+
+[<AutoOpen>]
 module LightProbe3dDispatcherModule =
 
     /// Gives an entity the base behavior of a 3d light probe.
@@ -733,18 +754,19 @@ module Character3dDispatcherModule =
             let leftness = (Vector3.Dot (linearVelocityAvg * 32.0f, -rotation.Right))
             let turnRightness = (angularVelocityAvg * v3Up).Length () * 48.0f
             let turnLeftness = -turnRightness
-            let animations = [{ StartTime = 0L; LifeTimeOpt = None; Name = "Armature|Idle"; Playback = Loop; Rate = 1.0f; Weight = 0.5f; BoneFilterOpt = None }]
             let animations =
-                if forwardness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkForward"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f forwardness; BoneFilterOpt = None } :: animations
-                elif backness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkBack"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f backness; BoneFilterOpt = None } :: animations
+                [Animation.make 0L None "Armature|Idle" Loop 1.0f 0.5f None]
+            let animations =
+                if forwardness >= 0.01f then Animation.make 0L None "Armature|WalkForward" Loop 1.0f (max 0.025f forwardness) None :: animations
+                elif backness >= 0.01f then Animation.make 0L None "Armature|WalkBack" Loop 1.0f (max 0.025f backness) None :: animations
                 else animations
             let animations =
-                if rightness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkRight"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f rightness; BoneFilterOpt = None } :: animations
-                elif leftness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkLeft"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f leftness; BoneFilterOpt = None } :: animations
+                if rightness >= 0.01f then Animation.make 0L None "Armature|WalkRight" Loop 1.0f (max 0.025f rightness) None :: animations
+                elif leftness >= 0.01f then Animation.make 0L None "Armature|WalkLeft" Loop 1.0f (max 0.025f leftness) None :: animations
                 else animations
             let animations =
-                if turnRightness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnRight"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f turnRightness; BoneFilterOpt = None } :: animations
-                elif turnLeftness >= 0.01f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnLeft"; Playback = Loop; Rate = 1.0f; Weight = max 0.025f turnLeftness; BoneFilterOpt = None } :: animations
+                if turnRightness >= 0.01f then Animation.make 0L None "Armature|TurnRight" Loop 1.0f (max 0.025f turnRightness) None :: animations
+                elif turnLeftness >= 0.01f then Animation.make 0L None "Armature|TurnLeft" Loop 1.0f (max 0.025f turnLeftness) None :: animations
                 else animations
             let world = entity.SetAnimations (List.toArray animations) world
             let world = entity.SetLinearVelocityPrevious linearVelocityAvg world
@@ -766,3 +788,55 @@ module TerrainDispatcherModule =
              define Entity.Presence Omnipresent
              define Entity.Static true
              define Entity.AlwaysRender true]
+
+[<AutoOpen>]
+module Nav3dConfigDispatcherModule =
+
+    type Entity with
+        member this.GetNav3dConfig world : Nav3dConfig = this.Get (nameof this.Nav3dConfig) world
+        member this.SetNav3dConfig (value : Nav3dConfig) world = this.Set (nameof this.Nav3dConfig) value world
+        member this.Nav3dConfig = lens (nameof this.Nav3dConfig) this this.GetNav3dConfig this.SetNav3dConfig
+
+    /// Augments an entity with a navigation mesh.
+    type Nav3dConfigDispatcher () =
+        inherit Entity3dDispatcher (false)
+
+        static let propagateNav3dConfig (entity : Entity) world =
+            let config = entity.GetNav3dConfig world
+            World.setNav3dConfig config entity.Screen world
+
+        static member Properties =
+            [define Entity.Nav3dConfig Nav3dConfig.defaultConfig]
+
+        override this.Register (entity, world) =
+            World.monitor (fun _ world -> (Cascade, propagateNav3dConfig entity world)) (entity.ChangeEvent (nameof entity.Nav3dConfig)) entity world
+
+        override this.Edit (op, entity, world) =
+            match op with
+            | OverlayViewport _ ->
+                let nav3d = World.getScreenNav3d entity.Screen world
+                match nav3d.Nav3dMeshOpt with
+                | Some (nbrData, _, _) ->
+                
+                    // edge color compute lambda
+                    let computeEdgeColor (edge : struct (Vector3 * Vector3)) =
+                        let middleY = (fst' edge).Y + (snd' edge).Y * 0.5f
+                        let height = Math.Lerp (0.0f, 1.0f, (middleY - nbrData.NavEdgesMinY) / (nbrData.NavEdgesMaxY - nbrData.NavEdgesMinY))
+                        Color (1.0f, 1.0f - height, height, 1.0f)
+
+                    // point color compute lambda
+                    let computePointColor (point : Vector3) =
+                        let height = Math.Lerp (0.0f, 1.0f, (point.Y - nbrData.NavPointsMinY) / (nbrData.NavPointsMaxY - nbrData.NavPointsMinY))
+                        Color (1.0f, 1.0f - height, height, 1.0f)
+
+                    // draw edges and points
+                    World.imGuiSegments3dPlus false nbrData.NavInteriorEdges 1.0f computeEdgeColor world
+                    World.imGuiSegments3dPlus false nbrData.NavExteriorEdges 1.0f computeEdgeColor world
+                    World.imGuiCircles3dPlus false nbrData.NavPoints 2.5f true computePointColor world
+                    world
+
+                | None -> world
+            | _ -> world
+
+        override this.GetAttributesInferred (_, _) =
+            AttributesInferred.unimportant

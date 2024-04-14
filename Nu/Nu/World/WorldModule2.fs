@@ -70,16 +70,11 @@ module WorldModule2 =
         static member internal rebuildQuadtree world =
             let quadtree = World.getQuadtree world
             Quadtree.clear quadtree
-            let omniEntities =
-                match World.getOmniScreenOpt world with
-                | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat
-                | None -> Seq.empty
             let selectedEntities =
                 match World.getSelectedScreenOpt world with
                 | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat
                 | None -> Seq.empty
-            let entities = Seq.append omniEntities selectedEntities
-            for entity in entities do
+            for entity in selectedEntities do
                 let bounds = entity.GetBounds world
                 let visible = entity.GetVisible world || entity.GetAlwaysRender world
                 let static_ = entity.GetStatic world
@@ -90,30 +85,22 @@ module WorldModule2 =
             world
 
         static member internal rebuildOctree world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.clear octree
-                let omniEntities =
-                    match World.getOmniScreenOpt world with
-                    | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat
-                    | None -> Seq.empty
-                let selectedEntities =
-                    match World.getSelectedScreenOpt world with
-                    | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat
-                    | None -> Seq.empty
-                let entities =
-                    Seq.append omniEntities selectedEntities
-                for entity in entities do
-                    let bounds = entity.GetBounds world
-                    let visible = entity.GetVisible world || entity.GetAlwaysRender world
-                    let static_ = entity.GetStatic world
-                    let lightProbe = entity.GetLightProbe world
-                    let light = entity.GetLight world
-                    let presence = entity.GetPresence world
-                    if entity.GetIs3d world then
-                        let element = Octelement.make visible static_ lightProbe light presence bounds entity
-                        Octree.addElement presence bounds element octree
-            | None -> ()
+            let octree = World.getOctree world
+            Octree.clear octree
+            let selectedEntities =
+                match World.getSelectedScreenOpt world with
+                | Some screen -> World.getGroups screen world |> Seq.map (flip World.getEntities world) |> Seq.concat
+                | None -> Seq.empty
+            for entity in selectedEntities do
+                let bounds = entity.GetBounds world
+                let visible = entity.GetVisible world || entity.GetAlwaysRender world
+                let static_ = entity.GetStatic world
+                let lightProbe = entity.GetLightProbe world
+                let light = entity.GetLight world
+                let presence = entity.GetPresence world
+                if entity.GetIs3d world then
+                    let element = Octelement.make visible static_ lightProbe light presence bounds entity
+                    Octree.addElement presence bounds element octree
             world
 
         /// Select the given screen without transitioning, even if another transition is taking place.
@@ -381,7 +368,7 @@ module WorldModule2 =
             let world = slideSprite.SetPersistent false world
             let world = slideSprite.SetSize eyeSize.V3 world
             let world =
-                if not Constants.Engine.EntityPerimeterCentered2dDefault
+                if not Constants.Engine.Entity2dPerimeterCenteredDefault
                 then slideSprite.SetPosition (-eyeSize.V3 * 0.5f) world
                 else world
             let world = slideSprite.SetAbsolute true world
@@ -730,7 +717,7 @@ module WorldModule2 =
                 let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
                 Quadtree.addElement entityState.Presence entityState.Bounds.Box2 element quadtree
             if SList.notEmpty entities3d then
-                let octree = World.getOrCreateOctree world
+                let octree = World.getOctree world
                 for entity in entities3d do
                     let entityState = World.getEntityState entity world
                     let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
@@ -746,7 +733,7 @@ module WorldModule2 =
                 let element = Quadelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entity
                 Quadtree.removeElement entityState.Presence entityState.Bounds.Box2 element quadtree
             if SArray.notEmpty entities3d then
-                let octree = World.getOrCreateOctree world
+                let octree = World.getOctree world
                 for entity in entities3d do
                     let entityState = World.getEntityState entity world
                     let element = Octelement.make (entityState.Visible || entityState.AlwaysRender) (entityState.Static && not entityState.AlwaysUpdate) entityState.LightProbe entityState.Light entityState.Presence entityState.Bounds entity
@@ -1094,9 +1081,6 @@ module WorldModule2 =
             let playBounds = World.getPlayBounds2dRelative world
             World.getElements2dBy (Quadtree.getElementsInPlay playBounds set) world
 
-        static member private getElements2d set world =
-            World.getElements2dBy (Quadtree.getElements set) world
-
         /// Get all 2d entities in the given bounds, including all uncullable entities.
         static member getEntities2dInBounds bounds set world =
             let quadtree = World.getQuadtree world
@@ -1129,72 +1113,49 @@ module WorldModule2 =
             Quadtree.getElements set quadtree
             Seq.map (fun (element : Entity Quadelement) -> element.Entry) set
 
-        static member private getElements3dBy (getElementsFromOctree : Entity Octree -> Entity Octelement seq) world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                let elements = getElementsFromOctree octree
-                (elements, world)
-            | None -> (Seq.empty, world)
-
         static member private getElements3dInPlay set world =
             let struct (playBox, playFrustum) = World.getPlayBounds3d world
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getElementsInPlay playBox playFrustum set octree
-            | None -> ()
+            let octree = World.getOctree world
+            Octree.getElementsInPlay playBox playFrustum set octree
 
         static member private getElements3dInViewFrustum interior exterior frustum set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getElementsInViewFrustum interior exterior frustum set octree
-            | None -> ()
+            let octree = World.getOctree world
+            Octree.getElementsInViewFrustum interior exterior frustum set octree
 
         static member private getElements3dInViewBox box set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getElementsInViewBox box set octree
-            | None -> ()
+            let octree = World.getOctree world
+            Octree.getElementsInViewBox box set octree
 
         static member private getElements3dInView set world =
             let interior = World.getEye3dFrustumInterior world
             let exterior = World.getEye3dFrustumExterior world
             let imposter = World.getEye3dFrustumImposter world
             let lightBox = World.getLight3dBox world
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getElementsInView interior exterior imposter lightBox set octree
-            | None -> ()
+            let octree = World.getOctree world
+            Octree.getElementsInView interior exterior imposter lightBox set octree
 
         static member private getElements3d set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getElements set octree
-            | None -> ()
+            let octree = World.getOctree world
+            Octree.getElements set octree
 
         /// Get all 3d entities in the given bounds, including all uncullable entities.
         static member getEntities3dInBounds bounds set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getElementsInBounds bounds set octree
-                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
-            | None -> Seq.empty
+            let octree = World.getOctree world
+            Octree.getElementsInBounds bounds set octree
+            Seq.map (fun (element : Entity Octelement) -> element.Entry) set
 
         /// Get all 3d entities at the given point, including all uncullable entities.
         static member getEntities3dAtPoint point set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getElementsAtPoint point set octree
-                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
-            | None -> Seq.empty
+            let octree = World.getOctree world
+            Octree.getElementsAtPoint point set octree
+            Seq.map (fun (element : Entity Octelement) -> element.Entry) set
 
         /// Get all 3d entities in the current 3d play zone, including all uncullable entities.
         static member getEntities3dInPlay set world =
             let struct (playBox, playFrustum) = World.getPlayBounds3d world
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getElementsInPlay playBox playFrustum set octree
-                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
-            | None -> Seq.empty
+            let octree = World.getOctree world
+            Octree.getElementsInPlay playBox playFrustum set octree
+            Seq.map (fun (element : Entity Octelement) -> element.Entry) set
 
         /// Get all 3d entities in the current 3d view, including all uncullable entities.
         static member getEntities3dInView set world =
@@ -1202,59 +1163,57 @@ module WorldModule2 =
             let exterior = World.getEye3dFrustumExterior world
             let imposter = World.getEye3dFrustumImposter world
             let lightBox = World.getLight3dBox world
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getElementsInView interior exterior imposter lightBox set octree
-                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
-            | None -> Seq.empty
+            let octree = World.getOctree world
+            Octree.getElementsInView interior exterior imposter lightBox set octree
+            Seq.map (fun (element : Entity Octelement) -> element.Entry) set
 
         /// Get all 3d light probe entities in the current 3d light box, including all uncullable light probes.
         static member getLightProbes3dInFrustum frustum set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getLightProbesInFrustum frustum set octree
-                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
-            | None -> Seq.empty
+            let octree = World.getOctree world
+            Octree.getLightProbesInFrustum frustum set octree
+            Seq.map (fun (element : Entity Octelement) -> element.Entry) set
 
         /// Get all 3d light probe entities in the current 3d light box, including all uncullable lights.
         static member getLightProbes3dInBox box set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getLightProbesInBox box set octree
-                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
-            | None -> Seq.empty
+            let octree = World.getOctree world
+            Octree.getLightProbesInBox box set octree
+            Seq.map (fun (element : Entity Octelement) -> element.Entry) set
 
         /// Get all 3d light probe entities in the current 3d light box, including all uncullable lights.
         static member getLightProbes3d set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getLightProbes set octree
-                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
-            | None -> Seq.empty
+            let octree = World.getOctree world
+            Octree.getLightProbes set octree
+            Seq.map (fun (element : Entity Octelement) -> element.Entry) set
 
         /// Get all 3d light entities in the current 3d light box, including all uncullable lights.
         static member getLights3dInFrustum frustum set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getLightsInFrustum frustum set octree
-                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
-            | None -> Seq.empty
+            let octree = World.getOctree world
+            Octree.getLightsInFrustum frustum set octree
+            Seq.map (fun (element : Entity Octelement) -> element.Entry) set
 
         /// Get all 3d light entities in the current 3d light box, including all uncullable lights.
         static member getLights3dInBox box set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getLightsInBox box set octree
-                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
-            | None -> Seq.empty
+            let octree = World.getOctree world
+            Octree.getLightsInBox box set octree
+            Seq.map (fun (element : Entity Octelement) -> element.Entry) set
 
         /// Get all 3d entities in the current selected screen, including all uncullable entities.
         static member getEntities3d set world =
-            match World.getOctreeOpt world with
-            | Some octree ->
-                Octree.getElements set octree
-                Seq.map (fun (element : Entity Octelement) -> element.Entry) set
-            | None -> Seq.empty
+            let octree = World.getOctree world
+            Octree.getElements set octree
+            Seq.map (fun (element : Entity Octelement) -> element.Entry) set
+
+        /// Sweep the quadtree clean of all empty nodes.
+        /// It can make sense to call this after loading a new level.
+        static member sweepQuadtree world =
+            let quadtree = World.getQuadtree world
+            Quadtree.sweep quadtree
+
+        /// Sweep the octree clean of all empty nodes.
+        /// It can make sense to call this after loading a new level.
+        static member sweepOctree world =
+            let octree = World.getOctree world
+            Octree.sweep octree
 
         static member private preUpdateSimulants (world : World) =
 
@@ -1262,10 +1221,8 @@ module WorldModule2 =
             PreUpdateGatherTimer.Start ()
             let game = Nu.Game.Handle
             let advancing = world.Advancing
-            let screens = match World.getOmniScreenOpt world with Some omniScreen -> [omniScreen] | None -> []
-            let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
-            let screens = List.rev screens
-            let groups = Seq.concat (List.map (flip World.getGroups world) screens)
+            let screenOpt = World.getSelectedScreenOpt world
+            let groups = match screenOpt with Some screen -> World.getGroups screen world | None -> Seq.empty
             PreUpdateGatherTimer.Stop ()
 
             // pre-update game
@@ -1273,9 +1230,9 @@ module WorldModule2 =
             let world = if advancing then World.preUpdateGame game world else world
             PreUpdateGameTimer.Stop ()
 
-            // pre-update screens
+            // pre-update screen if any
             PreUpdateScreensTimer.Start ()
-            let world = List.fold (fun world screen -> if advancing then World.preUpdateScreen screen world else world) world screens
+            let world = Option.fold (fun world screen -> if advancing then World.preUpdateScreen screen world else world) world screenOpt
             PreUpdateScreensTimer.Stop ()
 
             // pre-update groups
@@ -1295,10 +1252,8 @@ module WorldModule2 =
                 UpdateGatherTimer.Start ()
                 let game = Nu.Game.Handle
                 let advancing = world.Advancing
-                let screens = match World.getOmniScreenOpt world with Some omniScreen -> [omniScreen] | None -> []
-                let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
-                let screens = List.rev screens
-                let groups = Seq.concat (List.map (flip World.getGroups world) screens)
+                let screenOpt = World.getSelectedScreenOpt world
+                let groups = match screenOpt with Some screen -> World.getGroups screen world | None -> Seq.empty
                 World.getElements3dInPlay CachedHashSet3dNormal world
                 World.getElements2dInPlay CachedHashSet2dNormal world
                 UpdateGatherTimer.Stop ()
@@ -1308,9 +1263,9 @@ module WorldModule2 =
                 let world = if advancing then World.updateGame game world else world
                 UpdateGameTimer.Stop ()
             
-                // update screens
+                // update screen if any
                 UpdateScreensTimer.Start ()
-                let world = List.fold (fun world screen -> if advancing then World.updateScreen screen world else world) world screens
+                let world = Option.fold (fun world screen -> if advancing then World.updateScreen screen world else world) world screenOpt
                 UpdateScreensTimer.Stop ()
 
                 // update groups
@@ -1348,10 +1303,8 @@ module WorldModule2 =
             PostUpdateGatherTimer.Start ()
             let game = Nu.Game.Handle
             let advancing = world.Advancing
-            let screens = match World.getOmniScreenOpt world with Some omniScreen -> [omniScreen] | None -> []
-            let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
-            let screens = List.rev screens
-            let groups = Seq.concat (List.map (flip World.getGroups world) screens)
+            let screenOpt = World.getSelectedScreenOpt world
+            let groups = match screenOpt with Some screen -> World.getGroups screen world | None -> []
             PostUpdateGatherTimer.Stop ()
 
             // post-update game
@@ -1359,9 +1312,9 @@ module WorldModule2 =
             let world = if advancing then World.postUpdateGame game world else world
             PostUpdateGameTimer.Stop ()
 
-            // post-update screens
+            // post-update screen if any
             PostUpdateScreensTimer.Start ()
-            let world = List.fold (fun world screen -> if advancing then World.postUpdateScreen screen world else world) world screens
+            let world = Option.fold (fun world screen -> if advancing then World.postUpdateScreen screen world else world) world screenOpt
             PostUpdateScreensTimer.Stop ()
 
             // post-update groups
@@ -1426,10 +1379,8 @@ module WorldModule2 =
                 // gather simulants
                 RenderGatherTimer.Start ()
                 let game = Nu.Game.Handle
-                let screens = match World.getOmniScreenOpt world with Some omniScreen -> [omniScreen] | None -> []
-                let screens = match World.getSelectedScreenOpt world with Some selectedScreen -> selectedScreen :: screens | None -> screens
-                let screens = List.rev screens
-                let groups = Seq.concat (List.map (flip World.getGroups world) screens)
+                let screenOpt = World.getSelectedScreenOpt world
+                let groups = match screenOpt with Some screen -> World.getGroups screen world | None -> Seq.empty
                 let groupsInvisible =
                     if world.Accompanied
                     then hashSetPlus HashIdentity.Structural (Seq.filter (fun (group : Group) -> not (group.GetVisible world)) groups)
@@ -1442,12 +1393,12 @@ module WorldModule2 =
                     for element in hashSet do
                         if element.Static then
                             CachedHashSet3dNormal.Add element |> ignore<bool>
-                | ShadowPass (_, shadowDirectional, shadowFrustum) -> World.getElements3dInViewFrustum (not shadowDirectional) true shadowFrustum CachedHashSet3dNormal world
+                | ShadowPass (_, shadowDirectional, _, shadowFrustum) -> World.getElements3dInViewFrustum (not shadowDirectional) true shadowFrustum CachedHashSet3dNormal world
                 | ReflectionPass (_, _) -> ()
                 match renderPass with
                 | NormalPass -> World.getElements2dInView CachedHashSet2dNormal world
                 | LightMapPass (_, _) -> ()
-                | ShadowPass (_, _, _) -> ()
+                | ShadowPass (_, _, _, _) -> ()
                 | ReflectionPass (_, _) -> ()
                 RenderGatherTimer.Stop ()
 
@@ -1455,8 +1406,9 @@ module WorldModule2 =
                 World.renderGame renderPass game world
 
                 // render screens
-                for screen in screens do
-                    World.renderScreen renderPass screen world
+                match screenOpt with
+                | Some screen -> World.renderScreen renderPass screen world
+                | None -> ()
 
                 // render screen transition
                 match World.getSelectedScreenOpt world with
@@ -1509,7 +1461,7 @@ module WorldModule2 =
                         Seq.fold (fun world (lightProbe : Entity) ->
                             let id = lightProbe.GetId world
                             let bounds = lightProbe.GetProbeBounds world
-                            let boundsPlus = box3 (bounds.Min - bounds.Size) (bounds.Max + bounds.Size) // TODO: allow user to specify bounds scalar?
+                            let boundsPlus = bounds.ScaleUniform 4.0f // TODO: allow user to specify bounds scalar?
                             let renderPass = LightMapPass (id, boundsPlus)
                             let world = World.renderSimulantsInternal renderPass world
                             World.enqueueRenderMessage3d (RenderLightMap3d { LightProbeId = id; RenderPass = renderPass }) world
@@ -1569,7 +1521,8 @@ module WorldModule2 =
                     Array.sortBy fst' |>
                     Array.tryTake Constants.Render.ShadowsMax |>
                     Array.fold (fun world struct (struct (directionalSort, _), struct (shadowFrustum, light)) ->
-                        World.renderSimulantsInternal (ShadowPass (light.GetId world, isZero directionalSort, shadowFrustum)) world)
+                        let shadowRotation = light.GetRotation world * Quaternion.CreateFromAxisAngle (v3Right, -MathF.PI_OVER_2)
+                        World.renderSimulantsInternal (ShadowPass (light.GetId world, isZero directionalSort, shadowRotation, shadowFrustum)) world)
                         world
 
                 // render simulants normally, remember to clear 3d shadow cache
@@ -1992,18 +1945,18 @@ module EntityDispatcherModule2 =
             Entity2dDispatcher<'model, 'message, 'command> (centered, physical, fun _ -> initial)
 
         new (physical, makeInitial : World -> 'model) =
-            Entity2dDispatcher<'model, 'message, 'command> (Constants.Engine.EntityPerimeterCentered2dDefault, physical, makeInitial)
+            Entity2dDispatcher<'model, 'message, 'command> (Constants.Engine.Entity2dPerimeterCenteredDefault, physical, makeInitial)
 
         new (physical, initial : 'model) =
             Entity2dDispatcher<'model, 'message, 'command> (physical, fun _ -> initial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySize2dDefault
-             define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCentered2dDefault]
+            [define Entity.Size Constants.Engine.Entity2dSizeDefault
+             define Entity.PerimeterCentered Constants.Engine.Entity2dPerimeterCenteredDefault]
 
     /// A gui entity dispatcher.
     and [<AbstractClass>] GuiDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (makeInitial : World -> 'model) =
-        inherit EntityDispatcher<'model, 'message, 'command> (true, Constants.Engine.EntityPerimeterCenteredGuiDefault, false, makeInitial)
+        inherit EntityDispatcher<'model, 'message, 'command> (true, Constants.Engine.EntityGuiPerimeterCenteredDefault, false, makeInitial)
 
         new (initial : 'model) =
             GuiDispatcher<'model, 'message, 'command> (fun _ -> initial)
@@ -2012,8 +1965,8 @@ module EntityDispatcherModule2 =
             [typeof<LayoutFacet>]
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySizeGuiDefault
-             define Entity.PerimeterCentered Constants.Engine.EntityPerimeterCenteredGuiDefault
+            [define Entity.Size Constants.Engine.EntityGuiSizeDefault
+             define Entity.PerimeterCentered Constants.Engine.EntityGuiPerimeterCenteredDefault
              define Entity.Presence Omnipresent
              define Entity.Absolute true
              define Entity.DisabledColor Constants.Gui.DisabledColor
@@ -2031,7 +1984,7 @@ module EntityDispatcherModule2 =
             Entity3dDispatcher<'model, 'message, 'command> (physical, fun _ -> initial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySize3dDefault]
+            [define Entity.Size Constants.Engine.Entity3dSizeDefault]
 
         override this.RayCast (ray, entity, world) =
             if Array.isEmpty (entity.GetFacets world) then
@@ -2045,7 +1998,7 @@ module EntityDispatcherModule2 =
         inherit EntityDispatcher<'model, 'message, 'command> (false, true, false, makeInitial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntitySizeVuiDefault]
+            [define Entity.Size Constants.Engine.EntityVuiSizeDefault]
 
 [<RequireQualifiedAccess>]
 module EntityPropertyDescriptor =
@@ -2063,7 +2016,13 @@ module EntityPropertyDescriptor =
         let propertyName = propertyDescriptor.PropertyName
         let baseProperties = Reflection.getPropertyDefinitions typeof<EntityDispatcher>
         let rigidBodyProperties = Reflection.getPropertyDefinitions typeof<RigidBodyFacet>
-        if propertyName = "Name" || propertyName = "Surnames" || propertyName = "Model" || propertyName = "MountOpt" || propertyName = "PropagationSourceOpt" || propertyName = "OverlayNameOpt" then "Ambient Properties"
+        if  propertyName = "Name" ||
+            propertyName = "Surnames" ||
+            propertyName = "Model" ||
+            propertyName = "MountOpt" ||
+            propertyName = "PropagationSourceOpt" ||
+            propertyName = "OverlayNameOpt" then
+            "Ambient Properties"
         elif propertyName = "Degrees" || propertyName = "DegreesLocal" ||
              propertyName = "Elevation" || propertyName = "ElevationLocal" ||
              propertyName = "Offset" || propertyName = "Overflow" ||
@@ -2635,7 +2594,7 @@ module GamePropertyDescriptor =
     let getCategory propertyDescriptor =
         let propertyName = propertyDescriptor.PropertyName
         if propertyName = "Name" ||  propertyName.EndsWith "Model" then "Ambient Properties"
-        elif propertyName = "DesiredScreen" || propertyName = "OmniScreenOpt" || propertyName = "ScreenTransitionDestinationOpt" || propertyName = "SelectedScreenOpt" ||
+        elif propertyName = "DesiredScreen" || propertyName = "ScreenTransitionDestinationOpt" || propertyName = "SelectedScreenOpt" ||
              propertyName = "Eye2dCenter" || propertyName = "Eye2dSize" || propertyName = "Eye3dCenter" || propertyName = "Eye3dRotation" then
              "Built-In Properties"
         else "Xtension Properties"

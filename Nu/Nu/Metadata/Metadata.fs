@@ -59,8 +59,8 @@ module Metadata =
                 use image = Drawing.Image.FromStream (fileStream, false, false)
                 Some (TextureMetadata (OpenGL.Texture.TextureMetadata.make image.Width image.Height))
             else
-                // NOTE: System.Drawing.Image is not, AFAIK, available on non-Windows platforms, so we use a VERY slow path here.
-                match OpenGL.Texture.TryCreateTextureData asset.FilePath with
+                Log.infoOnce "Slow path used to load texture metadata."
+                match OpenGL.Texture.TryCreateTextureData (true, asset.FilePath) with
                 | Some textureData ->
                     let metadata = textureData.Metadata
                     textureData.Dispose ()
@@ -87,9 +87,9 @@ module Metadata =
     /// Thread-safe.
     let private tryGenerateModelMetadata (asset : Asset) =
         if File.Exists asset.FilePath then
-            let textureMemo = OpenGL.Texture.TextureMemo.make () // unused
-            let assimpSceneMemo = OpenGL.Assimp.AssimpSceneMemo.make () // unused
-            match OpenGL.PhysicallyBased.TryCreatePhysicallyBasedModel (false, asset.FilePath, Unchecked.defaultof<_>, textureMemo, assimpSceneMemo) with
+            let textureClient = OpenGL.Texture.TextureClient None // unused. TODO: consider making this opt.
+            let sceneClient = OpenGL.PhysicallyBased.PhysicallyBasedSceneClient () // unused. TODO: consider making this opt.
+            match sceneClient.TryCreatePhysicallyBasedModel (false, asset.FilePath, OpenGL.PhysicallyBased.PhysicallyBasedMaterial.empty, textureClient) with
             | Right model ->
                 if model.Animated
                 then Some (AnimatedModelMetadata model)
@@ -107,12 +107,12 @@ module Metadata =
     let private tryGenerateAssetMetadata (asset : Asset) =
         let extension = PathF.GetExtensionLower asset.FilePath
         match extension with
-        | ".raw" -> tryGenerateRawMetadata asset
-        | ".bmp" | ".png" | ".jpg" | ".jpeg" | ".tga" | ".tif" | ".tiff" | ".dds" -> tryGenerateTextureMetadata asset
-        | ".tmx" -> tryGenerateTileMapMetadata asset
-        | ".fbx" | ".dae" | ".obj" -> tryGenerateModelMetadata asset
-        | ".wav" -> Some SoundMetadata
-        | ".ogg" -> Some SongMetadata
+        | RawExtension _ -> tryGenerateRawMetadata asset
+        | ImageExtension _ -> tryGenerateTextureMetadata asset
+        | TileMapExtension _ -> tryGenerateTileMapMetadata asset
+        | ModelExtension _ -> tryGenerateModelMetadata asset
+        | SoundExtension _ -> Some SoundMetadata
+        | SongExtension _ -> Some SongMetadata
         | _ -> None
 
     let private tryGenerateMetadataPackage config packageName assetGraph =

@@ -13,10 +13,6 @@ open Prime
 /// A renderer process that may or may not be threaded.
 type RendererProcess =
     interface
-        /// Whether the rendering process has started.
-        abstract Started : bool
-        /// Whether the rendering process has been terminated.
-        abstract Terminated : bool
         /// Start the rendering process.
         abstract Start : ImFontAtlasPtr -> Window option -> unit
         /// Enqueue a 3d rendering message.
@@ -53,12 +49,6 @@ type RendererInline () =
 
     interface RendererProcess with
 
-        member this.Started =
-            started
-
-        member this.Terminated =
-            terminated
-
         member this.Start fonts windowOpt_ =
 
             // assign windowOpt
@@ -73,20 +63,15 @@ type RendererInline () =
                 | Some window ->
                 
                     // create gl context
-                    match window with
-                    | SglWindow window ->
-                        OpenGL.Hl.CreateSglContext window.SglWindow |> ignore<nativeint>
-                        OpenGL.Hl.Assert ()
-                    | WfglWindow window ->
-                        window.CreateWfglContext ()
-                        OpenGL.Hl.Assert ()
+                    let glContext = match window with SglWindow window -> OpenGL.Hl.CreateSglContextInitial window.SglWindow
+                    OpenGL.Hl.Assert ()
 
                     // initialize gl context
                     OpenGL.Hl.InitContext ()
                     OpenGL.Hl.Assert ()
 
                     // create 3d renderer
-                    let renderer3d = GlRenderer3d.make window :> Renderer3d
+                    let renderer3d = GlRenderer3d.make glContext window :> Renderer3d
                     OpenGL.Hl.Assert ()
 
                     // create 2d renderer
@@ -181,7 +166,6 @@ type RendererInline () =
             | Some window ->
                 match window with
                 | SglWindow window -> SDL.SDL_GL_SwapWindow window.SglWindow
-                | WfglWindow window -> window.Swap ()
             | None -> ()
 
         member this.Terminate () =
@@ -327,20 +311,15 @@ type RendererThread () =
             | Some window ->
                 
                 // create gl context
-                match window with
-                | SglWindow window ->
-                    OpenGL.Hl.CreateSglContext window.SglWindow |> ignore<nativeint>
-                    OpenGL.Hl.Assert ()
-                | WfglWindow window ->
-                    window.CreateWfglContext ()
-                    OpenGL.Hl.Assert ()
+                let glContext = match window with SglWindow window -> OpenGL.Hl.CreateSglContextInitial window.SglWindow
+                OpenGL.Hl.Assert ()
 
                 // initialize gl context
                 OpenGL.Hl.InitContext ()
                 OpenGL.Hl.Assert ()
 
                 // create 3d renderer
-                let renderer3d = GlRenderer3d.make window :> Renderer3d
+                let renderer3d = GlRenderer3d.make glContext window :> Renderer3d
                 OpenGL.Hl.Assert ()
 
                 // create 2d renderer
@@ -401,17 +380,14 @@ type RendererThread () =
                 OpenGL.Hl.Assert ()
 
                 // loop until swap is requested
-                while not swap && not terminated do Thread.Sleep 1
+                while not terminated && not swap do Thread.Sleep 1
 
                 // guard against early termination
                 if not terminated then
 
                     // attempt to swap
                     match windowOpt with
-                    | Some window ->
-                        match window with
-                        | SglWindow window -> SDL.SDL_GL_SwapWindow window.SglWindow
-                        | WfglWindow window -> window.Swap ()
+                    | Some window -> match window with SglWindow window -> SDL.SDL_GL_SwapWindow window.SglWindow
                     | None -> ()
 
                     // complete swap request
@@ -421,12 +397,6 @@ type RendererThread () =
         renderer2d.CleanUp ()
 
     interface RendererProcess with
-
-        member this.Started =
-            started
-
-        member this.Terminated =
-            terminated
 
         member this.Start fonts windowOpt =
 

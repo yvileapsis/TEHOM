@@ -13,8 +13,9 @@ type CharacterMessage =
     interface Message
 
 type CharacterCommand =
+    | Register
     | UpdateTransform of Vector3 * Quaternion
-    | UpdateAnimatedModel of Vector3 * Quaternion * Animation array
+    | UpdateAnimations of Vector3 * Quaternion * Animation array * bool
     | SyncWeaponTransform
     | PublishAttacks of Entity Set
     | PublishDie
@@ -46,6 +47,7 @@ module CharacterDispatcher =
              Entity.CharacterProperties == character.CharacterProperties
              Entity.BodyShape == CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None }
              Entity.FollowTargetOpt := match character.CharacterType with Enemy -> Some Simulants.GameplayPlayer | Player -> None
+             Entity.RegisterEvent => Register
              Game.KeyboardKeyDownEvent =|> fun evt -> UpdateInputKey evt.Data
              Entity.UpdateEvent => Update
              Game.PostUpdateEvent => SyncWeaponTransform]
@@ -92,13 +94,13 @@ module CharacterDispatcher =
                 let bodyId = entity.GetBodyId world
                 let grounded = World.getBodyGrounded bodyId world
                 let playerPosition = Simulants.GameplayPlayer.GetPosition world
-                let (soundOpt, animations, attackedCharacters, position, rotation, character) =
+                let (soundOpt, animations, invisible, attackedCharacters, position, rotation, character) =
                     Character.update isKeyboardKeyDown nav3dFollow time position rotation linearVelocity angularVelocity grounded playerPosition character
 
                 // deploy signals from update
                 let signals = match soundOpt with Some sound -> [PlaySound (0L, Constants.Audio.SoundVolumeDefault, sound) :> Signal] | None -> []
-                let signals = UpdateTransform (position, rotation) :> Signal :: UpdateAnimatedModel (position, rotation, Array.ofList animations) :: signals
-                let signals = if character.ActionState = WoundedState then PublishDie :> Signal :: signals else signals
+                let signals = UpdateTransform (position, rotation) :> Signal :: UpdateAnimations (position, rotation, Array.ofList animations, invisible) :: signals
+                let signals = match character.ActionState with WoundState wound when wound.WoundTime = world.UpdateTime - 60L -> PublishDie :> Signal :: signals | _ -> signals
                 let signals = if attackedCharacters.Count > 0 then PublishAttacks attackedCharacters :> Signal :: signals else signals
                 withSignals signals character
 
@@ -129,16 +131,24 @@ module CharacterDispatcher =
         override this.Command (character, command, entity, world) =
 
             match command with
+            | Register ->
+                let animatedModel = entity / Constants.Gameplay.CharacterAnimatedModelName
+                let world = animatedModel.SetAnimations [|Animation.loop GameTime.zero None "Armature|Idle"|] world
+                withSignal SyncWeaponTransform world
+
             | UpdateTransform (position, rotation) ->
                 let world = entity.SetPosition position world
                 let world = entity.SetRotation rotation world
                 just world
 
-            | UpdateAnimatedModel (position, rotation, animations) ->
+            | UpdateAnimations (position, rotation, animations, invisible) ->
                 let animatedModel = entity / Constants.Gameplay.CharacterAnimatedModelName
+                let weapon = entity / Constants.Gameplay.CharacterWeaponName
                 let world = animatedModel.SetPosition (character.PositionInterp position) world
                 let world = animatedModel.SetRotation (character.RotationInterp rotation) world
                 let world = animatedModel.SetAnimations animations world
+                let world = animatedModel.SetVisible (not invisible) world
+                let world = weapon.SetVisible (not invisible) world
                 just world
 
             | SyncWeaponTransform ->
@@ -163,7 +173,7 @@ module CharacterDispatcher =
                 just world
 
             | PublishDie ->
-                let world = World.publish () entity.DieEvent entity world
+                let world = World.publish entity entity.DieEvent entity world
                 just world
 
             | Jump ->

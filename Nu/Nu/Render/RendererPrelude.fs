@@ -3,6 +3,7 @@
 
 namespace Nu
 open System
+open System.Numerics
 open Prime
 
 /// The blend mode of a sprite.
@@ -53,21 +54,21 @@ type [<Struct>] RenderType =
 type [<CustomEquality; NoComparison>] RenderPass =
     | NormalPass
     | LightMapPass of LightProbeId : uint64 * LightMapBounds : Box3
-    | ShadowPass of LightId : uint64 * ShadowDirectional : bool * ShadowFrustum : Frustum
+    | ShadowPass of LightId : uint64 * ShadowDirectional : bool * ShadowRotation : Quaternion * ShadowFrustum : Frustum
     | ReflectionPass of ReflectorId : int64 * ShadowFrustum : Frustum
 
     static member hash renderPass =
         match renderPass with
         | NormalPass -> 0
         | LightMapPass (lightProbeId, _) -> hash lightProbeId
-        | ShadowPass (lightId, _, _) -> hash lightId
+        | ShadowPass (lightId, _, _, _) -> hash lightId
         | ReflectionPass (reflectorId, _) -> hash reflectorId
 
     static member equals left right =
         match struct (left, right) with
         | struct (NormalPass, NormalPass) -> true
         | struct (LightMapPass (lightProbeId, _), LightMapPass (lightProbeId2, _)) -> lightProbeId = lightProbeId2
-        | struct (ShadowPass (lightId, _, _), ShadowPass (lightId2, _, _)) -> lightId = lightId2
+        | struct (ShadowPass (lightId, _, _, _), ShadowPass (lightId2, _, _, _)) -> lightId = lightId2
         | struct (ReflectionPass (lightId, _), ReflectionPass (lightId2, _)) -> lightId = lightId2
         | struct (_, _) -> false
 
@@ -85,8 +86,8 @@ type [<CustomEquality; NoComparison>] RenderPass =
 /// An asset that is used for rendering.
 type RenderAsset =
     | RawAsset
-    | TextureAsset of TextureMetadata : OpenGL.Texture.TextureMetadata * Texture : OpenGL.Texture.Texture
+    | TextureAsset of Texture : OpenGL.Texture.Texture
     | FontAsset of FontSizeDefault : int * Font : nativeint
-    | CubeMapAsset of FilePaths : OpenGL.CubeMap.CubeMapMemoKey * CubeMap : OpenGL.Texture.Texture * IrradianceAndEnvironmentMapOptRef : (OpenGL.Texture.Texture * OpenGL.Texture.Texture) option ref
+    | CubeMapAsset of FilePaths : OpenGL.CubeMap.CubeMapKey * CubeMap : OpenGL.Texture.Texture * IrradianceAndEnvironmentMapOptRef : (OpenGL.Texture.Texture * OpenGL.Texture.Texture) option ref
     | StaticModelAsset of UserDefined : bool * StaticModel : OpenGL.PhysicallyBased.PhysicallyBasedModel
     | AnimatedModelAsset of AnimatedModel : OpenGL.PhysicallyBased.PhysicallyBasedModel

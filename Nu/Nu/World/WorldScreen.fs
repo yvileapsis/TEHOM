@@ -109,12 +109,9 @@ module WorldScreenModule =
         /// Check that a screen is selected.
         member this.Selected world =
             let gameState = World.getGameState Game.Handle world
-            match gameState.OmniScreenOpt with
-            | Some omniScreen when this.Name = omniScreen.Name -> true
-            | _ ->
-                match gameState.SelectedScreenOpt with
-                | Some screen when this.Name = screen.Name -> true
-                | _ -> false
+            match gameState.SelectedScreenOpt with
+            | Some screen when this.Name = screen.Name -> true
+            | _ -> false
 
         /// Check that a screen exists in the world.
         member this.Exists world = World.getScreenExists this world
@@ -359,8 +356,6 @@ module WorldScreenModule =
             | Slide (dissolveDescriptor, slideDescriptor, songOpt, destination) ->
                 let world = World.setScreenDissolve dissolveDescriptor songOpt screen world
                 setScreenSlide slideDescriptor destination screen world
-            | OmniScreen ->
-                World.setOmniScreen screen world
 
         static member internal getNav3dDescriptors contents =
             [for (bounds, affineMatrix, staticModel, surfaceIndex, content) in contents do
@@ -470,6 +465,7 @@ module WorldScreenModule =
                 let rcBuilderConfig = RcBuilderConfig (rcConfig, geomProvider.GetMeshBoundsMin (), geomProvider.GetMeshBoundsMax ())
                 let rcBuilder = RcBuilder ()
                 let rcBuilderResult = rcBuilder.Build (geomProvider, rcBuilderConfig)
+                let navBuilderResultData = NavBuilderResultData.make rcBuilderResult
                 let dtCreateParams = DemoNavMeshBuilder.GetNavMeshCreateParams (geomProvider, config.CellSize, config.CellHeight, config.AgentHeight, config.AgentRadius, config.AgentClimbMax, rcBuilderResult)
                 match DtNavMeshBuilder.CreateNavMeshData dtCreateParams with
                 | null -> None // some sort of argument issue
@@ -477,7 +473,7 @@ module WorldScreenModule =
                     DemoNavMeshBuilder.UpdateAreaAndFlags dtMeshData |> ignore<DtMeshData> // ignoring flow-syntax
                     let dtNavMesh = DtNavMesh (dtMeshData, 6, 0) // TODO: introduce constant?
                     let dtQuery = DtNavMeshQuery dtNavMesh
-                    Some (rcBuilderResult, dtNavMesh, dtQuery)
+                    Some (navBuilderResultData, dtNavMesh, dtQuery)
 
             // geometry not found
             | None -> None

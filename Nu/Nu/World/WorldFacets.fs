@@ -75,7 +75,7 @@ module StaticSpriteFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetStaticImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntitySize2dDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
 
 [<AutoOpen>]
 module AnimatedSpriteFacetModule =
@@ -232,70 +232,70 @@ module BasicStaticSpriteEmitterFacetModule =
                     (entity.GetParticleRate world)
                     (entity.GetParticleMax world)
 
-        static let updateParticleSystem updater (entity : Entity) world =
+        static let mapParticleSystem mapper (entity : Entity) world =
             let particleSystem = entity.GetParticleSystem world
-            let particleSystem = updater particleSystem
+            let particleSystem = mapper particleSystem
             let world = entity.SetParticleSystem particleSystem world
             world
 
-        static let updateEmitter updater (entity : Entity) world =
-            updateParticleSystem (fun particleSystem ->
+        static let mapEmitter mapper (entity : Entity) world =
+            mapParticleSystem (fun particleSystem ->
                 match Map.tryFind typeof<Particles.BasicStaticSpriteEmitter>.Name particleSystem.Emitters with
                 | Some (:? Particles.BasicStaticSpriteEmitter as emitter) ->
-                    let emitter = updater emitter
+                    let emitter = mapper emitter
                     { particleSystem with Emitters = Map.add typeof<Particles.BasicStaticSpriteEmitter>.Name (emitter :> Particles.Emitter) particleSystem.Emitters }
                 | _ -> particleSystem)
                 entity world
 
         static let rec processOutput output entity world =
             match output with
-            | Particles.OutputEmitter (name, emitter) -> updateParticleSystem (fun ps -> { ps with Emitters = Map.add name emitter ps.Emitters }) entity world
+            | Particles.OutputEmitter (name, emitter) -> mapParticleSystem (fun ps -> { ps with Emitters = Map.add name emitter ps.Emitters }) entity world
             | Particles.Outputs outputs -> SArray.fold (fun world output -> processOutput output entity world) world outputs
 
         static let handleEmitterBlendChange evt world =
             let emitterBlend = evt.Data.Value :?> Blend
-            let world = updateEmitter (fun emitter -> if emitter.Blend <> emitterBlend then { emitter with Blend = emitterBlend } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.Blend <> emitterBlend then { emitter with Blend = emitterBlend } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleEmitterImageChange evt world =
             let emitterImage = evt.Data.Value :?> Image AssetTag
-            let world = updateEmitter (fun emitter -> if assetNeq emitter.Image emitterImage then { emitter with Image = emitterImage } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if assetNeq emitter.Image emitterImage then { emitter with Image = emitterImage } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleEmitterLifeTimeOptChange evt world =
             let emitterLifeTimeOpt = evt.Data.Value :?> GameTime
-            let world = updateEmitter (fun emitter -> if emitter.Life.LifeTimeOpt <> emitterLifeTimeOpt then { emitter with Life = { emitter.Life with LifeTimeOpt = emitterLifeTimeOpt }} else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.Life.LifeTimeOpt <> emitterLifeTimeOpt then { emitter with Life = { emitter.Life with LifeTimeOpt = emitterLifeTimeOpt }} else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleParticleLifeTimeMaxOptChange evt world =
             let particleLifeTimeMaxOpt = evt.Data.Value :?> GameTime
-            let world = updateEmitter (fun emitter -> if emitter.ParticleLifeTimeMaxOpt <> particleLifeTimeMaxOpt then { emitter with ParticleLifeTimeMaxOpt = particleLifeTimeMaxOpt } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.ParticleLifeTimeMaxOpt <> particleLifeTimeMaxOpt then { emitter with ParticleLifeTimeMaxOpt = particleLifeTimeMaxOpt } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleParticleRateChange evt world =
             let particleRate = evt.Data.Value :?> single
-            let world = updateEmitter (fun emitter -> if emitter.ParticleRate <> particleRate then { emitter with ParticleRate = particleRate } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.ParticleRate <> particleRate then { emitter with ParticleRate = particleRate } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleParticleMaxChange evt world =
             let particleMax = evt.Data.Value :?> int
-            let world = updateEmitter (fun emitter -> if emitter.ParticleRing.Length <> particleMax then Particles.BasicStaticSpriteEmitter.resize particleMax emitter else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.ParticleRing.Length <> particleMax then Particles.BasicStaticSpriteEmitter.resize particleMax emitter else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleBasicParticleSeedChange evt world =
             let particleSeed = evt.Data.Value :?> Particles.BasicParticle
-            let world = updateEmitter (fun emitter -> if emitter.ParticleSeed <> particleSeed then { emitter with ParticleSeed = particleSeed } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.ParticleSeed <> particleSeed then { emitter with ParticleSeed = particleSeed } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleEmitterConstraintChange evt world =
             let emitterConstraint = evt.Data.Value :?> Particles.Constraint
-            let world = updateEmitter (fun emitter -> if emitter.Constraint <> emitterConstraint then { emitter with Constraint = emitterConstraint } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.Constraint <> emitterConstraint then { emitter with Constraint = emitterConstraint } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleEmitterStyleChange evt world =
             let entity = evt.Subscriber
             let emitter = makeEmitter entity world
-            let world = updateEmitter (constant emitter) entity world
+            let world = mapEmitter (constant emitter) entity world
             (Cascade, world)
 
         static let handlePositionChange evt world =
@@ -338,7 +338,7 @@ module BasicStaticSpriteEmitterFacetModule =
              define Entity.ParticleLifeTimeMaxOpt (GameTime.ofSeconds 1.0f)
              define Entity.ParticleRate (match Constants.GameTime.DesiredFrameRate with StaticFrameRate _ -> 1.0f | DynamicFrameRate _ -> 60.0f)
              define Entity.ParticleMax 60
-             define Entity.BasicParticleSeed { Life = Particles.Life.make GameTime.zero (GameTime.ofSeconds 1.0f); Body = Particles.Body.defaultBody; Size = Constants.Engine.ParticleSize2dDefault; Offset = v3Zero; Inset = box2Zero; Color = Color.One; Emission = Color.Zero; Flip = FlipNone }
+             define Entity.BasicParticleSeed { Life = Particles.Life.make GameTime.zero (GameTime.ofSeconds 1.0f); Body = Particles.Body.defaultBody; Size = Constants.Engine.Particle2dSizeDefault; Offset = v3Zero; Inset = box2Zero; Color = Color.One; Emission = Color.Zero; Flip = FlipNone }
              define Entity.EmitterConstraint Particles.Constraint.empty
              define Entity.EmitterStyle "BasicStaticSpriteEmitter"
              nonPersistent Entity.ParticleSystem Particles.ParticleSystem.empty]
@@ -478,7 +478,7 @@ module TextFacetModule =
                     world
 
         override this.GetAttributesInferred (_, _) =
-            AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+            AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module BackdroppableFacetModule =
@@ -525,8 +525,8 @@ module BackdroppableFacetModule =
             | Some image ->
                 match Metadata.tryGetTextureSizeF image with
                 | Some size -> AttributesInferred.important size.V3 v3Zero
-                | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+                | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module LabelFacetModule =
@@ -566,7 +566,7 @@ module LabelFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetLabelImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module ButtonFacetModule =
@@ -675,7 +675,7 @@ module ButtonFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetUpImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module ToggleButtonFacetModule =
@@ -802,7 +802,7 @@ module ToggleButtonFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetUntoggledImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module RadioButtonFacetModule =
@@ -924,7 +924,7 @@ module RadioButtonFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetUndialedImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module FillBarFacetModule =
@@ -1025,7 +1025,7 @@ module FillBarFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match Metadata.tryGetTextureSizeF (entity.GetBorderImage world) with
             | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module FeelerFacetModule =
@@ -1109,7 +1109,7 @@ module FeelerFacetModule =
             else world
 
         override this.GetAttributesInferred (_, _) =
-            AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+            AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module EffectFacetModule =
@@ -1145,6 +1145,12 @@ module EffectFacetModule =
         member this.GetEffectOffset world : Vector3 = this.Get (nameof this.EffectOffset) world
         member this.SetEffectOffset (value : Vector3) world = this.Set (nameof this.EffectOffset) value world
         member this.EffectOffset = lens (nameof this.EffectOffset) this this.GetEffectOffset this.SetEffectOffset
+        member this.GetEffectShadowEnabled world : bool = this.Get (nameof this.EffectShadowEnabled) world
+        member this.SetEffectShadowEnabled (value : bool) world = this.Set (nameof this.EffectShadowEnabled) value world
+        member this.EffectShadowEnabled = lens (nameof this.EffectShadowEnabled) this this.GetEffectShadowEnabled this.SetEffectShadowEnabled
+        member this.GetEffectShadowOffset world : single = this.Get (nameof this.EffectShadowOffset) world
+        member this.SetEffectShadowOffset (value : single) world = this.Set (nameof this.EffectShadowOffset) value world
+        member this.EffectShadowOffset = lens (nameof this.EffectShadowOffset) this this.GetEffectShadowOffset this.SetEffectShadowOffset
         member this.GetEffectRenderType world : RenderType = this.Get (nameof this.EffectRenderType) world
         member this.SetEffectRenderType (value : RenderType) world = this.Set (nameof this.EffectRenderType) value world
         member this.EffectRenderType = lens (nameof this.EffectRenderType) this this.GetEffectRenderType this.SetEffectRenderType
@@ -1182,6 +1188,7 @@ module EffectFacetModule =
                     (entity.GetEffectPerimeterCentered world)
                     (entity.GetEffectOffset world)
                     (entity.GetTransform world)
+                    (entity.GetEffectShadowOffset world)
                     (entity.GetEffectRenderType world)
                     (entity.GetParticleSystem world)
                     (entity.GetEffectHistoryMax world)
@@ -1266,35 +1273,43 @@ module EffectFacetModule =
 
         override this.Render (renderPass, entity, world) =
 
-            // render effect data token
-            let time = world.GameTime
-            let dataToken = entity.GetEffectDataToken world
-            World.renderDataToken renderPass dataToken world
+            // ensure rendering is applicable for this pass
+            let shouldRender =
+                match renderPass with
+                | ShadowPass (_, _, _, _) -> entity.GetEffectShadowEnabled world
+                | _ -> true
+            if shouldRender then
 
-            // render particles
-            let presence = entity.GetPresence world
-            let particleSystem = entity.GetParticleSystem world
-            let descriptors = ParticleSystem.toParticlesDescriptors time particleSystem
-            for descriptor in descriptors do
-                match descriptor with
-                | SpriteParticlesDescriptor descriptor ->
-                    let message =
-                        { Elevation = descriptor.Elevation
-                          Horizon = descriptor.Horizon
-                          AssetTag = descriptor.Image
-                          RenderOperation2d = RenderSpriteParticles descriptor }
-                    World.enqueueLayeredOperation2d message world
-                | BillboardParticlesDescriptor descriptor ->
-                    let message =
-                        RenderBillboardParticles
-                            { Absolute = descriptor.Absolute
-                              Presence = presence
-                              MaterialProperties = descriptor.MaterialProperties
-                              Material = descriptor.Material
-                              Particles = descriptor.Particles
-                              RenderType = descriptor.RenderType
-                              RenderPass = renderPass }
-                    World.enqueueRenderMessage3d message world
+                // render effect data token
+                let time = world.GameTime
+                let dataToken = entity.GetEffectDataToken world
+                World.renderDataToken renderPass dataToken world
+
+                // render particles
+                let presence = entity.GetPresence world
+                let particleSystem = entity.GetParticleSystem world
+                let descriptors = ParticleSystem.toParticlesDescriptors time particleSystem
+                for descriptor in descriptors do
+                    match descriptor with
+                    | SpriteParticlesDescriptor descriptor ->
+                        let message =
+                            { Elevation = descriptor.Elevation
+                              Horizon = descriptor.Horizon
+                              AssetTag = descriptor.Image
+                              RenderOperation2d = RenderSpriteParticles descriptor }
+                        World.enqueueLayeredOperation2d message world
+                    | BillboardParticlesDescriptor descriptor ->
+                        let message =
+                            RenderBillboardParticles
+                                { Absolute = descriptor.Absolute
+                                  Presence = presence
+                                  MaterialProperties = descriptor.MaterialProperties
+                                  Material = descriptor.Material
+                                  ShadowOffset = descriptor.ShadowOffset
+                                  Particles = descriptor.Particles
+                                  RenderType = descriptor.RenderType
+                                  RenderPass = renderPass }
+                        World.enqueueRenderMessage3d message world
 
         override this.RayCast (ray, entity, world) =
             let intersectionOpt = ray.Intersects (entity.GetBounds world)
@@ -1663,7 +1678,7 @@ module TileMapFacetModule =
         override this.GetAttributesInferred (entity, world) =
             match TmxMap.tryGetTileMap (entity.GetTileMap world) with
             | Some tileMap -> TmxMap.getAttributesInferred (entity.GetTileSizeDivisor world) tileMap
-            | None -> AttributesInferred.important Constants.Engine.EntitySize2dDefault v3Zero
+            | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
 
 [<AutoOpen>]
 module TmxMapFacetModule =
@@ -2219,29 +2234,6 @@ module Light3dFacetModule =
             | _ -> world
 
 [<AutoOpen>]
-module LightingConfigFacetModule =
-
-    type Entity with
-        member this.GetLightingConfig world : LightingConfig = this.Get (nameof this.LightingConfig) world
-        member this.SetLightingConfig (value : LightingConfig) world = this.Set (nameof this.LightingConfig) value world
-        member this.LightingConfig = lens (nameof this.LightingConfig) this this.GetLightingConfig this.SetLightingConfig
-
-    type LightingConfigFacet () =
-        inherit Facet (false)
-
-        static let configureLighting (entity : Entity) world =
-            let lightingConfig = entity.GetLightingConfig world
-            World.enqueueRenderMessage3d (ConfigureLighting lightingConfig) world
-
-        static member Properties =
-            [define Entity.LightingConfig LightingConfig.defaultConfig]
-
-        override this.Register (entity, world) =
-            let world = World.sense (fun evt world -> configureLighting evt.Subscriber world; (Cascade, world)) (entity.ChangeEvent (nameof entity.LightingConfig)) entity (nameof LightingConfigFacet) world
-            configureLighting entity world
-            world
-
-[<AutoOpen>]
 module StaticBillboardFacetModule =
 
     type Entity with
@@ -2255,6 +2247,12 @@ module StaticBillboardFacetModule =
         member this.GetRenderStyle world : RenderStyle = this.Get (nameof this.RenderStyle) world
         member this.SetRenderStyle (value : RenderStyle) world = this.Set (nameof this.RenderStyle) value world
         member this.RenderStyle = lens (nameof this.RenderStyle) this this.GetRenderStyle this.SetRenderStyle
+        member this.GetShadowEnabled world : bool = this.Get (nameof this.ShadowEnabled) world
+        member this.SetShadowEnabled (value : bool) world = this.Set (nameof this.ShadowEnabled) value world
+        member this.ShadowEnabled = lens (nameof this.ShadowEnabled) this this.GetShadowEnabled this.SetShadowEnabled
+        member this.GetShadowOffset world : single = this.Get (nameof this.ShadowOffset) world
+        member this.SetShadowOffset (value : single) world = this.Set (nameof this.ShadowOffset) value world
+        member this.ShadowOffset = lens (nameof this.ShadowOffset) this this.GetShadowOffset this.SetShadowOffset
 
     /// Augments an entity with a static billboard.
     type StaticBillboardFacet () =
@@ -2264,7 +2262,9 @@ module StaticBillboardFacetModule =
             [define Entity.InsetOpt None
              define Entity.MaterialProperties MaterialProperties.defaultProperties
              define Entity.Material Material.defaultMaterial
-             define Entity.RenderStyle Deferred]
+             define Entity.RenderStyle Deferred
+             define Entity.ShadowEnabled true
+             define Entity.ShadowOffset Constants.Engine.BillboardShadowOffsetDefault]
 
         override this.Render (renderPass, entity, world) =
             let mutable transform = entity.GetTransform world
@@ -2274,6 +2274,7 @@ module StaticBillboardFacetModule =
             let insetOpt = entity.GetInsetOpt world
             let properties = entity.GetMaterialProperties world
             let material = entity.GetMaterial world
+            let shadowOffset = entity.GetShadowOffset world
             let renderType =
                 match entity.GetRenderStyle world with
                 | Deferred -> DeferredRenderType
@@ -2281,7 +2282,7 @@ module StaticBillboardFacetModule =
             World.enqueueRenderMessage3d
                 (RenderBillboard
                     { Absolute = absolute; Presence = presence; ModelMatrix = affineMatrix; InsetOpt = insetOpt
-                      MaterialProperties = properties; Material = material; RenderType = renderType; RenderPass = renderPass })
+                      MaterialProperties = properties; Material = material; ShadowOffset = shadowOffset; RenderType = renderType; RenderPass = renderPass })
                 world
 
         override this.RayCast (ray, entity, world) =
@@ -2302,6 +2303,12 @@ module BasicStaticBillboardEmitterFacetModule =
         member this.GetEmitterMaterial world : Material = this.Get (nameof this.EmitterMaterial) world
         member this.SetEmitterMaterial (value : Material) world = this.Set (nameof this.EmitterMaterial) value world
         member this.EmitterMaterial = lens (nameof this.EmitterMaterial) this this.GetEmitterMaterial this.SetEmitterMaterial
+        member this.GetEmitterShadowEnabled world : bool = this.Get (nameof this.EmitterShadowEnabled) world
+        member this.SetEmitterShadowEnabled (value : bool) world = this.Set (nameof this.EmitterShadowEnabled) value world
+        member this.EmitterShadowEnabled = lens (nameof this.EmitterShadowEnabled) this this.GetEmitterShadowEnabled this.SetEmitterShadowEnabled
+        member this.GetEmitterShadowOffset world : single = this.Get (nameof this.EmitterShadowOffset) world
+        member this.SetEmitterShadowOffset (value : single) world = this.Set (nameof this.EmitterShadowOffset) value world
+        member this.EmitterShadowOffset = lens (nameof this.EmitterShadowOffset) this this.GetEmitterShadowOffset this.SetEmitterShadowOffset
         member this.GetEmitterRenderType world : RenderType = this.Get (nameof this.EmitterRenderType) world
         member this.SetEmitterRenderType (value : RenderType) world = this.Set (nameof this.EmitterRenderType) value world
         member this.EmitterRenderType = lens (nameof this.EmitterRenderType) this this.GetEmitterRenderType this.SetEmitterRenderType
@@ -2345,75 +2352,80 @@ module BasicStaticBillboardEmitterFacetModule =
                     (entity.GetParticleRate world)
                     (entity.GetParticleMax world)
 
-        static let updateParticleSystem updater (entity : Entity) world =
+        static let mapParticleSystem mapper (entity : Entity) world =
             let particleSystem = entity.GetParticleSystem world
-            let particleSystem = updater particleSystem
+            let particleSystem = mapper particleSystem
             let world = entity.SetParticleSystem particleSystem world
             world
 
-        static let updateEmitter updater (entity : Entity) world =
-            updateParticleSystem (fun particleSystem ->
+        static let mapEmitter mapper (entity : Entity) world =
+            mapParticleSystem (fun particleSystem ->
                 match Map.tryFind typeof<Particles.BasicStaticBillboardEmitter>.Name particleSystem.Emitters with
                 | Some (:? Particles.BasicStaticBillboardEmitter as emitter) ->
-                    let emitter = updater emitter
+                    let emitter = mapper emitter
                     { particleSystem with Emitters = Map.add typeof<Particles.BasicStaticBillboardEmitter>.Name (emitter :> Particles.Emitter) particleSystem.Emitters }
                 | _ -> particleSystem)
                 entity world
 
         static let rec processOutput output entity world =
             match output with
-            | Particles.OutputEmitter (name, emitter) -> updateParticleSystem (fun ps -> { ps with Emitters = Map.add name emitter ps.Emitters }) entity world
+            | Particles.OutputEmitter (name, emitter) -> mapParticleSystem (fun ps -> { ps with Emitters = Map.add name emitter ps.Emitters }) entity world
             | Particles.Outputs outputs -> SArray.fold (fun world output -> processOutput output entity world) world outputs
 
         static let handleEmitterMaterialPropertiesChange evt world =
             let emitterMaterialProperties = evt.Data.Value :?> MaterialProperties
-            let world = updateEmitter (fun emitter -> if emitter.MaterialProperties <> emitterMaterialProperties then { emitter with MaterialProperties = emitterMaterialProperties } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.MaterialProperties <> emitterMaterialProperties then { emitter with MaterialProperties = emitterMaterialProperties } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleEmitterMaterialChange evt world =
             let emitterMaterial = evt.Data.Value :?> Material
-            let world = updateEmitter (fun emitter -> if emitter.Material <> emitterMaterial then { emitter with Material = emitterMaterial } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.Material <> emitterMaterial then { emitter with Material = emitterMaterial } else emitter) evt.Subscriber world
+            (Cascade, world)
+
+        static let handleEmitterShadowOffsetChange evt world =
+            let emitterShadowOffset = evt.Data.Value :?> single
+            let world = mapEmitter (fun emitter -> if emitter.ShadowOffset <> emitterShadowOffset then { emitter with ShadowOffset = emitterShadowOffset } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleEmitterRenderTypeChange evt world =
             let emitterRenderType = evt.Data.Value :?> RenderType
-            let world = updateEmitter (fun emitter -> if emitter.RenderType <> emitterRenderType then { emitter with RenderType = emitterRenderType } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.RenderType <> emitterRenderType then { emitter with RenderType = emitterRenderType } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleEmitterLifeTimeOptChange evt world =
             let emitterLifeTimeOpt = evt.Data.Value :?> GameTime
-            let world = updateEmitter (fun emitter -> if emitter.Life.LifeTimeOpt <> emitterLifeTimeOpt then { emitter with Life = { emitter.Life with LifeTimeOpt = emitterLifeTimeOpt }} else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.Life.LifeTimeOpt <> emitterLifeTimeOpt then { emitter with Life = { emitter.Life with LifeTimeOpt = emitterLifeTimeOpt }} else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleParticleLifeTimeMaxOptChange evt world =
             let particleLifeTimeMaxOpt = evt.Data.Value :?> GameTime
-            let world = updateEmitter (fun emitter -> if emitter.ParticleLifeTimeMaxOpt <> particleLifeTimeMaxOpt then { emitter with ParticleLifeTimeMaxOpt = particleLifeTimeMaxOpt } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.ParticleLifeTimeMaxOpt <> particleLifeTimeMaxOpt then { emitter with ParticleLifeTimeMaxOpt = particleLifeTimeMaxOpt } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleParticleRateChange evt world =
             let particleRate = evt.Data.Value :?> single
-            let world = updateEmitter (fun emitter -> if emitter.ParticleRate <> particleRate then { emitter with ParticleRate = particleRate } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.ParticleRate <> particleRate then { emitter with ParticleRate = particleRate } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleParticleMaxChange evt world =
             let particleMax = evt.Data.Value :?> int
-            let world = updateEmitter (fun emitter -> if emitter.ParticleRing.Length <> particleMax then Particles.BasicStaticBillboardEmitter.resize particleMax emitter else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.ParticleRing.Length <> particleMax then Particles.BasicStaticBillboardEmitter.resize particleMax emitter else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleBasicParticleSeedChange evt world =
             let particleSeed = evt.Data.Value :?> Particles.BasicParticle
-            let world = updateEmitter (fun emitter -> if emitter.ParticleSeed <> particleSeed then { emitter with ParticleSeed = particleSeed } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.ParticleSeed <> particleSeed then { emitter with ParticleSeed = particleSeed } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleEmitterConstraintChange evt world =
             let emitterConstraint = evt.Data.Value :?> Particles.Constraint
-            let world = updateEmitter (fun emitter -> if emitter.Constraint <> emitterConstraint then { emitter with Constraint = emitterConstraint } else emitter) evt.Subscriber world
+            let world = mapEmitter (fun emitter -> if emitter.Constraint <> emitterConstraint then { emitter with Constraint = emitterConstraint } else emitter) evt.Subscriber world
             (Cascade, world)
 
         static let handleEmitterStyleChange evt world =
             let entity = evt.Subscriber
             let emitter = makeEmitter entity world
-            let world = updateEmitter (constant emitter) entity world
+            let world = mapEmitter (constant emitter) entity world
             (Cascade, world)
 
         static let handlePositionChange evt world =
@@ -2459,6 +2471,8 @@ module BasicStaticBillboardEmitterFacetModule =
              define Entity.BasicParticleSeed { Life = Particles.Life.make GameTime.zero (GameTime.ofSeconds 1.0f); Body = Particles.Body.defaultBody; Size = v3Dup 0.25f; Offset = v3Zero; Inset = box2Zero; Color = Color.One; Emission = Color.Zero; Flip = FlipNone }
              define Entity.EmitterConstraint Particles.Constraint.empty
              define Entity.EmitterStyle "BasicStaticBillboardEmitter"
+             define Entity.EmitterShadowEnabled true
+             define Entity.EmitterShadowOffset Constants.Engine.Particle3dShadowOffsetDefault
              nonPersistent Entity.ParticleSystem Particles.ParticleSystem.empty]
 
         override this.Register (entity, world) =
@@ -2470,6 +2484,7 @@ module BasicStaticBillboardEmitterFacetModule =
             let world = World.sense handleRotationChange (entity.GetChangeEvent (nameof entity.Rotation)) entity (nameof BasicStaticBillboardEmitterFacet) world
             let world = World.sense handleEmitterMaterialPropertiesChange (entity.GetChangeEvent (nameof entity.EmitterMaterialProperties)) entity (nameof BasicStaticBillboardEmitterFacet) world
             let world = World.sense handleEmitterMaterialChange (entity.GetChangeEvent (nameof entity.EmitterMaterial)) entity (nameof BasicStaticBillboardEmitterFacet) world
+            let world = World.sense handleEmitterShadowOffsetChange (entity.GetChangeEvent (nameof entity.EmitterShadowOffset)) entity (nameof BasicStaticBillboardEmitterFacet) world
             let world = World.sense handleEmitterRenderTypeChange (entity.GetChangeEvent (nameof entity.EmitterRenderType)) entity (nameof BasicStaticBillboardEmitterFacet) world
             let world = World.sense handleEmitterLifeTimeOptChange (entity.GetChangeEvent (nameof entity.EmitterLifeTimeOpt)) entity (nameof BasicStaticBillboardEmitterFacet) world
             let world = World.sense handleParticleLifeTimeMaxOptChange (entity.GetChangeEvent (nameof entity.ParticleLifeTimeMaxOpt)) entity (nameof BasicStaticBillboardEmitterFacet) world
@@ -2496,47 +2511,53 @@ module BasicStaticBillboardEmitterFacetModule =
             else world
 
         override this.Render (renderPass, entity, world) =
-            let time = world.GameTime
-            let presence = entity.GetPresence world
-            let particleSystem = entity.GetParticleSystem world
-            let particlesMessages =
-                particleSystem |>
-                Particles.ParticleSystem.toParticlesDescriptors time |>
-                List.map (fun descriptor ->
-                    match descriptor with
-                    | Particles.BillboardParticlesDescriptor descriptor ->
-                        let emitterProperties = entity.GetEmitterMaterialProperties world
-                        let properties =
-                            { AlbedoOpt = match emitterProperties.AlbedoOpt with Some albedo -> Some albedo | None -> descriptor.MaterialProperties.AlbedoOpt
-                              RoughnessOpt = match emitterProperties.RoughnessOpt with Some roughness -> Some roughness | None -> descriptor.MaterialProperties.RoughnessOpt
-                              MetallicOpt = match emitterProperties.MetallicOpt with Some metallic -> Some metallic | None -> descriptor.MaterialProperties.MetallicOpt
-                              AmbientOcclusionOpt = match emitterProperties.AmbientOcclusionOpt with Some ambientOcclusion -> Some ambientOcclusion | None -> descriptor.MaterialProperties.AmbientOcclusionOpt
-                              EmissionOpt = match emitterProperties.EmissionOpt with Some emission -> Some emission | None -> descriptor.MaterialProperties.EmissionOpt
-                              HeightOpt = match emitterProperties.HeightOpt with Some height -> Some height | None -> descriptor.MaterialProperties.HeightOpt
-                              IgnoreLightMapsOpt = match emitterProperties.IgnoreLightMapsOpt with Some ignoreLightMaps -> Some ignoreLightMaps | None -> descriptor.MaterialProperties.IgnoreLightMapsOpt
-                              OpaqueDistanceOpt = None }
-                        let emitterMaterial = entity.GetEmitterMaterial world
-                        let material =
-                            { AlbedoImageOpt = match emitterMaterial.AlbedoImageOpt with Some albedoImage -> Some albedoImage | None -> descriptor.Material.AlbedoImageOpt
-                              RoughnessImageOpt = match emitterMaterial.RoughnessImageOpt with Some roughnessImage -> Some roughnessImage | None -> descriptor.Material.RoughnessImageOpt
-                              MetallicImageOpt = match emitterMaterial.MetallicImageOpt with Some metallicImage -> Some metallicImage | None -> descriptor.Material.MetallicImageOpt
-                              AmbientOcclusionImageOpt = match emitterMaterial.AmbientOcclusionImageOpt with Some ambientOcclusionImage -> Some ambientOcclusionImage | None -> descriptor.Material.AmbientOcclusionImageOpt
-                              EmissionImageOpt = match emitterMaterial.EmissionImageOpt with Some emissionImage -> Some emissionImage | None -> descriptor.Material.EmissionImageOpt
-                              NormalImageOpt = match emitterMaterial.NormalImageOpt with Some normalImage -> Some normalImage | None -> descriptor.Material.NormalImageOpt
-                              HeightImageOpt = match emitterMaterial.HeightImageOpt with Some heightImage -> Some heightImage | None -> descriptor.Material.HeightImageOpt
-                              TwoSidedOpt = match emitterMaterial.TwoSidedOpt with Some twoSided -> Some twoSided | None -> descriptor.Material.TwoSidedOpt }
-                        Some
-                            (RenderBillboardParticles
-                                { Absolute = descriptor.Absolute
-                                  Presence = presence
-                                  MaterialProperties = properties
-                                  Material = material
-                                  Particles = descriptor.Particles
-                                  RenderType = descriptor.RenderType
-                                  RenderPass = renderPass })
-                    | _ -> None) |>
-                List.definitize
-            World.enqueueRenderMessages3d particlesMessages world
+            let shouldRender =
+                match renderPass with
+                | ShadowPass (_, _, _, _) -> entity.GetEmitterShadowEnabled world 
+                | _ -> true
+            if shouldRender then
+                let time = world.GameTime
+                let presence = entity.GetPresence world
+                let particleSystem = entity.GetParticleSystem world
+                let particlesMessages =
+                    particleSystem |>
+                    Particles.ParticleSystem.toParticlesDescriptors time |>
+                    List.map (fun descriptor ->
+                        match descriptor with
+                        | Particles.BillboardParticlesDescriptor descriptor ->
+                            let emitterProperties = entity.GetEmitterMaterialProperties world
+                            let properties =
+                                { AlbedoOpt = match emitterProperties.AlbedoOpt with Some albedo -> Some albedo | None -> descriptor.MaterialProperties.AlbedoOpt
+                                  RoughnessOpt = match emitterProperties.RoughnessOpt with Some roughness -> Some roughness | None -> descriptor.MaterialProperties.RoughnessOpt
+                                  MetallicOpt = match emitterProperties.MetallicOpt with Some metallic -> Some metallic | None -> descriptor.MaterialProperties.MetallicOpt
+                                  AmbientOcclusionOpt = match emitterProperties.AmbientOcclusionOpt with Some ambientOcclusion -> Some ambientOcclusion | None -> descriptor.MaterialProperties.AmbientOcclusionOpt
+                                  EmissionOpt = match emitterProperties.EmissionOpt with Some emission -> Some emission | None -> descriptor.MaterialProperties.EmissionOpt
+                                  HeightOpt = match emitterProperties.HeightOpt with Some height -> Some height | None -> descriptor.MaterialProperties.HeightOpt
+                                  IgnoreLightMapsOpt = match emitterProperties.IgnoreLightMapsOpt with Some ignoreLightMaps -> Some ignoreLightMaps | None -> descriptor.MaterialProperties.IgnoreLightMapsOpt
+                                  OpaqueDistanceOpt = None }
+                            let emitterMaterial = entity.GetEmitterMaterial world
+                            let material =
+                                { AlbedoImageOpt = match emitterMaterial.AlbedoImageOpt with Some albedoImage -> Some albedoImage | None -> descriptor.Material.AlbedoImageOpt
+                                  RoughnessImageOpt = match emitterMaterial.RoughnessImageOpt with Some roughnessImage -> Some roughnessImage | None -> descriptor.Material.RoughnessImageOpt
+                                  MetallicImageOpt = match emitterMaterial.MetallicImageOpt with Some metallicImage -> Some metallicImage | None -> descriptor.Material.MetallicImageOpt
+                                  AmbientOcclusionImageOpt = match emitterMaterial.AmbientOcclusionImageOpt with Some ambientOcclusionImage -> Some ambientOcclusionImage | None -> descriptor.Material.AmbientOcclusionImageOpt
+                                  EmissionImageOpt = match emitterMaterial.EmissionImageOpt with Some emissionImage -> Some emissionImage | None -> descriptor.Material.EmissionImageOpt
+                                  NormalImageOpt = match emitterMaterial.NormalImageOpt with Some normalImage -> Some normalImage | None -> descriptor.Material.NormalImageOpt
+                                  HeightImageOpt = match emitterMaterial.HeightImageOpt with Some heightImage -> Some heightImage | None -> descriptor.Material.HeightImageOpt
+                                  TwoSidedOpt = match emitterMaterial.TwoSidedOpt with Some twoSided -> Some twoSided | None -> descriptor.Material.TwoSidedOpt }
+                            Some
+                                (RenderBillboardParticles
+                                    { Absolute = descriptor.Absolute
+                                      Presence = presence
+                                      MaterialProperties = properties
+                                      Material = material
+                                      ShadowOffset = descriptor.ShadowOffset
+                                      Particles = descriptor.Particles
+                                      RenderType = descriptor.RenderType
+                                      RenderPass = renderPass })
+                        | _ -> None) |>
+                    List.definitize
+                World.enqueueRenderMessages3d particlesMessages world
 
         override this.RayCast (ray, entity, world) =
             let intersectionOpt = ray.Intersects (entity.GetBounds world)
@@ -2895,20 +2916,20 @@ module TerrainFacetModule =
              define Entity.TerrainMaterial
                 (BlendMaterial
                     { TerrainLayers =
-                        [|{ AlbedoImage = Assets.Default.TerrainLayerAlbedo
-                            RoughnessImage = Assets.Default.TerrainLayerRoughness
-                            AmbientOcclusionImage = Assets.Default.TerrainLayerAmbientOcclusion
-                            NormalImage = Assets.Default.TerrainLayerNormal
-                            HeightImage = Assets.Default.TerrainLayerHeight }
-                          { AlbedoImage = Assets.Default.TerrainLayer2Albedo
-                            RoughnessImage = Assets.Default.TerrainLayer2Roughness
-                            AmbientOcclusionImage = Assets.Default.TerrainLayer2AmbientOcclusion
-                            NormalImage = Assets.Default.TerrainLayer2Normal
-                            HeightImage = Assets.Default.TerrainLayer2Height }|]
+                        [|{ AlbedoImage = Assets.Default.TerrainLayer0Albedo
+                            RoughnessImage = Assets.Default.TerrainLayer0Roughness
+                            AmbientOcclusionImage = Assets.Default.TerrainLayer0AmbientOcclusion
+                            NormalImage = Assets.Default.TerrainLayer0Normal
+                            HeightImage = Assets.Default.TerrainLayer0Height }
+                          { AlbedoImage = Assets.Default.TerrainLayer1Albedo
+                            RoughnessImage = Assets.Default.TerrainLayer1Roughness
+                            AmbientOcclusionImage = Assets.Default.TerrainLayer1AmbientOcclusion
+                            NormalImage = Assets.Default.TerrainLayer1Normal
+                            HeightImage = Assets.Default.TerrainLayer1Height }|]
                       BlendMap =
                           RedsMap
-                            [|Assets.Default.TerrainLayerBlend
-                              Assets.Default.TerrainLayer2Blend|]})
+                            [|Assets.Default.TerrainLayer0Blend
+                              Assets.Default.TerrainLayer1Blend|]})
              define Entity.TintImageOpt None
              define Entity.NormalImageOpt None
              define Entity.Tiles (v2 256.0f 256.0f)
@@ -3061,141 +3082,6 @@ module NavBodyFacetModule =
             if entity.GetIs2d world
             then world // TODO: implement for 2d navigation when it's available.
             else World.setNav3dBodyOpt None entity world
-
-        override this.GetAttributesInferred (_, _) =
-            AttributesInferred.unimportant
-
-[<AutoOpen>]
-module Nav3dConfigFacetModule =
-
-    type Entity with
-        member this.GetNav3dConfig world : Nav3dConfig = this.Get (nameof this.Nav3dConfig) world
-        member this.SetNav3dConfig (value : Nav3dConfig) world = this.Set (nameof this.Nav3dConfig) value world
-        member this.Nav3dConfig = lens (nameof this.Nav3dConfig) this this.GetNav3dConfig this.SetNav3dConfig
-
-    /// Augments an entity with a navigation mesh.
-    type Nav3dConfigFacet () =
-        inherit Facet (false)
-
-        static let propagateNav3dConfig (entity : Entity) world =
-            let config = entity.GetNav3dConfig world
-            World.setNav3dConfig config entity.Screen world
-
-        static member Properties =
-            [define Entity.Nav3dConfig Nav3dConfig.defaultConfig]
-
-        override this.Register (entity, world) =
-            World.sense (fun _ world -> (Cascade, propagateNav3dConfig entity world)) (entity.ChangeEvent (nameof entity.Nav3dConfig)) entity (nameof Nav3dConfigFacet) world
-
-        override this.Edit (op, entity, world) =
-            match op with
-            | OverlayViewport _ ->
-                let nav3d = World.getScreenNav3d entity.Screen world
-                match nav3d.Nav3dMeshOpt with
-                | Some (builderResult, _, _) ->
-
-                    // draw exterior edges
-                    let dmesh = builderResult.GetMeshDetail ()
-                    let mutable segmentsMinY = Single.MaxValue
-                    let mutable segmentsMaxY = Single.MinValue
-                    let segments =
-                        SArray.ofSeq
-                            (seq {
-                                for i in 0 .. dec dmesh.nmeshes do
-                                    let m = i * 4
-                                    let bverts = dmesh.meshes.[m]
-                                    let btris = dmesh.meshes.[m + 2]
-                                    let ntris = dmesh.meshes.[m + 3]
-                                    let verts = bverts * 3
-                                    let tris = btris * 4
-                                    for j in 0 .. dec ntris do
-                                        let t = tris + j * 4
-                                        let mutable k = 0
-                                        let mutable kp = 2
-                                        while k < 3 do
-                                            let ef = (dmesh.tris.[t + 3] >>> (kp * 2)) &&& 0x3
-                                            if ef <> 0 then
-                                                let start =
-                                                    v3
-                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3]
-                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 1]
-                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 2]
-                                                let stop =
-                                                    v3
-                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3]
-                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 1]
-                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 2]
-                                                if segmentsMinY > start.Y then segmentsMinY <- start.Y
-                                                if segmentsMaxY < start.Y then segmentsMaxY <- start.Y
-                                                if segmentsMinY > stop.Y then segmentsMinY <- stop.Y
-                                                if segmentsMaxY < stop.Y then segmentsMaxY <- stop.Y
-                                                struct (start, stop)
-                                            kp <- k
-                                            k <- inc k })
-                    let computeSegmentColor (segment : struct (Vector3 * Vector3)) =
-                        let middleY = (fst' segment).Y + (snd' segment).Y * 0.5f
-                        let height = Math.Lerp (0.0f, 1.0f, (middleY - segmentsMinY) / (segmentsMaxY - segmentsMinY))
-                        Color (1.0f, 1.0f - height, height, 1.0f)
-                    World.imGuiSegments3dPlus false segments 1.0f computeSegmentColor world
-
-                    // draw interior edges
-                    let dmesh = builderResult.GetMeshDetail ()
-                    let segments =
-                        SArray.ofSeq
-                            (seq {
-                                for i in 0 .. dec dmesh.nmeshes do
-                                    let m = i * 4
-                                    let bverts = dmesh.meshes.[m]
-                                    let btris = dmesh.meshes.[m + 2]
-                                    let ntris = dmesh.meshes.[m + 3]
-                                    let verts = bverts * 3
-                                    let tris = btris * 4
-                                    for j in 0 .. dec ntris do
-                                        let t = tris + j * 4
-                                        let mutable k = 0
-                                        let mutable kp = 2
-                                        while k < 3 do
-                                            let ef = (dmesh.tris.[t + 3] >>> (kp * 2)) &&& 0x3
-                                            if ef = 0 then
-                                                let start =
-                                                    v3
-                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3]
-                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 1]
-                                                        dmesh.verts.[verts + dmesh.tris.[t + kp] * 3 + 2]
-                                                let stop =
-                                                    v3
-                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3]
-                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 1]
-                                                        dmesh.verts.[verts + dmesh.tris.[t + k] * 3 + 2]
-                                                struct (start, stop)
-                                            kp <- k
-                                            k <- inc k })
-                    World.imGuiSegments3dPlus false segments 1.0f computeSegmentColor world
-
-                    // draw points
-                    let mutable pointsMinY = Single.MaxValue
-                    let mutable pointsMaxY = Single.MinValue
-                    let points =
-                        SArray.ofSeq
-                            (seq {
-                                for i in 0 .. dec dmesh.nmeshes do
-                                    let m = i * 4
-                                    let bverts = dmesh.meshes.[m]
-                                    let nverts = dmesh.meshes.[m + 1]
-                                    let verts = bverts * 3
-                                    for j in 0 .. dec nverts do
-                                        let point = v3 dmesh.verts.[verts + j * 3] dmesh.verts.[verts + j * 3 + 1] dmesh.verts.[verts + j * 3 + 2]
-                                        if pointsMinY > point.Y then pointsMinY <- point.Y
-                                        if pointsMaxY < point.Y then pointsMaxY <- point.Y
-                                        point })
-                    let computePointColor (point : Vector3) =
-                        let height = Math.Lerp (0.0f, 1.0f, (point.Y - pointsMinY) / (pointsMaxY - pointsMinY))
-                        Color (1.0f, 1.0f - height, height, 1.0f)
-                    World.imGuiCircles3dPlus false points 2.5f true computePointColor world
-                    world
-
-                | None -> world
-            | _ -> world
 
         override this.GetAttributesInferred (_, _) =
             AttributesInferred.unimportant

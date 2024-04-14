@@ -67,7 +67,7 @@ module Content =
                         world)
                         world eventSignalsAdded
 
-                /// drag event signals with existing subscription ids forward in time
+                // drag event signals with existing subscription ids forward in time
                 for eventSignalEntry in eventSignalContentsOld do
                     if eventSignalContents.ContainsKey eventSignalEntry.Key then
                         eventSignalContents.[eventSignalEntry.Key] <- eventSignalEntry.Value
@@ -117,7 +117,7 @@ module Content =
                         world)
                         world eventHandlersAdded
 
-                /// drag event signals with existing subscription ids forward in time
+                // drag event signals with existing subscription ids forward in time
                 for eventHandlerEntry in eventHandlerContentsOld do
                     if eventHandlerContents.ContainsKey eventHandlerEntry.Key then
                         eventHandlerContents.[eventHandlerEntry.Key] <- eventHandlerEntry.Value
@@ -138,8 +138,9 @@ module Content =
             List.foldGeneric (fun world propertyContent ->
                 if not propertyContent.PropertyStatic || initializing then
                     let lens = propertyContent.PropertyLens
-                    let simulant = match lens.This :> obj with null -> simulant | _ -> lens.This
-                    World.setProperty lens.Name { PropertyType = lens.Type; PropertyValue = propertyContent.PropertyValue } simulant world |> snd'
+                    match lens.This :> obj with
+                    | null -> World.setProperty lens.Name { PropertyType = lens.Type; PropertyValue = propertyContent.PropertyValue } simulant world |> snd'
+                    | _ -> lens.TrySet propertyContent.PropertyValue world
                 else world)
                 world content.PropertyContentsOpt
         else world
@@ -159,8 +160,9 @@ module Content =
                 if not propertyContent.PropertyStatic || initializing then
                     let lens = propertyContent.PropertyLens
                     if strEq lens.Name "MountOpt" then mountOptFound <- true
-                    let entity = match lens.This :> obj with null -> entity | _ -> lens.This :?> Entity
-                    world <- World.setEntityPropertyFast lens.Name { PropertyType = lens.Type; PropertyValue = propertyContent.PropertyValue } entity world
+                    match lens.This :> obj with
+                    | null -> world <- World.setEntityPropertyFast lens.Name { PropertyType = lens.Type; PropertyValue = propertyContent.PropertyValue } entity world
+                    | _ -> world <- lens.TrySet propertyContent.PropertyValue world
             content.PropertyContentsOpt <- null // OPTIMIZATION: blank out property contents to avoid GC promotion.
             world
         else world
@@ -369,6 +371,10 @@ module Content =
         for entity in entities do
             if isNull entityContentsOpt then entityContentsOpt <- OrderedDictionary StringComparer.Ordinal
             entityContentsOpt.Add (entity.EntityName, entity)
+#if DEBUG
+        if notNull entityContentsOpt && entityContentsOpt.Count > 2048 then // probably indicates a 4096 24-bit Dictionary.Entry array on the LOH
+            Log.warnOnce "High MMCC entity content count: having a large number of MMCC entities (> 2048) in a single entity parent may thrash the LOH."
+#endif
         { EntityDispatcherName = typeof<'entityDispatcher>.Name; EntityName = entityName; EntityFilePathOpt = entityFilePathOpt; EntityCachedOpt = Unchecked.defaultof<_>
           EventSignalContentsOpt = eventSignalContentsOpt; EventHandlerContentsOpt = eventHandlerContentsOpt; PropertyContentsOpt = propertyContentsOpt
           EntityContentsOpt = entityContentsOpt }
@@ -455,6 +461,12 @@ module Content =
     /// Describe a sky box with the given definitions.
     let skyBox entityName definitions = entity<SkyBoxDispatcher> entityName definitions
 
+    /// Describe a basic static billboard emitter with the given definitions.
+    let basicStaticBillboardEmitter entityName definitions = entity<BasicStaticBillboardEmitterDispatcher> entityName definitions
+
+    /// Describe a 3d effect with the given definitions.
+    let effect3d entityName definitions = entity<Effect3dDispatcher> entityName definitions
+
     /// Describe a 3d block with the given definitions.
     let block3d entityName definitions = entity<Block3dDispatcher> entityName definitions
 
@@ -463,9 +475,6 @@ module Content =
 
     /// Describe a static billboard with the given definitions.
     let staticBillboard entityName definitions = entity<StaticBillboardDispatcher> entityName definitions
-
-    /// Describe a basic static billboard emitter with the given definitions.
-    let basicStaticBillboardEmitter entityName definitions = entity<BasicStaticSpriteEmitterDispatcher> entityName definitions
 
     /// Describe a static model with the given definitions.
     let staticModel entityName definitions = entity<StaticModelDispatcher> entityName definitions
@@ -488,6 +497,12 @@ module Content =
     /// Describe a terrain with the given definitions.
     let terrain entityName definitions = entity<TerrainDispatcher> entityName definitions
 
+    /// Describe a 3d navigation configuration.
+    let nav3dConfig entityName definitions = entity<Nav3dConfigDispatcher> entityName definitions
+
+    /// Describe a 3d lighting configuration.
+    let lighting3dConfig entityName definitions = entity<Lighting3dConfigDispatcher> entityName definitions
+
     /// Describe a static model expanded into an entity hierarchy with the given definitions.
     let staticModelHierarchy entityName definitions = entity<StaticModelHierarchyDispatcher> entityName definitions
 
@@ -508,6 +523,10 @@ module Content =
         for entity in entities do
             if isNull entityContentsOpt then entityContentsOpt <- OrderedDictionary StringComparer.Ordinal
             entityContentsOpt.Add (entity.EntityName, entity)
+#if DEBUG
+        if notNull entityContentsOpt && entityContentsOpt.Count > 2048 then // probably indicates a 4096 24-bit Dictionary.Entry array on the LOH
+            Log.warnOnce "High MMCC entity content count: having a large number of MMCC entities (> 2048) in a single group may thrash the LOH."
+#endif
         { GroupDispatcherName = typeof<'groupDispatcher>.Name; GroupName = groupName; GroupFilePathOpt = groupFilePathOpt; SimulantCachedOpt = Unchecked.defaultof<_>
           EventSignalContentsOpt = eventSignalContentsOpt; EventHandlerContentsOpt = eventHandlerContentsOpt; PropertyContentsOpt = propertyContentsOpt
           EntityContentsOpt = entityContentsOpt }
@@ -533,6 +552,10 @@ module Content =
             | PropertyContent pc -> (if isNull propertyContentsOpt then propertyContentsOpt <- List ()); propertyContentsOpt.Add pc
         for group in groups do
             groupContents.Add (group.GroupName, group)
+#if DEBUG
+        if groupContents.Count > 2048 then // probably indicates a 4096 24-bit Dictionary.Entry array on the LOH
+            Log.warnOnce "High MMCC group content count: having a large number of MMCC groups (> 2048) in a single screen may thrash the LOH."
+#endif
         { ScreenDispatcherName = typeof<'screenDispatcher>.Name; ScreenName = screenName; ScreenBehavior = screenBehavior; GroupFilePathOpt = groupFilePathOpt; SimulantCachedOpt = Unchecked.defaultof<_>
           EventSignalContentsOpt = eventSignalContentsOpt; EventHandlerContentsOpt = eventHandlerContentsOpt; PropertyContentsOpt = propertyContentsOpt
           GroupContents = groupContents }
@@ -560,6 +583,10 @@ module Content =
             | PropertyContent pc -> (if isNull propertyContentsOpt then propertyContentsOpt <- List ()); propertyContentsOpt.Add pc
         for screen in screens do
             screenContents.Add (screen.ScreenName, screen)
+#if DEBUG
+        if screenContents.Count > 2048 then // probably indicates a 4096 24-bit Dictionary.Entry array on the LOH
+            Log.warnOnce "High MMCC scrren content count: having a large number of MMCC screen (> 2048) in a single game may thrash the LOH."
+#endif
         { InitialScreenNameOpt = initialScreenNameOpt; SimulantCachedOpt = Unchecked.defaultof<_>
           EventSignalContentsOpt = eventSignalContentsOpt; EventHandlerContentsOpt = eventHandlerContentsOpt; PropertyContentsOpt = propertyContentsOpt
           ScreenContents = screenContents }

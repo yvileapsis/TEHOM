@@ -29,11 +29,14 @@ type AttackState =
 type InjuryState =
     { InjuryTime : int64 }
 
+type WoundState =
+    { WoundTime : int64 }
+
 type ActionState =
     | NormalState
     | AttackState of AttackState
     | InjuryState of InjuryState
-    | WoundedState
+    | WoundState of WoundState
 
 type [<ReferenceEquality; SymbolicExpansion>] Character =
     { CharacterType : CharacterType
@@ -83,7 +86,8 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
         | Enemy -> { CharacterProperties.defaultProperties with PenetrationDepthMax = 0.1f }
 
     static member private computeTraversalAnimations rotation linearVelocity angularVelocity character =
-        if character.ActionState <> WoundedState then
+        match character.ActionState with
+        | NormalState ->
             let rotationInterp = character.RotationInterp rotation
             let linearVelocityInterp = character.LinearVelocityInterp linearVelocity
             let angularVelocityInterp = character.AngularVelocityInterp angularVelocity
@@ -94,24 +98,25 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
             let turnRightness = (angularVelocityInterp * v3Up).Length () * 48.0f
             let turnLeftness = -turnRightness
             let animations =
-                [{ StartTime = 0L; LifeTimeOpt = None; Name = "Armature|Idle"; Playback = Loop; Rate = 1.0f; Weight = 0.5f; BoneFilterOpt = None }]
+                [Animation.make 0L None "Armature|Idle" Loop 1.0f 0.5f None]
             let animations =
-                if forwardness >= 0.2f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkForward"; Playback = Loop; Rate = 1.0f; Weight = forwardness; BoneFilterOpt = None } :: animations
-                elif backness >= 0.2f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkBack"; Playback = Loop; Rate = 1.0f; Weight = backness; BoneFilterOpt = None } :: animations
+                if forwardness >= 0.01f then Animation.make 0L None "Armature|WalkForward" Loop 1.0f forwardness None :: animations
+                elif backness >= 0.01f then Animation.make 0L None "Armature|WalkBack" Loop 1.0f backness None :: animations
                 else animations
             let animations =
-                if rightness >= 0.2f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkRight"; Playback = Loop; Rate = 1.0f; Weight = rightness; BoneFilterOpt = None } :: animations
-                elif leftness >= 0.2f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|WalkLeft"; Playback = Loop; Rate = 1.0f; Weight = leftness; BoneFilterOpt = None } :: animations
+                if rightness >= 0.01f then Animation.make 0L None "Armature|WalkRight" Loop 1.0f rightness None :: animations
+                elif leftness >= 0.01f then Animation.make 0L None "Armature|WalkLeft" Loop 1.0f leftness None :: animations
                 else animations
             let animations =
-                if turnRightness >= 0.05f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnRight"; Playback = Loop; Rate = 1.0f; Weight = turnRightness; BoneFilterOpt = None } :: animations
-                elif turnLeftness >= 0.05f then { StartTime = 0L; LifeTimeOpt = None; Name = "Armature|TurnLeft"; Playback = Loop; Rate = 1.0f; Weight = turnLeftness; BoneFilterOpt = None } :: animations
+                if turnRightness >= 0.01f then Animation.make 0L None "Armature|TurnRight" Loop 1.0f turnRightness None :: animations
+                elif turnLeftness >= 0.01f then Animation.make 0L None "Armature|TurnLeft" Loop 1.0f turnLeftness None :: animations
                 else animations
             animations
-        else []
+        | _ -> []
 
     static member private tryComputeActionAnimation time character =
         match character.ActionState with
+        | NormalState -> None
         | AttackState attack ->
             let localTime = time - attack.AttackTime
             let soundOpt =
@@ -121,14 +126,19 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
                 | _ -> None
             let animationStartTime = GameTime.ofUpdates (time - localTime % 55L)
             let animationName = if localTime <= 55 then "Armature|AttackVertical" else "Armature|AttackHorizontal"
-            let animation = { StartTime = animationStartTime; LifeTimeOpt = None; Name = animationName; Playback = Once; Rate = 1.0f; Weight = 32.0f; BoneFilterOpt = None }
-            Some (soundOpt, animation)
+            let animation = Animation.once animationStartTime None animationName
+            Some (soundOpt, animation, false)
         | InjuryState injury ->
             let localTime = time - injury.InjuryTime
             let animationStartTime = GameTime.ofUpdates (time - localTime % 55L)
-            let animation = { StartTime = animationStartTime; LifeTimeOpt = None; Name = "Armature|WalkBack"; Playback = Once; Rate = 1.0f; Weight = 32.0f; BoneFilterOpt = None }
-            (Some (None, animation))
-        | NormalState | WoundedState -> None
+            let animation = Animation.once animationStartTime None "Armature|WalkBack"
+            Some (None, animation, false)
+        | WoundState wound ->
+            let localTime = time - wound.WoundTime
+            let animationStartTime = GameTime.ofUpdates (time - localTime % 55L)
+            let animation = Animation.loop animationStartTime None "Armature|WalkBack"
+            let invisible = localTime / 5L % 2L = 0L
+            Some (None, animation, invisible)
 
     static member private updateInterps position rotation linearVelocity angularVelocity character =
 
@@ -150,7 +160,7 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
         // fin
         character
 
-    static member private updateMotion isKeyboardKeyDown nav3dFollow time position (rotation : Quaternion) grounded playerPosition character =
+    static member private updateMotion isKeyboardKeyDown nav3dFollow time position (rotation : Quaternion) grounded (playerPosition : Vector3) character =
 
         // update jump state
         let lastTimeOnGround = if grounded then time else character.JumpState.LastTimeOnGround
@@ -188,7 +198,10 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
         
             // enemy traversal
             if character.ActionState = NormalState then
-                let sphere = Sphere (playerPosition, 0.75f)
+                let sphere =
+                    if position.Y - playerPosition.Y >= 0.25f
+                    then Sphere (playerPosition, 0.1f) // when above player
+                    else Sphere (playerPosition, 0.7f) // when at or below player
                 let nearest = sphere.Nearest position
                 let followOutput = nav3dFollow (Some 1.0f) (Some 10.0f) 0.04f 0.1f position rotation nearest
                 (followOutput.NavPosition, followOutput.NavRotation, followOutput.NavLinearVelocity, followOutput.NavAngularVelocity, character)
@@ -202,17 +215,23 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
                 let rotationForwardFlat = rotation.Forward.WithY(0.0f).Normalized
                 let positionFlat = position.WithY 0.0f
                 let playerPositionFlat = playerPosition.WithY 0.0f
-                if  Vector3.Distance (playerPosition, position) < 1.75f &&
-                    rotationForwardFlat.AngleBetween (playerPositionFlat - positionFlat) < 0.2f && 
-                    playerPosition.Y - position.Y < 1.3f &&
-                    position.Y - playerPosition.Y < 1.3f then
-                    { character with ActionState = AttackState (AttackState.make time) }
+                if position.Y - playerPosition.Y >= 0.25f then // above player
+                    if  Vector3.Distance (playerPositionFlat, positionFlat) < 1.0f &&
+                        rotationForwardFlat.AngleBetween (playerPositionFlat - positionFlat) < 0.1f then
+                        { character with ActionState = AttackState (AttackState.make time) }
+                    else character
+                elif playerPosition.Y - position.Y < 1.3f then // at or a bit below player
+                    if  Vector3.Distance (playerPositionFlat, positionFlat) < 1.75f &&
+                        rotationForwardFlat.AngleBetween (playerPositionFlat - positionFlat) < 0.15f then
+                        { character with ActionState = AttackState (AttackState.make time) }
+                    else character
                 else character
             | _ -> character
         | Player -> character
 
     static member private updateState time character =
         match character.ActionState with
+        | NormalState -> character
         | AttackState attack ->
             let actionState =
                 let localTime = time - attack.AttackTime
@@ -228,17 +247,16 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
                 then InjuryState injury
                 else NormalState
             { character with ActionState = actionState }
-        | NormalState -> character
-        | WoundedState -> character
+        | WoundState _ -> character
 
     static member private computeAnimations time position rotation linearVelocity angularVelocity character =
         ignore<Vector3> position
         let traversalAnimations = Character.computeTraversalAnimations rotation linearVelocity angularVelocity character
-        let (soundOpt, animations) =
+        let (soundOpt, animations, invisible) =
             match Character.tryComputeActionAnimation time character with
-            | Some (soundOpt, animation) -> (soundOpt, animation :: traversalAnimations)
-            | None -> (None, traversalAnimations)
-        (soundOpt, animations)
+            | Some (soundOpt, animation, invisible) -> (soundOpt, animation :: traversalAnimations, invisible)
+            | None -> (None, traversalAnimations, false)
+        (soundOpt, animations, invisible)
 
     static member private updateAttackedCharacters time character =
         match character.ActionState with
@@ -279,7 +297,7 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
                         if localTime > 10L && not attack.FollowUpBuffered
                         then { character with ActionState = AttackState { attack with FollowUpBuffered = true }}
                         else character
-                    | InjuryState _ | WoundedState -> character
+                    | InjuryState _ | WoundState _ -> character
                 (false, character)
             else (false, character)
 
@@ -291,8 +309,8 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
         let character = Character.updateAction time position rotation playerPosition character
         let character = Character.updateState time character
         let (attackedCharacters, character) = Character.updateAttackedCharacters time character
-        let (soundOpt, animations) = Character.computeAnimations time position rotation linearVelocity angularVelocity character
-        (soundOpt, animations, attackedCharacters, position, rotation, character)
+        let (soundOpt, animations, invisible) = Character.computeAnimations time position rotation linearVelocity angularVelocity character
+        (soundOpt, animations, invisible, attackedCharacters, position, rotation, character)
 
     static member initial characterType =
         { CharacterType = characterType

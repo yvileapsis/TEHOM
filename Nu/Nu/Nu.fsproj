@@ -53,7 +53,6 @@
 		<Compile Include="OpenGL\OpenGL.Hl.fs" />
 		<Compile Include="OpenGL\OpenGL.Shader.fs" />
 		<Compile Include="OpenGL\OpenGL.Texture.fs" />
-		<Compile Include="OpenGL\OpenGL.Assimp.fs" />
 		<Compile Include="OpenGL\OpenGL.CubeMap.fs" />
 		<Compile Include="OpenGL\OpenGL.LightMap.fs" />
 		<Compile Include="OpenGL\OpenGL.Framebuffer.fs" />
@@ -78,7 +77,7 @@
 		<Compile Include="AssetGraph\AssetTag.fs" />
 		<Compile Include="AssetGraph\AssetTypes.fs" />
 		<Compile Include="AssetGraph\AssetGraph.fs" />
-		<Compile Include="AssetGraph\AssetMemo.fs" />
+		<Compile Include="AssetGraph\AssetClient.fs" />
 		<Compile Include="Physics\PhysicsEngine.fs" />
 		<Compile Include="Physics\PhysicsEngine2d.fs" />
 		<Compile Include="Physics\PhysicsEngine3d.fs" />
@@ -188,7 +187,7 @@
 
 	<ItemGroup>
 		<Reference Include="AssimpNet">
-			<HintPath>..\Nu.Dependencies\AssimpNet\netstandard1.3\AssimpNet.dll</HintPath>
+			<HintPath>..\Nu.Dependencies\AssimpNet\netstandard2.1\AssimpNet.dll</HintPath>
 		</Reference>
 		<Reference Include="BulletSharpPInvoke">
 			<HintPath>..\Nu.Dependencies\BulletSharpPInvoke\netstandard2.1\BulletSharp.dll</HintPath>

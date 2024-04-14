@@ -40,8 +40,8 @@ module Override =
                 | nameof OpenGL.HlAssert -> OpenGL.HlAssert <- scvalue value
                 | nameof Engine.RunSynchronously -> Engine.RunSynchronously <- scvalue value
                 | nameof Engine.Meter2d -> Engine.Meter2d <- scvalue value
-                | nameof Engine.EntityPerimeterCentered2dDefault -> Engine.EntityPerimeterCentered2dDefault <- scvalue value
-                | nameof Engine.EntityPerimeterCenteredGuiDefault -> Engine.EntityPerimeterCenteredGuiDefault <- scvalue value
+                | nameof Engine.Entity2dPerimeterCenteredDefault -> Engine.Entity2dPerimeterCenteredDefault <- scvalue value
+                | nameof Engine.EntityGuiPerimeterCenteredDefault -> Engine.EntityGuiPerimeterCenteredDefault <- scvalue value
                 | nameof Engine.QuadnodeSize -> Engine.QuadnodeSize <- scvalue value
                 | nameof Engine.QuadtreeDepth -> Engine.QuadtreeDepth <- scvalue value
                 | nameof Engine.OctnodeSize -> Engine.OctnodeSize <- scvalue value
@@ -59,6 +59,8 @@ module Override =
                 | nameof Render.VirtualScalar -> Render.VirtualScalar <- scvalue value
                 | nameof Render.SsaoResolutionDivisor -> Render.SsaoResolutionDivisor <- scvalue value
                 | nameof Render.FieldOfView -> Render.FieldOfView <- scvalue value
+                | nameof Render.TextureAnisotropyMax -> Render.TextureAnisotropyMax <- scvalue value
+                | nameof Render.TextureMinimalMipmapIndex -> Render.TextureMinimalMipmapIndex <- scvalue value
                 | nameof Render.ShadowDetailedCount -> Render.ShadowDetailedResolutionScalar <- scvalue value
                 | nameof Render.ShadowDetailedResolutionScalar -> Render.ShadowDetailedResolutionScalar <- scvalue value
                 | nameof Render.ShadowsMax -> Render.ShadowsMax <- min (scvalue value) Constants.Render.ShadowsMaxShader

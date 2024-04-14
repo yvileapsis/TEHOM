@@ -150,7 +150,7 @@ module TmxMap =
             let mutable tileOffset = 1 // gid 0 is the empty tile
             let mutable tileSetIndex = 0
             let mutable tileSetFound = false
-            let mutable enr = tmd.TileMap.Tilesets.GetEnumerator () // TODO: P1: try to figure out how to remove allocation here.
+            let mutable enr = tmd.TileMap.Tilesets.GetEnumerator () // TODO: try to figure out how to remove allocation here.
             while enr.MoveNext () && not tileSetFound do
                 let set = enr.Current
                 let tileCountOpt = set.TileCount
@@ -311,7 +311,7 @@ module TmxMap =
               AngularVelocity = v3Zero
               AngularDamping = 0.0f
               AngularFactor = v3One
-              Substance = Mass 1.0f // TODO: P1: check if this should be zero.
+              Substance = Mass 0.0f
               GravityOverride = Some v3Zero
               CharacterProperties = CharacterProperties.defaultProperties
               CollisionDetection = Discontinuous
@@ -361,6 +361,7 @@ module TmxMap =
                 let descriptors = List ()
                 let mutable yC = 0
                 let mutable yO = r.Y + single yC * tileSize.Y
+                yO <- yO + 0.0001f |> floor // NOTE: fixes #766 and seems to provide more horizontal tile alignement stability. Alternatively, we could instead do + 0.5f |> floor on yI.
                 while r.Y + single yC * tileSize.Y < r2.Y + tileSize.Y do
 
                     // compute y index and ensure it's in bounds
