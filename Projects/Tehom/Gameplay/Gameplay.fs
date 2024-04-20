@@ -3,45 +3,46 @@ namespace Tehom
 open Nu
 open TehomID
 
+// this represents that state of the simulation during gameplay.
+type GameplayState =
+    | Playing
+    | Quitting
+    | Quit
 
-module Gameplay =
-    // this represents that state of the simulation during gameplay.
-    type GameplayState =
-        | Playing
-        | Quitting
-        | Quit
+// this is our MMCC model type representing gameplay.
+// this model representation uses update time, that is, time based on number of engine updates.
+// if you wish to use clock time instead (https://github.com/bryanedds/Nu/wiki/GameTime-and-its-Polymorphic-Nature),
+// you could use `Time : single` instead.
+type Gameplay = {
 
+    GameTime : int64
 
-    // this is our MMCC model type representing gameplay.
-    // this model representation uses update time, that is, time based on number of engine updates.
-    // if you wish to use clock time instead (https://github.com/bryanedds/Nu/wiki/GameTime-and-its-Polymorphic-Nature),
-    // you could use `Time : single` instead.
-    type Gameplay = {
-        GameTime : int64
+    Time : TehomTime
 
-        Time : TehomTime
+    State : GameplayState
 
-        State : GameplayState
+    Actors : TehomActors
 
-        Actors : TehomActors
+    Player: TehomID
 
-        Player: TehomID
+    Display : string
 
-        Display : string
+} with
+    static member empty = {
+        GameTime = 0
+        State = Playing
+        Time = TehomTime.empty
+        Actors = TehomActors.empty
+        Player = TehomID.empty
+        Display = ""
+    }
 
-    } with
-        static member start = {
-            GameTime = 0
-            State = Playing
-
-            Time = TehomTime.empty
-
-            Actors = TehomActors.addDefault TehomActors.empty
-
+    static member initial = {
+        Gameplay.empty with
             Player = ID "player"
-
+            Actors = TehomActors.addDefault Gameplay.empty.Actors
             Display = "Hello world!\nOn two lines!"
-        }
+    }
 
 // this is our MMCC message type.
 type GameplayMessage =
@@ -53,5 +54,3 @@ type GameplayMessage =
     | StartQuitting
     | FinishQuitting
     interface Message
-
-type Gameplay = Gameplay.Gameplay

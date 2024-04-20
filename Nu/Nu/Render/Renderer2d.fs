@@ -952,7 +952,9 @@ type [<ReferenceEquality>] GlRenderer2d =
                     OpenGL.Hl.Assert ()
 
                     // make texture drawable
-                    let textTexture = OpenGL.Texture.CreateTextureFromId textTextureId
+                    let textTextureMetadata = OpenGL.Texture.TextureMetadata.make textSurfaceWidth textSurfaceHeight
+                    let textTextureHandle = OpenGL.Texture.CreateTextureHandle textTextureId
+                    let textTexture = OpenGL.Texture.EagerTexture { TextureMetadata = textTextureMetadata; TextureId = textTextureId; TextureHandle = textTextureHandle }
                     OpenGL.Hl.Assert ()
 
                     // draw text sprite
@@ -964,7 +966,7 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     // destroy texture
                     SDL.SDL_FreeSurface textSurfacePtr
-                    OpenGL.Texture.DestroyTexture textTexture
+                    textTexture.Destroy ()
                     OpenGL.Hl.Assert ()
 
                 List.iter renderOpenGLSprite surfaces

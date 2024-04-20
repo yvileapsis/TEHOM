@@ -14,5 +14,5 @@ type TehomPlugin () =
             "Splash", Game.SetModel Splash
             "Title", Game.SetModel Title
             "Credits", Game.SetModel Credits
-            "Gameplay", Game.SetModel (Gameplay Gameplay.start)
+            "Gameplay", Game.SetModel (Gameplay Gameplay.initial)
         ]

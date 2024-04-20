@@ -40,7 +40,7 @@ module GameplayGui =
                 Entity.FontSizing == Some 10
             ]
 
-            richText (Simulants.GameplayTextBox.Name) [
+            richText Simulants.GameplayTextBox.Name [
                 Entity.Size == v3 400.0f 100.0f 0.0f
                 Entity.Position == v3 -36.0f 80.0f 0.0f
                 Entity.Elevation == 10.0f
@@ -98,5 +98,4 @@ module GameplayGui =
                 Entity.Text == "Quit"
                 Entity.ClickEvent => StartQuitting
             ]
-
         ]

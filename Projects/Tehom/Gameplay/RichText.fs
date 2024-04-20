@@ -87,7 +87,7 @@ module RichTextFacetModule =
                 } world
 
         override this.GetAttributesInferred (_, _) =
-            AttributesInferred.important Constants.Engine.EntitySizeGuiDefault v3Zero
+            AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 
 [<AutoOpen>]
