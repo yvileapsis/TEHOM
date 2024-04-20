@@ -219,7 +219,7 @@ module WorldModule =
         static member getGameTime world =
             World.getAmbientStateBy AmbientState.getGameTime world
 
-        /// Unshelve the ambient state.
+        /// Switch simulation to use this ambient state.
         static member internal switchAmbientState world =
             World.choose { world with AmbientState = AmbientState.switch world.AmbientState }
 
@@ -653,13 +653,13 @@ module WorldModule =
             (facetName : string)
             (world : World) =
             let removalId = makeGuid ()
-            let monitorId = makeGuid ()
             let fastenId = makeGuid ()
-            let world = World.subscribePlus<'a, Entity> monitorId callback eventAddress entity world |> snd
+            let senseId = makeGuid ()
+            let world = World.subscribePlus<'a, Entity> senseId callback eventAddress entity world |> snd
             let unsubscribe = fun (world : World) ->
                 let world = World.unsubscribe removalId world
-                let world = World.unsubscribe monitorId world
                 let world = World.unsubscribe fastenId world
+                let world = World.unsubscribe senseId world
                 world
             let callback' = fun _ world -> (Cascade, unsubscribe world)
             let callback'' = fun changeEvent world ->

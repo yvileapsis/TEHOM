@@ -380,6 +380,22 @@ module Character2dDispatcherModule =
                 world
 
 [<AutoOpen>]
+module BodyJoint2dDispatcherModule =
+
+    /// Gives an entity the base behavior of a physics-driven 2d joint.
+    type BodyJoint2dDispatcher () =
+        inherit Entity2dDispatcher (true)
+
+        static member Facets =
+            [typeof<BodyJointFacet>]
+
+        static member Properties =
+            [define Entity.BodyJoint EmptyJoint]
+
+        override this.GetAttributesInferred (_, _) =
+            AttributesInferred.important Constants.Engine.BodyJoint2dSizeDefault v3Zero
+
+[<AutoOpen>]
 module TileMapDispatcherModule =
 
     /// Gives an entity the base behavior of an asset-defined tile map.
@@ -390,8 +406,7 @@ module TileMapDispatcherModule =
             [typeof<TileMapFacet>]
 
         static member Properties =
-            [define Entity.Presence Omnipresent
-             define Entity.BodyEnabled true
+            [define Entity.BodyEnabled true
              define Entity.Friction 0.0f
              define Entity.Restitution 0.0f
              define Entity.CollisionCategories "1"
@@ -414,8 +429,7 @@ module TmxMapDispatcherModule =
             [typeof<TmxMapFacet>]
 
         static member Properties =
-            [define Entity.Presence Omnipresent
-             define Entity.BodyEnabled true
+            [define Entity.BodyEnabled true
              define Entity.Friction 0.0f
              define Entity.Restitution 0.0f
              define Entity.CollisionCategories "1"
@@ -772,6 +786,27 @@ module Character3dDispatcherModule =
             let world = entity.SetLinearVelocityPrevious linearVelocityAvg world
             let world = entity.SetAngularVelocityPrevious angularVelocityAvg world
             world
+
+[<AutoOpen>]
+module BodyJoint3dDispatcherModule =
+
+    /// Gives an entity the base behavior of a physics-driven 3d joint.
+    type BodyJoint3dDispatcher () =
+        inherit Entity3dDispatcher (true)
+
+        static member Facets =
+            [typeof<BodyJointFacet>]
+
+        static member Properties =
+            [define Entity.BodyJoint EmptyJoint]
+
+        override this.GetAttributesInferred (_, _) =
+            AttributesInferred.important Constants.Engine.BodyJoint3dSizeDefault v3Zero
+
+        override this.RayCast (ray, entity, world) =
+            let intersectionOpt = ray.Intersects (entity.GetBounds world)
+            if intersectionOpt.HasValue then [|intersectionOpt.Value|]
+            else [||]
 
 [<AutoOpen>]
 module TerrainDispatcherModule =

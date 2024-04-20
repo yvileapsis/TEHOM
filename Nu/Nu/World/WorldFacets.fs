@@ -1255,6 +1255,8 @@ module EffectFacetModule =
              define Entity.EffectDefinitions Map.empty
              define Entity.EffectDescriptor Effects.EffectDescriptor.empty
              define Entity.EffectOffset v3Zero
+             define Entity.EffectShadowEnabled true
+             define Entity.EffectShadowOffset Constants.Engine.ParticleShadowOffsetDefault
              define Entity.EffectRenderType (ForwardRenderType (0.0f, 0.0f))
              define Entity.EffectHistoryMax Constants.Effects.EffectHistoryMaxDefault
              variable Entity.EffectHistory (fun _ -> Deque<Effects.Slice> (inc Constants.Effects.EffectHistoryMaxDefault))
@@ -1434,7 +1436,7 @@ module RigidBodyFacetModule =
             [define Entity.BodyEnabled true
              define Entity.BodyType Static
              define Entity.SleepingAllowed true
-             define Entity.Friction 0.2f
+             define Entity.Friction 0.5f
              define Entity.Restitution 0.0f
              define Entity.LinearVelocity v3Zero
              define Entity.LinearDamping 0.0f // leave this up to friction by default
@@ -1499,8 +1501,7 @@ module RigidBodyFacetModule =
         override this.RegisterPhysics (entity, world) =
             let mutable transform = entity.GetTransform world
             let bodyProperties =
-                { BodyIndex = (entity.GetBodyId world).BodyIndex
-                  Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
+                { Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
                   Rotation = transform.Rotation
                   Scale = transform.Scale
                   BodyShape = getBodyShape entity world
@@ -1521,7 +1522,8 @@ module RigidBodyFacetModule =
                   CollisionCategories = Physics.categorizeCollisionMask (entity.GetCollisionCategories world)
                   CollisionMask = Physics.categorizeCollisionMask (entity.GetCollisionMask world)
                   Sensor = entity.GetSensor world
-                  Observable = entity.GetObservable world }
+                  Observable = entity.GetObservable world
+                  BodyIndex = (entity.GetBodyId world).BodyIndex }
             World.createBody (entity.GetIs2d world) (entity.GetBodyId world) bodyProperties world
 
         override this.UnregisterPhysics (entity, world) =
@@ -1534,6 +1536,21 @@ module BodyJointFacetModule =
         member this.GetBodyJoint world : BodyJoint = this.Get (nameof this.BodyJoint) world
         member this.SetBodyJoint (value : BodyJoint) world = this.Set (nameof this.BodyJoint) value world
         member this.BodyJoint = lens (nameof this.BodyJoint) this this.GetBodyJoint this.SetBodyJoint
+        member this.GetBodyJointTarget world : Entity Relation = this.Get (nameof this.BodyJointTarget) world
+        member this.SetBodyJointTarget (value : Entity Relation) world = this.Set (nameof this.BodyJointTarget) value world
+        member this.BodyJointTarget = lens (nameof this.BodyJointTarget) this this.GetBodyJointTarget this.SetBodyJointTarget
+        member this.GetBodyJointTarget2 world : Entity Relation = this.Get (nameof this.BodyJointTarget2) world
+        member this.SetBodyJointTarget2 (value : Entity Relation) world = this.Set (nameof this.BodyJointTarget2) value world
+        member this.BodyJointTarget2 = lens (nameof this.BodyJointTarget2) this this.GetBodyJointTarget2 this.SetBodyJointTarget2
+        member this.GetBodyJointEnabled world : bool = this.Get (nameof this.BodyJointEnabled) world
+        member this.SetBodyJointEnabled (value : bool) world = this.Set (nameof this.BodyJointEnabled) value world
+        member this.BodyJointEnabled = lens (nameof this.BodyJointEnabled) this this.GetBodyJointEnabled this.SetBodyJointEnabled
+        member this.GetBreakImpulseThreshold world : single = this.Get (nameof this.BreakImpulseThreshold) world
+        member this.SetBreakImpulseThreshold (value : single) world = this.Set (nameof this.BreakImpulseThreshold) value world
+        member this.BreakImpulseThreshold = lens (nameof this.BreakImpulseThreshold) this this.GetBreakImpulseThreshold this.SetBreakImpulseThreshold
+        member this.GetCollideConnected world : bool = this.Get (nameof this.CollideConnected) world
+        member this.SetCollideConnected (value : bool) world = this.Set (nameof this.CollideConnected) value world
+        member this.CollideConnected = lens (nameof this.CollideConnected) this this.GetCollideConnected this.SetCollideConnected
         member this.GetBodyJointId world : BodyJointId = this.Get (nameof this.BodyJointId) world
         member this.BodyJointId = lensReadOnly (nameof this.BodyJointId) this this.GetBodyJointId
 
@@ -1541,23 +1558,57 @@ module BodyJointFacetModule =
     type BodyJointFacet () =
         inherit Facet (true)
 
+        static let tryGetBodyTargetIds (entity : Entity) world =
+            match tryResolve entity (entity.GetBodyJointTarget world) with
+            | Some targetEntity ->
+                match tryResolve entity (entity.GetBodyJointTarget2 world) with
+                | Some target2Entity ->
+                    let targetId = { BodySource = targetEntity; BodyIndex = Constants.Physics.InternalIndex }
+                    let target2Id = { BodySource = target2Entity; BodyIndex = Constants.Physics.InternalIndex }
+                    Some (targetId, target2Id)
+                | None -> None
+            | None -> None
+
         static member Properties =
             [define Entity.BodyJoint EmptyJoint
+             define Entity.BodyJointTarget (Relation.makeParent ())
+             define Entity.BodyJointTarget2 (Relation.makeParent ())
+             define Entity.BodyJointEnabled true
+             define Entity.BreakImpulseThreshold Constants.Physics.BreakImpulseThresholdDefault
+             define Entity.CollideConnected true
              computed Entity.BodyJointId (fun (entity : Entity) _ -> { BodyJointSource = entity; BodyJointIndex = Constants.Physics.InternalIndex }) None]
 
         override this.Register (entity, world) =
-            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Transform)) entity (nameof BodyJointFacet) world
             let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyJoint)) entity (nameof BodyJointFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyJointTarget)) entity (nameof BodyJointFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyJointTarget2)) entity (nameof BodyJointFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyJointEnabled)) entity (nameof BodyJointFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BreakImpulseThreshold)) entity (nameof BodyJointFacet) world
+            let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollideConnected)) entity (nameof BodyJointFacet) world
             world
 
         override this.RegisterPhysics (entity, world) =
-            let bodyJointProperties =
-                { BodyJointIndex = (entity.GetBodyJointId world).BodyJointIndex
-                  BodyJoint = (entity.GetBodyJoint world) }
-            World.createBodyJoint (entity.GetIs2d world) entity bodyJointProperties world
+            match tryGetBodyTargetIds entity world with
+            | Some (targetId, target2Id) ->
+                let bodyJointProperties =
+                    { BodyJoint = entity.GetBodyJoint world
+                      BodyJointTarget = targetId
+                      BodyJointTarget2 = target2Id
+                      BodyJointEnabled = entity.GetBodyJointEnabled world
+                      BreakImpulseThreshold = entity.GetBreakImpulseThreshold world
+                      CollideConnected = entity.GetCollideConnected world
+                      BodyJointIndex = (entity.GetBodyJointId world).BodyJointIndex }
+                World.createBodyJoint (entity.GetIs2d world) entity bodyJointProperties world
+            | None -> world
 
         override this.UnregisterPhysics (entity, world) =
-            World.destroyBodyJoint (entity.GetIs2d world) (entity.GetBodyJointId world) world
+            match tryGetBodyTargetIds entity world with
+            | Some (targetId, target2Id) ->
+                World.destroyBodyJoint (entity.GetIs2d world) targetId target2Id (entity.GetBodyJointId world) world
+            | None -> world
+
+        override this.GetAttributesInferred (_, _) =
+            AttributesInferred.unimportant
 
 [<AutoOpen>]
 module TileMapFacetModule =
@@ -1584,8 +1635,7 @@ module TileMapFacetModule =
         inherit Facet (true)
 
         static member Properties =
-            [define Entity.Presence Omnipresent
-             define Entity.BodyEnabled true
+            [define Entity.BodyEnabled true
              define Entity.Friction 0.0f
              define Entity.Restitution 0.0f
              define Entity.CollisionCategories "1"
@@ -1693,8 +1743,7 @@ module TmxMapFacetModule =
         inherit Facet (true)
 
         static member Properties =
-            [define Entity.Presence Omnipresent
-             define Entity.BodyEnabled true
+            [define Entity.BodyEnabled true
              define Entity.Friction 0.0f
              define Entity.Restitution 0.0f
              define Entity.CollisionCategories "1"
@@ -2472,7 +2521,7 @@ module BasicStaticBillboardEmitterFacetModule =
              define Entity.EmitterConstraint Particles.Constraint.empty
              define Entity.EmitterStyle "BasicStaticBillboardEmitter"
              define Entity.EmitterShadowEnabled true
-             define Entity.EmitterShadowOffset Constants.Engine.Particle3dShadowOffsetDefault
+             define Entity.EmitterShadowOffset Constants.Engine.ParticleShadowOffsetDefault
              nonPersistent Entity.ParticleSystem Particles.ParticleSystem.empty]
 
         override this.Register (entity, world) =
@@ -2959,8 +3008,7 @@ module TerrainFacetModule =
                       TransformOpt = None
                       PropertiesOpt = None }
                 let bodyProperties =
-                    { BodyIndex = (entity.GetBodyId world).BodyIndex
-                      Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
+                    { Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
                       Rotation = transform.Rotation
                       Scale = transform.Scale
                       BodyShape = TerrainShape terrainShape
@@ -2981,7 +3029,8 @@ module TerrainFacetModule =
                       CollisionCategories = Physics.categorizeCollisionMask (entity.GetCollisionCategories world)
                       CollisionMask = Physics.categorizeCollisionMask (entity.GetCollisionMask world)
                       Sensor = false
-                      Observable = entity.GetObservable world }
+                      Observable = entity.GetObservable world
+                      BodyIndex = (entity.GetBodyId world).BodyIndex }
                 World.createBody false (entity.GetBodyId world) bodyProperties world
             | None -> world
 

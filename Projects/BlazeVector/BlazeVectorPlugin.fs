@@ -1,6 +1,5 @@
 ﻿namespace BlazeVector
 open System
-open Prime
 open Nu
 
 // this is a plugin for the Nu game engine that directs the execution of your application and editor
@@ -10,7 +9,7 @@ type BlazeVectorPlugin () =
     // this exposes different editing modes in the editor
     override this.EditModes =
         Map.ofSeq
-            [("Splash", fun world -> Game.SetModel Splash world)
-             ("Title", fun world -> Game.SetModel Title world)
-             ("Credits", fun world -> Game.SetModel Credits world)
-             ("Gameplay", fun world -> Game.SetModel (Gameplay { GameplayState = Commence; Score = 0 }) world)]
+            [("Splash", fun world -> Game.SetBlazeVector Splash world)
+             ("Title", fun world -> Game.SetBlazeVector Title world)
+             ("Credits", fun world -> Game.SetBlazeVector Credits world)
+             ("Gameplay", fun world -> Game.SetBlazeVector Gameplay world)]

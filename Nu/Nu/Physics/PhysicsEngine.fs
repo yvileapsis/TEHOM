@@ -173,6 +173,7 @@ type HeightMap =
         | RawHeightMap map -> HeightMap.tryGetRawHeightMapMetadata tryGetAssetFilePath bounds tiles map
 
 /// Identifies a body that can be found in a physics engine.
+/// TODO: see if removing CustomEquality here doesn't increase GC pressure or causes other perf overhead.
 type [<CustomEquality; NoComparison>] BodyId =
     { BodySource : Simulant
       BodyIndex : int }
@@ -409,8 +410,7 @@ type [<SymbolicExpansion>] CharacterProperties =
 
 /// The properties needed to describe the physical part of a body.
 type BodyProperties =
-    { BodyIndex : int
-      Center : Vector3
+    { Center : Vector3
       Rotation : Quaternion
       Scale : Vector3
       BodyType : BodyType
@@ -431,7 +431,8 @@ type BodyProperties =
       CollisionCategories : int
       CollisionMask : int
       Sensor : bool // sensor is always inherently observable
-      Observable : bool }
+      Observable : bool
+      BodyIndex : int }
 
     member this.HasSensors =
         this.Sensor || this.BodyShape.HasSensors
@@ -444,10 +445,70 @@ type BodyJointId =
     { BodyJointSource : Simulant
       BodyJointIndex : int }
 
-type AngleJoint =
-    { TargetId : BodyId
-      TargetId2 : BodyId
-      Anchor : Vector3
+/// Angle joint.
+type [<SymbolicExpansion>] AngleJoint =
+    { Anchor : Vector3
+      Anchor2 : Vector3
+      Axis : Vector3
+      Axis2 : Vector3
+      Angle : single
+      Softness : single
+      BiasFactor : single }
+
+/// Distance joint.
+type [<SymbolicExpansion>] DistanceJoint =
+    { Anchor : Vector3
+      Anchor2 : Vector3
+      Length : single
+      Frequency : single
+      DampingRatio : single }
+
+/// TODO: implement.
+type [<SymbolicExpansion>] FrictionJoint =
+    { Anchor : Vector3
+      Anchor2 : Vector3 }
+
+/// TODO: implement.
+type [<SymbolicExpansion>] GearJoint =
+    { Anchor : Vector3
+      Anchor2 : Vector3 }
+
+/// TODO: implement.
+type [<SymbolicExpansion>] MotorJoint =
+    { Anchor : Vector3
+      Anchor2 : Vector3 }
+
+/// TODO: implement.
+type [<SymbolicExpansion>] PrismaticJoint =
+    { Anchor : Vector3
+      Anchor2 : Vector3 }
+
+/// TODO: implement.
+type [<SymbolicExpansion>] PulleyJoint =
+    { Anchor : Vector3
+      Anchor2 : Vector3 }
+
+/// TODO: implement.
+type [<SymbolicExpansion>] RevoluteJoint =
+    { Anchor : Vector3
+      Anchor2 : Vector3 }
+
+/// TODO: implement.
+type [<SymbolicExpansion>] RopeJoint =
+    { Anchor : Vector3
+      Anchor2 : Vector3 }
+
+/// TODO: implement.
+type [<SymbolicExpansion>] WheelJoint =
+    { Anchor : Vector3
+      Anchor2 : Vector3 }
+
+type UserDefinedAetherJoint =
+    { CreateBodyJoint : nkast.Aether.Physics2D.Dynamics.Body -> nkast.Aether.Physics2D.Dynamics.Body -> nkast.Aether.Physics2D.Dynamics.Joints.Joint }
+
+/// Hinge joint.
+type [<SymbolicExpansion>] HingeJoint =
+    { Anchor : Vector3
       Anchor2 : Vector3
       Axis : Vector3
       Axis2 : Vector3
@@ -456,63 +517,39 @@ type AngleJoint =
       Softness : single
       BiasFactor : single
       RelaxationFactor : single
-      BreakImpulseThreshold : single }
+      AngularOnly : bool }
 
-type DistanceJoint =
-    { TargetId : BodyId
-      TargetId2 : BodyId
-      Anchor : Vector3
+/// Slider joint.
+type [<SymbolicExpansion>] SliderJoint =
+    { Anchor : Vector3
       Anchor2 : Vector3
-      Length : single
-      Frequency : single }
+      Axis : Vector3
+      Axis2 : Vector3
+      LinearLimitLower : single
+      LinearLimitUpper : single
+      AngularLimitLower : single
+      AngularLimitUpper : single
+      DirectionLinearSoftness : single
+      DirectionLinearRestitution : single
+      DirectionLinearDamping : single
+      DirectionAngularSoftness : single
+      DirectionAngularRestitution : single
+      DirectionAngularDamping : single
+      LimitLinearSoftness : single
+      LimitLinearRestitution : single
+      LimitLinearDamping : single
+      LimitAngularSoftness : single
+      LimitAngularRestitution : single
+      LimitAngularDamping : single
+      OrthoLinearSoftness : single
+      OrthoLinearRestitution : single
+      OrthoLinearDamping : single
+      OrthoAngularSoftness : single
+      OrthoAngularRestitution : single
+      OrthoAngularDamping : single }
 
-type FrictionJoint =
-    { TargetId : BodyId
-      TargetId2 : BodyId
-      Anchor : Vector3
-      Anchor2 : Vector3 }
-
-type GearJoint =
-    { TargetId : BodyId
-      TargetId2 : BodyId
-      Anchor : Vector3
-      Anchor2 : Vector3 }
-
-type MotorJoint =
-    { TargetId : BodyId
-      TargetId2 : BodyId
-      Anchor : Vector3
-      Anchor2 : Vector3 }
-
-type PrismaticJoint =
-    { TargetId : BodyId
-      TargetId2 : BodyId
-      Anchor : Vector3
-      Anchor2 : Vector3 }
-
-type PulleyJoint =
-    { TargetId : BodyId
-      TargetId2 : BodyId
-      Anchor : Vector3
-      Anchor2 : Vector3 }
-
-type RevoluteJoint =
-    { TargetId : BodyId
-      TargetId2 : BodyId
-      Anchor : Vector3
-      Anchor2 : Vector3 }
-
-type RopeJoint =
-    { TargetId : BodyId
-      TargetId2 : BodyId
-      Anchor : Vector3
-      Anchor2 : Vector3 }
-
-type WheelJoint =
-    { TargetId : BodyId
-      TargetId2 : BodyId
-      Anchor : Vector3
-      Anchor2 : Vector3 }
+type UserDefinedBulletJoint =
+    { CreateBodyJoint : BulletSharp.RigidBody -> BulletSharp.RigidBody -> BulletSharp.TypedConstraint }
 
 /// A joint on physics bodies.
 [<Syntax
@@ -531,14 +568,20 @@ type BodyJoint =
     | RevoluteJoint of RevoluteJoint
     | RopeJoint of RopeJoint
     | WheelJoint of WheelJoint
+    | UserDefinedAetherJoint of UserDefinedAetherJoint
+    | HingeJoint of HingeJoint
+    | SliderJoint of SliderJoint
+    | UserDefinedBulletJoint of UserDefinedBulletJoint
 
+/// Describes the universal properties of a body joint.
 type BodyJointProperties =
-    { BodyJointIndex : int
-      BodyJoint : BodyJoint }
-
-    static member empty =
-        { BodyJointIndex = 0
-          BodyJoint = EmptyJoint }
+    { BodyJoint : BodyJoint
+      BodyJointTarget : BodyId
+      BodyJointTarget2 : BodyId
+      BodyJointEnabled : bool
+      BreakImpulseThreshold : single
+      CollideConnected : bool
+      BodyJointIndex : int }
 
 /// A message to the physics system to create a body.
 type CreateBodyMessage =
@@ -563,18 +606,11 @@ type CreateBodyJointMessage =
     { BodyJointSource : Simulant
       BodyJointProperties : BodyJointProperties }
 
-/// A message to the physics system to create multiple joints.
-type CreateBodyJointsMessage =
-    { BodyJointsSource : Simulant
-      BodyJointsProperties : BodyJointProperties list }
-
 /// A message to the physics system to destroy a joint.
 type DestroyBodyJointMessage =
-    { BodyJointId : BodyJointId }
-
-/// A message to the physics system to destroy multiple joints.
-type DestroyBodyJointsMessage =
-    { BodyJointIds : BodyJointId list }
+    { BodyJointId : BodyJointId
+      BodyJointTarget : BodyId
+      BodyJointTarget2 : BodyId }
 
 /// A message to the physics system to destroy a body.
 type SetBodyEnabledMessage =
@@ -661,9 +697,7 @@ type PhysicsMessage =
     | DestroyBodyMessage of DestroyBodyMessage
     | DestroyBodiesMessage of DestroyBodiesMessage
     | CreateBodyJointMessage of CreateBodyJointMessage
-    | CreateBodyJointsMessage of CreateBodyJointsMessage
     | DestroyBodyJointMessage of DestroyBodyJointMessage
-    | DestroyBodyJointsMessage of DestroyBodyJointsMessage
     | SetBodyEnabledMessage of SetBodyEnabledMessage
     | SetBodyCenterMessage of SetBodyCenterMessage
     | SetBodyRotationMessage of SetBodyRotationMessage

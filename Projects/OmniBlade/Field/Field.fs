@@ -12,13 +12,14 @@ open CueSystem
 type FieldMessage =
     | Update
     | UpdateFieldTransition
-    | UpdateAvatarBodyTracking
     | TimeUpdate
+    | UpdateAvatarBodyTracking
     | AvatarBodyTransform of BodyTransformData
     | AvatarBodyCollision of BodyCollisionData
     | AvatarBodySeparationExplicit of BodySeparationExplicitData
     | AvatarBodySeparationImplicit of BodySeparationImplicitData
     | ScreenTransitioning of bool
+    | TryCommencingBattle of BattleType * Advent Set
     | MenuTeamOpen
     | MenuTeamAlly of int
     | MenuInventoryOpen
@@ -55,7 +56,6 @@ type FieldMessage =
     | ShopLeave
     | PromptLeft
     | PromptRight
-    | TryBattle of BattleType * Advent Set
     | Interact
     interface Message
 
@@ -66,6 +66,8 @@ type FieldCommand =
     | WarpAvatar of Vector3
     | MoveAvatar of Vector3
     | FaceAvatar of Direction
+    | CommencingBattle
+    | CommenceBattle of BattleData * PrizePool
     | PlayFieldSong
     | PlaySound of int64 * single * Sound AssetTag
     | PlaySong of int64 * int64 * int64 * single * Song AssetTag
@@ -82,7 +84,8 @@ type [<SymbolicExpansion>] Options =
     { BattleSpeed : BattleSpeed }
 
 type FieldState =
-    | Play
+    | Playing
+    | Battling of BattleData * PrizePool
     | Quitting
     | Quit
 
@@ -124,7 +127,6 @@ module Field =
               Tint_ : Color
               ShopOpt_ : Shop option
               DialogOpt_ : Dialog option
-              BattleOpt_ : Battle option
               FieldSongTimeOpt_ : int64 option
               FieldState_ : FieldState }
 
@@ -154,7 +156,6 @@ module Field =
         member this.Tint = this.Tint_
         member this.ShopOpt = this.ShopOpt_
         member this.DialogOpt = this.DialogOpt_
-        member this.BattleOpt = this.BattleOpt_
         member this.FieldSongTimeOpt = this.FieldSongTimeOpt_
         member this.FieldState = this.FieldState_
 
@@ -189,7 +190,7 @@ module Field =
                 (propDescriptor.PropId, prop))
         | None -> Map.empty
 
-    let private makeBattleFromTeam inventory prizePool (team : Map<int, Teammate>) battleSpeed battleData =
+    let private makeBattleFromTeam battleSpeed inventory (team : Map<int, Teammate>) prizePool battleData =
         let party = team |> Map.toList |> List.tryTake 3
         let allyPositions =
             if List.length party < 3
@@ -216,7 +217,7 @@ module Field =
                         character
                     | None -> failwith ("Could not find CharacterData for '" + scstring teammate.CharacterType + "'."))
                 party
-        let battle = Battle.makeFromParty inventory prizePool party battleSpeed battleData
+        let battle = Battle.makeFromParty battleSpeed inventory party prizePool battleData
         battle
         
     let rec detokenize (field : Field) (text : string) =
@@ -500,10 +501,6 @@ module Field =
     let mapDialogOpt updater field =
         { field with DialogOpt_ = updater field.DialogOpt_ }
 
-    let mapBattleOpt updater field =
-        let battleOpt = updater field.BattleOpt_
-        { field with BattleOpt_ = battleOpt }
-
     let mapFieldSongTimeOpt updater field =
         { field with FieldSongTimeOpt_ = updater field.FieldSongTimeOpt_ }
 
@@ -555,14 +552,19 @@ module Field =
         let field = mapAvatarIntersectedPropIds (constant []) field
         field
 
-    let enterBattle songTime prizePool battleData (field : Field) =
-        let battle = makeBattleFromTeam field.Inventory prizePool field.Team field.Options.BattleSpeed battleData
-        let field = mapFieldSongTimeOpt (constant (Some songTime)) field
-        mapBattleOpt (constant (Some battle)) field
+    let commencingBattle battleData prizePool field =
+        let field = { field with FieldState_ = Battling (battleData, prizePool) }
+        field
 
-    let exitBattle consequents battle field =
+    let commenceBattle songTime battleData prizePool (field : Field) =
+        let battle = makeBattleFromTeam field.Options.BattleSpeed field.Inventory field.Team prizePool battleData
+        let field = mapFieldSongTimeOpt (constant (Some songTime)) field
+        (battle, field)
+
+    let concludeBattle consequents battle field =
         let field = synchronizeFromBattle consequents battle field
         let field = clearSpirits field
+        let field = { field with FieldState_ = Playing }
         field
 
     let private toSavable field =
@@ -615,7 +617,7 @@ module Field =
         | (false, dialog) ->
             let field = mapDialogOpt (constant None) field
             match dialog.DialogBattleOpt with
-            | Some (battleType, consequence) -> withSignal (TryBattle (battleType, consequence)) field
+            | Some (battleType, consequence) -> withSignal (TryCommencingBattle (battleType, consequence)) field
             | None -> just field
 
     let private interactChest itemType chestId battleTypeOpt cue requirements (prop : Prop) (field : Field) =
@@ -996,16 +998,6 @@ module Field =
             | Some _ -> (cue, definitions, just field)
             | None -> (Fin, definitions, just field)
 
-        | Battle (battleType, consequents) ->
-            match field.BattleOpt_ with
-            | Some _ -> (cue, definitions, just field)
-            | None -> (BattleState, definitions, withSignal (TryBattle (battleType, consequents)) field)
-
-        | BattleState ->
-            match field.BattleOpt_ with
-            | Some _ -> (cue, definitions, just field)
-            | None -> (Fin, definitions, just field)
-
         | Dialog (text, isNarration) ->
             match field.DialogOpt_ with
             | Some _ ->
@@ -1034,6 +1026,9 @@ module Field =
             match field.DialogOpt_ with
             | None -> (Fin, definitions, just field)
             | Some _ -> (cue, definitions, just field)
+
+        | Battle (battleType, consequents) ->
+            (Fin, definitions, withSignal (TryCommencingBattle (battleType, consequents)) field)
 
         | If (p, c, a) ->
             match p with
@@ -1164,11 +1159,11 @@ module Field =
             | None -> Right field
         | Some _ -> Right field
 
-    let update (field : Field) =
+    let update field =
 
-        // update when battle is inactive
-        match field.BattleOpt_ with
-        | None ->
+        // ensure we're playing
+        match field.FieldState_ with
+        | Playing ->
 
             // update dialog
             let field =
@@ -1234,20 +1229,17 @@ module Field =
                     Option.isNone field.FieldTransitionOpt_ then
                     match updateSpirits field with
                     | Left (battleData, field) ->
-                        let fieldTime = field.FieldTime_
-                        let playTime = Option.defaultValue fieldTime field.FieldSongTimeOpt_
-                        let startTime = fieldTime - playTime
                         let prizePool = { Consequents = Set.empty; Items = []; Gold = 0; Exp = 0 }
-                        let field = enterBattle startTime prizePool battleData field
-                        let fade = FadeOutSong 60L
-                        let beastGrowl = PlaySound (0L, Constants.Audio.SoundVolumeDefault, Assets.Field.BeastGrowlSound)
-                        (signal fade :: signal beastGrowl :: signals, field)
+                        let field = commencingBattle battleData prizePool field
+                        (signal CommencingBattle :: signals, field)
                     | Right field -> (signals, field)
                 else (signals, field)
 
             // fin
             (signals, field)
-        | Some _ -> just field
+
+        // fin
+        | _ -> just field
 
     let updateFieldTime field =
         let field = { field with FieldTime_ = inc field.FieldTime_ }
@@ -1291,9 +1283,8 @@ module Field =
           Tint_ = Color.Zero
           ShopOpt_ = None
           DialogOpt_ = None
-          BattleOpt_ = None
           FieldSongTimeOpt_ = None
-          FieldState_ = Play }
+          FieldState_ = Playing }
 
     let empty viewBounds2dAbsolute =
         { FieldTime_ = 0L
@@ -1323,7 +1314,6 @@ module Field =
           Tint_ = Color.Zero
           ShopOpt_ = None
           DialogOpt_ = None
-          BattleOpt_ = None
           FieldSongTimeOpt_ = None
           FieldState_ = Quit }
 
@@ -1332,20 +1322,6 @@ module Field =
 
     let debug time viewBounds2dAbsolute =
         make time viewBounds2dAbsolute DebugField Slot1 Rand.DefaultSeedState (Avatar.empty ()) (Map.singleton 0 (Teammate.make 3 0 Jinn)) Advents.initial Inventory.initial
-
-    let debugBattle time viewBounds2dAbsolute =
-        let field = debug time viewBounds2dAbsolute
-        let battle =
-            match Map.tryFind DebugBattle Data.Value.Battles with
-            | Some battle ->
-                let level = 50
-                let team =
-                    Map.singleton 0 (Teammate.make level 0 Jinn) |>
-                    Map.add 1 (Teammate.make level 1 Mael) |>
-                    Map.add 2 (Teammate.make level 2 Riain)
-                makeBattleFromTeam Inventory.initial PrizePool.empty team PacedSpeed battle
-            | None -> Battle.empty
-        mapBattleOpt (constant (Some battle)) field
 
     let tryLoad time saveSlot =
         try let saveFilePath =

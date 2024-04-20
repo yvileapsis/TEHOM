@@ -76,6 +76,7 @@ type [<ReferenceEquality>] PhysicsEngine3d =
           TryGetAssetFilePath : AssetTag -> string option
           TryGetStaticModelMetadata : StaticModel AssetTag -> OpenGL.PhysicallyBased.PhysicallyBasedModel option
           UnscaledPointsCached : Dictionary<UnscaledPointsKey, Vector3 array>
+          CreateBodyJointMessages : Dictionary<BodyId, CreateBodyJointMessage List>
           IntegrationMessages : IntegrationMessage List }
 
     static member private handleCollision physicsEngine (bodyId : BodyId) (bodyId2 : BodyId) normal =
@@ -472,9 +473,20 @@ type [<ReferenceEquality>] PhysicsEngine3d =
             bodyId bodyProperties physicsEngine
 
     static member private createBody (createBodyMessage : CreateBodyMessage) physicsEngine =
+
+        // attempt to create body
         let bodyId = createBodyMessage.BodyId
         let bodyProperties = createBodyMessage.BodyProperties
         PhysicsEngine3d.createBody4 bodyProperties.BodyShape bodyId bodyProperties physicsEngine
+
+        // attempt to run any related body joint creation functions
+        match physicsEngine.CreateBodyJointMessages.TryGetValue bodyId with
+        | (true, createBodyJointMessages) ->
+            for createBodyJointMessage in createBodyJointMessages do
+                let bodyJointId = { BodyJointSource = createBodyJointMessage.BodyJointSource; BodyJointIndex = createBodyJointMessage.BodyJointProperties.BodyJointIndex }
+                PhysicsEngine3d.destroyBodyJointInternal bodyJointId physicsEngine
+                PhysicsEngine3d.createBodyJointInternal createBodyJointMessage.BodyJointProperties bodyJointId physicsEngine
+        | (false, _) -> ()
 
     static member private createBodies (createBodiesMessage : CreateBodiesMessage) physicsEngine =
         List.iter (fun (bodyProperties : BodyProperties) ->
@@ -485,7 +497,17 @@ type [<ReferenceEquality>] PhysicsEngine3d =
             createBodiesMessage.BodiesProperties
 
     static member private destroyBody (destroyBodyMessage : DestroyBodyMessage) physicsEngine =
+
+        // attempt to run any related body joint destruction functions
         let bodyId = destroyBodyMessage.BodyId
+        match physicsEngine.CreateBodyJointMessages.TryGetValue bodyId with
+        | (true, createBodyJointMessages) ->
+            for createBodyJointMessage in createBodyJointMessages do
+                let bodyJointId = { BodyJointSource = createBodyJointMessage.BodyJointSource; BodyJointIndex = createBodyJointMessage.BodyJointProperties.BodyJointIndex }
+                PhysicsEngine3d.destroyBodyJointInternal bodyJointId physicsEngine
+        | (false, _) -> ()
+
+        // attempt to destroy body
         match physicsEngine.Objects.TryGetValue bodyId with
         | (true, object) ->
             match object with
@@ -516,41 +538,111 @@ type [<ReferenceEquality>] PhysicsEngine3d =
             PhysicsEngine3d.destroyBody { BodyId = bodyId } physicsEngine)
             destroyBodiesMessage.BodyIds
 
-    static member private createBodyJoint (createBodyJointMessage : CreateBodyJointMessage) physicsEngine =
-        let bodyJointProperties = createBodyJointMessage.BodyJointProperties
-        let bodyJointId = { BodyJointSource = createBodyJointMessage.BodyJointSource; BodyJointIndex = bodyJointProperties.BodyJointIndex }
+    static member private createBodyJointInternal bodyJointProperties bodyJointId physicsEngine =
         match bodyJointProperties.BodyJoint with
         | EmptyJoint -> ()
-        | AngleJoint jointAngle ->
-            match (physicsEngine.Bodies.TryGetValue jointAngle.TargetId, physicsEngine.Bodies.TryGetValue jointAngle.TargetId2) with
+        | _ ->
+            let bodyId = bodyJointProperties.BodyJointTarget
+            let body2Id = bodyJointProperties.BodyJointTarget2
+            match (physicsEngine.Bodies.TryGetValue bodyId, physicsEngine.Bodies.TryGetValue body2Id) with
             | ((true, body), (true, body2)) ->
-                let hinge = new HingeConstraint (body, body2, jointAngle.Anchor, jointAngle.Anchor2, jointAngle.Axis, jointAngle.Axis2)
-                hinge.SetLimit (jointAngle.AngleMin, jointAngle.AngleMax, jointAngle.Softness, jointAngle.BiasFactor, jointAngle.RelaxationFactor)
-                hinge.BreakingImpulseThreshold <- jointAngle.BreakImpulseThreshold
-                physicsEngine.PhysicsContext.AddConstraint (hinge, false)
-                if physicsEngine.Constraints.TryAdd (bodyJointId, hinge)
-                then () // nothing to do
-                else Log.debug ("Could not add joint via '" + scstring createBodyJointMessage + "'.")
-            | (_, _) -> Log.debug "Could not create a joint for one or more non-existent bodies."
-        | _ -> failwithnie ()
+                let constrainOpt =
+                    match bodyJointProperties.BodyJoint with
+                    | EmptyJoint ->
+                        failwithumf () // already checked
+                    | AngleJoint angleJoint ->
+                        let hinge = new HingeConstraint (body, body2, angleJoint.Anchor, angleJoint.Anchor2, angleJoint.Axis, angleJoint.Axis2, true)
+                        hinge.SetLimit (angleJoint.Angle, angleJoint.Angle, angleJoint.Softness, angleJoint.BiasFactor, 1.0f)
+                        Some (hinge :> TypedConstraint)
+                    | DistanceJoint distanceJoint ->
+                        let slider = new SliderConstraint (body, body2, Matrix4x4.CreateTranslation distanceJoint.Anchor, Matrix4x4.CreateTranslation distanceJoint.Anchor2, true)
+                        slider.LowerLinearLimit <- distanceJoint.Length
+                        slider.UpperLinearLimit <- distanceJoint.Length
+                        Some slider
+                    | HingeJoint hingeJoint ->
+                        let hinge = new HingeConstraint (body, body2, hingeJoint.Anchor, hingeJoint.Anchor2, hingeJoint.Axis, hingeJoint.Axis2, true)
+                        hinge.AngularOnly <- hingeJoint.AngularOnly
+                        hinge.SetLimit (hingeJoint.AngleMin, hingeJoint.AngleMax, hingeJoint.Softness, hingeJoint.BiasFactor, hingeJoint.RelaxationFactor)
+                        Some (hinge :> TypedConstraint)
+                    | SliderJoint sliderJoint ->
+                        let frameInA = Matrix4x4.CreateFromTrs (sliderJoint.Anchor, Quaternion.CreateFromYawPitchRoll (sliderJoint.Axis.Y, sliderJoint.Axis.X, sliderJoint.Axis.Z), v3One)
+                        let frameInB = Matrix4x4.CreateFromTrs (sliderJoint.Anchor2, Quaternion.CreateFromYawPitchRoll (sliderJoint.Axis2.Y, sliderJoint.Axis2.X, sliderJoint.Axis2.Z), v3One)
+                        let slider = new SliderConstraint (body, body2, frameInA, frameInB, true)
+                        slider.LowerLinearLimit <- sliderJoint.LinearLimitLower
+                        slider.UpperLinearLimit <- sliderJoint.LinearLimitUpper
+                        slider.LowerAngularLimit <- sliderJoint.AngularLimitLower
+                        slider.UpperAngularLimit <- sliderJoint.AngularLimitUpper
+                        slider.SoftnessDirLinear <- sliderJoint.DirectionLinearSoftness
+                        slider.RestitutionDirLinear <- sliderJoint.DirectionLinearRestitution
+                        slider.DampingDirLinear <- sliderJoint.DirectionLinearDamping
+                        slider.SoftnessDirAngular <- sliderJoint.DirectionAngularSoftness
+                        slider.RestitutionDirAngular <- sliderJoint.DirectionAngularRestitution
+                        slider.DampingDirAngular <- sliderJoint.DirectionAngularDamping
+                        slider.SoftnessLimLinear <- sliderJoint.LimitLinearSoftness
+                        slider.RestitutionLimLinear <- sliderJoint.LimitLinearRestitution
+                        slider.DampingLimLinear <- sliderJoint.LimitLinearDamping
+                        slider.SoftnessLimAngular <- sliderJoint.LimitAngularSoftness
+                        slider.RestitutionLimAngular <- sliderJoint.LimitAngularRestitution
+                        slider.DampingLimAngular <- sliderJoint.LimitAngularDamping
+                        slider.SoftnessOrthoLinear <- sliderJoint.OrthoLinearSoftness
+                        slider.RestitutionOrthoLinear <- sliderJoint.OrthoLinearRestitution
+                        slider.DampingOrthoLinear <- sliderJoint.OrthoLinearDamping
+                        slider.SoftnessOrthoAngular <- sliderJoint.OrthoAngularSoftness
+                        slider.RestitutionOrthoAngular <- sliderJoint.OrthoAngularRestitution
+                        slider.DampingOrthoAngular <- sliderJoint.OrthoAngularDamping
+                        Some slider
+                    | UserDefinedBulletJoint bulletJoint ->
+                        Some (bulletJoint.CreateBodyJoint body body2)
+                    | _ ->
+                        Log.warn ("Joint type '" + getCaseName bodyJointProperties.BodyJoint + "' not implemented for PhysicsEngine3d.")
+                        None
+                match constrainOpt with
+                | Some constrain ->
+                    constrain.BreakingImpulseThreshold <- bodyJointProperties.BreakImpulseThreshold
+                    // TODO: implement CollideConnected.
+                    constrain.IsEnabled <- bodyJointProperties.BodyJointEnabled
+                    body.Activate true
+                    body2.Activate true
+                    physicsEngine.PhysicsContext.AddConstraint (constrain, false)
+                    if physicsEngine.Constraints.TryAdd (bodyJointId, constrain)
+                    then () // nothing to do
+                    else Log.warn ("Could not add joint for '" + scstring bodyJointId + "'.")
+                | None -> ()
+            | (_, _) -> ()
 
-    static member private createBodyJoints (createBodyJointsMessage : CreateBodyJointsMessage) physicsEngine =
-        List.iter (fun (bodyJointProperties : BodyJointProperties) ->
-            let createBodyJointMessage = { BodyJointSource = createBodyJointsMessage.BodyJointsSource; BodyJointProperties = bodyJointProperties }
-            PhysicsEngine3d.createBodyJoint createBodyJointMessage physicsEngine)
-            createBodyJointsMessage.BodyJointsProperties
+    static member private createBodyJoint (createBodyJointMessage : CreateBodyJointMessage) physicsEngine =
 
-    static member private destroyBodyJoint (destroyBodyJointMessage : DestroyBodyJointMessage) physicsEngine =
-        match physicsEngine.Constraints.TryGetValue destroyBodyJointMessage.BodyJointId with
+        // log creation message
+        for bodyTarget in [createBodyJointMessage.BodyJointProperties.BodyJointTarget; createBodyJointMessage.BodyJointProperties.BodyJointTarget2] do
+            match physicsEngine.CreateBodyJointMessages.TryGetValue bodyTarget with
+            | (true, messages) -> messages.Add createBodyJointMessage
+            | (false, _) -> physicsEngine.CreateBodyJointMessages.Add (bodyTarget, List [createBodyJointMessage])
+
+        // attempt to add body joint
+        let bodyJointId = { BodyJointSource = createBodyJointMessage.BodyJointSource; BodyJointIndex = createBodyJointMessage.BodyJointProperties.BodyJointIndex }
+        PhysicsEngine3d.createBodyJointInternal createBodyJointMessage.BodyJointProperties bodyJointId physicsEngine
+
+    static member private destroyBodyJointInternal (bodyJointId : BodyJointId) physicsEngine =
+        match physicsEngine.Constraints.TryGetValue bodyJointId with
         | (true, contrain) ->
-            physicsEngine.Constraints.Remove destroyBodyJointMessage.BodyJointId |> ignore
+            physicsEngine.Constraints.Remove bodyJointId |> ignore
             physicsEngine.PhysicsContext.RemoveConstraint contrain
         | (false, _) -> ()
 
-    static member private destroyBodyJoints (destroyBodyJointsMessage : DestroyBodyJointsMessage) physicsEngine =
-        List.iter (fun bodyJointId ->
-            PhysicsEngine3d.destroyBodyJoint { BodyJointId = bodyJointId } physicsEngine)
-            destroyBodyJointsMessage.BodyJointIds
+    static member private destroyBodyJoint (destroyBodyJointMessage : DestroyBodyJointMessage) physicsEngine =
+
+        // unlog creation message
+        for bodyTarget in [destroyBodyJointMessage.BodyJointTarget; destroyBodyJointMessage.BodyJointTarget2] do
+            match physicsEngine.CreateBodyJointMessages.TryGetValue bodyTarget with
+            | (true, messages) ->
+                messages.RemoveAll (fun message ->
+                    message.BodyJointSource = destroyBodyJointMessage.BodyJointId.BodyJointSource &&
+                    message.BodyJointProperties.BodyJointIndex = destroyBodyJointMessage.BodyJointId.BodyJointIndex) |>
+                ignore<int>
+            | (false, _) -> ()
+
+        // attempt to destroy body joint
+        PhysicsEngine3d.destroyBodyJointInternal destroyBodyJointMessage.BodyJointId physicsEngine
 
     static member private setBodyEnabled (setBodyEnabledMessage : SetBodyEnabledMessage) physicsEngine =
         match physicsEngine.Objects.TryGetValue setBodyEnabledMessage.BodyId with
@@ -649,7 +741,7 @@ type [<ReferenceEquality>] PhysicsEngine3d =
             if not (Single.IsNaN applyBodyTorqueMessage.Torque.X) then
                 body.ApplyTorque applyBodyTorqueMessage.Torque
                 body.Activate ()
-            else Log.info ("Applying invalid torque '" + scstring applyBodyTorqueMessage.Torque + "'; this may destabilize Aether.")
+            else Log.info ("Applying invalid torque '" + scstring applyBodyTorqueMessage.Torque + "'; this may destabilize Bullet.")
         | (_, _) -> ()
 
     static member private jumpBody (jumpBodyMessage : JumpBodyMessage) physicsEngine =
@@ -667,9 +759,7 @@ type [<ReferenceEquality>] PhysicsEngine3d =
         | DestroyBodyMessage destroyBodyMessage -> PhysicsEngine3d.destroyBody destroyBodyMessage physicsEngine
         | DestroyBodiesMessage destroyBodiesMessage -> PhysicsEngine3d.destroyBodies destroyBodiesMessage physicsEngine
         | CreateBodyJointMessage createBodyJointMessage -> PhysicsEngine3d.createBodyJoint createBodyJointMessage physicsEngine
-        | CreateBodyJointsMessage createBodyJointsMessage -> PhysicsEngine3d.createBodyJoints createBodyJointsMessage physicsEngine
         | DestroyBodyJointMessage destroyBodyJointMessage -> PhysicsEngine3d.destroyBodyJoint destroyBodyJointMessage physicsEngine
-        | DestroyBodyJointsMessage destroyBodyJointsMessage -> PhysicsEngine3d.destroyBodyJoints destroyBodyJointsMessage physicsEngine
         | SetBodyEnabledMessage setBodyEnabledMessage -> PhysicsEngine3d.setBodyEnabled setBodyEnabledMessage physicsEngine
         | SetBodyCenterMessage setBodyCenterMessage -> PhysicsEngine3d.setBodyCenter setBodyCenterMessage physicsEngine
         | SetBodyRotationMessage setBodyRotationMessage -> PhysicsEngine3d.setBodyRotation setBodyRotationMessage physicsEngine
@@ -893,6 +983,7 @@ type [<ReferenceEquality>] PhysicsEngine3d =
               TryGetAssetFilePath = tryGetAssetFilePath
               TryGetStaticModelMetadata = tryGetStaticModelMetadata
               UnscaledPointsCached = dictPlus UnscaledPointsKey.comparer []
+              CreateBodyJointMessages = Dictionary<BodyId, CreateBodyJointMessage List> HashIdentity.Structural
               IntegrationMessages = List () }
         physicsEngine
 

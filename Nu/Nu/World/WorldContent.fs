@@ -11,6 +11,8 @@ open Prime
 [<RequireQualifiedAccess>]
 module Content =
 
+    let private ContentsCached = Dictionary<string, struct (obj * obj)> StringComparer.Ordinal
+
     /// Helps to track when content bound to event handlers needs to be updated due to LateBindings changing, such as
     /// via code reloading.
     let mutable internal UpdateLateBindingsCount = 0
@@ -446,6 +448,9 @@ module Content =
     /// Describe a 2d character with the given definitions.
     let character2d entityName definitions = entity<Character2dDispatcher> entityName definitions
 
+    /// Describe a 2d body joint with the given definitions.
+    let bodyJoint2d entityName definitions = entity<BodyJoint2dDispatcher> entityName definitions
+
     /// Describe a tile map with the given definitions.
     let tileMap entityName definitions = entity<TileMapDispatcher> entityName definitions
 
@@ -493,6 +498,9 @@ module Content =
 
     /// Describe a 3d character with the given definitions.
     let character3d entityName definitions = entity<Character3dDispatcher> entityName definitions
+
+    /// Describe a 3d body joint with the given definitions.
+    let bodyJoint3d entityName definitions = entity<BodyJoint3dDispatcher> entityName definitions
 
     /// Describe a terrain with the given definitions.
     let terrain entityName definitions = entity<TerrainDispatcher> entityName definitions
@@ -590,6 +598,19 @@ module Content =
         { InitialScreenNameOpt = initialScreenNameOpt; SimulantCachedOpt = Unchecked.defaultof<_>
           EventSignalContentsOpt = eventSignalContentsOpt; EventHandlerContentsOpt = eventHandlerContentsOpt; PropertyContentsOpt = propertyContentsOpt
           ScreenContents = screenContents }
+
+    /// Cache named content. Name must be globally unique!
+    let cache<'v, 'c> name (value : 'v) (fn : 'v -> 'c) : 'c =
+        match ContentsCached.TryGetValue name with
+        | (true, struct (v, (:? 'c as content))) when v === value -> content
+        | (_, _) ->
+            let content = fn value
+            ContentsCached.[name] <- struct (value, content)
+            content
+
+    /// Discard cached content.
+    let wipe () =
+        ContentsCached.Clear ()
 
 [<AutoOpen>]
 module ContentOperators =
