@@ -15,33 +15,22 @@ type GameplayState =
 // you could use `Time : single` instead.
 type Gameplay = {
 
-    GameTime : int64
-
-    Time : TehomTime
-
     State : GameplayState
-
-    Actors : TehomActors
-
-    Player: TehomID
-
-    Display : string
+    GameTime : int64
+    Story : Story
+    CurrentAct : int
 
 } with
     static member empty = {
-        GameTime = 0
         State = Playing
-        Time = TehomTime.empty
-        Actors = TehomActors.empty
-        Player = TehomID.empty
-        Display = ""
+        GameTime = 0
+        Story = Story.empty
+        CurrentAct = 0
     }
 
     static member initial = {
         Gameplay.empty with
-            Player = ID "player"
-            Actors = TehomActors.addDefault Gameplay.empty.Actors
-            Display = "Hello world!\nOn two lines!"
+            Story = Story.initial
     }
 
 // this is our MMCC message type.
@@ -49,8 +38,6 @@ type GameplayMessage =
     | Update
     | InputString of TehomID
     | Action of TehomID * TehomChoice
-    | Save
-    | Load
     | StartQuitting
     | FinishQuitting
     interface Message

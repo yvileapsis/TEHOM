@@ -28,12 +28,10 @@ module Simulants =
     // gameplay screen
     let Gameplay = Game / "Gameplay"
     let GameplayBackground = Gameplay / "Background"
-    let GameplayGui = Gameplay / "Gui"
-    let GameplayGametime = GameplayGui / "Gametime"
-    let GameplayTime = GameplayGui / "Time"
-    let GameplayTextBox = GameplayGui / "TextBox"
-    let GameplayTextInputBox = GameplayGui / "TextInputBox"
-    let GameplayQuit = GameplayGui / "Quit"
-    let GameplaySave = GameplayGui / "Save"
-    let GameplayLoad = GameplayGui / "Load"
-    let GameplayScene = Gameplay / "Scene"
+    let GameplaySceneName = Gameplay / "SceneName"
+
+    let GameplayActionInput = Gameplay / "ActionInput"
+    let GameplayActionInputBox = GameplayActionInput / "Box"
+
+    let GameplayScenes = Gameplay / "Scenes"
+    let GameplayTextBox = GameplayScenes / "TextBox"

@@ -32,21 +32,16 @@ type GameplayDispatcher () =
         | Update ->
             just { gameplay with GameTime = inc gameplay.GameTime }
         | InputString actorID ->
-            let choices = TehomChoices.choices (ActorID actorID) gameplay.Actors
+            just gameplay
+(*            let choices = TehomChoices.choices (ActorID actorID) gameplay.Actors
             if Set.isEmpty (TehomChoices.unwrap choices) then
                 just gameplay
             else
                 let choice = TehomChoices.best choices
-                withSignal (Action (actorID, choice)) gameplay
+                withSignal (Action (actorID, choice)) gameplay*)
         | Action (actorID, choice) ->
-            let gameplay = { gameplay with Display = $"%A{actorID} %A{choice}" }
-            let gameplay = { gameplay with Time = TehomTime.advance 1u gameplay.Time }
-            just gameplay
-        | Save ->
-//                Serialization.saveToFile gameplay
-            just gameplay
-        | Load ->
-//                let gameplay = Serialization.loadFromFile gameplay
+//            let gameplay = { gameplay with Display = $"%A{actorID} %A{choice}" }
+//            let gameplay = { gameplay with Time = TehomTime.advance 1u gameplay.Time }
             just gameplay
         | StartQuitting ->
             just { gameplay with State = Quitting }
@@ -56,12 +51,14 @@ type GameplayDispatcher () =
     // here we describe the content of the game including the level, the hud, and the player
     override this.Content (gameplay, _) = [// the gui group
 
-        GameplayGui.Background gameplay
-        GameplayGui.Gui gameplay
+        GameplayGroups.background
+        GameplayGroups.sceneName gameplay
+        GameplayGroups.scenes gameplay
+        GameplayGroups.actionInput gameplay
 
         // the scene group while playing or quitting
         match gameplay.State with
         | Playing
-        | Quitting -> Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] []
+        | Quitting -> () //Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] []
         | Quit -> ()
     ]
