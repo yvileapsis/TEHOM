@@ -34,4 +34,6 @@ module Simulants =
     let GameplayActionInputBox = GameplayActionInput / "Box"
 
     let GameplayScenes = Gameplay / "Scenes"
+    let GameplayScenesAssociation = GameplayScenes / "Association"
+    let GameplayScenesAssociationText = GameplayScenesAssociation / "Text"
     let GameplayTextBox = GameplayScenes / "TextBox"

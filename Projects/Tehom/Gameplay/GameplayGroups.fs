@@ -16,15 +16,15 @@ module GameplayGroups =
 
     let sceneName (model: Gameplay) = Content.group Simulants.GameplaySceneName.Name [] [
 
-        let position = v3 -36.0f 80.0f 0.0f
+        let position = v3 0.0f 156.0f 0.0f
 
         let topName =
             match Story.getActName model.CurrentAct model.Story with
             | None -> ""
             | Some name -> name
 
-        richText Simulants.GameplayTextBox.Name [
-            Entity.Size == v3 400.0f 100.0f 0.0f
+        Content.text Simulants.GameplayTextBox.Name [
+            Entity.Size == v3 400.0f 20.0f 0.0f
             Entity.Position == position
             Entity.Elevation == 10.0f
             Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
@@ -50,10 +50,15 @@ module GameplayGroups =
         ]
     ]
 
-    let scenes (gameplay: Gameplay) =
+    let scenes (gameplay: Gameplay) = Content.group Simulants.GameplayScenes.Name [] [// time
+        let position = v3 0.0f 0.0f 0.0f
 
-        Content.group Simulants.GameplayScenes.Name [] [// time
-
+        Content.association (Simulants.GameplayScenesAssociation.Name) [
+            Entity.Size == v3 400.0f 240.0f 0.0f
+            Entity.Elevation == 10.0f
+            Entity.Position == position
+            Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+        ] [
             let act = Story.getAct gameplay.CurrentAct gameplay.Story
 
             if (act.IsSome) then
@@ -62,19 +67,19 @@ module GameplayGroups =
 
                 let scenes = act.Scenes
 
-                let position = v3 -36.0f 80.0f 0.0f
 
                 for i, scene in List.indexed scenes do
-                    richText (Simulants.GameplayScenes.Name + $"/Text+{i}") [
-                        Entity.Size == v3 400.0f 100.0f 0.0f
-                        Entity.Position == position + v3 (float32 i * 10.0f) 0f 0f
-                        Entity.Elevation == 10.0f
+                    Content.text (Simulants.GameplayScenesAssociationText.Name + $"+{i}") [
+//                        Entity.Size == v3 400.0f 100.0f 0.0f
+//                            Entity.Position == position + v3 0f (float32 i * 30.0f) 0f
+//                            Entity.Elevation == 10.0f
                         Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                         Entity.Text := Scene.getText (scene |> fst) act.Lebenswelt act.Player
                         Entity.TextColor == Color.FloralWhite
                         Entity.Font == Assets.Gui.MontSerratFont
                         Entity.FontSizing == Some 10
                     ]
+            ]
         ]
 
 

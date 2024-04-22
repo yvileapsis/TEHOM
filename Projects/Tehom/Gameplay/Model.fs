@@ -2,17 +2,6 @@
 open System
 open Nu
 
-(*
-    To tl;dr the point of the project:
-    Create a horror text game with a systemic support for body horror to then infuse it with text generation.
-
-    Main goals for the foreseeable future:
-    * Add good way of mass-loading entities from some form of config file, currently thinking yaml
-    * Add some rudimentary display of context around player entity
-    * Add some form of text input that gets processed as actions, rudimentary string comparison would do
-    * Make it possible to move player entity from room 1 to room 2
-*)
-
 module TehomID =
 
     type TehomID =
@@ -365,27 +354,3 @@ module Action =
             Whatever = 0u
             Order = List.empty
         }
-
-
-(*
-    Horror situations that should be possible in the simulation:
-    * Corpses coming alive;
-    * Monsters with arrays of limbs;
-    * You traversing a large enough creature from the inside a la James Bartley.
-    * Parasites traversing your body;
-    * Your limbs 'dying' while still attached to your body;
-    * Your limb growing multiple eyes that you can see through;
-    * Your limb growing multiple eyes that you can not see through;     <- some concept of ownership or control is definitely needed
-    * Your limb leaving you to become its own creature that can be either hostile or friendly to player;
-    * Various supernatural things like telekinesis or teleportation;
-*)
-
-(*
-    Actual plans:
-    * First thing I should do is complete the model to the point I have actual look action I can call.
-      For that I need :
-        * Time system
-        * Action taking system
-
-
-*)
