@@ -173,11 +173,6 @@ module Actor =
         }
 
 
-    // Signifies physical attachment, i.e. finger is attached to palm, door is attached to wall.
-    // Trait that determines what other entities this entity is attached to.
-    // The main issue is that these relations go both ways and can be influenced from either side,
-    // i.e. to use the example from 'Attached': finger can be separated from the hand by a sword,
-    // hand can be separated from the finger by a sword, either action result is supposed to be the same.
 
     type Attached =
         | Strongly
@@ -186,17 +181,9 @@ module Actor =
 
 
 
-
-    // Trait that lists other entities parent entity is composed of.
-    // It is not necessarily physical, as player party consists of every member of the party.
-    // Point of this list is so that we can get slices of this composition based on children traits,
-    // i.e. if we apply filter of HasAbility CanMove _ we can get creature's entire locomotion system.
     type Composed =
         | Simple
-        // So at to define ability of parent entity to control its child entities,
-        // I want to define cohesion of the entity agglomeration
-        // Low cohesion -> actions are less of orders and more of suggestions
-        // i.e. low cohesion party of NPCs will disobey player character
+
         | Controls of int
     with
         static member default' =
