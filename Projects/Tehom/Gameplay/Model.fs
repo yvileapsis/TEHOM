@@ -33,23 +33,6 @@ module TehomID =
 
 open TehomID
 
-module Screens =
-
-    // Main screens of the game, put here temporarily.
-    type Screens =
-        | Title
-        | SaveLoad
-        | Exploration
-        | Combat
-
-module GUI =
-
-    // Rough idea for GUI, main elements are input box and scene (current block of text shown)
-    type GUI =
-        | InputBox
-        | Scene
-        | Stats
-        | OtherElements
 
 module Ability =
     open TehomID
