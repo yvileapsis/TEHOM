@@ -344,6 +344,80 @@ type [<ReferenceEquality>] WorldConfig =
           ModeOpt = None
           SdlConfig = SdlConfig.defaultConfig }
 
+/// Engine timing objects.
+type Timers =
+    { InputTimer : Stopwatch
+      PhysicsTimer : Stopwatch
+      PreUpdateTimer : Stopwatch
+      PreUpdateGatherTimer : Stopwatch
+      PreUpdateGameTimer : Stopwatch
+      PreUpdateScreensTimer : Stopwatch
+      PreUpdateGroupsTimer : Stopwatch
+      UpdateTimer : Stopwatch
+      UpdateGatherTimer : Stopwatch
+      UpdateGameTimer : Stopwatch
+      UpdateScreensTimer : Stopwatch
+      UpdateGroupsTimer : Stopwatch
+      UpdateEntitiesTimer : Stopwatch
+      PostUpdateTimer : Stopwatch
+      PostUpdateGatherTimer : Stopwatch
+      PostUpdateGameTimer : Stopwatch
+      PostUpdateScreensTimer : Stopwatch
+      PostUpdateGroupsTimer : Stopwatch
+      TaskletsTimer : Stopwatch
+      DestructionTimer : Stopwatch
+      PerProcessTimer : Stopwatch
+      PreProcessTimer : Stopwatch
+      PostProcessTimer : Stopwatch
+      RenderGatherTimer : Stopwatch
+      RenderEntitiesTimer : Stopwatch
+      RenderTimer : Stopwatch
+      AudioTimer : Stopwatch
+      TotalTimer : Stopwatch
+      FrameTimer : Stopwatch
+      mutable FrameTime : TimeSpan
+      ImGuiTimer : Stopwatch
+      mutable ImGuiTime : TimeSpan
+      mutable GcTotalTime : TimeSpan
+      mutable GcFrameTime : TimeSpan }
+
+    static member make () =
+        let gcTime = GC.GetTotalPauseDuration ()
+        { InputTimer = Stopwatch ()
+          PhysicsTimer = Stopwatch ()
+          PreUpdateTimer = Stopwatch ()
+          PreUpdateGatherTimer = Stopwatch ()
+          PreUpdateGameTimer = Stopwatch ()
+          PreUpdateScreensTimer = Stopwatch ()
+          PreUpdateGroupsTimer = Stopwatch ()
+          UpdateTimer = Stopwatch ()
+          UpdateGatherTimer = Stopwatch ()
+          UpdateGameTimer = Stopwatch ()
+          UpdateScreensTimer = Stopwatch ()
+          UpdateGroupsTimer = Stopwatch ()
+          UpdateEntitiesTimer = Stopwatch ()
+          PostUpdateTimer = Stopwatch ()
+          PostUpdateGatherTimer = Stopwatch ()
+          PostUpdateGameTimer = Stopwatch ()
+          PostUpdateScreensTimer = Stopwatch ()
+          PostUpdateGroupsTimer = Stopwatch ()
+          TaskletsTimer = Stopwatch ()
+          DestructionTimer = Stopwatch ()
+          PerProcessTimer = Stopwatch ()
+          PreProcessTimer = Stopwatch ()
+          PostProcessTimer = Stopwatch ()
+          RenderGatherTimer = Stopwatch ()
+          RenderEntitiesTimer = Stopwatch ()
+          RenderTimer = Stopwatch ()
+          AudioTimer = Stopwatch ()
+          TotalTimer = Stopwatch ()
+          FrameTimer = Stopwatch ()
+          FrameTime = TimeSpan.Zero
+          ImGuiTimer = Stopwatch ()
+          ImGuiTime = TimeSpan.Zero
+          GcTotalTime = gcTime
+          GcFrameTime = gcTime }
+
 [<AutoOpen>]
 module AmbientState =
 
@@ -372,6 +446,7 @@ module AmbientState =
               // cache line 3
               Symbolics : Symbolics
               Overlayer : Overlayer
+              Timers : Timers
               LightMapRenderRequested : bool }
 
         member this.Imperative = this.Flags &&& ImperativeMask <> 0u
@@ -568,6 +643,10 @@ module AmbientState =
     let setOverlayer overlayer state =
         { state with Overlayer = overlayer }
 
+    /// Get the timers.
+    let getTimers state =
+        state.Timers
+
     /// Acknowledge a light map render request.
     let acknowledgeLightMapRenderRequest state =
         { state with LightMapRenderRequested = false }
@@ -581,7 +660,7 @@ module AmbientState =
         { state with LightMapRenderRequested = true }
 
     /// Make an ambient state value.
-    let make imperative accompanied advancing framePacing symbolics overlayer sdlDepsOpt =
+    let make imperative accompanied advancing framePacing symbolics overlayer timers sdlDepsOpt =
         let flags =
             (if imperative then ImperativeMask else 0u) |||
             (if accompanied then AccompaniedMask else 0u) |||
@@ -602,6 +681,7 @@ module AmbientState =
           SdlDepsOpt = sdlDepsOpt
           Symbolics = symbolics
           Overlayer = overlayer
+          Timers = timers
           LightMapRenderRequested = false }
 
 /// The ambient state of the world.

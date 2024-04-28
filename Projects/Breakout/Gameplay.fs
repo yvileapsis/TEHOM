@@ -7,7 +7,6 @@ open Nu
 // this represents the state of gameplay simulation.
 type GameplayState =
     | Playing
-    | Quitting
     | Quit
 
 // the state of our breakout paddle
@@ -56,6 +55,7 @@ type Gameplay =
       Ball : Ball
       Lives : int }
 
+    // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
     static member empty =
         { GameplayTime = 0L
           GameplayState = Quit
@@ -64,6 +64,7 @@ type Gameplay =
           Bricks = Map.empty
           Lives = 0 }
 
+    // this represents the gameplay model in its initial state, such as when gameplay starts.
     static member initial =
         let bricks =
             Map.ofSeq
@@ -126,7 +127,7 @@ type GameplayDispatcher () =
             match gameplay.GameplayState with
             | Playing ->
 
-                // ...and while living and bticks are present
+                // ...and while living and bricks are present
                 if gameplay.Lives > 0 && gameplay.Bricks.Count > 0 then
 
                     // update paddle motion
@@ -240,7 +241,7 @@ type GameplayDispatcher () =
 
          // the scene group while playing
          match gameplay.GameplayState with
-         | Playing | Quitting ->
+         | Playing ->
             
             // loads scene from file edited in Gaia
             Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" []

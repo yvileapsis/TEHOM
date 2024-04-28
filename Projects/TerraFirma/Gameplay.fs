@@ -7,13 +7,22 @@ open Nu
 // this represents that state of gameplay simulation.
 type GameplayState =
     | Quit
-    | Quitting
     | Playing
 
 // this is our MMCC model type representing gameplay.
 type [<SymbolicExpansion>] Gameplay =
     { GameplayState : GameplayState
       Score : int }
+
+    // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
+    static member empty =
+        { GameplayState = Quit
+          Score = 0 }
+
+    // this represents the gameplay model in its initial state, such as when gameplay starts.
+    static member initial =
+        { GameplayState = Playing
+          Score = 0 }
 
 // this is our MMCC message type.
 type GameplayMessage =
@@ -43,7 +52,7 @@ module Gameplay =
 
 // this is the screen dispatcher that defines the screen where gameplay takes place.
 type GameplayDispatcher () =
-    inherit ScreenDispatcher<Gameplay, GameplayMessage, GameplayCommand> ({ GameplayState = Quit; Score = 0 })
+    inherit ScreenDispatcher<Gameplay, GameplayMessage, GameplayCommand> (Gameplay.empty)
 
     // here we define the screen's property values and event handling
     override this.Definitions (_, _) =
@@ -68,9 +77,7 @@ type GameplayDispatcher () =
         | Die deadCharacter ->
             let character = deadCharacter.GetCharacter world
             match character.CharacterType with
-            | Player ->
-                let gameplay = { gameplay with GameplayState = Quitting }
-                withSignal StartQuitting gameplay
+            | Player -> withSignal StartQuitting gameplay
             | Enemy ->
                 let gameplay = { gameplay with Score = gameplay.Score + 100 }
                 withSignal (DestroyEnemy deadCharacter) gameplay
@@ -82,7 +89,7 @@ type GameplayDispatcher () =
 
         match command with
         | SetupScene ->
-            let world = Simulants.GameplayPlayer.SetPosition (v3 0.0f 2.0f 0.0f) world
+            let world = Simulants.GameplayPlayer.SetPosition (v3 0.0f 1.65f 0.0f) world
             let world = World.synchronizeNav3d screen world
             just world
 
@@ -154,9 +161,9 @@ type GameplayDispatcher () =
                  Entity.Text == "Quit"
                  Entity.ClickEvent => StartQuitting]]
 
-         // the scene group while playing or quitting
+         // the scene group while playing
          match gameplay.GameplayState with
-         | Playing | Quitting ->
+         | Playing ->
             
             // loads scene from file edited in Gaia
             Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" []
