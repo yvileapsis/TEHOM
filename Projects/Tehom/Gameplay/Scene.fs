@@ -4,7 +4,7 @@ open Nu
 open Tehom.TehomID
 
 
-type Lebenswelt = {
+type Stage = {
     Time : TehomTime
     Actors : TehomActors
 }
@@ -14,7 +14,7 @@ with
         Actors = TehomActors.empty
     }
 
-    static member initial = { Lebenswelt.empty with Actors = TehomActors.addDefault Lebenswelt.empty.Actors }
+    static member initial = { Stage.empty with Actors = TehomActors.addDefault Stage.empty.Actors }
 
 
 module TehomAct =
@@ -30,7 +30,7 @@ module TehomAct =
     // Scene is a constraint on what player should be able to do
     type Text = {
         Name: string
-        Text: Lebenswelt -> TehomID -> string
+        Text: Stage -> TehomID -> string
         // Limitations:
         // Actors/stars
     }
@@ -64,8 +64,10 @@ module TehomAct =
             Name = "Beginning"
             Text = fun world player ->
                 $"You wake up in a {currentLocation world}.
-                You look at your surroundings and see {stuffInside}.
-                You look at yourself and realize you're {player}"
+What what!
+You look at your surroundings and see {stuffInside world}.
+
+You look at yourself and realize you're {player}"
         }, List.empty
 
     let secondScene =
@@ -94,14 +96,14 @@ module TehomAct =
 
 
     type Act = {
-        Lebenswelt: Lebenswelt
+        Stage: Stage
         Player: TehomID
         Scenes: (Scene * Effect list) list
         ActEnd: int option
     }
     with
         static member empty : Act = {
-            Lebenswelt = Lebenswelt.empty
+            Stage = Stage.empty
             Player = TehomID.empty
             Scenes = List.empty
             ActEnd = None
@@ -117,7 +119,7 @@ module TehomAct =
     let gameStart = {
         Act.empty with
             Player = ID "player"
-            Lebenswelt = Lebenswelt.initial
+            Stage = Stage.initial
             Scenes = [ firstScene; secondScene ]
     }
 

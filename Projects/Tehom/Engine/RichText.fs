@@ -2,12 +2,12 @@ namespace Tehom
 
 open System
 open Nu
-open Tehom.NuMark
+open NuMark
 
 [<AutoOpen>]
 module RichTextFacetModule =
 
-    /// Augments an entity with text.
+    /// Augments an entity with rich text.
     type RichTextFacet () =
         inherit Facet (false)
 
@@ -41,48 +41,80 @@ module RichTextFacetModule =
                 textTransform.Elevation <- transform.Elevation + shift
                 textTransform.Absolute <- transform.Absolute
 
-                let parsedText =
-                    NuMark.parseNuMark text
-                    |> List.map (function
-                        | NuMark.Paragraph (justification, line) ->
-                            {
-                                Blocks = line
-                                |> List.map (fun block -> {
-                                    Text = block.Text
-                                    Color = Color.White
-                                    Font = Assets.Gui.MontSerratFont
-                                    FontSizing = Some 10
-                                    FontStyling = Set.fold (fun set x ->
-                                        match x with
-                                        | Bold -> Set.add FontStyle.Bold set
-                                        | Italics -> Set.add FontStyle.Italic set
-                                        | Underlined -> Set.add FontStyle.Underline set
-                                        | Strikethrough -> Set.add FontStyle.Strikethrough set
-                                        | _ -> set
-                                    ) Set.empty block.Style
-                                })
-                                Justification = justification
-                            }
-                        | _ ->
-                            {
-                                Blocks = List.empty
-                                Justification = Justification.Unjustified true
-                            }
-                    )
+                let font = entity.GetFont world
+                let fontSizing = entity.GetFontSizing world
+                let fontStyling = entity.GetFontStyling world
+                let color = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
+                let justification = entity.GetJustification world
 
+                let parsingResult = parseNuMark text
 
-                let deffont = entity.GetFont world
-                let deffontSizing = entity.GetFontSizing world
-                let deffontStyling = entity.GetFontStyling world
-                let defcolor = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
-                let defjustification = entity.GetJustification world
+                let paragraphList =
+                    match parsingResult with
+                    | Ok text ->
+                        text
+                        |> List.map (function
+                            | Paragraph (justification, paragraph) ->
+                                {
+                                    Blocks =
+                                        List.map (fun block -> {
+                                            Text = block.Text
+                                            Color = color
+                                            Font = font
+                                            FontSizing = fontSizing
+                                            FontStyling = Set.fold (fun set x ->
+                                                match x with
+                                                | Bold -> Set.add FontStyle.Bold set
+                                                | Italics -> Set.add FontStyle.Italic set
+                                                | Underlined -> Set.add FontStyle.Underline set
+                                                | Strikethrough -> Set.add FontStyle.Strikethrough set
+                                                | _ -> set
+                                            ) fontStyling block.Style
+                                        }) paragraph
+                                    Justification =
+                                        match justification with
+                                        | Left -> Justified (JustifyLeft, JustifyMiddle)
+                                        | Right -> Justified (JustifyRight, JustifyMiddle)
+                                        | Center -> Justified (JustifyCenter, JustifyMiddle)
+                                        // incorrect
+                                        | Full -> Justified (JustifyLeft, JustifyMiddle)
+                                }
+                            | _ ->
+                                {
+                                    Blocks = List.empty
+                                    Justification = justification
+                                }
+                        )
+                    | Error (text, error) -> [
+                        {
+                            Blocks = [{
+                                Text = text
+                                Color = color
+                                Font = font
+                                FontSizing = fontSizing
+                                FontStyling = fontStyling
+                            }]
+                            Justification = justification
+                        }
+                        {
+                            Blocks = [{
+                                Text = $"{error}"
+                                Color = color
+                                Font = font
+                                FontSizing = fontSizing
+                                FontStyling = fontStyling
+                            }]
+                            Justification = justification
+                        }
+                    ]
+
                 World.enqueueLayeredOperation2d {
                     Elevation = textTransform.Elevation
                     Horizon = horizon
-                    AssetTag = deffont
+                    AssetTag = font
                     RenderOperation2d = RenderRichText {
                         Transform = textTransform
-                        Entries = parsedText
+                        Entries = paragraphList
                     }
                 } world
 
@@ -98,8 +130,8 @@ module RichTextDispatcherModule =
         inherit GuiDispatcher ()
 
         static member Facets =
-            [typeof<RichTextFacet>
-             typeof<BackdroppableFacet>]
+            [typeof<BackdroppableFacet>
+             typeof<RichTextFacet>]
 
         static member Properties =
             [define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))]

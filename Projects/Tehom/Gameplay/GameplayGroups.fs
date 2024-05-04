@@ -61,24 +61,24 @@ module GameplayGroups =
         ] [
             let act = Story.getAct gameplay.CurrentAct gameplay.Story
 
-            if (act.IsSome) then
+            match act with
 
-                let (Some act) = act
-
+            | Some act ->
                 let scenes = act.Scenes
 
 
                 for i, scene in List.indexed scenes do
-                    Content.text (Simulants.GameplayScenesAssociationText.Name + $"+{i}") [
-//                        Entity.Size == v3 400.0f 100.0f 0.0f
+                    richText (Simulants.GameplayScenesAssociationText.Name + $"+{i}") [
+                        Entity.Size == v3 400.0f 100.0f 0.0f
 //                            Entity.Position == position + v3 0f (float32 i * 30.0f) 0f
 //                            Entity.Elevation == 10.0f
                         Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                        Entity.Text := Scene.getText (scene |> fst) act.Lebenswelt act.Player
+                        Entity.Text := Scene.getText (scene |> fst) act.Stage act.Player
                         Entity.TextColor == Color.FloralWhite
                         Entity.Font == Assets.Gui.MontSerratFont
                         Entity.FontSizing == Some 10
                     ]
+            | None -> ()
             ]
         ]
 

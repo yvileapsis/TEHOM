@@ -33,14 +33,15 @@
 	</Target>
 
 	<ItemGroup>
-		<Compile Include="Engine\InputParser.fs" />
+		<Compile Include="Engine\NuMark.fs" />
 		<Compile Include="Engine\RichText.fs" />
 		<Compile Include="Engine\TextInput.fs" />
 		<Compile Include="Engine\Graph.fs" />
 		<Compile Include="Assets.fs" />
 		<Compile Include="Simulants.fs" />
 		<Compile Include="Gameplay\Time.fs" />
-		<Compile Include="Gameplay\Model.fs" />
+		<Compile Include="Gameplay\OldModel.fs" />
+		<Compile Include="Gameplay\OldActors.fs" />
 		<Compile Include="Gameplay\Actors.fs" />
 		<Compile Include="Gameplay\Choices.fs" />
 		<Compile Include="Gameplay\Scene.fs" />
