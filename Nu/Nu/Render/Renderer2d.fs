@@ -630,6 +630,8 @@ type [<ReferenceEquality>] GlRenderer2d =
             let viewport = Constants.Render.Viewport
             let viewProjection = viewport.ViewProjection2d (absolute, eyeCenter, eyeSize)
 
+
+
             // get font pointer for point asset and set its styling and sizing
             let getFont fontAsset fontSizing (fontStyling: Set<FontStyle>) =
                 match GlRenderer2d.tryGetRenderAsset fontAsset renderer with
@@ -696,15 +698,14 @@ type [<ReferenceEquality>] GlRenderer2d =
                 else
                     IntPtr.Zero
 
-            // rework text into lines of concrete width and justification
-            let reflowText (text: RichTextParagraph list) =
+
+
+            // reshape text into lines of concrete width and justification
+            // cut it up into lines and render those into lists of SDL surfaces
+            let reflowText =
 
                 // setting reflow width to size of entity
                 let width = size.X
-
-                let twipsToPixels twips =
-                    // Magic numbers lifted from SDL_rtf
-                    (((twips * 64 * 72 + (36 + 32 * 72)) / 72) / 20) / 64;
 
                 // splits string for concrete offset and width
                 // adds up x offset and finds max of y offset
@@ -818,7 +819,6 @@ type [<ReferenceEquality>] GlRenderer2d =
                     // TODO: justify justification
                     // TODO: justify vertically somehow
                     // TODO: subscript, superscript
-                    // TODO: special styles like in Godot
 
                     let startingOffset = 0.0f
 
@@ -922,66 +922,58 @@ type [<ReferenceEquality>] GlRenderer2d =
                 |> List.concat
                 |> List.filter (fun (surface, _) -> surface <> IntPtr.Zero), sizeY
 
+
+
             // render prepared surfaces with OpenGL
-            let renderSprites (surfaces, offset) =
+            let (surfaces, offset) = reflowText
 
-                let position = position + v2 0.0f (size.Y)
+            let position = position + v2 0.0f size.Y
 
-                // renders a single block, assumes filtered input
-                let renderOpenGLSprite (textSurfacePtr, offset: Vector2) =
+            // renders a single block, assumes filtered input
+            let renderOpenGLSprite (textSurfacePtr, offset: Vector2) =
 
-                    let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface> textSurfacePtr
+                let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface> textSurfacePtr
 
-                    // construct mvp matrix
-                    let textSurfaceWidth = textSurface.pitch / 4 // NOTE: textSurface.w may be an innacurate representation of texture width in SDL2_ttf versions beyond v2.0.15 because... I don't know why.
-                    let textSurfaceHeight = textSurface.h
-                    let translation = (position + offset).V3
-                    let scale = v3 (single textSurfaceWidth) (single textSurfaceHeight) 1.0f
-                    let modelTranslation = Matrix4x4.CreateTranslation translation
-                    let modelScale = Matrix4x4.CreateScale scale
-                    let modelMatrix = modelScale * modelTranslation
-                    let modelViewProjection = modelMatrix * viewProjection
+                // construct mvp matrix
+                let textSurfaceWidth = textSurface.pitch / 4 // NOTE: textSurface.w may be an innacurate representation of texture width in SDL2_ttf versions beyond v2.0.15 because... I don't know why.
+                let textSurfaceHeight = textSurface.h
+                let translation = (position + offset).V3
+                let scale = v3 (single textSurfaceWidth) (single textSurfaceHeight) 1.0f
+                let modelTranslation = Matrix4x4.CreateTranslation translation
+                let modelScale = Matrix4x4.CreateScale scale
+                let modelMatrix = modelScale * modelTranslation
+                let modelViewProjection = modelMatrix * viewProjection
 
-                    // upload texture data
-                    let textTextureId = OpenGL.Gl.GenTexture ()
-                    OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, textTextureId)
-                    OpenGL.Gl.TexImage2D (OpenGL.TextureTarget.Texture2d, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, textSurface.pixels)
-                    OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMinFilter, int OpenGL.TextureMinFilter.Nearest)
-                    OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMagFilter, int OpenGL.TextureMagFilter.Nearest)
-                    OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, 0u)
-                    OpenGL.Hl.Assert ()
-
-                    // make texture drawable
-                    let textTextureMetadata = OpenGL.Texture.TextureMetadata.make textSurfaceWidth textSurfaceHeight
-                    let textTextureHandle = OpenGL.Texture.CreateTextureHandle textTextureId
-                    let textTexture = OpenGL.Texture.EagerTexture { TextureMetadata = textTextureMetadata; TextureId = textTextureId; TextureHandle = textTextureHandle }
-                    OpenGL.Hl.Assert ()
-
-                    // draw text sprite
-                    // NOTE: we allocate an array here, too.
-                    let (vertices, indices, vao) = renderer.TextQuad
-                    let (modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader) = renderer.SpriteShader
-                    OpenGL.Sprite.DrawSprite (vertices, indices, vao, modelViewProjection.ToArray (), ValueNone, Color.White, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader)
-                    OpenGL.Hl.Assert ()
-
-                    // destroy texture
-                    SDL.SDL_FreeSurface textSurfacePtr
-                    textTexture.Destroy ()
-                    OpenGL.Hl.Assert ()
-
-                List.iter renderOpenGLSprite surfaces
-
+                // upload texture data
+                let textTextureId = OpenGL.Gl.GenTexture ()
+                OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, textTextureId)
+                OpenGL.Gl.TexImage2D (OpenGL.TextureTarget.Texture2d, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, textSurface.pixels)
+                OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMinFilter, int OpenGL.TextureMinFilter.Nearest)
+                OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMagFilter, int OpenGL.TextureMagFilter.Nearest)
+                OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, 0u)
                 OpenGL.Hl.Assert ()
 
-            // Main Pipeline
-            // take text
-            text
+                // make texture drawable
+                let textTextureMetadata = OpenGL.Texture.TextureMetadata.make textSurfaceWidth textSurfaceHeight
+                let textTextureHandle = OpenGL.Texture.CreateTextureHandle textTextureId
+                let textTexture = OpenGL.Texture.EagerTexture { TextureMetadata = textTextureMetadata; TextureId = textTextureId; TextureHandle = textTextureHandle }
+                OpenGL.Hl.Assert ()
 
-            // cut it up into lines and render those into SDL surfaces
-            |> reflowText
+                // draw text sprite
+                // NOTE: we allocate an array here, too.
+                let (vertices, indices, vao) = renderer.TextQuad
+                let (modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader) = renderer.SpriteShader
+                OpenGL.Sprite.DrawSprite (vertices, indices, vao, modelViewProjection.ToArray (), ValueNone, Color.White, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader)
+                OpenGL.Hl.Assert ()
 
-            // render SDL surfaces as sprites on OpenGL screen
-            |> renderSprites
+                // destroy texture
+                SDL.SDL_FreeSurface textSurfacePtr
+                textTexture.Destroy ()
+                OpenGL.Hl.Assert ()
+
+            List.iter renderOpenGLSprite surfaces
+
+            OpenGL.Hl.Assert ()
 
         static member renderText
         (transform : Transform byref,
