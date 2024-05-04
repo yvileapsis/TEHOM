@@ -49,12 +49,29 @@ module RichTextFacetModule =
 
                 let parsingResult = parseNuMark text
 
+                let alterStyling blockStyle =
+                    Set.fold (fun set x ->
+                        match x with
+                        | Bold -> Set.add FontStyle.Bold set
+                        | Italics -> Set.add FontStyle.Italic set
+                        | Underlined -> Set.add FontStyle.Underline set
+                        | Strikethrough -> Set.add FontStyle.Strikethrough set
+                        | _ -> set
+                    ) fontStyling blockStyle
+
+                let alterJustify = function
+                    | Left -> Justified (JustifyLeft, JustifyMiddle)
+                    | Right -> Justified (JustifyRight, JustifyMiddle)
+                    | Center -> Justified (JustifyCenter, JustifyMiddle)
+                    // incorrect
+                    | Full -> Justified (JustifyLeft, JustifyMiddle)
+
                 let paragraphList =
                     match parsingResult with
                     | Ok text ->
                         text
                         |> List.map (function
-                            | Paragraph (justification, paragraph) ->
+                            | Paragraph (justify, paragraph) ->
                                 {
                                     Blocks =
                                         List.map (fun block -> {
@@ -62,22 +79,9 @@ module RichTextFacetModule =
                                             Color = color
                                             Font = font
                                             FontSizing = fontSizing
-                                            FontStyling = Set.fold (fun set x ->
-                                                match x with
-                                                | Bold -> Set.add FontStyle.Bold set
-                                                | Italics -> Set.add FontStyle.Italic set
-                                                | Underlined -> Set.add FontStyle.Underline set
-                                                | Strikethrough -> Set.add FontStyle.Strikethrough set
-                                                | _ -> set
-                                            ) fontStyling block.Style
+                                            FontStyling = alterStyling block.Style
                                         }) paragraph
-                                    Justification =
-                                        match justification with
-                                        | Left -> Justified (JustifyLeft, JustifyMiddle)
-                                        | Right -> Justified (JustifyRight, JustifyMiddle)
-                                        | Center -> Justified (JustifyCenter, JustifyMiddle)
-                                        // incorrect
-                                        | Full -> Justified (JustifyLeft, JustifyMiddle)
+                                    Justification = alterJustify justify
                                 }
                             | _ ->
                                 {
