@@ -23,6 +23,7 @@ module NuMark =
         - Nesting is not supported for the same tag, as it wouldn't provide any additional sense.
         - Nesting is supported for different tags.
         - Interlinked nesting isn't supported.
+
     2. Additional tags formatting:
         - Contained within "<tag>" and "</tag>"
         - If tag is not closed entirety of the line till the end is considered to be in the tag.
@@ -33,6 +34,14 @@ module NuMark =
 
     *)
 
+    // Have to define local justification types as
+    // 1. there is a justification type not seen there, the full line justification
+    // 2. there is no such thing as unjustified text in rich text block
+    type Justification =
+        | Left
+        | Center
+        | Right
+        | Full
 
     type Style =
         | Bold
@@ -69,7 +78,7 @@ module NuMark =
 
     let parseLine till : Parser<Line, UserState> =
 
-        let specialChars = ['~'; '^'; '*'; '_'; '{'; '}'; '\\'; '\n']
+        let specialChars = ['~'; '^'; '*'; '_'; '{'; '}'; '\\'; '\n'; '\r']
 
         let many1CharsTillOptional chars till =
             attempt (many1CharsTill chars till)
@@ -78,6 +87,7 @@ module NuMark =
         let text =
             let escaped = choice [
                 pstring @"\n" >>% ' '
+                pstring @"\r" >>% ' '
                 pstring @"\*" >>% '*'
                 pstring @"\_" >>% '_'
                 pstring @"\~" >>% '~'
@@ -87,6 +97,7 @@ module NuMark =
             choice [
                 many1CharsTillOptional escaped till <?> "escaped"
                 many1CharsTillOptional (noneOf specialChars) till <?> "text"
+                many1CharsTillOptional (newline >>% ' ') till <?> "singular newline"
                 many1CharsTillOptional (anyOf specialChars) till <?> "special symbol"
             ]
             |>> fun x -> [{ Block.empty with Text = x }]
@@ -154,11 +165,20 @@ module NuMark =
 
     type Text = Node list
 
-    let parseNode : Parser<Text, _> =
+    let parseText : Parser<Text, _> =
         let node, nodeRef = createParserForwardedToRef()
 
         let line =
-            let line = parseLine (followedByString " ||" <|> followedByString "||" <|> followedByNewline)
+            let endings = choice [
+                followedBy (pstring "||" .>>? (newline .>> newline))
+                followedBy (pstring "||" .>>? eof)
+                followedBy (pstring " ||" .>>? (newline .>> newline))
+                followedBy (pstring " ||" .>>? eof)
+                followedBy (newline >>. newline)
+                followedBy eof
+            ]
+
+            let line = parseLine endings //(followedByString " ||" <|> followedByString "||" <|> followedByNewline <|> (followedBy eof))
 
             let center =
                 pstring "||"
@@ -166,23 +186,23 @@ module NuMark =
                 >>? line
                 .>>? optional (pstring " ")
                 .>>? pstring "||"
-                |>> fun x -> Justified (JustifyCenter, JustifyMiddle), x
+                |>> fun x -> Center, x
 
             let left =
                 pstring "||"
                 >>? optional (pstring " ")
                 >>? line
-                |>> fun x -> Justified (JustifyLeft, JustifyMiddle), x
+                |>> fun x -> Left, x
 
             let right =
                 line
                 .>>? optional (pstring " ")
                 .>>? pstring "||"
-                |>> fun x -> Justified (JustifyRight, JustifyMiddle), x
+                |>> fun x -> Right, x
 
             let no =
                 line
-                |>> fun x -> Justified (JustifyLeft, JustifyMiddle), x
+                |>> fun x -> Full, x
 
             optional spaces
             >>. choice [
@@ -197,15 +217,15 @@ module NuMark =
             line
         ]
 
-        sepEndBy1 node (newline >>. newline)
+        sepEndBy1 (node) (newline)
 
 
-    runParserOnString parseNode UserState.Default "" """~~value~~ {whatever}~test~
+    runParserOnString parseText UserState.Default "" """~~value~~ {whatever}~test~
     | testing a second line |
     whatever |
 """
 
-    runParserOnString parseNode UserState.Default "" """{test}~~**This is bold text** __This is underlined text__~~
+    runParserOnString parseText UserState.Default "" """{test}~~**This is bold text** __This is underlined text__~~
 {also a style}*This is italic text*  |
 _This is subscript text_ |
 ~~Strikethrough~~ |
@@ -213,48 +233,48 @@ _This is subscript text_ |
 """
 
     let parseNuMark string =
-        match runParserOnString parseNode UserState.Default "" string with
-        | Success (x, _, _) -> x
-        | Failure (_, x, _) -> [ Node.Paragraph (Justified (JustifyLeft, JustifyMiddle),[{ Block.empty with Text = $"%A{x}"}]) ]
+        match runParserOnString parseText UserState.Default "" string with
+        | Success (x, _, _) -> Result.Ok x
+        | Failure (x, y, _) -> Result.Error (x, y)
 
-    (*
-        White space before, in the middle, etc of commands is ignored
+(*
+    White space before, in the middle, etc of commands is ignored
 
-        ### Header
-        # # # Same tier of header
-          ### Also the same header with the same indentation
+    ### Header
+    # # # Same tier of header
+      ### Also the same header with the same indentation
 
-        >>> triple quote
-        > > > also triple quote
+    >>> triple quote
+    > > > also triple quote
 
-        Right quote <<<
+    Right quote <<<
 
-        ### Centered Header ###
+    ### Centered Header ###
 
-        Header To The Right ###   <- there could be unlimited whitespace but not any symbols
+    Header To The Right ###   <- there could be unlimited whitespace but not any symbols
 
-        | Normal Paragraph
-        Also Normal Paragraph
-        | Centered Paragraph |
-        Right Oriented Paragraph |
+    | Normal Paragraph
+    Also Normal Paragraph
+    | Centered Paragraph |
+    Right Oriented Paragraph |
 
-        ``` ``` <- code block
-        ` ` <- one line code
-        |: Table with one |
-        | - |
+    ``` ``` <- code block
+    ` ` <- one line code
+    |: Table with one |
+    | - |
 
-        | Table | With :|: Several |
-        | - | - | - |
+    | Table | With :|: Several |
+    | - | - | - |
 
-        classic table
+    classic table
 
-        | Whatever | Whatever | whatever |
-        |:-|:-:|-:|
-
-
+    | Whatever | Whatever | whatever |
+    |:-|:-:|-:|
 
 
-    *)
+
+
+*)
 
     let textTest  =
         """---
