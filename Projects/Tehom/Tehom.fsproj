@@ -48,8 +48,6 @@
 		<Compile Include="Gameplay\Gameplay.fs" />
 		<Compile Include="Gameplay\GameplayGroups.fs" />
 		<Compile Include="Gameplay\GameplayDispatcher.fs" />
-		<Compile Include="Gameplay\Serialization.fs" />
-		<Compile Include="Gameplay\ActionMessage.fs" />
 		<Compile Include="Tehom.fs" />
 		<Compile Include="TehomPlugin.fs" />
 		<Compile Include="Program.fs" />
