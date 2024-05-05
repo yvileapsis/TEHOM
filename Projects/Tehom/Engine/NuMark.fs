@@ -42,6 +42,7 @@ module NuMark =
         | Center
         | Right
         | Full
+        | Unjustified
 
     type Style =
         | Bold
@@ -186,7 +187,7 @@ module NuMark =
                 >>? line
                 .>>? optional (pstring " ")
                 .>>? pstring "||"
-                |>> fun x -> Full, x
+                |>> fun x -> Center, x
 
             let left =
                 pstring "||"
@@ -202,7 +203,7 @@ module NuMark =
 
             let center =
                 line
-                |>> fun x -> Center, x
+                |>> fun x -> Unjustified, x
 
             optional spaces
             >>. choice [

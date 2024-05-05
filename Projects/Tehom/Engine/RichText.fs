@@ -67,12 +67,13 @@ module RichTextFacetModule =
                     | Justified (JustifyFull, _) -> JustifyFull
                     | _ -> JustifyLeft
 
-                let alterJustify = function
+                let alterJustify entityJustification =
+                    match entityJustification with
                     | Left -> JustifyLeft
                     | Right -> JustifyRight
                     | Center -> JustifyCenter
-                    // incorrect
                     | Full -> JustifyFull
+                    | Unjustified -> defaultJustify
 
                 let paragraphList =
                     match parsingResult with
