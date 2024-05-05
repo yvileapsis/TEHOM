@@ -107,8 +107,8 @@ module Abyss =
                     ]
                     |> Undirected.Edges.addMany [
                         ID "Head", ID "Torso", { Tissue.healthy with Distance = 0.1 }
-                        ID "Legs", ID "Torso", { Tissue.healthy with Distance = 0.1 }
-                        ID "Arms", ID "Torso", { Tissue.healthy with Distance = 0.1 }
+                        ID "Forelegs", ID "Torso", { Tissue.healthy with Distance = 0.1 }
+                        ID "Backlegs", ID "Torso", { Tissue.healthy with Distance = 0.1 }
                         ID "Stomach", ID "Torso", { Tissue.healthy with Distance = 0.0 }
                     ]
         }
