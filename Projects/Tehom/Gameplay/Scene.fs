@@ -64,7 +64,6 @@ module TehomAct =
             Name = "Beginning"
             Text = fun world player ->
                 $"You wake up in a {currentLocation world}.
-What what!
 You look at your surroundings and see {stuffInside world}.
 
 You look at yourself and realize you're {player}"
