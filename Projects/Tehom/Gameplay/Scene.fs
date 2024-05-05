@@ -40,7 +40,7 @@ module Act =
 
     let firstScene =
         // TODO: make this functional
-        let currentLocation world = "Sterile Room"
+        let currentLocation world = "Dark Room"
         let stuffInside world = "Table, Key, Cat"
         Text {
             Name = "Beginning"
