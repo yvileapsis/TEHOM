@@ -59,12 +59,20 @@ module RichTextFacetModule =
                         | _ -> set
                     ) fontStyling blockStyle
 
+                let defaultJustify =
+                    match justification with
+                    | Justified (JustifyLeft, _) -> JustifyLeft
+                    | Justified (JustifyRight, _) -> JustifyRight
+                    | Justified (JustifyCenter, _) -> JustifyCenter
+                    | Justified (JustifyFull, _) -> JustifyFull
+                    | _ -> JustifyLeft
+
                 let alterJustify = function
-                    | Left -> Justified (JustifyLeft, JustifyMiddle)
-                    | Right -> Justified (JustifyRight, JustifyMiddle)
-                    | Center -> Justified (JustifyCenter, JustifyMiddle)
+                    | Left -> JustifyLeft
+                    | Right -> JustifyRight
+                    | Center -> JustifyCenter
                     // incorrect
-                    | Full -> Justified (JustifyLeft, JustifyMiddle)
+                    | Full -> JustifyFull
 
                 let paragraphList =
                     match parsingResult with
@@ -86,7 +94,7 @@ module RichTextFacetModule =
                             | _ ->
                                 {
                                     Blocks = List.empty
-                                    Justification = justification
+                                    Justification = defaultJustify
                                 }
                         )
                     | Error (text, error) -> [
@@ -98,7 +106,7 @@ module RichTextFacetModule =
                                 FontSizing = fontSizing
                                 FontStyling = fontStyling
                             }]
-                            Justification = justification
+                            Justification = defaultJustify
                         }
                         {
                             Blocks = [{
@@ -108,7 +116,7 @@ module RichTextFacetModule =
                                 FontSizing = fontSizing
                                 FontStyling = fontStyling
                             }]
-                            Justification = justification
+                            Justification = defaultJustify
                         }
                     ]
 

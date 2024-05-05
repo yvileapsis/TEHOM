@@ -170,23 +170,23 @@ module NuMark =
 
         let line =
             let endings = choice [
-                followedBy (pstring "||" .>>? (newline .>> newline))
-                followedBy (pstring "||" .>>? eof)
                 followedBy (pstring " ||" .>>? (newline .>> newline))
                 followedBy (pstring " ||" .>>? eof)
+                followedBy (pstring "||" .>>? (newline .>> newline))
+                followedBy (pstring "||" .>>? eof)
                 followedBy (newline >>. newline)
                 followedBy eof
             ]
 
             let line = parseLine endings //(followedByString " ||" <|> followedByString "||" <|> followedByNewline <|> (followedBy eof))
 
-            let center =
+            let full =
                 pstring "||"
                 >>? optional (pstring " ")
                 >>? line
                 .>>? optional (pstring " ")
                 .>>? pstring "||"
-                |>> fun x -> Center, x
+                |>> fun x -> Full, x
 
             let left =
                 pstring "||"
@@ -200,16 +200,16 @@ module NuMark =
                 .>>? pstring "||"
                 |>> fun x -> Right, x
 
-            let no =
+            let center =
                 line
-                |>> fun x -> Full, x
+                |>> fun x -> Center, x
 
             optional spaces
             >>. choice [
-                center
+                full
                 left
                 right
-                no
+                center
             ]
             |>> Paragraph
 
