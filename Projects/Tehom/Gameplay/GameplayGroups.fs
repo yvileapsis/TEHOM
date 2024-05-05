@@ -1,8 +1,7 @@
 namespace Tehom
 
 open Nu
-open Actor
-open Tehom.TehomAct
+open Act
 
 module GameplayGroups =
 

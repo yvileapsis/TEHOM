@@ -1,26 +1,8 @@
 namespace Tehom
 
 open Nu
-open Tehom.TehomID
 
-
-type Stage = {
-    Time : TehomTime
-    Actors : TehomActors
-}
-with
-    static member empty = {
-        Time = TehomTime.empty
-        Actors = TehomActors.empty
-    }
-
-    static member initial = { Stage.empty with Actors = TehomActors.addDefault Stage.empty.Actors }
-
-
-module TehomAct =
-
-    // world + time + quests
-
+module Act =
     type Condition =
          | Condition
 
@@ -117,18 +99,18 @@ You look at yourself and realize you're {player}"
 
     let gameStart = {
         Act.empty with
-            Player = ID "player"
+            Player = ID "Player"
             Stage = Stage.initial
             Scenes = [ firstScene; secondScene ]
     }
 
 // this is what gets stored in world model
-type Story = Story of TehomAct.Act list
+type Story = Story of Act.Act list
 with
     static member empty : Story = Story List.empty
 
     static member initial : Story = Story [
-        TehomAct.gameStart
+        Act.gameStart
     ]
 
     static member getAct index story =
@@ -139,4 +121,4 @@ with
     static member getActName index story =
         match Story.getAct index story with
         | None -> None
-        | Some act -> TehomAct.Act.getName act |> Some
+        | Some act -> Act.Act.getName act |> Some

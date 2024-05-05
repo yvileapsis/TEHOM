@@ -2,7 +2,6 @@ namespace Tehom
 
 open Prime
 open Nu
-open TehomID
 
 [<AutoOpen>]
 module GameplayExtentions =
@@ -31,18 +30,6 @@ type GameplayDispatcher () =
         match message with
         | Update ->
             just { gameplay with GameTime = inc gameplay.GameTime }
-        | InputString actorID ->
-            just gameplay
-(*            let choices = TehomChoices.choices (ActorID actorID) gameplay.Actors
-            if Set.isEmpty (TehomChoices.unwrap choices) then
-                just gameplay
-            else
-                let choice = TehomChoices.best choices
-                withSignal (Action (actorID, choice)) gameplay*)
-        | Action (actorID, choice) ->
-//            let gameplay = { gameplay with Display = $"%A{actorID} %A{choice}" }
-//            let gameplay = { gameplay with Time = TehomTime.advance 1u gameplay.Time }
-            just gameplay
         | StartQuitting ->
             just { gameplay with State = Quitting }
         | FinishQuitting ->

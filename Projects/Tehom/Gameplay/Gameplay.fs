@@ -1,7 +1,6 @@
 namespace Tehom
 
 open Nu
-open TehomID
 
 // this represents that state of the simulation during gameplay.
 type GameplayState =
@@ -36,8 +35,6 @@ type Gameplay = {
 // this is our MMCC message type.
 type GameplayMessage =
     | Update
-    | InputString of TehomID
-    | Action of TehomID * TehomChoice
     | StartQuitting
     | FinishQuitting
     interface Message
