@@ -734,6 +734,51 @@ type [<ReferenceEquality>] GlRenderer2d =
                     let stringLength = String.length string
 
                     // TODO: make per-letter line splitting
+                    // TODO: rewrite block splitting and block shaping again to fix the bugs
+
+                    // this version backtracked a lot and couldn't support full width justification
+
+                    (*while iterRight < stringLength do
+                        currentWidth <- currentWidth + glyphWidth string[iterRight]
+
+                        // we hit our limit for the line, splitting
+                        if currentOffset + currentWidth <= width then
+                            iterRight <- iterRight + 1
+
+                            // there is a rare case where splitting happens immediately, making string empty
+                        elif iterLeft < iterRight then
+
+                            // moving back once as we went over the limit with that last one
+                            currentWidth <- currentWidth - glyphWidth string[iterRight]
+                            iterRight <- iterRight - 1
+
+                            // finding last word to split on
+                            let mutable k = iterRight
+                            let mutable widthChange = 0.0f
+
+                            while k >= iterLeft && not (Char.IsWhiteSpace string[k]) do
+                                widthChange <- widthChange + glyphWidth string[k]
+                                k <- k - 1
+
+                            if k >= iterLeft then
+                                iterRight <- k
+                                currentWidth <- currentWidth - widthChange
+
+                            list <-
+                              {| Text = string[iterLeft..iterRight]
+                                 Width = currentWidth
+                                 NewLine = newLine |} :: list
+
+                            iterLeft <- iterRight + 1
+                            iterRight <- iterRight + 1
+
+                        currentWidth <- 0.0f
+                        currentOffset <- 0.0f
+                        newLine <- true
+                        *)
+
+                    // this version has a bug where it treats separate blocks as necessarily separate words, resulting in
+                    // spaces each time styling is used, really dumb
                     while iterRight < stringLength do
 
                         if not (Char.IsWhiteSpace string[iterRight]) then
