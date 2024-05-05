@@ -120,8 +120,9 @@ module Gaia =
     let private MiscTimings = Queue (Array.zeroCreate<single> TimingCapacity)
     let private PhysicsTimings = Queue (Array.zeroCreate<single> TimingCapacity)
     let private UpdateTimings = Queue (Array.zeroCreate<single> TimingCapacity)
-    let private RenderTimings = Queue (Array.zeroCreate<single> TimingCapacity)
+    let private RenderMessagesTimings = Queue (Array.zeroCreate<single> TimingCapacity)
     let private ImGuiTimings = Queue (Array.zeroCreate<single> TimingCapacity)
+    let private MainThreadTimings = Queue (Array.zeroCreate<single> TimingCapacity)
     let private FrameTimings = Queue (Array.zeroCreate<single> TimingCapacity)
 
     (* Modal Activity States *)
@@ -768,8 +769,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
     (* Editor Command Functions *)
 
     let private createSnapshot world =
-        let world = World.playSound Constants.Audio.SongVolumeDefault Assets.Default.Sound world
         let world = snapshot world
+        World.playSound Constants.Audio.SongVolumeDefault Assets.Default.Sound world
         world
 
     let private inductEntity atMouse (entity : Entity) world =
@@ -781,9 +782,11 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 let eyeCenter = World.getEye2dCenter world
                 let eyeSize = World.getEye2dSize world
                 let entityPosition =
-                    if atMouse
-                    then viewport.MouseToWorld2d (entity.GetAbsolute world, RightClickPosition, eyeCenter, eyeSize)
-                    else eyeCenter
+                    if atMouse then
+                        viewport.MouseToWorld2d (entity.GetAbsolute world, RightClickPosition, eyeCenter, eyeSize)
+                    elif not (entity.GetAbsolute world) then
+                        eyeCenter
+                    else v2Zero
                 let attributes = entity.GetAttributesInferred world
                 entityTransform.Position <- entityPosition.V3
                 entityTransform.Size <- attributes.SizeInferred
@@ -801,7 +804,9 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         let forward = eyeRotation.Forward
                         let plane = plane3 (eyeCenter + forward * NewEntityDistance) -forward
                         (ray.Intersection plane).Value
-                    else eyeCenter + Vector3.Transform (v3Forward, eyeRotation) * NewEntityDistance
+                    elif not (entity.GetAbsolute world) then
+                        eyeCenter + Vector3.Transform (v3Forward, eyeRotation) * NewEntityDistance
+                    else v3Zero
                 let attributes = entity.GetAttributesInferred world
                 entityTransform.Position <- entityPosition
                 entityTransform.Size <- attributes.SizeInferred
@@ -3774,11 +3779,13 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                          world.Timers.DestructionTimer.Elapsed.TotalMilliseconds +
                          world.Timers.PostProcessTimer.Elapsed.TotalMilliseconds) + Seq.last PhysicsTimings)
                 UpdateTimings.Dequeue () |> ignore<single>
-                RenderTimings.Enqueue (single world.Timers.RenderTimer.Elapsed.TotalMilliseconds + Seq.last UpdateTimings)
-                RenderTimings.Dequeue () |> ignore<single>
-                ImGuiTimings.Enqueue (single world.Timers.ImGuiTimer.Elapsed.TotalMilliseconds + Seq.last RenderTimings)
+                RenderMessagesTimings.Enqueue (single world.Timers.RenderMessagesTimer.Elapsed.TotalMilliseconds + Seq.last UpdateTimings)
+                RenderMessagesTimings.Dequeue () |> ignore<single>
+                ImGuiTimings.Enqueue (single world.Timers.ImGuiTimer.Elapsed.TotalMilliseconds + Seq.last RenderMessagesTimings)
                 ImGuiTimings.Dequeue () |> ignore<single>
-                FrameTimings.Enqueue (single world.Timers.FrameTime.TotalMilliseconds)
+                MainThreadTimings.Enqueue (single world.Timers.MainThreadTime.TotalMilliseconds)
+                MainThreadTimings.Dequeue () |> ignore<single>
+                FrameTimings.Enqueue (single world.Timers.FrameTimer.Elapsed.TotalMilliseconds)
                 FrameTimings.Dequeue () |> ignore<single>
             if ImPlot.BeginPlot ("FrameTimings", v2 -1.0f -1.0f, ImPlotFlags.NoTitle ||| ImPlotFlags.NoInputs) then
                 ImPlot.SetupLegend (ImPlotLocation.West, ImPlotLegendFlags.Outside)
@@ -3792,10 +3799,12 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 ImPlot.PlotLine ("Physics Time", &TimingsArray.[0], TimingsArray.Length)
                 UpdateTimings.CopyTo (TimingsArray, 0)
                 ImPlot.PlotLine ("Update Time", &TimingsArray.[0], TimingsArray.Length)
-                RenderTimings.CopyTo (TimingsArray, 0)
+                RenderMessagesTimings.CopyTo (TimingsArray, 0)
                 ImPlot.PlotLine ("Render Msgs", &TimingsArray.[0], TimingsArray.Length)
                 ImGuiTimings.CopyTo (TimingsArray, 0)
                 ImPlot.PlotLine ("ImGui Time", &TimingsArray.[0], TimingsArray.Length)
+                MainThreadTimings.CopyTo (TimingsArray, 0)
+                ImPlot.PlotLine ("Main Thread", &TimingsArray.[0], TimingsArray.Length)
                 FrameTimings.CopyTo (TimingsArray, 0)
                 ImPlot.PlotLine ("Frame Time", &TimingsArray.[0], TimingsArray.Length)
                 ImPlot.EndPlot ()
@@ -3945,12 +3954,12 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         if ImGui.Begin ("Audio Player", ImGuiWindowFlags.NoNav) then
             ImGui.Text "Master Sound Volume"
             let mutable masterSoundVolume = World.getMasterSoundVolume world
-            let world = if ImGui.SliderFloat ("##masterSoundVolume", &masterSoundVolume, 0.0f, 1.0f) then World.setMasterSoundVolume masterSoundVolume world else world
+            if ImGui.SliderFloat ("##masterSoundVolume", &masterSoundVolume, 0.0f, 1.0f) then World.setMasterSoundVolume masterSoundVolume world
             ImGui.SameLine ()
             ImGui.Text (string masterSoundVolume)
             ImGui.Text "Master Song Volume"
             let mutable masterSongVolume = World.getMasterSongVolume world
-            let world = if ImGui.SliderFloat ("##masterSongVolume", &masterSongVolume, 0.0f, 1.0f) then World.setMasterSongVolume masterSongVolume world else world
+            if ImGui.SliderFloat ("##masterSongVolume", &masterSongVolume, 0.0f, 1.0f) then World.setMasterSongVolume masterSongVolume world
             ImGui.SameLine ()
             ImGui.Text (string masterSongVolume)
             ImGui.End ()
@@ -4651,8 +4660,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 let world = World.setEye2dCenter DesiredEye2dCenter world
                 let world = World.setEye3dCenter DesiredEye3dCenter world
                 let world = World.setEye3dRotation DesiredEye3dRotation world
-                let world = World.setMasterSoundVolume gaiaState.MasterSoundVolume world
-                let world = World.setMasterSongVolume gaiaState.MasterSongVolume world
+                World.setMasterSoundVolume gaiaState.MasterSoundVolume world
+                World.setMasterSongVolume gaiaState.MasterSongVolume world
                 world
             else world
         TargetDir <- targetDir_
