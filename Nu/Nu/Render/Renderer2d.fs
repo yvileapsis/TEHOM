@@ -92,7 +92,7 @@ type [<Struct>] RichTextBlock =
 
 type [<Struct>] RichTextParagraph =
     { Blocks : RichTextBlock list
-      Justification : Justification }
+      Justification : JustificationH }
 
 /// Describes how to render rich text to a rendering subsystem.
 type RichTextDescriptor =
@@ -733,48 +733,39 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     let stringLength = String.length string
 
-                    // TODO: Remake the line splitter into a per-word-separated-by-whitespace manner, allowing for
-                    // TODO: no backtracking and easier modification into variable whitespace width justification.
+                    // TODO: make per-letter line splitting
                     while iterRight < stringLength do
-                        currentWidth <- currentWidth + glyphWidth string[iterRight]
 
-                        // we hit our limit for the line, splitting
-                        if currentOffset + currentWidth > width then
+                        if not (Char.IsWhiteSpace string[iterRight]) then
 
-                            // there is a rare case where splitting happens immediately, making string empty
-                            if iterLeft < iterRight then
+                            currentWidth <- currentWidth + glyphWidth string[iterRight]
 
-                                // moving back once as we went over the limit with that last one
-                                currentWidth <- currentWidth - glyphWidth string[iterRight]
-                                iterRight <- iterRight - 1
+                        elif iterRight > iterLeft then
 
-                                // finding last word to split on
-                                let mutable k = iterRight
-                                let mutable widthChange = 0.0f
+                            // we hit our limit for the line, splitting
+                            if currentOffset + currentWidth > width then
+                                currentOffset <- 0.0f
+                                newLine <- true
 
-                                while k >= iterLeft && not (Char.IsWhiteSpace string[k]) do
-                                    widthChange <- widthChange + glyphWidth string[k]
-                                    k <- k - 1
+                            list <-
+                              {| Text = string[iterLeft..iterRight - 1]
+                                 Width = currentWidth
+                                 NewLine = newLine |} :: list
 
-                                if k >= iterLeft then
-                                    iterRight <- k
-                                    currentWidth <- currentWidth - widthChange
-
-                                list <-
-                                  {| Text = string[iterLeft..iterRight]
-                                     Width = currentWidth
-                                     NewLine = newLine |} :: list
-
-                                iterLeft <- iterRight + 1
-                                iterRight <- iterRight + 1
-
+                            iterLeft <- iterRight + 1
+                            currentOffset <- currentOffset + currentWidth + glyphWidth string[iterRight]
                             currentWidth <- 0.0f
+                            newLine <- false
+
+                        iterRight <- iterRight + 1
+
+                    // fix last block
+                    if (iterLeft < iterRight) then
+
+                        if currentOffset + currentWidth > width then
                             currentOffset <- 0.0f
                             newLine <- true
-                        else
-                            iterRight <- iterRight + 1
 
-                    if (iterLeft < iterRight) then
                         list <-
                           {| Text = string[iterLeft..iterRight]
                              Width = currentWidth
@@ -796,17 +787,14 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     let stringList, offset = splitBlock block.Text font offset
 
-                    let surfaceList :
-                      {| Surface: nativeint
-                         Width: float32
-                         LineHeight: float32
-                         NewLine: bool |} list =
+                    let surfaceList =
 
                         stringList
                         |> List.map (fun value ->
                             {| Surface = renderSdlSurface font block.Color value.Text
                                Width = value.Width
                                LineHeight = lineHeight
+                               SpaceWidth = float32 (charWidth font ' ')
                                NewLine = value.NewLine |}
                         )
 
@@ -815,8 +803,6 @@ type [<ReferenceEquality>] GlRenderer2d =
                 let reflowParagraph (paragraph: RichTextParagraph) (offset: float32) =
                     // TODO: Margins (?)
                     // TODO: Tabs (?)
-
-                    // TODO: justify justification
                     // TODO: justify vertically somehow
                     // TODO: subscript, superscript
 
@@ -835,7 +821,8 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                             let newValue =
                               {| Surface = value.Surface
-                                 Width = value.Width |}
+                                 Width = value.Width
+                                 SpaceWidth = value.SpaceWidth |}
 
                             if value.NewLine then
                                 let listOfLists = (currentList, maxLineHeight)::listOfLists
@@ -862,11 +849,11 @@ type [<ReferenceEquality>] GlRenderer2d =
                         // set x coordinates
                         match justification with
 
-                        | Justified (JustifyRight, _) ->
+                        | JustifyRight ->
                             List.map (fun (list, lineHeight) ->
                                 list
                                 |> List.foldMap (fun value state ->
-                                    let state = state - value.Width
+                                    let state = state - value.Width - value.SpaceWidth
 
                                     let newValue = {| Surface = value.Surface; OffsetX = state |}
 
@@ -875,32 +862,50 @@ type [<ReferenceEquality>] GlRenderer2d =
                                 |> fst, lineHeight
                             )
 
-                        | Justified (JustifyCenter, _) ->
+                        | JustifyCenter ->
                             List.map (fun (list, lineHeight) ->
 
-                                let lineWidth = list |> List.sumBy _.Width
+                                let offset =
+                                    (width + (list |> List.sumBy _.Width) + (list |> List.sumBy _.SpaceWidth)) / 2.0f
 
                                 list
                                 |> List.foldMap (fun value state ->
-                                    let state = state - value.Width
+                                    let state = state - value.Width - value.SpaceWidth / 2.0f
 
                                     let newValue = {| Surface = value.Surface; OffsetX = state |}
 
-                                    newValue, state
-                                ) ((width + lineWidth) / 2.0f)
+                                    newValue, state - value.SpaceWidth / 2.0f
+                                ) offset
                                 |> fst, lineHeight
                             )
 
-                        | _ ->
+                        | JustifyLeft ->
                             List.map (fun (list, lineHeight) ->
                                 list
                                 |> List.rev
-                                |> List.foldMap (fun value state ->
-                                    let newValue = {| Surface = value.Surface; OffsetX = state |}
+                                |> List.foldMap (fun value offset ->
+                                    let newValue = {| Surface = value.Surface; OffsetX = offset |}
 
-                                    let state = state + value.Width
+                                    let offset = offset + value.Width + value.SpaceWidth
 
-                                    newValue, state
+                                    newValue, offset
+                                ) 0.0f
+                                |> fst, lineHeight
+                            )
+                        | JustifyFull ->
+                            List.map (fun (list, lineHeight) ->
+                                let listCount = List.length list - 1
+                                let lineWidth = list |> List.sumBy _.Width
+                                let spaceWidth = (width - lineWidth) / float32 listCount
+
+                                list
+                                |> List.rev
+                                |> List.foldMap (fun value offset ->
+                                    let newValue = {| Surface = value.Surface; OffsetX = offset |}
+
+                                    let offset = offset + value.Width + spaceWidth
+
+                                    newValue, offset
                                 ) 0.0f
                                 |> fst, lineHeight
                             )
@@ -1058,7 +1063,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                                 let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface> textSurfacePtr
                                 let offsetX =
                                     match h with
-                                    | JustifyLeft -> 0.0f
+                                    | JustifyLeft | JustifyFull -> 0.0f
                                     | JustifyCenter -> floor ((size.X - single width) * 0.5f)
                                     | JustifyRight -> size.X - single width
                                 let offsetY =
