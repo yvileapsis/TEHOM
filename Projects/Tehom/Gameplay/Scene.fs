@@ -97,7 +97,7 @@ You look at yourself and realize you're {player}"
             |> Scene.getName
 
 
-    let gameStart = {
+    let initial = {
         Act.empty with
             Player = ID "Player"
             Stage = Stage.initial
@@ -110,7 +110,7 @@ with
     static member empty : Story = Story List.empty
 
     static member initial : Story = Story [
-        Act.gameStart
+        Act.initial
     ]
 
     static member getAct index story =
