@@ -96,7 +96,7 @@ type CharacterDispatcher () =
                     | LargeStature ->
                         perimeter.Min + perimeter.Size - Constants.Battle.AfflictionSize.MapY((*) 0.5f)
                     | BossStature ->
-                        perimeter.Min + perimeter.Size - Constants.Battle.AfflictionSize.MapX((*) 2.0f).MapY((*) 1.75f)
+                    perimeter.Min + perimeter.Size - Constants.Battle.AfflictionSize.MapX((*) 2.0f).MapY((*) 1.75f)
                 let mutable afflictionTransform = Transform.makeDefault false
                 afflictionTransform.Position <- afflictionPosition
                 afflictionTransform.Size <- Constants.Battle.AfflictionSize
@@ -126,7 +126,7 @@ type CharacterDispatcher () =
                     | LargeStature ->
                         perimeter.Min + perimeter.Size - Constants.Battle.ChargeOrbSize.MapX((*) 1.5f).MapY((*) 0.5f)
                     | BossStature ->
-                        perimeter.Min + perimeter.Size - Constants.Battle.ChargeOrbSize.MapX((*) 2.5f).MapY((*) 1.75f)
+                    perimeter.Min + perimeter.Size - Constants.Battle.ChargeOrbSize.MapX((*) 2.5f).MapY((*) 1.75f)
                 let mutable chargeOrbTransform = Transform.makeDefault false
                 chargeOrbTransform.Position <- chargeOrbPosition
                 chargeOrbTransform.Size <- Constants.Battle.ChargeOrbSize

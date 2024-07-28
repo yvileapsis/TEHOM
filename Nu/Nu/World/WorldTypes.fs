@@ -45,31 +45,101 @@ type Callback<'a, 's when 's :> Simulant> = Event<'a, 's> -> World -> Handling *
 /// Represents an unsubscription operation for an event.
 and Unsubscription = World -> World
 
+/// Describes the type of snapshot taken for operation tracking.
+and SnapshotType =
+    | RerenderLightMap
+    | WipePropagationTargets
+    | TranslateEntity
+    | RotateEntity
+    | ScaleEntity
+    | AutoBoundsEntity
+    | PropagateEntity
+    | ReorderEntities
+    | SetEntityFrozen of bool
+    | SetEntityFamilyStatic of bool
+    | ChangeEntityDispatcher
+    | RenameEntity
+    | CreateEntity
+    | DeleteEntity
+    | CutEntity
+    | PasteEntity
+    | LoadEntity
+    | DuplicateEntity
+    | RenameGroup
+    | OpenGroup
+    | CloseGroup
+    | ChangeProperty of int64 option * string
+    | Evaluate of string
+    | RestorePoint
+    | RencenterInProbeBounds
+    | ResetProbeBounds
+    | SynchronizeNav
+    | SetEditMode of int
+    | ReloadCode
+    | Advance
+    | Halt
+    | UserDefinedSnapshot of Image AssetTag * string // a user-defined type of snapshot
+
+    member this.Label =
+        match this with
+        | RerenderLightMap -> (scstringMemo this).Spaced
+        | WipePropagationTargets -> (scstringMemo this).Spaced
+        | TranslateEntity -> (scstringMemo this).Spaced
+        | RotateEntity -> (scstringMemo this).Spaced
+        | ScaleEntity -> (scstringMemo this).Spaced
+        | AutoBoundsEntity -> (scstringMemo this).Spaced
+        | PropagateEntity -> (scstringMemo this).Spaced
+        | ReorderEntities -> (scstringMemo this).Spaced
+        | SetEntityFrozen frozen -> if frozen then "Freeze Entity" else "Thaw Entity"
+        | SetEntityFamilyStatic static_ -> if static_ then "Staticize Entity Family" else "Dynamize Entity Family"
+        | ChangeEntityDispatcher -> (scstringMemo this).Spaced
+        | RenameEntity -> (scstringMemo this).Spaced
+        | CreateEntity -> (scstringMemo this).Spaced
+        | DeleteEntity -> (scstringMemo this).Spaced
+        | CutEntity -> (scstringMemo this).Spaced
+        | PasteEntity -> (scstringMemo this).Spaced
+        | LoadEntity -> (scstringMemo this).Spaced
+        | DuplicateEntity -> (scstringMemo this).Spaced
+        | RenameGroup -> (scstringMemo this).Spaced
+        | OpenGroup -> (scstringMemo this).Spaced
+        | CloseGroup -> (scstringMemo this).Spaced
+        | ChangeProperty (_, propertyName) -> "Change Property " + propertyName
+        | Evaluate _ -> "Evaluate F# Expression"
+        | RestorePoint -> (scstringMemo this).Spaced
+        | RencenterInProbeBounds -> (scstringMemo this).Spaced
+        | ResetProbeBounds -> (scstringMemo this).Spaced
+        | SynchronizeNav -> (scstringMemo this).Spaced
+        | SetEditMode i -> (scstringMemo this).Spaced + " (" + string (inc i) + " of 2)"
+        | ReloadCode -> (scstringMemo this).Spaced
+        | Advance -> (scstringMemo this).Spaced
+        | Halt -> (scstringMemo this).Spaced
+        | UserDefinedSnapshot (_, label) -> label
+
 /// Details replacement for editing behavior for a simulant property, allowing the user to indicate that a property was
 /// replaced.
 and [<ReferenceEquality>] ReplaceProperty =
-    { Snapshot : World -> World
+    { Snapshot : SnapshotType -> World -> World
       FocusProperty : World -> World
       IndicateReplaced : World -> World
       PropertyDescriptor : PropertyDescriptor }
 
 /// Details additional editing behavior for a simulant's properties.
 and AppendProperties =
-    { Snapshot : World -> World
+    { Snapshot : SnapshotType -> World -> World
       UnfocusProperty : World -> World }
 
 /// Details additional editing behavior for viewport context menu.
 and ContextHierarchy =
-    { Snapshot : World -> World }
+    { Snapshot : SnapshotType -> World -> World }
 
 /// Details additional editing behavior for viewport context menu.
 and ContextViewport =
-    { Snapshot : World -> World
+    { Snapshot : SnapshotType -> World -> World
       RightClickPosition : Vector2 }
 
 /// Details the additional editing behavior for a simulant in a viewport.
 and [<ReferenceEquality>] OverlayViewport =
-    { Snapshot : World -> World
+    { Snapshot : SnapshotType -> World -> World
       ViewportView : Matrix4x4
       ViewportProjection : Matrix4x4
       ViewportBounds : Box2 }
@@ -288,6 +358,13 @@ and [<CustomEquality; CustomComparison>] SortPriority =
             match that with
             | :? SortPriority as that -> (this :> SortPriority IComparable).CompareTo that
             | _ -> failwithumf ()
+
+/// Specified the requested song, if any, or whether to ignore song request functionality altogether.
+and RequestedSong =
+    | Request of SongDescriptor
+    | RequestFadeOut of GameTime
+    | RequestNone
+    | RequestIgnore
 
 /// Specifies the desired screen, if any, or whether to ignore screen desire functionality altogether.
 and DesiredScreen =
@@ -885,6 +962,7 @@ and [<ReferenceEquality; CLIMutable>] ScreenState =
       TransitionState : TransitionState
       Incoming : Transition
       Outgoing : Transition
+      RequestedSong : RequestedSong
       SlideOpt : Slide option
       Nav3d : Nav3d
       Protected : bool
@@ -934,6 +1012,7 @@ and [<ReferenceEquality; CLIMutable>] ScreenState =
           TransitionState = IdlingState time
           Incoming = Transition.make Incoming
           Outgoing = Transition.make Outgoing
+          RequestedSong = RequestIgnore
           SlideOpt = None
           Nav3d = Nav3d.make ()
           Protected = false
@@ -1233,7 +1312,7 @@ and [<TypeConverter (typeof<GameConverter>)>] Game (gameAddress : Game Address) 
         if isNull (game :> obj) then Address.anonymize address else acatf address game.GameAddress
 
     override this.ToString () =
-        scstring this.GameAddress
+        this.GameAddress.ToString ()
 
     override this.Equals that =
         match that with
@@ -1335,7 +1414,7 @@ and [<TypeConverter (typeof<ScreenConverter>)>] Screen (screenAddress) =
         if isNull (screen :> obj) then Address.anonymize address else acatf address screen.ScreenAddress
 
     override this.ToString () =
-        scstring this.ScreenAddress
+        this.ScreenAddress.ToString ()
 
     override this.Equals that =
         match that with
@@ -1439,7 +1518,7 @@ and [<TypeConverter (typeof<GroupConverter>)>] Group (groupAddress) =
         if isNull (group :> obj) then Address.anonymize address else acatf address group.GroupAddress
 
     override this.ToString () =
-        scstring this.GroupAddress
+        this.GroupAddress.ToString ()
 
     override this.Equals that =
         match that with
@@ -1566,7 +1645,7 @@ and [<TypeConverter (typeof<EntityConverter>)>] Entity (entityAddress) =
         if isNull (entity :> obj) then Address.anonymize address else acatf address entity.EntityAddress
 
     override this.ToString () =
-        scstring this.EntityAddress
+        this.EntityAddress.ToString ()
 
     override this.Equals that =
         match that with
@@ -1752,14 +1831,6 @@ and [<ReferenceEquality>] World =
     member this.UpdateTime =
         AmbientState.getUpdateTime this.AmbientState
 
-    /// Get the tick delta as a number of environment ticks.
-    member this.TickDelta =
-        AmbientState.getTickDelta this.AmbientState
-
-    /// Get the tick time as a number of environment ticks.
-    member this.TickTime =
-        AmbientState.getTickTime this.AmbientState
-
     /// Get the amount of clock time that has transpired between this and the previous frame.
     member this.ClockDelta =
         AmbientState.getClockDelta this.AmbientState
@@ -1767,6 +1838,14 @@ and [<ReferenceEquality>] World =
     /// Get the clock time as of when the current frame began.
     member this.ClockTime =
         AmbientState.getClockTime this.AmbientState
+
+    /// Get the tick delta as a number of environment ticks.
+    member this.TickDelta =
+        AmbientState.getTickDelta this.AmbientState
+
+    /// Get the tick time as a number of environment ticks.
+    member this.TickTime =
+        AmbientState.getTickTime this.AmbientState
 
     /// Get the polymorphic engine time delta.
     member this.GameDelta =

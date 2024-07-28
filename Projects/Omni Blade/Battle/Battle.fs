@@ -290,17 +290,17 @@ module Battle =
         getAlliesWounded battle |>
         Map.toKeyList
 
-    let mapCharactersIf pred updater (battle : Battle) =
-        { battle with Characters_ = Map.map (fun i c -> if pred i c then updater c else c) battle.Characters_ }
+    let mapCharactersIf pred mapper (battle : Battle) =
+        { battle with Characters_ = Map.map (fun i c -> if pred i c then mapper c else c) battle.Characters_ }
 
-    let mapCharacters updater battle =
-        mapCharactersIf tautology2 updater battle
+    let mapCharacters mapper battle =
+        mapCharactersIf tautology2 mapper battle
 
-    let mapCharactersHealthy updater battle =
-        mapCharactersIf (fun _ character -> character.Healthy) updater battle
+    let mapCharactersHealthy mapper battle =
+        mapCharactersIf (fun _ character -> character.Healthy) mapper battle
 
-    let mapCharactersWounded updater battle =
-        mapCharactersIf (fun _ character -> character.Wounded) updater battle
+    let mapCharactersWounded mapper battle =
+        mapCharactersIf (fun _ character -> character.Wounded) mapper battle
 
     let foldCharactersIf pred folder battle =
         let filtered = Map.filter (fun key value -> pred key value) (getCharacters battle)
@@ -309,23 +309,23 @@ module Battle =
     let foldCharacters folder battle =
         foldCharactersIf tautology2 folder battle
 
-    let mapAlliesIf pred updater battle =
-        mapCharactersIf (fun i c -> pred i c && match i with AllyIndex _ -> true | _ -> false) updater battle
+    let mapAlliesIf pred mapper battle =
+        mapCharactersIf (fun i c -> pred i c && match i with AllyIndex _ -> true | _ -> false) mapper battle
 
-    let mapAllies updater battle =
-        mapAlliesIf tautology2 updater battle
+    let mapAllies mapper battle =
+        mapAlliesIf tautology2 mapper battle
 
-    let mapAlliesHealthy updater battle =
-        mapAlliesIf (fun _ character -> character.Healthy) updater battle
+    let mapAlliesHealthy mapper battle =
+        mapAlliesIf (fun _ character -> character.Healthy) mapper battle
 
     let foldAllies folder battle =
         foldCharactersIf (fun index _ -> index.Ally) folder battle
 
-    let mapEnemiesIf pred updater battle =
-        mapCharactersIf (fun i c -> pred i c && match i with EnemyIndex _ -> true | _ -> false) updater battle
+    let mapEnemiesIf pred mapper battle =
+        mapCharactersIf (fun i c -> pred i c && match i with EnemyIndex _ -> true | _ -> false) mapper battle
 
-    let mapEnemies updater battle =
-        mapEnemiesIf tautology2 updater battle
+    let mapEnemies mapper battle =
+        mapEnemiesIf tautology2 mapper battle
 
     let foldEnemies folder battle =
         foldCharactersIf (fun index _ -> index.Enemy) folder battle
@@ -439,16 +439,16 @@ module Battle =
         then getCharacterBy Character.shouldCounter sourceIndex battle
         else false
 
-    let private tryWithCharacter updater characterIndex battle =
+    let private tryWithCharacter mapper characterIndex battle =
         match tryGetCharacter characterIndex battle with
         | Some character ->
-            let character = updater character
+            let character = mapper character
             { battle with Characters_ = Map.add characterIndex character battle.Characters_ }
         | None -> battle
 
-    let private mapCharacter updater characterIndex battle =
+    let private mapCharacter mapper characterIndex battle =
         let character = getCharacter characterIndex battle
-        let character = updater character
+        let character = mapper character
         { battle with Characters_ = Map.add characterIndex character battle.Characters_ }
 
     let setCharacterInputState inputState characterIndex battle =
@@ -731,7 +731,8 @@ module Battle =
 
     let rec private evalAttackAffectType affectType (source : Character) (target : Character) (observer : Character) battle =
         match affectType with
-        | Physical | Touching -> source.ArchetypeType.AttackTouchingArchetype
+        | Physical -> true
+        | Touching -> source.ArchetypeType.AttackTouchingArchetype
         | Magical | Affinity _ | Item | OrbEmptied | OrbFilled | Cancelled | Uncancelled | Buffed | Debuffed -> false
         | Wounded -> target.Wounded
         | Random chance -> Gen.randomf < chance
@@ -1141,7 +1142,7 @@ module Battle =
                 if containsCharacter targetIndex battle then
                     match localTime with
                     | 0L ->
-                        if getCharacterHealthy targetIndex battle || consumable = Revive then // HACK: should really be checked ConsumableData.
+                        if getCharacterHealthy targetIndex battle || consumable = Revive then // TODO: pull from from ConsumableData.
                             let sourcePerimeter = getCharacterPerimeter sourceIndex battle
                             let targetPerimeter = getCharacterPerimeter targetIndex battle
                             let battle =
@@ -1365,7 +1366,7 @@ module Battle =
                                         let displayBuff = DisplayBuff (0L, Shield (true, true), targetIndex)
                                         let battle = animateCharacter Cast2Animation sourceIndex battle
                                         withSignals [playBuff; displayBuff] battle
-                                    | Vita | Purify -> // HACK: just using purify effect for vita since it's unused in demp.
+                                    | Vita | Purify -> // HACK: just using purify effect for vita since it's unused in demo.
                                         let displayPurify = DisplayPurify (0L, targetIndex)
                                         let battle = animateCharacter Cast2Animation sourceIndex battle
                                         withSignal displayPurify battle
@@ -1427,15 +1428,6 @@ module Battle =
                                         match spawnOpt with
                                         | Some spawn -> spawnEnemies spawn battle
                                         | _ -> battle
-                                    withSignals sigs battle
-                                elif localTime = techAnimationData.AffectingStop then
-                                    let results = evalTech sourceIndex targetIndex techType battle |> Triple.thd
-                                    let (battle, sigs) =
-                                        Map.fold (fun (battle, sigs) _ (_, _, _, _, _) ->
-                                            // TODO: emission effect
-                                            (battle, sigs))
-                                            (battle, [])
-                                            results
                                     withSignals sigs battle
                                 elif localTime = techAnimationData.TechingStop then
                                     let sourcePerimeterOriginal = getCharacterPerimeterOriginal sourceIndex battle
@@ -1834,7 +1826,7 @@ module Battle =
 
     and private updateReadying startTime (battle : Battle) =
         let localTime = battle.BattleTime_ - startTime
-        if localTime = 0L then // first frame after transitioning in
+        if localTime = 0L then
             let battle = animateEnemiesPoised battle
             match battle.BattleSongOpt_ with
             | Some battleSong -> withSignal (PlaySong (0L, Constants.Audio.FadeOutTimeDefault, 0L, None, 0.5f, battleSong)) battle

@@ -350,19 +350,20 @@ type BattleDispatcher () =
             match Battle.tryGetCharacter targetIndex battle with
             | Some target -> displayEffect delay (v3 48.0f 48.0f 0.0f) (Bottom target.Perimeter.Bottom) Over EffectDescriptors.cure screen world |> just
             | None -> just world
-        
+            
         | DisplayProtect (delay, targetIndex) ->
             match Battle.tryGetCharacter targetIndex battle with
             | Some target -> displayEffect delay (v3 48.0f 48.0f 0.0f) (Bottom target.Perimeter.Bottom) Over EffectDescriptors.protect screen world |> just
             | None -> just world
-        
+            
         | DisplayPurify (delay, targetIndex) ->
             match Battle.tryGetCharacter targetIndex battle with
             | Some target -> displayEffect delay (v3 192.0f 192.0f 0.0f) (Bottom (target.Perimeter.Bottom - v3 0.0f 100.0f 0.0f)) Over EffectDescriptors.purify screen world |> just
             | None -> just world
 
         | DisplayInferno delay ->
-            displayEffect delay (v3 48.0f 48.0f 0.0f) (Position (v3 0.0f 0.0f 0.0f)) Over EffectDescriptors.inferno screen world |> just
+            let world = displayEffect delay (v3 48.0f 48.0f 0.0f) (Position (v3 0.0f 0.0f 0.0f)) Over EffectDescriptors.inferno screen world
+            just world
 
         | DisplayScatterBolt delay ->
             let origin = v2 -288.0f -240.0f // TODO: turn these duplicated vars into global consts.
@@ -376,7 +377,7 @@ type BattleDispatcher () =
             | Some target -> displayEffect delay (v3 144.0f 144.0f 0.0f) (Bottom target.Perimeter.Bottom) Over EffectDescriptors.silk screen world |> just
             | None -> just world
 
-    override this.Content (battle, _) =
+        override this.Content (battle, _) =
 
         [// scene group
          Content.group Simulants.BattleScene.Name []
@@ -541,7 +542,7 @@ type BattleDispatcher () =
                                  Entity.CancelEvent => TechItemCancel index]
 
                          | AimReticles (actionStr, aimType) ->
-                            let infoText = actionStr.Words
+                            let infoText = actionStr.Spaced
                             Content.text "Info"
                                 [Entity.PositionLocal := ally.Perimeter.Center + v3 -270.0f 15.0f 0.0f
                                  Entity.Size == v3 540.0f 81.0f 0.0f

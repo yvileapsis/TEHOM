@@ -312,7 +312,7 @@ type TechType =
     | Silk
 
     member this.Name =
-        (scstringMemo this).Words
+        (scstringMemo this).Spaced
 
     // TODO: put this in TechData.
     member this.ConjureTech =
@@ -356,7 +356,7 @@ type ArchetypeType =
     | Arachnos
 
     member this.Name =
-        (scstringMemo this).Words
+        (scstringMemo this).Spaced
 
     member this.AttackTouchingArchetype =
         match this with
@@ -396,7 +396,7 @@ type FieldType =
 
     member this.Connector =
         match this with
-        | CastleConnector
+        | CastleConnector -> true
         | _ -> false
 
     static member toFieldName (fieldType : FieldType) =
@@ -529,7 +529,7 @@ type AllyType =
     | Peric
 
     member this.Name =
-        (scstringMemo this).Words
+        (scstringMemo this).Spaced
 
 type EnemyType =
     | DebugGoblin
@@ -548,7 +548,7 @@ type EnemyType =
     | Kyla
 
     member this.Name =
-        (scstringMemo this).Words
+        (scstringMemo this).Spaced
 
 type CharacterType =
     | Ally of AllyType
@@ -1113,7 +1113,7 @@ module FieldData =
                     let (probability, rand) = Rand.nextSingleUnder 1.0f rand
                     if probability < Constants.Field.TreasureProbability then
                         let (id, rand) = let (i, rand) = Rand.nextInt rand in let (j, rand) = Rand.nextInt rand in (Gen.idFromInts i j, rand)
-                        let chestType = match fieldData.FieldType with Castle _ -> WoodenChest | _ -> SteelChest
+                        let chestType = WoodenChest
                         let chestSpawned = { chestSpawn with PropData = Chest (chestType, treasure, id, None, CueSystem.Fin, Set.empty) }
 #if DEV
                         let mapSize =
@@ -1170,9 +1170,9 @@ module FieldData =
                     let battleIndex = int (5.0f / distanceFromOriginMax * distanceFromOrigin)
                     match battleIndex with
                     | 0 -> Some WeakSpirit
-                    | 1 -> if Gen.random1 3 <> 0 then Some WeakSpirit else Some NormalSpirit
+                    | 1 -> if Gen.randomb then Some WeakSpirit else Some NormalSpirit
                     | 2 -> Some NormalSpirit
-                    | 3 -> if Gen.random1 3 <> 0 then Some NormalSpirit else Some StrongSpirit
+                    | 3 -> if Gen.randomb then Some NormalSpirit else Some StrongSpirit
                     | _ -> Some StrongSpirit
                 | FieldStatic _ | FieldConnector _ | FieldRoom _ -> None
             | Choice4Of4 _ ->
