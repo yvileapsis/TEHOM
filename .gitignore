@@ -55,6 +55,7 @@ packages/
 # VSCode #
 ##########
 .vscode
+.idea
 
 ##################
 # Nu Local Items #
