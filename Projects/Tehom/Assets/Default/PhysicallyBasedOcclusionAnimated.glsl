@@ -25,20 +25,14 @@ void main()
 
     // compute output values
     vec4 positionBlended = boneBlended * vec4(position, 1.0);
-    vec4 positionWorld = model * positionBlended;
-    gl_Position = projection * view * positionWorld;
+    vec4 positionIntermediate = model * positionBlended;
+    gl_Position = projection * view * positionIntermediate;
 }
 
 #shader fragment
 #version 410
 
-layout (location = 0) out vec2 moments;
-
 void main()
 {
-    float depth = gl_FragCoord.z;
-    moments.x = depth;
-    float dx = dFdx(depth);
-    float dy = dFdy(depth);
-    moments.y = depth * depth + 0.25 * (dx * dx + dy * dy);
+    // nothing to do
 }
