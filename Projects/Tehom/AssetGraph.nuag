@@ -8,6 +8,8 @@
    [Assets Assets/Default [nuentity nugroup tsx tmx] [] []]]]
  [Gui
   [[Assets Assets/Gui [bmp png psd] [Render2d] [PsdToPng]]
+   [Asset ClearSansFont "Assets/Gui/ClearSans.016.ttf" [Render2d] []]
+   [Asset MontSerratFont "Assets/Gui/Montserrat-Regular.016.ttf" [Render2d] []]
    [Assets Assets/Gui [jpg jpeg tga tif tiff dds] [Render3d] [ConvertToDds]]
    [Assets Assets/Gui [cbm fbx dae obj mtl glsl raw] [Render3d] []]
    [Assets Assets/Gui [wav ogg mp3] [Audio] []]

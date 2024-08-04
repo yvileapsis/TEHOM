@@ -1,32 +1,9 @@
-﻿namespace Tehom
+namespace Tehom
+
 open System
 open System.Numerics
 open Prime
 open Nu
-
-// this represents the state of gameplay simulation.
-type GameplayState =
-    | Playing
-    | Quit
-
-// this is our MMCC model type representing gameplay.
-// this model representation uses update time, that is, time based on number of engine updates.
-type Gameplay = {
-    GameplayTime : int64
-    GameplayState : GameplayState
-}
-with
-    // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
-    static member empty = {
-        GameplayTime = 0L
-        GameplayState = Quit
-    }
-
-    // this represents the gameplay model in its initial state, such as when gameplay starts.
-    static member initial = {
-        Gameplay.empty with
-            GameplayState = Playing
-    }
 
 // this is our gameplay MMCC message type.
 type GameplayMessage =
@@ -107,6 +84,13 @@ type GameplayDispatcher () =
         // the scene group while playing
         match gameplay.GameplayState with
         | Playing ->
+
+            GameplayGroups.background
+            GameplayGroups.sceneName gameplay
+            GameplayGroups.scenes gameplay
+            GameplayGroups.actionInput gameplay
+
+            (*
             Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] [
                 Content.staticModel "StaticModel" [
                     Entity.Position == v3 0.0f 1.0f 0.0f
@@ -114,7 +98,7 @@ type GameplayDispatcher () =
                         Quaternion.CreateFromAxisAngle ((v3 1.0f 0.75f 0.5f).Normalized,
                         gameplay.GameplayTime % 360L |> single |> Math.DegreesToRadians)
                 ]
-            ]
+            ]*)
 
         // no scene group otherwise
         | Quit -> ()
