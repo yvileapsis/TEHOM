@@ -24,6 +24,8 @@ type [<Struct>] JustificationH =
     | JustifyLeft
     | JustifyCenter
     | JustifyRight
+    // TODO: confirm this is fine
+    | JustifyFull
 
 /// Vertical justification.
 type [<Struct>] JustificationV =
