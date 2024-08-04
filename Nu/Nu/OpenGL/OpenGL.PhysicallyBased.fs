@@ -339,11 +339,26 @@ module PhysicallyBased =
     /// Describes the lighting pass of a deferred physically-based shader that's loaded into GPU.
     type PhysicallyBasedDeferredLightingShader =
         { EyeCenterUniform : int
+          ViewUniform : int
+          ProjectionUniform : int
           LightCutoffMarginUniform : int
           LightAmbientColorUniform : int
           LightAmbientBrightnessUniform : int
           LightShadowBiasAcneUniform : int
           LightShadowBiasBleedUniform : int
+          SsrEnabledUniform : int
+          SsrDetailUniform : int
+          SsrDepthMaxUniform : int
+          SsrDistanceMaxUniform : int
+          SsrRefinementsMaxUniform : int
+          SsrRoughnessMaxUniform : int
+          SsrSurfaceSlopeMaxUniform : int
+          SsrRayThicknessMarchUniform : int
+          SsrRayThicknessRefinementUniform : int
+          SsrFilterCutoffUniform : int
+          SsrEdgeCutoffHorizontalUniform : int
+          SsrEdgeCutoffVerticalUniform : int
+          SsrLightColorUniform : int
           PositionTextureUniform : int
           AlbedoTextureUniform : int
           MaterialTextureUniform : int
@@ -1612,11 +1627,26 @@ module PhysicallyBased =
 
         // retrieve uniforms
         let eyeCenterUniform = Gl.GetUniformLocation (shader, "eyeCenter")
+        let viewUniform = Gl.GetUniformLocation (shader, "view")
+        let projectionUniform = Gl.GetUniformLocation (shader, "projection")
         let lightCutoffMarginUniform = Gl.GetUniformLocation (shader, "lightCutoffMargin")
         let lightAmbientColorUniform = Gl.GetUniformLocation (shader, "lightAmbientColor")
         let lightAmbientBrightnessUniform = Gl.GetUniformLocation (shader, "lightAmbientBrightness")
         let lightShadowBiasAcneUniform = Gl.GetUniformLocation (shader, "lightShadowBiasAcne")
         let lightShadowBiasBleedUniform = Gl.GetUniformLocation (shader, "lightShadowBiasBleed")
+        let ssrEnabled = Gl.GetUniformLocation (shader, "ssrEnabled")
+        let ssrDetail = Gl.GetUniformLocation (shader, "ssrDetail")
+        let ssrDepthMax = Gl.GetUniformLocation (shader, "ssrDepthMax")
+        let ssrDistanceMax = Gl.GetUniformLocation (shader, "ssrDistanceMax")
+        let ssrRefinementsMax = Gl.GetUniformLocation (shader, "ssrRefinementsMax")
+        let ssrRoughnessMax = Gl.GetUniformLocation (shader, "ssrRoughnessMax")
+        let ssrSurfaceSlopeMax = Gl.GetUniformLocation (shader, "ssrSurfaceSlopeMax")
+        let ssrRayThicknessMarch = Gl.GetUniformLocation (shader, "ssrRayThicknessMarch")
+        let ssrRayThicknessRefinement = Gl.GetUniformLocation (shader, "ssrRayThicknessRefinement")
+        let ssrFilterCutoff = Gl.GetUniformLocation (shader, "ssrFilterCutoff")
+        let ssrEdgeCutoffHorizontal = Gl.GetUniformLocation (shader, "ssrEdgeCutoffHorizontal")
+        let ssrEdgeCutoffVertical = Gl.GetUniformLocation (shader, "ssrEdgeCutoffVertical")
+        let SsrLightColor = Gl.GetUniformLocation (shader, "ssrLightColor")
         let positionTextureUniform = Gl.GetUniformLocation (shader, "positionTexture")
         let albedoTextureUniform = Gl.GetUniformLocation (shader, "albedoTexture")
         let materialTextureUniform = Gl.GetUniformLocation (shader, "materialTexture")
@@ -1646,11 +1676,26 @@ module PhysicallyBased =
 
         // make shader record
         { EyeCenterUniform = eyeCenterUniform
+          ViewUniform = viewUniform
+          ProjectionUniform = projectionUniform
           LightCutoffMarginUniform = lightCutoffMarginUniform
           LightAmbientColorUniform = lightAmbientColorUniform
           LightAmbientBrightnessUniform = lightAmbientBrightnessUniform
           LightShadowBiasAcneUniform = lightShadowBiasAcneUniform
           LightShadowBiasBleedUniform = lightShadowBiasBleedUniform
+          SsrEnabledUniform = ssrEnabled
+          SsrDetailUniform = ssrDetail
+          SsrDepthMaxUniform = ssrDepthMax
+          SsrDistanceMaxUniform = ssrDistanceMax
+          SsrRefinementsMaxUniform = ssrRefinementsMax
+          SsrRoughnessMaxUniform = ssrRoughnessMax
+          SsrSurfaceSlopeMaxUniform = ssrSurfaceSlopeMax
+          SsrRayThicknessMarchUniform = ssrRayThicknessMarch
+          SsrRayThicknessRefinementUniform = ssrRayThicknessRefinement
+          SsrFilterCutoffUniform = ssrFilterCutoff
+          SsrEdgeCutoffHorizontalUniform = ssrEdgeCutoffHorizontal
+          SsrEdgeCutoffVerticalUniform = ssrEdgeCutoffVertical
+          SsrLightColorUniform = SsrLightColor
           PositionTextureUniform = positionTextureUniform
           AlbedoTextureUniform = albedoTextureUniform
           MaterialTextureUniform = materialTextureUniform
@@ -2566,11 +2611,26 @@ module PhysicallyBased =
     /// Draw the lighting pass of a deferred physically-based surface.
     let DrawPhysicallyBasedDeferredLightingSurface
         (eyeCenter : Vector3,
+         view : single array,
+         projection : single array,
          lightCutoffMargin : single,
          lightAmbientColor : single array,
          lightAmbientBrightness : single,
          lightShadowBiasAcne : single,
          lightShadowBiasBleed : single,
+         ssrEnabled : int,
+         ssrDetail : single,
+         ssrDepthMax : single,
+         ssrDistanceMax : single,
+         ssrRefinementsMax : int,
+         ssrRoughnessMax : single,
+         ssrSurfaceSlopeMax : single,
+         ssrRayThicknessMarch : single,
+         ssrRayThicknessRefinement : single,
+         ssrFilterCutoff : single,
+         ssrEdgeCutoffHorizontal : single,
+         ssrEdgeCutoffVertical : single,
+         ssrLightColor : single array,
          positionTexture : Texture.Texture,
          albedoTexture : Texture.Texture,
          materialTexture : Texture.Texture,
@@ -2599,11 +2659,26 @@ module PhysicallyBased =
         // setup shader
         Gl.UseProgram shader.PhysicallyBasedDeferredLightingShader
         Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
+        Gl.UniformMatrix4 (shader.ViewUniform, false, view)
+        Gl.UniformMatrix4 (shader.ProjectionUniform, false, projection)
         Gl.Uniform1 (shader.LightCutoffMarginUniform, lightCutoffMargin)
         Gl.Uniform3 (shader.LightAmbientColorUniform, lightAmbientColor)
         Gl.Uniform1 (shader.LightAmbientBrightnessUniform, lightAmbientBrightness)
         Gl.Uniform1 (shader.LightShadowBiasAcneUniform, lightShadowBiasAcne)
         Gl.Uniform1 (shader.LightShadowBiasBleedUniform, lightShadowBiasBleed)
+        Gl.Uniform1 (shader.SsrEnabledUniform, ssrEnabled)
+        Gl.Uniform1 (shader.SsrDetailUniform, ssrDetail)
+        Gl.Uniform1 (shader.SsrDepthMaxUniform, ssrDepthMax)
+        Gl.Uniform1 (shader.SsrDistanceMaxUniform, ssrDistanceMax)
+        Gl.Uniform1 (shader.SsrRefinementsMaxUniform, ssrRefinementsMax)
+        Gl.Uniform1 (shader.SsrRoughnessMaxUniform, ssrRoughnessMax)
+        Gl.Uniform1 (shader.SsrSurfaceSlopeMaxUniform, ssrSurfaceSlopeMax)
+        Gl.Uniform1 (shader.SsrRayThicknessMarchUniform, ssrRayThicknessMarch)
+        Gl.Uniform1 (shader.SsrRayThicknessRefinementUniform, ssrRayThicknessRefinement)
+        Gl.Uniform1 (shader.SsrFilterCutoffUniform, ssrFilterCutoff)
+        Gl.Uniform1 (shader.SsrEdgeCutoffHorizontalUniform, ssrEdgeCutoffHorizontal)
+        Gl.Uniform1 (shader.SsrEdgeCutoffVerticalUniform, ssrEdgeCutoffVertical)
+        Gl.Uniform3 (shader.SsrLightColorUniform, ssrLightColor)
         Gl.Uniform1 (shader.PositionTextureUniform, 0)
         Gl.Uniform1 (shader.AlbedoTextureUniform, 1)
         Gl.Uniform1 (shader.MaterialTextureUniform, 2)
