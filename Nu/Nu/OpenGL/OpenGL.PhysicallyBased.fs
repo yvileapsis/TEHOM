@@ -138,6 +138,8 @@ module PhysicallyBased =
             surface.HashCode
 
         static member equals left right =
+            refEq left right || // OPTIMIZATION: first check ref equality.
+            left.HashCode = right.HashCode && // OPTIMIZATION: check hash equality to bail as quickly as possible.
             left.SurfaceMaterial.AlbedoTexture = right.SurfaceMaterial.AlbedoTexture &&
             left.SurfaceMaterial.RoughnessTexture = right.SurfaceMaterial.RoughnessTexture &&
             left.SurfaceMaterial.MetallicTexture = right.SurfaceMaterial.MetallicTexture &&
@@ -348,17 +350,21 @@ module PhysicallyBased =
           LightShadowBiasBleedUniform : int
           SsrEnabledUniform : int
           SsrDetailUniform : int
-          SsrDepthMaxUniform : int
-          SsrDistanceMaxUniform : int
           SsrRefinementsMaxUniform : int
-          SsrRoughnessMaxUniform : int
-          SsrSurfaceSlopeMaxUniform : int
-          SsrRayThicknessMarchUniform : int
-          SsrRayThicknessRefinementUniform : int
-          SsrFilterCutoffUniform : int
-          SsrEdgeCutoffHorizontalUniform : int
-          SsrEdgeCutoffVerticalUniform : int
+          SsrRayThicknessUniform : int
+          SsrTowardEyeCutoffUniform : int
+          SsrDepthCutoffUniform : int
+          SsrDepthCutoffMarginUniform : int
+          SsrDistanceCutoffUniform : int
+          SsrDistanceCutoffMarginUniform : int
+          SsrRoughnessCutoffUniform : int
+          SsrRoughnessCutoffMarginUniform : int
+          SsrSlopeCutoffUniform : int
+          SsrSlopeCutoffMarginUniform : int
+          SsrEdgeHorizontalMarginUniform : int
+          SsrEdgeVerticalMarginUniform : int
           SsrLightColorUniform : int
+          SsrLightBrightnessUniform : int
           PositionTextureUniform : int
           AlbedoTextureUniform : int
           MaterialTextureUniform : int
@@ -1617,7 +1623,7 @@ module PhysicallyBased =
           SsaoDistanceMax = ssaoDistanceMax
           SsaoSampleCount = ssaoSampleCount
           PhysicallyBasedDeferredSsaoShader = shader }
-
+          
     /// Create a physically-based shader for the lighting pass of deferred rendering.
     let CreatePhysicallyBasedDeferredLightingShader (shaderFilePath : string) =
 
@@ -1634,19 +1640,23 @@ module PhysicallyBased =
         let lightAmbientBrightnessUniform = Gl.GetUniformLocation (shader, "lightAmbientBrightness")
         let lightShadowBiasAcneUniform = Gl.GetUniformLocation (shader, "lightShadowBiasAcne")
         let lightShadowBiasBleedUniform = Gl.GetUniformLocation (shader, "lightShadowBiasBleed")
-        let ssrEnabled = Gl.GetUniformLocation (shader, "ssrEnabled")
-        let ssrDetail = Gl.GetUniformLocation (shader, "ssrDetail")
-        let ssrDepthMax = Gl.GetUniformLocation (shader, "ssrDepthMax")
-        let ssrDistanceMax = Gl.GetUniformLocation (shader, "ssrDistanceMax")
-        let ssrRefinementsMax = Gl.GetUniformLocation (shader, "ssrRefinementsMax")
-        let ssrRoughnessMax = Gl.GetUniformLocation (shader, "ssrRoughnessMax")
-        let ssrSurfaceSlopeMax = Gl.GetUniformLocation (shader, "ssrSurfaceSlopeMax")
-        let ssrRayThicknessMarch = Gl.GetUniformLocation (shader, "ssrRayThicknessMarch")
-        let ssrRayThicknessRefinement = Gl.GetUniformLocation (shader, "ssrRayThicknessRefinement")
-        let ssrFilterCutoff = Gl.GetUniformLocation (shader, "ssrFilterCutoff")
-        let ssrEdgeCutoffHorizontal = Gl.GetUniformLocation (shader, "ssrEdgeCutoffHorizontal")
-        let ssrEdgeCutoffVertical = Gl.GetUniformLocation (shader, "ssrEdgeCutoffVertical")
-        let SsrLightColor = Gl.GetUniformLocation (shader, "ssrLightColor")
+        let ssrEnabledUniform = Gl.GetUniformLocation (shader, "ssrEnabled")
+        let ssrDetailUniform = Gl.GetUniformLocation (shader, "ssrDetail")
+        let ssrRefinementsMaxUniform = Gl.GetUniformLocation (shader, "ssrRefinementsMax")
+        let ssrRayThicknessUniform = Gl.GetUniformLocation (shader, "ssrRayThickness")
+        let ssrTowardEyeCutoffUniform = Gl.GetUniformLocation (shader, "ssrTowardEyeCutoff")
+        let ssrDepthCutoffUniform = Gl.GetUniformLocation (shader, "ssrDepthCutoff")
+        let ssrDepthCutoffMarginUniform = Gl.GetUniformLocation (shader, "ssrDepthCutoffMargin")
+        let ssrDistanceCutoffUniform = Gl.GetUniformLocation (shader, "ssrDistanceCutoff")
+        let ssrDistanceCutoffMarginUniform = Gl.GetUniformLocation (shader, "ssrDistanceCutoffMargin")
+        let ssrRoughnessCutoffUniform = Gl.GetUniformLocation (shader, "ssrRoughnessCutoff")
+        let ssrRoughnessCutoffMarginUniform = Gl.GetUniformLocation (shader, "ssrRoughnessCutoffMargin")
+        let ssrSlopeCutoffUniform = Gl.GetUniformLocation (shader, "ssrSlopeCutoff")
+        let ssrSlopeCutoffMarginUniform = Gl.GetUniformLocation (shader, "ssrSlopeCutoffMargin")
+        let ssrEdgeHorizontalMarginUniform = Gl.GetUniformLocation (shader, "ssrEdgeHorizontalMargin")
+        let ssrEdgeVerticalMarginUniform = Gl.GetUniformLocation (shader, "ssrEdgeVerticalMargin")
+        let ssrLightColorUniform = Gl.GetUniformLocation (shader, "ssrLightColor")
+        let ssrLightBrightnessUniform = Gl.GetUniformLocation (shader, "ssrLightBrightness")
         let positionTextureUniform = Gl.GetUniformLocation (shader, "positionTexture")
         let albedoTextureUniform = Gl.GetUniformLocation (shader, "albedoTexture")
         let materialTextureUniform = Gl.GetUniformLocation (shader, "materialTexture")
@@ -1683,19 +1693,23 @@ module PhysicallyBased =
           LightAmbientBrightnessUniform = lightAmbientBrightnessUniform
           LightShadowBiasAcneUniform = lightShadowBiasAcneUniform
           LightShadowBiasBleedUniform = lightShadowBiasBleedUniform
-          SsrEnabledUniform = ssrEnabled
-          SsrDetailUniform = ssrDetail
-          SsrDepthMaxUniform = ssrDepthMax
-          SsrDistanceMaxUniform = ssrDistanceMax
-          SsrRefinementsMaxUniform = ssrRefinementsMax
-          SsrRoughnessMaxUniform = ssrRoughnessMax
-          SsrSurfaceSlopeMaxUniform = ssrSurfaceSlopeMax
-          SsrRayThicknessMarchUniform = ssrRayThicknessMarch
-          SsrRayThicknessRefinementUniform = ssrRayThicknessRefinement
-          SsrFilterCutoffUniform = ssrFilterCutoff
-          SsrEdgeCutoffHorizontalUniform = ssrEdgeCutoffHorizontal
-          SsrEdgeCutoffVerticalUniform = ssrEdgeCutoffVertical
-          SsrLightColorUniform = SsrLightColor
+          SsrEnabledUniform = ssrEnabledUniform
+          SsrDetailUniform = ssrDetailUniform
+          SsrRefinementsMaxUniform = ssrRefinementsMaxUniform
+          SsrRayThicknessUniform = ssrRayThicknessUniform
+          SsrTowardEyeCutoffUniform = ssrTowardEyeCutoffUniform
+          SsrDepthCutoffUniform = ssrDepthCutoffUniform
+          SsrDepthCutoffMarginUniform = ssrDepthCutoffMarginUniform
+          SsrDistanceCutoffUniform = ssrDistanceCutoffUniform
+          SsrDistanceCutoffMarginUniform = ssrDistanceCutoffMarginUniform
+          SsrRoughnessCutoffUniform = ssrRoughnessCutoffUniform
+          SsrRoughnessCutoffMarginUniform = ssrRoughnessCutoffMarginUniform
+          SsrSlopeCutoffUniform = ssrSlopeCutoffUniform
+          SsrSlopeCutoffMarginUniform = ssrSlopeCutoffMarginUniform
+          SsrEdgeHorizontalMarginUniform = ssrEdgeHorizontalMarginUniform
+          SsrEdgeVerticalMarginUniform = ssrEdgeVerticalMarginUniform
+          SsrLightColorUniform = ssrLightColorUniform
+          SsrLightBrightnessUniform = ssrLightBrightnessUniform
           PositionTextureUniform = positionTextureUniform
           AlbedoTextureUniform = albedoTextureUniform
           MaterialTextureUniform = materialTextureUniform
@@ -1779,9 +1793,12 @@ module PhysicallyBased =
         Gl.BindVertexArray 0u
         Hl.Assert ()
 
-        // teardown shader
+        // teardown textures
         Gl.ActiveTexture TextureUnit.Texture0
         Gl.BindTexture (TextureTarget.Texture2d, 0u)
+        Hl.Assert ()
+
+        // teardown shader
         Gl.UseProgram 0u
 
     /// Draw the filter gaussian pass using a physically-based surface.
@@ -2288,19 +2305,19 @@ module PhysicallyBased =
         // setup textures
         for i in 0 .. dec layersCount do
             Gl.ActiveTexture (int TextureUnit.Texture0 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials[i].AlbedoTexture.TextureId)
+            Gl.BindTexture (TextureTarget.Texture2d, materials.[i].AlbedoTexture.TextureId)
         for i in 0 .. dec layersCount do
             Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials[i].RoughnessTexture.TextureId)
+            Gl.BindTexture (TextureTarget.Texture2d, materials.[i].RoughnessTexture.TextureId)
         for i in 0 .. dec layersCount do
             Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax * 2 |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials[i].AmbientOcclusionTexture.TextureId)
+            Gl.BindTexture (TextureTarget.Texture2d, materials.[i].AmbientOcclusionTexture.TextureId)
         for i in 0 .. dec layersCount do
             Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax * 3 |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials[i].NormalTexture.TextureId)
+            Gl.BindTexture (TextureTarget.Texture2d, materials.[i].NormalTexture.TextureId)
         for i in 0 .. dec layersCount do
             Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax * 4 |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials[i].HeightTexture.TextureId)
+            Gl.BindTexture (TextureTarget.Texture2d, materials.[i].HeightTexture.TextureId)
         Hl.Assert ()
 
         // update instance buffer
@@ -2620,17 +2637,21 @@ module PhysicallyBased =
          lightShadowBiasBleed : single,
          ssrEnabled : int,
          ssrDetail : single,
-         ssrDepthMax : single,
-         ssrDistanceMax : single,
          ssrRefinementsMax : int,
-         ssrRoughnessMax : single,
-         ssrSurfaceSlopeMax : single,
-         ssrRayThicknessMarch : single,
-         ssrRayThicknessRefinement : single,
-         ssrFilterCutoff : single,
-         ssrEdgeCutoffHorizontal : single,
-         ssrEdgeCutoffVertical : single,
+         ssrRayThickness : single,
+         ssrTowardEyeCutoff : single,
+         ssrDepthCutoff : single,
+         ssrDepthCutoffMargin : single,
+         ssrDistanceCutoff : single,
+         ssrDistanceCutoffMargin : single,
+         ssrRoughnessCutoff : single,
+         ssrRoughnessCutoffMargin : single,
+         ssrSlopeCutoff : single,
+         ssrSlopeCutoffMargin : single,
+         ssrEdgeHorizontalMargin : single,
+         ssrEdgeVerticalMargin : single,
          ssrLightColor : single array,
+         ssrLightBrightness : single,
          positionTexture : Texture.Texture,
          albedoTexture : Texture.Texture,
          materialTexture : Texture.Texture,
@@ -2668,17 +2689,21 @@ module PhysicallyBased =
         Gl.Uniform1 (shader.LightShadowBiasBleedUniform, lightShadowBiasBleed)
         Gl.Uniform1 (shader.SsrEnabledUniform, ssrEnabled)
         Gl.Uniform1 (shader.SsrDetailUniform, ssrDetail)
-        Gl.Uniform1 (shader.SsrDepthMaxUniform, ssrDepthMax)
-        Gl.Uniform1 (shader.SsrDistanceMaxUniform, ssrDistanceMax)
         Gl.Uniform1 (shader.SsrRefinementsMaxUniform, ssrRefinementsMax)
-        Gl.Uniform1 (shader.SsrRoughnessMaxUniform, ssrRoughnessMax)
-        Gl.Uniform1 (shader.SsrSurfaceSlopeMaxUniform, ssrSurfaceSlopeMax)
-        Gl.Uniform1 (shader.SsrRayThicknessMarchUniform, ssrRayThicknessMarch)
-        Gl.Uniform1 (shader.SsrRayThicknessRefinementUniform, ssrRayThicknessRefinement)
-        Gl.Uniform1 (shader.SsrFilterCutoffUniform, ssrFilterCutoff)
-        Gl.Uniform1 (shader.SsrEdgeCutoffHorizontalUniform, ssrEdgeCutoffHorizontal)
-        Gl.Uniform1 (shader.SsrEdgeCutoffVerticalUniform, ssrEdgeCutoffVertical)
+        Gl.Uniform1 (shader.SsrRayThicknessUniform, ssrRayThickness)
+        Gl.Uniform1 (shader.SsrTowardEyeCutoffUniform, ssrTowardEyeCutoff)
+        Gl.Uniform1 (shader.SsrDepthCutoffUniform, ssrDepthCutoff)
+        Gl.Uniform1 (shader.SsrDepthCutoffMarginUniform, ssrDepthCutoffMargin)
+        Gl.Uniform1 (shader.SsrDistanceCutoffUniform, ssrDistanceCutoff)
+        Gl.Uniform1 (shader.SsrDistanceCutoffMarginUniform, ssrDistanceCutoffMargin)
+        Gl.Uniform1 (shader.SsrRoughnessCutoffUniform, ssrRoughnessCutoff)
+        Gl.Uniform1 (shader.SsrRoughnessCutoffMarginUniform, ssrRoughnessCutoffMargin)
+        Gl.Uniform1 (shader.SsrSlopeCutoffUniform, ssrSlopeCutoff)
+        Gl.Uniform1 (shader.SsrSlopeCutoffMarginUniform, ssrSlopeCutoffMargin)
+        Gl.Uniform1 (shader.SsrEdgeHorizontalMarginUniform, ssrEdgeHorizontalMargin)
+        Gl.Uniform1 (shader.SsrEdgeVerticalMarginUniform, ssrEdgeVerticalMargin)
         Gl.Uniform3 (shader.SsrLightColorUniform, ssrLightColor)
+        Gl.Uniform1 (shader.SsrLightBrightnessUniform, ssrLightBrightness)
         Gl.Uniform1 (shader.PositionTextureUniform, 0)
         Gl.Uniform1 (shader.AlbedoTextureUniform, 1)
         Gl.Uniform1 (shader.MaterialTextureUniform, 2)

@@ -388,10 +388,6 @@ module WorldModule2 =
             let world = World.setEntityProtected true slideSprite world |> snd'
             let world = slideSprite.SetPersistent false world
             let world = slideSprite.SetSize eyeSize.V3 world
-            let world =
-                if not Constants.Engine.Entity2dPerimeterCenteredDefault
-                then slideSprite.SetPosition (-eyeSize.V3 * 0.5f) world
-                else world
             let world = slideSprite.SetAbsolute true world
             let world =
                 match slideDescriptor.SlideImageOpt with
@@ -453,7 +449,7 @@ module WorldModule2 =
                 if considerUsingCurrentEntityAsPropagationSource then
                     match currentEntityOpt with
                     | Some currentEntity ->
-                        if currentEntity.GetExists world && World.hasPropagationTargets currentEntity world
+                        if currentEntity.GetExists world && currentEntity.HasPropagationTargets world
                         then { propagatedDescriptor with EntityProperties = Map.add Constants.Engine.PropagationSourceOptPropertyName (valueToSymbol (Some currentEntity)) propagatedDescriptor.EntityProperties }
                         else propagatedDescriptor
                     | None -> propagatedDescriptor
@@ -598,10 +594,10 @@ module WorldModule2 =
 
         /// Propagate the structure of an entity to all other entities with it as their propagation source.
         /// TODO: expose this through Entity API.
-        static member propagateEntityStructure entity world =
+        static member propagateEntityStructure (entity : Entity) world =
 
             // propagate entity
-            let targets = World.getPropagationTargets entity world
+            let targets = entity.GetPropagationTargets world
             let currentDescriptor = World.writeEntity true EntityDescriptor.empty entity world
             let previousDescriptor = Option.defaultValue EntityDescriptor.empty (entity.GetPropagatedDescriptorOpt world)
             let world =
@@ -622,21 +618,21 @@ module WorldModule2 =
 
             // propagate sourced ancestor entities
             seq {
-                for target in World.getPropagationTargets entity world do
+                for target in entity.GetPropagationTargets world do
                     if target.GetExists world then
                         for ancestor in World.getEntityAncestors target world do
-                            if ancestor.GetExists world && World.hasPropagationTargets ancestor world then
+                            if ancestor.GetExists world && ancestor.HasPropagationTargets world then
                                 ancestor } |>
             Set.ofSeq |>
             Set.fold (fun world ancestor ->
-                if ancestor.GetExists world && World.hasPropagationTargets ancestor world
+                if ancestor.GetExists world && ancestor.HasPropagationTargets world
                 then World.propagateEntityStructure ancestor world
                 else world)
                 world
 
         /// Clear all propagation targets pointing back to the given entity.
-        static member clearPropagationTargets entity world =
-            let targets = World.getPropagationTargets entity world
+        static member clearPropagationTargets (entity : Entity) world =
+            let targets = entity.GetPropagationTargets world
             Seq.fold (fun world target ->
                 if World.getEntityExists target world
                 then target.SetPropagationSourceOpt None world
@@ -1042,17 +1038,17 @@ module WorldModule2 =
             match World.getLiveness world with
             | Live ->
                 match integrationMessage with
-                | BodyCollisionMessage bodyCollisionMessage ->
-                    match bodyCollisionMessage.BodyShapeSource.BodyId.BodySource with
+                | BodyPenetrationMessage bodyPenetrationMessage ->
+                    match bodyPenetrationMessage.BodyShapeSource.BodyId.BodySource with
                     | :? Entity as entity ->
                         if entity.GetExists world && entity.GetSelected world then
-                            let collisionData =
-                                { BodyShapeCollider = bodyCollisionMessage.BodyShapeSource
-                                  BodyShapeCollidee = bodyCollisionMessage.BodyShapeSource2
-                                  Normal = bodyCollisionMessage.Normal }
-                            let collisionAddress = entity.BodyCollisionEvent
+                            let penetrationData =
+                                { BodyShapePenetrator = bodyPenetrationMessage.BodyShapeSource
+                                  BodyShapePenetratee = bodyPenetrationMessage.BodyShapeSource2
+                                  Normal = bodyPenetrationMessage.Normal }
+                            let penetrationAddress = entity.BodyPenetrationEvent
                             let eventTrace = EventTrace.debug "World" "processIntegrationMessage" "" EventTrace.empty
-                            World.publishPlus collisionData collisionAddress eventTrace Nu.Game.Handle false false world
+                            World.publishPlus penetrationData penetrationAddress eventTrace Nu.Game.Handle false false world
                         else world
                     | _ -> world
                 | BodySeparationMessage bodySeparationMessage ->
@@ -1365,10 +1361,8 @@ module WorldModule2 =
                         | (_, _) -> failwithumf ()
                     let alpha = match transition.TransitionType with Incoming -> 1.0f - progress | Outgoing -> progress
                     let color = Color.One.WithA alpha
-                    let position = -eyeSize.V3 * 0.5f
                     let size = eyeSize.V3
-                    let mutable transform = Transform.makeDefault false
-                    transform.Position <- position
+                    let mutable transform = Transform.makeDefault ()
                     transform.Size <- size
                     transform.Elevation <- Single.MaxValue
                     transform.Absolute <- true
@@ -1850,11 +1844,11 @@ module EntityDispatcherModule2 =
 
     /// The MMCC dispatcher for entities.
     and [<AbstractClass>] EntityDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command>
-        (is2d, perimeterCentered, physical, lightProbe, light, makeInitial : World -> 'model) =
-        inherit EntityDispatcher (is2d, perimeterCentered, physical, lightProbe, light)
+        (is2d, physical, lightProbe, light, makeInitial : World -> 'model) =
+        inherit EntityDispatcher (is2d, physical, lightProbe, light)
 
-        new (is2d, perimeterCentered, physical, lightProbe, light, initial : 'model) =
-            EntityDispatcher<'model, 'message, 'command> (is2d, perimeterCentered, physical, lightProbe, light, fun _ -> initial)
+        new (is2d, physical, lightProbe, light, initial : 'model) =
+            EntityDispatcher<'model, 'message, 'command> (is2d, physical, lightProbe, light, fun _ -> initial)
 
         /// Get the entity's model.
         member this.GetModel (entity : Entity) world : 'model =
@@ -1982,25 +1976,18 @@ module EntityDispatcherModule2 =
         default this.UntruncateModel (_, incoming) = incoming
 
     /// A 2d entity dispatcher.
-    and [<AbstractClass>] Entity2dDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (perimeterCentered, physical, lightProbe, light, makeInitial : World -> 'model) =
-        inherit EntityDispatcher<'model, 'message, 'command> (true, perimeterCentered, physical, lightProbe, light, makeInitial)
-
-        new (centered, physical, lightProbe, light, initial : 'model) =
-            Entity2dDispatcher<'model, 'message, 'command> (centered, physical, lightProbe, light, fun _ -> initial)
-
-        new (physical, lightProbe, light, makeInitial : World -> 'model) =
-            Entity2dDispatcher<'model, 'message, 'command> (Constants.Engine.Entity2dPerimeterCenteredDefault, physical, lightProbe, light, makeInitial)
+    and [<AbstractClass>] Entity2dDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (physical, lightProbe, light, makeInitial : World -> 'model) =
+        inherit EntityDispatcher<'model, 'message, 'command> (true, physical, lightProbe, light, makeInitial)
 
         new (physical, lightProbe, light, initial : 'model) =
             Entity2dDispatcher<'model, 'message, 'command> (physical, lightProbe, light, fun _ -> initial)
 
         static member Properties =
-            [define Entity.Size Constants.Engine.Entity2dSizeDefault
-             define Entity.PerimeterCentered Constants.Engine.Entity2dPerimeterCenteredDefault]
+            [define Entity.Size Constants.Engine.Entity2dSizeDefault]
 
     /// A gui entity dispatcher.
     and [<AbstractClass>] GuiDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (makeInitial : World -> 'model) =
-        inherit EntityDispatcher<'model, 'message, 'command> (true, Constants.Engine.EntityGuiPerimeterCenteredDefault, false, false, false, makeInitial)
+        inherit EntityDispatcher<'model, 'message, 'command> (true, false, false, false, makeInitial)
 
         new (initial : 'model) =
             GuiDispatcher<'model, 'message, 'command> (fun _ -> initial)
@@ -2009,9 +1996,7 @@ module EntityDispatcherModule2 =
             [typeof<LayoutFacet>]
 
         static member Properties =
-            [define Entity.Size Constants.Engine.EntityGuiSizeDefault
-             define Entity.PerimeterCentered Constants.Engine.EntityGuiPerimeterCenteredDefault
-             define Entity.Presence Omnipresent
+            [define Entity.Presence Omnipresent
              define Entity.Absolute true
              define Entity.DisabledColor Constants.Gui.DisabledColor
              define Entity.Layout Manual
@@ -2022,7 +2007,7 @@ module EntityDispatcherModule2 =
 
     /// A 3d entity dispatcher.
     and [<AbstractClass>] Entity3dDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (physical, lightProbe, light, makeInitial : World -> 'model) =
-        inherit EntityDispatcher<'model, 'message, 'command> (false, true, physical, lightProbe, light, makeInitial)
+        inherit EntityDispatcher<'model, 'message, 'command> (false, physical, lightProbe, light, makeInitial)
 
         new (physical, lightProbe, light, initial : 'model) =
             Entity3dDispatcher<'model, 'message, 'command> (physical, lightProbe, light, fun _ -> initial)
@@ -2039,7 +2024,7 @@ module EntityDispatcherModule2 =
 
     /// A vui dispatcher (gui in 3d).
     and [<AbstractClass>] VuiDispatcher<'model, 'message, 'command when 'message :> Message and 'command :> Command> (makeInitial : World -> 'model) =
-        inherit EntityDispatcher<'model, 'message, 'command> (false, true, false, false, false, makeInitial)
+        inherit EntityDispatcher<'model, 'message, 'command> (false, false, false, false, makeInitial)
 
         static member Properties =
             [define Entity.Size Constants.Engine.EntityVuiSizeDefault]
@@ -2062,11 +2047,12 @@ module EntityPropertyDescriptor =
         let rigidBodyProperties = Reflection.getPropertyDefinitions typeof<RigidBodyFacet>
         if  propertyName = "Name" ||
             propertyName = "Surnames" ||
-            propertyName = "Model" ||
             propertyName = "MountOpt" ||
             propertyName = "PropagationSourceOpt" ||
             propertyName = "OverlayNameOpt" then
             "Ambient Properties"
+        elif propertyName = "Model" then
+            "Basic Model Properties"
         elif propertyName = "Degrees" || propertyName = "DegreesLocal" ||
              propertyName = "Elevation" || propertyName = "ElevationLocal" ||
              propertyName = "Offset" || propertyName = "Overflow" ||
@@ -2077,7 +2063,8 @@ module EntityPropertyDescriptor =
              propertyName = "Size" then
              "Basic Transform Properties"
         elif List.exists (fun (property : PropertyDefinition) -> propertyName = property.PropertyName) baseProperties then "Configuration Properties"
-        elif propertyName = "MaterialProperties" || propertyName = "Material" then "Material Properties"
+        elif propertyName = "MaterialProperties" then "Material Properties"
+        elif propertyName = "Material" then "Material Properties 2"
         elif propertyName = "NavShape" || propertyName = "Nav3dConfig" then "Navigation Properties"
         elif List.exists (fun (property : PropertyDefinition) -> propertyName = property.PropertyName) rigidBodyProperties then "Physics Properties"
         else "Uncategorized Properties"

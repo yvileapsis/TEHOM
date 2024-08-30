@@ -18,7 +18,7 @@ type [<CustomEquality; NoComparison>] private UnscaledPointsKey =
         chs.HashCode
 
     static member equals left right =
-        left.HashCode = right.HashCode &&
+        left.HashCode = right.HashCode && // TODO: ensure this isn't just a minor pessimization.
         Enumerable.SequenceEqual (left.Vertices, right.Vertices)
 
     static member comparer =
@@ -77,14 +77,14 @@ type [<ReferenceEquality>] PhysicsEngine3d =
           CreateBodyJointMessages : Dictionary<BodyId, CreateBodyJointMessage List>
           IntegrationMessages : IntegrationMessage List }
 
-    static member private handleCollision physicsEngine (bodyId : BodyId) (bodyId2 : BodyId) normal =
-        let bodyCollisionMessage =
+    static member private handlePenetration physicsEngine (bodyId : BodyId) (bodyId2 : BodyId) normal =
+        let bodyPenetrationMessage =
             { BodyShapeSource = { BodyId = bodyId; BodyShapeIndex = 0 }
               BodyShapeSource2 = { BodyId = bodyId2; BodyShapeIndex = 0 }
               Normal = normal }
-        let integrationMessage = BodyCollisionMessage bodyCollisionMessage
+        let integrationMessage = BodyPenetrationMessage bodyPenetrationMessage
         physicsEngine.IntegrationMessages.Add integrationMessage
-    
+
     static member private handleSeparation physicsEngine (bodyId : BodyId) (bodyId2 : BodyId) =
         let bodySeparationMessage =
             { BodyShapeSource = { BodyId = bodyId; BodyShapeIndex = 0 }
@@ -419,7 +419,7 @@ type [<ReferenceEquality>] PhysicsEngine3d =
             // TODO: make this more accurate by making each c weighted proportionately to its respective m.
             List.fold (fun (c, m, i, d) (c', m', i', d') -> (c + c', m + m', i + i', fun () -> d (); d' ())) (v3Zero, 0.0f, v3Zero, id) centerMassInertiaDisposes
         let shapeSensorOpt = match bodyProperties.BodyShape.PropertiesOpt with Some properties -> properties.SensorOpt | None -> None
-        let userIndex = if Option.defaultValue false shapeSensorOpt ||  bodyProperties.Sensor || bodyProperties.Observable then 1 else -1
+        let userIndex = if Option.defaultValue false shapeSensorOpt || bodyProperties.Sensor || bodyProperties.Observable then 1 else -1
         if bodyProperties.Sensor then
             let ghost = new GhostObject ()
             ghost.CollisionShape <- shape
@@ -429,8 +429,9 @@ type [<ReferenceEquality>] PhysicsEngine3d =
             ghost.UserIndex <- userIndex
             PhysicsEngine3d.configureCollisionObjectProperties bodyProperties ghost
             physicsEngine.PhysicsContext.AddCollisionObject (ghost, bodyProperties.CollisionCategories, bodyProperties.CollisionMask)
-            if physicsEngine.Ghosts.TryAdd (bodyId, ghost)
-            then physicsEngine.Objects.Add (bodyId, ghost)
+            if physicsEngine.Ghosts.TryAdd (bodyId, ghost) then
+                physicsEngine.Objects.Add (bodyId, ghost)
+                ghost.Activate true // force activation since it seems to be unconditionally disabled somewhere in the above bullet processes
             else Log.error ("Could not add body for '" + scstring bodyId + "'.")
         elif bodyProperties.BodyType = KinematicCharacter then
             match shape with
@@ -465,8 +466,9 @@ type [<ReferenceEquality>] PhysicsEngine3d =
                       AngularVelocity = v3Zero
                       CharacterController = characterController
                       Ghost = ghost }
-                if physicsEngine.KinematicCharacters.TryAdd (bodyId, character)
-                then physicsEngine.Objects.Add (bodyId, ghost)
+                if physicsEngine.KinematicCharacters.TryAdd (bodyId, character) then
+                    physicsEngine.Objects.Add (bodyId, ghost)
+                    ghost.Activate true // force activation since it seems to be unconditionally disabled somewhere in the above bullet processes
                 else Log.error ("Could not add body for '" + scstring bodyId + "'.")
             | _ -> Log.info "Non-convex body shapes are unsupported for KinematicCharacter."
         else
@@ -924,12 +926,12 @@ type [<ReferenceEquality>] PhysicsEngine3d =
                     | (true, collisions) -> collisions.Add normal
                     | (false, _) -> physicsEngine.CollisionsGround.Add (body1Source, List [normal])
 
-        // create collision messages
+        // create penetration messages
         for entry in physicsEngine.CollisionsFiltered do
             let (bodySourceA, bodySourceB) = entry.Key
             if not (collisionsOld.ContainsKey entry.Key) then
-                PhysicsEngine3d.handleCollision physicsEngine bodySourceA bodySourceB entry.Value
-                PhysicsEngine3d.handleCollision physicsEngine bodySourceB bodySourceA -entry.Value
+                PhysicsEngine3d.handlePenetration physicsEngine bodySourceA bodySourceB entry.Value
+                PhysicsEngine3d.handlePenetration physicsEngine bodySourceB bodySourceA -entry.Value
 
         // create separation messages
         for entry in collisionsOld do
@@ -985,7 +987,6 @@ type [<ReferenceEquality>] PhysicsEngine3d =
         world.Broadphase.OverlappingPairCache.SetInternalGhostPairCallback ghostPairCallback
         world.DispatchInfo.AllowedCcdPenetration <- Constants.Physics.AllowedCcdPenetration3d
         world.Gravity <- gravity
-
         let physicsEngine =
             { PhysicsContext = world
               Constraints = Dictionary HashIdentity.Structural

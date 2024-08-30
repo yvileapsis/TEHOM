@@ -26,21 +26,21 @@ module WorldPhysics =
             let world =
                 match message with
                 | CreateBodyMessage message ->
-                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage2d" "" EventTrace.empty
+                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage2d" "CreateBodyMessage" EventTrace.empty
                     World.publishPlus message.BodyId Game.Handle.BodyAddingEvent eventTrace Game.Handle false false world
                 | CreateBodiesMessage message ->
-                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage2d" "" EventTrace.empty
+                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage2d" "CreateBodiesMessage" EventTrace.empty
                     List.fold (fun world (bodyProperties : BodyProperties) ->
                         let bodyId = { BodySource = message.BodySource; BodyIndex = bodyProperties.BodyIndex }
                         World.publishPlus bodyId Game.Handle.BodyAddingEvent eventTrace Game.Handle false false world)
                         world message.BodiesProperties
                 | DestroyBodyMessage message ->
-                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage2d" "" EventTrace.empty
+                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage2d" "DestroyBodyMessage" EventTrace.empty
                     let world = World.publishPlus { BodyId = message.BodyId } Game.Handle.BodySeparationImplicitEvent eventTrace Game.Handle false false world
                     let world = World.publishPlus message.BodyId Game.Handle.BodyRemovingEvent eventTrace Game.Handle false false world
                     world
                 | DestroyBodiesMessage message ->
-                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage2d" "" EventTrace.empty
+                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage2d" "DestroyBodiesMessage" EventTrace.empty
                     List.fold (fun world (bodyId : BodyId) ->
                         let world = World.publishPlus { BodyId = bodyId } Game.Handle.BodySeparationImplicitEvent eventTrace Game.Handle false false world
                         let world = World.publishPlus bodyId Game.Handle.BodyRemovingEvent eventTrace Game.Handle false false world
@@ -59,21 +59,21 @@ module WorldPhysics =
             let world =
                 match message with
                 | CreateBodyMessage message ->
-                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage3d" "" EventTrace.empty
+                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage3d" "CreateBodyMessage" EventTrace.empty
                     World.publishPlus message.BodyId Game.Handle.BodyAddingEvent eventTrace Game.Handle false false world
                 | CreateBodiesMessage message ->
-                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage3d" "" EventTrace.empty
+                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage3d" "CreateBodiesMessage" EventTrace.empty
                     List.fold (fun world (bodyProperties : BodyProperties) ->
                         let bodyId = { BodySource = message.BodySource; BodyIndex = bodyProperties.BodyIndex }
                         World.publishPlus bodyId Game.Handle.BodyAddingEvent eventTrace Game.Handle false false world)
                         world message.BodiesProperties
                 | DestroyBodyMessage message ->
-                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage3d" "" EventTrace.empty
+                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage3d" "DestroyBodyMessage" EventTrace.empty
                     let world = World.publishPlus { BodyId = message.BodyId } Game.Handle.BodySeparationImplicitEvent eventTrace Game.Handle false false world
                     let world = World.publishPlus message.BodyId Game.Handle.BodyRemovingEvent eventTrace Game.Handle false false world
                     world
                 | DestroyBodiesMessage message ->
-                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage3d" "" EventTrace.empty
+                    let eventTrace = EventTrace.debug "World" "handlePhysicsMessage3d" "DestroyBodiesMessage" EventTrace.empty
                     List.fold (fun world (bodyId : BodyId) ->
                         let world = World.publishPlus { BodyId = bodyId } Game.Handle.BodySeparationImplicitEvent eventTrace Game.Handle false false world
                         let world = World.publishPlus bodyId Game.Handle.BodyRemovingEvent eventTrace Game.Handle false false world
@@ -281,3 +281,13 @@ module WorldPhysics =
             let world = World.handlePhysicsMessage3d jumpBodyMessage world
             let world = World.handlePhysicsMessage2d jumpBodyMessage world
             world
+
+        /// Unregister and register all selected physics bodies.
+        /// HACK: this is just a temporary workaround for Bullet Physics bug #856.
+        static member reregisterPhysics world =
+            match World.getSelectedScreenOpt world with
+            | Some selectedScreen ->
+                let world = WorldModule.unregisterScreenPhysics selectedScreen world
+                let world = WorldModule.registerScreenPhysics selectedScreen world
+                world
+            | None -> world

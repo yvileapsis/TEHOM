@@ -45,6 +45,7 @@ type RendererInline () =
     let mutable started = false
     let mutable terminated = false
     let mutable windowOpt = Option<Window>.None
+    let mutable glFinishRequired = false
     let mutable messages3d = List ()
     let mutable messages2d = List ()
     let mutable renderersOpt = Option<Renderer3d * Renderer2d * RendererImGui>.None
@@ -65,8 +66,9 @@ type RendererInline () =
                 | Some window ->
                 
                     // create gl context
-                    let glContext = match window with SglWindow window -> OpenGL.Hl.CreateSglContextInitial window.SglWindow
+                    let (glFinishRequired', glContext) = match window with SglWindow window -> OpenGL.Hl.CreateSglContextInitial window.SglWindow
                     OpenGL.Hl.Assert ()
+                    glFinishRequired <- glFinishRequired'
 
                     // initialize gl context
                     OpenGL.Hl.InitContext ()
@@ -170,9 +172,9 @@ type RendererInline () =
 
         member this.Swap () =
             match windowOpt with
-            | Some window ->
-                match window with
-                | SglWindow window -> SDL.SDL_GL_SwapWindow window.SglWindow
+            | Some (SglWindow window) ->
+                if glFinishRequired then OpenGL.Gl.Finish ()
+                SDL.SDL_GL_SwapWindow window.SglWindow
             | None -> ()
 
         member this.Terminate () =
@@ -314,12 +316,12 @@ type RendererThread () =
     member private this.Run fonts windowOpt =
 
         // create renderers
-        let (renderer3d, renderer2d, rendererImGui) =
+        let (glFinishRequired, renderer3d, renderer2d, rendererImGui) =
             match windowOpt with
             | Some window ->
                 
                 // create gl context
-                let glContext = match window with SglWindow window -> OpenGL.Hl.CreateSglContextInitial window.SglWindow
+                let (glFinishRequired, glContext) = match window with SglWindow window -> OpenGL.Hl.CreateSglContextInitial window.SglWindow
                 OpenGL.Hl.Assert ()
 
                 // initialize gl context
@@ -338,14 +340,14 @@ type RendererThread () =
                 let rendererImGui = GlRendererImGui.make fonts :> RendererImGui
 
                 // fin
-                (renderer3d, renderer2d, rendererImGui)
+                (glFinishRequired, renderer3d, renderer2d, rendererImGui)
 
             // create stub renderers
             | None ->
                 let renderer3d = StubRenderer3d.make () :> Renderer3d
                 let renderer2d = StubRenderer2d.make () :> Renderer2d
                 let rendererImGui = StubRendererImGui.make fonts :> RendererImGui
-                (renderer3d, renderer2d, rendererImGui)
+                (false, renderer3d, renderer2d, rendererImGui)
 
         // mark as started
         started <- true
@@ -394,13 +396,15 @@ type RendererThread () =
                 // guard against early termination
                 if not terminated then
 
+                    // acknowledge swap request
+                    swap <- false
+
                     // attempt to swap
                     match windowOpt with
-                    | Some window -> match window with SglWindow window -> SDL.SDL_GL_SwapWindow window.SglWindow
+                    | Some (SglWindow window) ->
+                        if glFinishRequired then OpenGL.Gl.Finish ()
+                        SDL.SDL_GL_SwapWindow window.SglWindow
                     | None -> ()
-
-                    // complete swap request
-                    swap <- false
 
         // clean up
         renderer2d.CleanUp ()
@@ -585,6 +589,7 @@ type RendererThread () =
             submissionOpt <- Some (frustumInterior, frustumExterior, frustumImposter, lightBox, messages3d, messages2d, eye3dCenter, eye3dRotation, eye2dCenter, eye2dSize, eyeMargin, drawData)
 
         member this.Swap () =
+            if swap then raise (InvalidOperationException "Render process already swapping.")
             if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
             swap <- true
             while swap do Thread.Sleep 1
