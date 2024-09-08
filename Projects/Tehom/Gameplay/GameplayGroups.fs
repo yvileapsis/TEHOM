@@ -44,7 +44,7 @@ module GameplayGroups =
             //    let actorID = TehomID.ID (evt.Data)
             //    InputString actorID
             Entity.TextColor == Color.FloralWhite
-            Entity.Font == Assets.Gui.ClearSans12Font
+            Entity.Font == Assets.Gui.ClearSansFont
             Entity.FontSizing == Some 10
         ]
     ]

@@ -127,6 +127,7 @@ module RichTextFacetModule =
                     AssetTag = font
                     RenderOperation2d = RenderRichText {
                         Transform = textTransform
+                        ClipOpt = ValueNone
                         Entries = paragraphList
                     }
                 } world
@@ -321,6 +322,7 @@ module TextInputFacetModule =
                     AssetTag = font
                     RenderOperation2d = RenderText {
                         Transform = textTransform
+                        ClipOpt = ValueNone
                         Text = string
                         Font = font
                         FontSizing = fontSizing

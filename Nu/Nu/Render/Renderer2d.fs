@@ -103,6 +103,7 @@ type [<Struct>] RichTextParagraph =
 /// Describes how to render rich text to a rendering subsystem.
 type RichTextDescriptor =
     { mutable Transform : Transform
+      ClipOpt : Box2 voption
       Entries : RichTextParagraph list }
 
 
@@ -769,12 +770,14 @@ type [<ReferenceEquality>] GlRenderer2d =
     /// Render rich text.
     static member renderRichText
         (transform : Transform byref,
+         clipOpt : Box2 voption inref,
          text : RichTextParagraph list,
          eyeCenter : Vector2,
          eyeSize : Vector2,
          renderer : GlRenderer2d) =
 
         let transform = transform
+        let clipOpt = clipOpt
 
         flip OpenGL.SpriteBatch.InterruptSpriteBatchFrame renderer.SpriteBatchEnv $ fun () ->
 
@@ -787,7 +790,6 @@ type [<ReferenceEquality>] GlRenderer2d =
             let size = perimeter.Size.V2 * virtualScalar
             let viewport = Constants.Render.Viewport
             let viewProjection = viewport.ViewProjection2d (absolute, eyeCenter, eyeSize)
-
 
             // get font pointer for point asset and set its styling and sizing
             let getFont fontAsset fontSizing (fontStyling: Set<FontStyle>) =
@@ -1168,8 +1170,12 @@ type [<ReferenceEquality>] GlRenderer2d =
                 // draw text sprite
                 // NOTE: we allocate an array here, too.
                 let (vertices, indices, vao) = renderer.TextQuad
-                let (modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader) = renderer.SpriteShader
-                OpenGL.Sprite.DrawSprite (vertices, indices, vao, modelViewProjection.ToArray (), ValueNone, Color.White, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, modelViewProjectionUniform, texCoords4Uniform, colorUniform, texUniform, shader)
+                let (modelViewProjectionUniform, texCoords4Uniform, colorUniform, textureUniform, shader) = renderer.SpriteShader
+
+                let insetOpt : Box2 voption = ValueNone
+                let color = Color.White
+
+                OpenGL.Sprite.DrawSprite (vertices, indices, vao, &viewProjection, modelViewProjection.ToArray (), &insetOpt, &clipOpt, &color, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, modelViewProjectionUniform, texCoords4Uniform, colorUniform, textureUniform, shader)
                 OpenGL.Hl.Assert ()
 
                 // destroy texture
@@ -1210,7 +1216,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                 (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Text, descriptor.Font, descriptor.FontSizing, descriptor.FontStyling, &descriptor.Color, descriptor.Justification, eyeCenter, eyeSize, renderer)
         | RenderRichText descriptor ->
             GlRenderer2d.renderRichText
-                (&descriptor.Transform, descriptor.Entries, eyeCenter, eyeSize, renderer)
+                (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Entries, eyeCenter, eyeSize, renderer)
         | RenderTiles descriptor ->
             GlRenderer2d.renderTiles
                 (&descriptor.Transform, &descriptor.ClipOpt, &descriptor.Color, &descriptor.Emission, descriptor.MapSize, descriptor.Tiles, descriptor.TileSourceSize, descriptor.TileSize, descriptor.TileAssets, eyeCenter, eyeSize, renderer)
