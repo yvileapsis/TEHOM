@@ -31,7 +31,7 @@ module RichTextFacetModule =
                 let perimeter = transform.Perimeter // gui currently ignores rotation and scale
                 let horizon = transform.Horizon
 
-                let mutable textTransform = Transform.makeDefault false // centered-ness and offset are already baked into perimeter
+                let mutable textTransform = Transform.makeDefault ()  // centered-ness and offset are already baked into perimeter
                 let margin = (entity.GetTextMargin world).V3
                 let offset = (entity.GetTextOffset world).V3
 
@@ -303,7 +303,7 @@ module TextInputFacetModule =
                 let mutable transform = entity.GetTransform world
                 let perimeter = transform.Perimeter // gui currently ignores rotation and scale
                 let horizon = transform.Horizon
-                let mutable textTransform = Transform.makeDefault false // centered-ness and offset are already baked into perimeter
+                let mutable textTransform = Transform.makeDefault () // centered-ness and offset are already baked into perimeter
                 let margin = (entity.GetTextMargin world).V3
                 let offset = (entity.GetTextOffset world).V3
                 let shift = entity.GetTextShift world

@@ -42,6 +42,7 @@
 		<Compile Include="Assets.fs" />
 		<Compile Include="Simulants.fs" />
 		<Compile Include="Events.fs" />
+		<Compile Include="Prototypes\Sudoku.fs" />
 		<Compile Include="Gameplay\Gameplay.fs" />
 		<Compile Include="Gameplay\GameplayGroups.fs" />
 		<Compile Include="Gameplay\GameplayDispatcher.fs" />
@@ -96,5 +97,5 @@
 	<ItemGroup>
 		<PackageReference Update="FSharp.Core" Version="8.0.100" />
 	</ItemGroup>
-
+	
 </Project>
