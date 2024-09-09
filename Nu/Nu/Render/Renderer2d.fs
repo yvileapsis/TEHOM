@@ -1136,7 +1136,7 @@ type [<ReferenceEquality>] GlRenderer2d =
             // render prepared surfaces with OpenGL
             let (surfaces, offset) = reflowText
 
-            let position = position + v2 0.0f size.Y
+            let position = position + v2 (size.X * 0.5f) (size.Y * 1.5f) // pure nonsense, this is obviously an issue with previous code
 
             // renders a single block, assumes filtered input
             let renderOpenGLSprite (textSurfacePtr, offset: Vector2) =

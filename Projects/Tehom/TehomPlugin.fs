@@ -16,6 +16,10 @@ type TehomPlugin () =
                 let world = Simulants.Gameplay.SetGameplay Gameplay.initial world
                 let world = Game.SetMyGame Gameplay world
                 world
+            "Combat", fun world ->
+                let world = Simulants.Combat.SetCombat Combat.initial world
+                let world = Game.SetMyGame Combat world
+                world
         ]
 
     // this specifies which packages are automatically loaded at game start-up.
