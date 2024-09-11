@@ -115,10 +115,10 @@ with
 
     static member getElement element this =
         match element with
-        | Plasma -> this.PlasmaChange
-        | Oil -> this.OilChange
-        | Lymph -> this.LymphChange
-        | Gall -> this.GallChange
+        | Plasma -> this.Plasma
+        | Oil -> this.Oil
+        | Lymph -> this.Lymph
+        | Gall -> this.Gall
 
     static member changeStance =
         ""
@@ -171,17 +171,15 @@ with
         match gameplay.GameplayState with
         | Playing ->
 
-            let resolveChallenge attacker defender =
+            let resolveChallenge attacker defender () =
                 let getSuccessesForElement element character =
                     let stat = character |> Character.getElement element |> int
                     Dice.rollDiceThreshold stat 3 ()
 
-                let resultLeft = getSuccessesForElement Gall attacker
-                let resultRight = getSuccessesForElement Lymph defender
+                getSuccessesForElement Gall attacker,
+                getSuccessesForElement Lymph defender
 
-                resultLeft, resultRight
-
-            let resultLeft, resultRight = resolveChallenge gameplay.Player gameplay.Enemy
+            let resultLeft, resultRight = resolveChallenge gameplay.Player gameplay.Enemy ()
 
             { gameplay with ResultPlayer = resultLeft; ResultEnemy = resultRight }
 
