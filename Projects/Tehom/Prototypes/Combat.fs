@@ -277,9 +277,11 @@ type CombatDispatcher () =
         Content.group Simulants.GameplayGui.Name [] [
             richText "CombatWhatever" [
                 Entity.Position == v3 0.0f 0.0f 0.0f
+                Entity.Size == v3 240.0f 32.0f 0.0f
                 Entity.Elevation == 10.0f
-                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                 Entity.Text := $"{gameplay.ResultPlayer} - {gameplay.ResultEnemy} - {winner} won!
+
                 Player wins: {gameplay.PlayerWins} - Enemy wins: {gameplay.EnemyWins}"
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.ClearSansFont
