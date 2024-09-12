@@ -127,7 +127,7 @@ module Dice =
     let rollDie () = Gen.random2 1 7
     let rollDice count =
         Seq.init count (fun _ -> rollDie ())
-    let rollDiceThreshold count threshold () =
+    let rollDiceThreshold count threshold =
         rollDice count
         |> Seq.fold (fun state x -> if x > threshold then state + 1 else state) 0
 
@@ -146,6 +146,8 @@ type [<SymbolicExpansion>] Combat = {
     Enemy : Character
     ResultPlayer : int
     ResultEnemy : int
+    PlayerWins : int
+    EnemyWins : int
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
@@ -156,6 +158,8 @@ with
         Enemy = Character.empty
         ResultPlayer = 0
         ResultEnemy = 0
+        PlayerWins = 0
+        EnemyWins = 0
     }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
@@ -171,17 +175,26 @@ with
         match gameplay.GameplayState with
         | Playing ->
 
-            let resolveChallenge attacker defender () =
+            let resolveChallenge attacker defender =
                 let getSuccessesForElement element character =
                     let stat = character |> Character.getElement element |> int
-                    Dice.rollDiceThreshold stat 3 ()
+                    Dice.rollDiceThreshold stat 3
 
                 getSuccessesForElement Gall attacker,
                 getSuccessesForElement Lymph defender
 
-            let resultLeft, resultRight = resolveChallenge gameplay.Player gameplay.Enemy ()
+            let resultLeft, resultRight = resolveChallenge gameplay.Player gameplay.Enemy
 
-            { gameplay with ResultPlayer = resultLeft; ResultEnemy = resultRight }
+            let playerWins = gameplay.PlayerWins + if resultLeft > resultRight then 1 else 0
+            let enemyWins = gameplay.EnemyWins + if resultLeft < resultRight then 1 else 0
+
+            {
+                gameplay with
+                    ResultPlayer = resultLeft
+                    ResultEnemy = resultRight
+                    PlayerWins = playerWins
+                    EnemyWins = enemyWins
+            }
 
         | Playing | Quit -> gameplay
 
@@ -257,14 +270,17 @@ type CombatDispatcher () =
     // here we describe the content of the game including the hud, the scene, and the player
     override this.Content (gameplay, _) = [
         // the gui group
-        let winner = if gameplay.ResultPlayer > gameplay.ResultEnemy then "Player" else "Enemy"
+        let winner =
+            if gameplay.ResultPlayer = gameplay.ResultEnemy then "No one" else
+            if gameplay.ResultPlayer > gameplay.ResultEnemy then "Player" else "Enemy"
 
         Content.group Simulants.GameplayGui.Name [] [
             richText "CombatWhatever" [
                 Entity.Position == v3 0.0f 0.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                Entity.Text := $"{gameplay.ResultPlayer} - {gameplay.ResultEnemy} - {winner} won!"
+                Entity.Text := $"{gameplay.ResultPlayer} - {gameplay.ResultEnemy} - {winner} won!
+                Player wins: {gameplay.PlayerWins} - Enemy wins: {gameplay.EnemyWins}"
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.ClearSansFont
                 Entity.FontSizing == Some 10
