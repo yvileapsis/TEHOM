@@ -6,10 +6,10 @@ open Prime
 open Nu
 
 type Element =
-    | Plasma
-    | Oil
     | Gall
     | Lymph
+    | Oil
+    | Plasma
 
 type MajorWounds =
     | Healthy = 0
@@ -35,24 +35,13 @@ type Stat =
     | Impossible = 9
 // C F P A S G E T D I
 
-type StatChange =
-    | NoFocus = 0
-    | Focus = 1
-    | Focus2 = 2
-    | Focus3 = 3
-    | Focus4 = 4
-    | Focus5 = 5
+type Stats = Stat * Stat * Stat * Stat
+
+type Stance = int * int * int * int
 
 type Character = {
-    Plasma : Stat
-    Oil : Stat
-    Gall : Stat
-    Lymph : Stat
-
-    PlasmaChange : StatChange
-    OilChange : StatChange
-    GallChange : StatChange
-    LymphChange : StatChange
+    Stats : Stats
+    Stance : Stance
 
     Edges : Stat list
 
@@ -67,16 +56,39 @@ type Character = {
     Initiative : int
 }
 with
-    static member empty = {
-        Plasma = Stat.Crippled
-        Oil = Stat.Crippled
-        Gall = Stat.Crippled
-        Lymph = Stat.Crippled
+    static member getElement element stats =
+        let (gall, lymph, oil, plasma) = stats
+        match element with
+        | Plasma -> plasma
+        | Oil -> oil
+        | Lymph -> lymph
+        | Gall -> gall
 
-        PlasmaChange = StatChange.NoFocus
-        OilChange = StatChange.NoFocus
-        GallChange = StatChange.NoFocus
-        LymphChange = StatChange.NoFocus
+    static member statsEmpty : Stats = Stat.Crippled, Stat.Crippled, Stat.Crippled, Stat.Crippled
+    static member stanceEmpty : Stance = 0, 0, 0, 0
+    static member stanceMove fromStat toStat (stance : Stance) =
+        let (gall, lymph, oil, plasma) = stance
+
+        let stance : Stance =
+            match fromStat with
+            | Gall -> gall - 1, lymph, oil, plasma
+            | Lymph -> gall, lymph - 1, oil, plasma
+            | Oil -> gall, lymph, oil - 1, plasma
+            | Plasma-> gall, lymph, oil, plasma - 1
+
+        let (gall, lymph, oil, plasma) = stance
+
+        let stance : Stance =
+            match toStat with
+            | Gall -> gall + 1, lymph, oil, plasma
+            | Lymph -> gall, lymph + 1, oil, plasma
+            | Oil -> gall, lymph, oil + 1, plasma
+            | Plasma-> gall, lymph, oil, plasma + 1
+
+        stance
+    static member empty = {
+        Stats = Character.statsEmpty
+        Stance = Character.stanceEmpty
 
         Damage = 0
 
@@ -93,10 +105,7 @@ with
 
     static member player = {
         Character.empty with
-            Plasma = Stat.Gifted
-            Oil = Stat.Gifted
-            Lymph = Stat.Gifted
-            Gall = Stat.Gifted
+            Stats = Stat.Gifted, Stat.Gifted, Stat.Gifted, Stat.Gifted
 
             Damage = 5
             Stances = 3
@@ -104,24 +113,32 @@ with
 
     static member enemy = {
         Character.empty with
-            Plasma = Stat.Average
-            Oil = Stat.Average
-            Lymph = Stat.Average
-            Gall = Stat.Average
+            Stats = Stat.Average, Stat.Average, Stat.Average, Stat.Average
 
             Damage = 5
             Stances = 2
     }
 
-    static member getElement element this =
-        match element with
-        | Plasma -> this.Plasma
-        | Oil -> this.Oil
-        | Lymph -> this.Lymph
-        | Gall -> this.Gall
+    static member stanceVerify (stance : Stance) (stats : Stats) =
+        let (gall, lymph, oil, plasma) = stats
+        let (gallChange, lymphChange, oilChange, plasmaChange) = stance
+        gallChange + lymphChange + oilChange + plasmaChange |> int = 0
+        && - int gallChange < int gall
+        && - int lymphChange < int lymph
+        && - int oilChange < int oil
+        && - int plasmaChange < int plasma
 
-    static member changeStance =
-        ""
+    static member stanceChange (stance : Stance) character =
+        {
+            character with
+                Stance = stance
+                StancesLeft = character.StancesLeft - 1
+        }
+
+    static member getStatsInStance character : Stats =
+        let (gall, lymph, oil, plasma) = character.Stats
+        let (gallChange, lymphChange, oilChange, plasmaChange) = character.Stance
+        gall + enum gallChange, lymph + enum lymphChange, oil + enum oilChange, plasma + enum plasmaChange
 
 module Dice =
     let rollDie () = Gen.random2 1 7
@@ -183,7 +200,7 @@ with
                 getSuccessesForElement Gall attacker,
                 getSuccessesForElement Lymph defender
 
-            let resultLeft, resultRight = resolveChallenge gameplay.Player gameplay.Enemy
+            let resultLeft, resultRight = resolveChallenge gameplay.Player.Stance gameplay.Enemy.Stance
 
             let playerWins = gameplay.PlayerWins + if resultLeft > resultRight then 1 else 0
             let enemyWins = gameplay.EnemyWins + if resultLeft < resultRight then 1 else 0
