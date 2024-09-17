@@ -217,12 +217,21 @@ with
         }
 
     static member getStats character : Stats =
+        character.Stats
+
+    static member getStancedStats character : Stats =
         let (gall, lymph, oil, plasma) = character.Stats
         let (gallChange, lymphChange, oilChange, plasmaChange) = character.Stance
         gall + enum gallChange, lymph + enum lymphChange, oil + enum oilChange, plasma + enum plasmaChange
 
-    static member getBaseStat element character =
+    static member getStat element character =
         character.Stats
+        |> Character.getElement element
+        |> int
+
+    static member getStancedStat element character =
+        character
+        |> Character.getStancedStats
         |> Character.getElement element
         |> int
 
@@ -230,7 +239,7 @@ with
         character.Damage
 
     static member doDamage damage character =
-        let (_, lymph, oil, _) = character.Stats
+        let (_, lymph, oil, _) = Character.getStats character
 
         let lymph = int lymph
         let oil = int oil
@@ -260,12 +269,9 @@ with
         else
             { character with MajorWounds = maxDamage (6 + int character.MajorWounds) }
 
-    static member rollInitiative character =
-        let (gall, _, _, plasma) = character.Stats
-        let maxInitiative = int gall + int plasma
-        { character with Initiative = Gen.random2 0 maxInitiative }
-
-
+    static member getMaxInitiative character =
+        let (gall, _, _, plasma) = Character.getStats character
+        int gall, int plasma
 
 
 module Random =
@@ -279,6 +285,9 @@ module Random =
     let getItemsFromList length list =
         let gen () = Gen.randomItem list
         List.init length (fun _ -> gen ())
+
+    let rollInitiative max =
+        Gen.random2 0 max
 
 type CombatState =
     | Playing
@@ -322,7 +331,10 @@ with
             Combatants =
                 [ Character.player; Character.enemy ]
                 |> List.map Character.stanceReset
-                |> List.map Character.rollInitiative
+                |> List.map (fun c ->
+                    let gall, plasma = Character.getMaxInitiative c
+                    { c with Initiative = Random.rollInitiative (gall + plasma) }
+                )
                 |> List.sortBy (_.Initiative)
                 |> List.rev
             DisplayLeft = "Player"
@@ -353,7 +365,7 @@ with
             gameplay.Combatants
             |> List.findIndex ((=) target)
 
-        let statCombatant = Character.getBaseStat Gall combatant
+        let statCombatant = Character.getStat Gall combatant
 
         let movesCombatant =
             if (combatant.MajorWounds < MajorWounds.Down) then
@@ -383,7 +395,7 @@ with
             | Moves moves -> moves
             | _ -> []
 
-        let statTarget = Character.getBaseStat Lymph target
+        let statTarget = Character.getStat Lymph target
 
         let movesTarget =
             if (target.MajorWounds < MajorWounds.Down) then
@@ -430,14 +442,8 @@ with
             | Moves moves -> moves
             | _ -> []
 
-        let getStat element character =
-            character
-            |> Character.getStats
-            |> Character.getElement element
-            |> int
-
-        let statCombatant = getStat Gall combatant
-        let statTarget = getStat Lymph target
+        let statCombatant = Character.getStancedStat Gall combatant
+        let statTarget = Character.getStancedStat Lymph target
 
         let successesCombatant = Random.rollDiceThreshold statCombatant 3
         let successesTarget = Random.rollDiceThreshold statTarget 3
