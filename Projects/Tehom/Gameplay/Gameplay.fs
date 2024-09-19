@@ -3,7 +3,7 @@ open System
 open System.Numerics
 open Prime
 open Nu
-open FSharp.FGL
+open FGL
 
 
 type TehomID =

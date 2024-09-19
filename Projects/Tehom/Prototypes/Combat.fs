@@ -4,6 +4,7 @@ open System
 open System.Numerics
 open Prime
 open Nu
+open FGL
 
 type Element =
     | Gall
@@ -289,6 +290,56 @@ module Random =
     let rollInitiative max =
         Gen.random2 0 max
 
+
+type Area = {
+    Name : string
+    Actors : Set<String>
+}
+with
+    static member room1 = {
+        Name = "Dark Room"
+        Actors = Set.ofList ["Player"; "Table"; "Cat"; "Key"]
+    }
+
+    static member room2 = {
+        Name = "Mediumly Lit Room"
+        Actors = Set.empty
+    }
+
+    static member room3 = {
+        Name = "Bright Room"
+        Actors = Set.ofList [ "Enemy" ]
+    }
+
+type Pathway = {
+    Open : bool
+    Length : int
+}
+with
+    static member empty = { Open = true; Length = 10 }
+
+
+type Level = {
+    Name : string
+    Areas : Graph<String, Area, Pathway>
+}
+with
+    static member empty = {
+        Name = String.empty
+        Areas = Graph.empty
+    }
+
+    static member level1 = {
+        Name = "Sheol"
+        Areas =
+            Graph.empty
+            |> Vertices.add ("Room 1", Area.room1)
+            |> Vertices.add ("Room 2", Area.room2)
+            |> Undirected.Edges.add ("Room 1", "Room 2", Pathway.empty)
+            |> Vertices.add ("Room 3", Area.room3)
+            |> Undirected.Edges.add  ("Room 2", "Room 3", Pathway.empty)
+    }
+
 type CombatState =
     | Playing
     | Quit
@@ -307,6 +358,8 @@ type [<SymbolicExpansion>] Combat = {
     OldCombatant : int
     CurrentCombatant : int
     Turn : int
+
+    Level : Level
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
@@ -322,6 +375,8 @@ with
         OldCombatant = 0
         CurrentCombatant = 0
         Turn = 0
+
+        Level = Level.empty
     }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
@@ -339,6 +394,7 @@ with
                 |> List.rev
             DisplayLeft = "Player"
             DisplayRight = "Enemy"
+            Level = Level.level1
     }
 
     // this updates the gameplay model every frame that gameplay is active.
@@ -369,7 +425,37 @@ with
 
         let movesCombatant =
             if (combatant.MajorWounds < MajorWounds.Down) then
-                Random.getItemsFromList statCombatant Move.attacks
+
+                let combatantName = combatant.Name
+                let targetName = target.Name
+
+                let combatantVertex =
+                    gameplay.Level.Areas
+                    |> Vertices.toVertexList
+                    |> List.find (fun (string, vertex) -> Set.contains combatantName vertex.Actors)
+                    |> fst
+
+                let targetVertex =
+                    gameplay.Level.Areas
+                    |> Vertices.toVertexList
+                    |> List.find (fun (string, vertex) -> Set.contains targetName vertex.Actors)
+                    |> fst
+
+                let path =
+                    gameplay.Level.Areas
+                    |> Undirected.Edges.map (fun v1 v2 edge -> 1u)
+                    |> Query.sp combatantVertex targetVertex
+
+                let movementMoves = List.length path - 1
+
+                if (movementMoves > 0) then
+                    if (statCombatant > movementMoves) then
+                        Random.getItemsFromList movementMoves Move.positioning
+                        @ Random.getItemsFromList (statCombatant - movementMoves) Move.attacks
+                    else
+                        Random.getItemsFromList statCombatant Move.positioning
+                else
+                    Random.getItemsFromList statCombatant Move.attacks
             else
                 []
 

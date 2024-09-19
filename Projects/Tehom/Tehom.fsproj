@@ -36,6 +36,11 @@
 	</Target>
 
 	<ItemGroup>
+		<Compile Include="Graphs\Graph.fs" />
+		<Compile Include="Graphs\Models.fs" />
+		<Compile Include="Graphs\Directed.fs" />
+		<Compile Include="Graphs\Undirected.fs" />
+		<Compile Include="Graphs\Query.fs" />
 		<Compile Include="Engine\Graph.fs" />
 		<Compile Include="Engine\NuMark.fs" />
 		<Compile Include="Engine\Facets.fs" />
@@ -59,7 +64,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="FSharp.FGL" Version="0.0.4" />
+		<PackageReference Include="Aether" Version="8.3.1" />
 		<Reference Include="AssimpNet">
 			<HintPath>..\..\Nu\Nu.Dependencies\AssimpNet\netstandard2.1\AssimpNet.dll</HintPath>
 		</Reference>
