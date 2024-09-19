@@ -8,19 +8,11 @@ module Query =
 
     type Path<'Vertex> = 'Vertex list
 
-    type LPath<'Vertex, 'Label> = LP of LVertex<'Vertex, 'Label> list
+    type LPath<'Vertex, 'Label> = LVertex<'Vertex, 'Label> list
 
     type RTree<'Vertex> = Path<'Vertex> list
 
     type LRTree<'Vertex, 'Label> = LPath<'Vertex, 'Label> list
-
-    let expand (d : 'Distance) (LP p) ((_,_,_,s) : Context<'Vertex, 'Label, 'Distance>) : (Map<'Distance, LPath<'Vertex, 'Distance>> list) =
-        s
-        // switched v and l since its edges that are supposed to have length, no?
-        |> List.map (fun (v, l) ->
-            Map.empty
-            |> Map.add (l + d) (LP ([v, l + d] @ p))
-        )
 
 
 (*
@@ -40,9 +32,17 @@ module Query =
             let h' = Map.remove min h
 
             match minValue with
-            | LP ((v, d) :: _) as p ->
+            | (v, d) :: _ as p ->
                 match Graph.tryDecompose v g with
                 | Some context, g' ->
+
+                    let expand (d : 'Distance) p ((_,_,_,s) : Context<'Vertex, 'Label, 'Distance>)
+                        : Map<'Distance, LPath<'Vertex, 'Distance>> list =
+                        List.map (fun (v, l) ->
+                            Map.empty
+                            |> Map.add (l + d) ([v, l + d] @ p)
+                        ) s
+
                     let expand = expand d p context
 
                     let mergeMaps maps =
@@ -72,7 +72,7 @@ module Query =
 *)
     let spTree (v : 'Vertex) : Graph<'Vertex, 'Label, 'Distance> -> LRTree<'Vertex, 'Distance> = dijkstra (
         Map.empty
-        |> Map.add 0u (LP [v, 0u])
+        |> Map.add 0u [v, 0u]
     )
 
 
@@ -90,9 +90,9 @@ findP v (LP (p@((w,_):_)):ps) | v==w      = p
     let rec findP (v : 'Vertex) (p : LRTree<'Vertex, 'Distance>) : LVertex<'Vertex, 'Distance> list =
         match p with
         | [] -> []
-        | LP []::ps -> findP v ps
-        | LP ((w,_)::_)::ps when not (v = w) -> findP v ps
-        | LP p::_ -> p
+        | []::ps -> findP v ps
+        | ((w,_)::_)::ps when not (v = w) -> findP v ps
+        | p::_ -> p
 
 
 (*
@@ -109,7 +109,7 @@ getDistance v t = case findP v t of
     let getDistance (v : 'Vertex) (t : LRTree<'Vertex, 'Distance>) : 'Distance option =
         match findP v t with
         | [] -> None
-        | ((_,d)::_) -> Some d
+        | (_,d)::_ -> Some d
 
     /// Length of the shortest path between two nodes, if any.
     /// Returns 'Nothing' if there is no path, and @'Just' <path length>@ otherwise.
@@ -122,11 +122,10 @@ getDistance v t = case findP v t of
     let getLPath (v : 'Vertex) : LRTree<'Vertex, 'Distance> -> LPath<'Vertex, 'Distance> =
         findP v
         >> List.rev
-        >> LP
 
     let getLPathNodes (v : 'Vertex) : LRTree<'Vertex, 'Distance> -> Path<'Vertex> =
         getLPath v
-        >> fun (LP x) -> List.map fst x
+        >> List.map fst
 
     let sp (v1 : 'Vertex) (v2 : 'Vertex) (g : Graph<'Vertex, 'Label, 'Distance>) : Path<'Vertex> =
         spTree v1 g
