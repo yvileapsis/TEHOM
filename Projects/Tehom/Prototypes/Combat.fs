@@ -296,6 +296,12 @@ type Area = {
     Actors : Set<String>
 }
 with
+
+    static member empty = {
+        Name = String.empty
+        Actors = Set.empty
+    }
+
     static member room1 = {
         Name = "Dark Room"
         Actors = Set.ofList ["Player"; "Table"; "Cat"; "Key"]
@@ -338,6 +344,18 @@ with
             |> Undirected.Edges.add ("Room 1", "Room 2", Pathway.empty)
             |> Vertices.add ("Room 3", Area.room3)
             |> Undirected.Edges.add  ("Room 2", "Room 3", Pathway.empty)
+
+            |> Vertices.add ("Room 4", Area.empty)
+            |> Vertices.add ("Room 5", Area.empty)
+            |> Vertices.add ("Room 6", Area.empty)
+            |> Vertices.add ("Room 7", Area.empty)
+            |> Undirected.Edges.add ("Room 1", "Room 4", Pathway.empty)
+            |> Undirected.Edges.add ("Room 3", "Room 7", Pathway.empty)
+            |> Undirected.Edges.add ("Room 4", "Room 5", Pathway.empty)
+            |> Undirected.Edges.add ("Room 4", "Room 6", Pathway.empty)
+            |> Undirected.Edges.add ("Room 4", "Room 7", Pathway.empty)
+            |> Undirected.Edges.add ("Room 5", "Room 6", Pathway.empty)
+
     }
 
 type CombatState =

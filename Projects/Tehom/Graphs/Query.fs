@@ -1,5 +1,6 @@
 namespace FGL
 
+open Prime
 open System
 open Aether
 open FGL
@@ -14,79 +15,50 @@ module Query =
 
     type LRTree<'Vertex, 'Label> = LPath<'Vertex, 'Label> list
 
+    /// Tree of shortest paths from a certain node to the rest of the (reachable) nodes.
+    /// Corresponds to 'dijkstra' applied to a heap in which the only known node is the starting node, with a path of length
+    /// 0 leading to it. The edge labels of type @b@ are the edge weights; negative edge weights are not supported.
+    let spTree (v : 'Vertex) (g : Graph<'Vertex, 'Label, 'Distance>) : LRTree<'Vertex, 'Distance> =
 
-(*
--- | Dijkstra's shortest path algorithm.
---
---   The edge labels of type @b@ are the edge weights; negative edge
---   weights are not supported.
-*)
+        /// Dijkstra's shortest path algorithm.
+        /// The edge labels of type @b@ are the edge weights; negative edge weights are not supported.
+        /// Basically a graph fold with extra rules. Tail recursive unlike FGL implementation.
+        let rec dijkstra
+            (heap : OSet<LPath<'Vertex,'Distance>>)
+            (acc : LRTree<'Vertex, 'Distance>)
+            (graph : Graph<'Vertex, 'Label, 'Distance>)
+            : LRTree<'Vertex, 'Distance> =
 
-    [<TailCall>]
-    let rec dijkstra (h : Map<'Distance, LPath<'Vertex,'Distance>>) (g : Graph<'Vertex, 'Label, 'Distance>) : LRTree<'Vertex, 'Distance> =
+            if OSet.isEmpty heap || Graph.isEmpty graph then
+                acc
+            else
+                let minValues = heap |> OSet.toSeq |> Seq.head
+                let heap' = OSet.remove minValues heap
 
-        if not (Map.isEmpty h) && not (Graph.isEmpty g) then
+                match minValues with
+                | [] -> acc
+                | (minVertex, minVertexDistance) :: _ ->
 
-            let min = h |> Map.keys |> Seq.head
-            let minValue = Map.find min h
-            let h' = Map.remove min h
+                    let context, graph' = Graph.tryDecompose minVertex graph
 
-            match minValue with
-            | (v, d) :: _ as p ->
-                match Graph.tryDecompose v g with
-                | Some context, g' ->
+                    let minValues', heap' =
+                        match context with
+                        | Some (_, _, _, rightEdge) ->
 
-                    let expand (d : 'Distance) p ((_,_,_,s) : Context<'Vertex, 'Label, 'Distance>)
-                        : Map<'Distance, LPath<'Vertex, 'Distance>> list =
-                        List.map (fun (v, l) ->
-                            Map.empty
-                            |> Map.add (l + d) ([v, l + d] @ p)
-                        ) s
+                            minValues :: acc,
+                            rightEdge
+                            |> List.map (fun (v, l) -> [[v, l + minVertexDistance] @ minValues])
+                            |> List.fold OSet.concat heap'
 
-                    let expand = expand d p context
+                        | None ->
+                            [], heap'
 
-                    let mergeMaps maps =
-                        maps
-                        |> List.map Map.toList
-                        |> List.concat
-                        |> Map.ofList
+                    dijkstra heap' minValues' graph'
 
-                    [p] @ (dijkstra (mergeMaps ([h'] @ expand)) g')
-                | None, g' ->
-                    dijkstra h' g'
+        dijkstra (OSet.ofSeq1 [[v, 0u]]) List.empty g
 
-            | _ ->
-                []
-        else
-            []
-
-(*
--- | Tree of shortest paths from a certain node to the rest of the
---   (reachable) nodes.
---
---   Corresponds to 'dijkstra' applied to a heap in which the only known node is
---   the starting node, with a path of length 0 leading to it.
---
---   The edge labels of type @b@ are the edge weights; negative edge
---   weights are not supported.
-*)
-    let spTree (v : 'Vertex) : Graph<'Vertex, 'Label, 'Distance> -> LRTree<'Vertex, 'Distance> = dijkstra (
-        Map.empty
-        |> Map.add 0u [v, 0u]
-    )
-
-
-(*
--- | Find the first path in a tree that starts with the given node.
---
---   Returns an empty list if there is no such path.
-findP :: Node -> LRTree a -> [LNode a]
-findP _ []                                = []
-findP v (LP []:ps)                        = findP v ps
-findP v (LP (p@((w,_):_)):ps) | v==w      = p
-                              | otherwise = findP v ps
-*)
-
+    /// Find the first path in a tree that starts with the given node.
+    /// Returns an empty list if there is no such path.
     let rec findP (v : 'Vertex) (p : LRTree<'Vertex, 'Distance>) : LVertex<'Vertex, 'Distance> list =
         match p with
         | [] -> []
@@ -94,18 +66,8 @@ findP v (LP (p@((w,_):_)):ps) | v==w      = p
         | ((w,_)::_)::ps when not (v = w) -> findP v ps
         | p::_ -> p
 
-
-(*
--- | Return the distance to the given node in the given tree.
---
---   Returns 'Nothing' if the given node is not reachable.
-
-getDistance :: Node -> LRTree a -> Maybe a
-getDistance v t = case findP v t of
-  []      -> Nothing
-  (_,d):_ -> Just d
-*)
-
+    /// Return the distance to the given node in the given tree.
+    ///  Returns 'Nothing' if the given node is not reachable.
     let getDistance (v : 'Vertex) (t : LRTree<'Vertex, 'Distance>) : 'Distance option =
         match findP v t with
         | [] -> None
@@ -114,10 +76,8 @@ getDistance v t = case findP v t of
     /// Length of the shortest path between two nodes, if any.
     /// Returns 'Nothing' if there is no path, and @'Just' <path length>@ otherwise.
     /// The edge labels of type @b@ are the edge weights; negative edge weights are not supported.
-
     let spLength (v1 : 'Vertex) (v2 : 'Vertex) (g : Graph<'Vertex, 'Label, 'Distance>) : 'Distance option =
         spTree v1 g |> getDistance v2
-
 
     let getLPath (v : 'Vertex) : LRTree<'Vertex, 'Distance> -> LPath<'Vertex, 'Distance> =
         findP v
@@ -130,29 +90,3 @@ getDistance v t = case findP v t of
     let sp (v1 : 'Vertex) (v2 : 'Vertex) (g : Graph<'Vertex, 'Label, 'Distance>) : Path<'Vertex> =
         spTree v1 g
         |> getLPathNodes v2
-
-
-
-
-(*
-
--- | Shortest path between two nodes, if any.
---
---   Returns 'Nothing' if the destination is not reachable from the
---   start node, and @'Just' <path>@ otherwise.
---
---   The edge labels of type @b@ are the edge weights; negative edge
---   weights are not supported.
-sp :: (Graph gr, Real b)
-    => Node -- ^ Start
-    -> Node -- ^ Destination
-    -> gr a b
-    -> Maybe Path
-sp s t g = case getLPathNodes t (spTree s g) of
-  [] -> Nothing
-  p  -> Just p
-
-
-
-
-*)
