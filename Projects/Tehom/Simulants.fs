@@ -27,6 +27,7 @@ module Simulants =
     let Combat = Game / "Combat"
     let CombatGui = Combat / "Gui"
 
+    let Rogue = Game / "Rogue"
 
     // gameplay screen
     let Gameplay = Game / "Gameplay"

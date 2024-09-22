@@ -12,6 +12,7 @@ type Tehom =
     | Credits
     | Gameplay
     | Combat
+    | Rogue
 
 // this is our top-level MMCC message type.
 type TehomMessage =
@@ -47,6 +48,7 @@ type TehomDispatcher () =
             | Credits -> Desire Simulants.Credits
             | Gameplay -> Desire Simulants.Gameplay
             | Combat -> Desire Simulants.Combat
+            | Rogue -> Desire Simulants.Rogue
         if myGame = Splash then Simulants.Splash.DeselectingEvent => ShowTitle
         Simulants.TitleCredits.ClickEvent => ShowCredits
         Simulants.TitlePlay.ClickEvent => ShowGameplay
@@ -77,4 +79,5 @@ type TehomDispatcher () =
         Content.screenWithGroupFromFile Simulants.Credits.Name (Dissolve (Constants.Dissolve.Default, None)) "Assets/Gui/Credits.nugroup" [] []
         Content.screen<GameplayDispatcher> Simulants.Gameplay.Name (Dissolve (Constants.Dissolve.Default, None)) [] []
         Content.screen<CombatDispatcher> Simulants.Combat.Name (Dissolve (Constants.Dissolve.Default, None)) [] []
+        Content.screen<RogueDispatcher> Simulants.Rogue.Name (Dissolve (Constants.Dissolve.Default, None)) [] []
     ]

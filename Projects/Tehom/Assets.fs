@@ -18,6 +18,8 @@ module Assets =
         let CreditsGroupFilePath = "Assets\\Gui\\Credits.nugroup"
         let ClearSansFont = asset<Font> PackageName "ClearSans"
         let MontSerratFont = asset<Font> PackageName "Montserrat-Regular"
+        let MonaspaceFont = asset<Font> PackageName "MonaspaceKrypton-Regular"
+        let SpaceMonoFont = asset<Font> PackageName "SpaceMono-Regular"
 
     // these are assets from the Gui package. Also no assets here yet.
     [<RequireQualifiedAccess>]

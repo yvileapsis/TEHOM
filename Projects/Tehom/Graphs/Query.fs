@@ -59,6 +59,7 @@ module Query =
 
     /// Find the first path in a tree that starts with the given node.
     /// Returns an empty list if there is no such path.
+    [<TailCall>]
     let rec findP (v : 'Vertex) (p : LRTree<'Vertex, 'Distance>) : LVertex<'Vertex, 'Distance> list =
         match p with
         | [] -> []
@@ -67,7 +68,7 @@ module Query =
         | p::_ -> p
 
     /// Return the distance to the given node in the given tree.
-    ///  Returns 'Nothing' if the given node is not reachable.
+    /// Returns 'Nothing' if the given node is not reachable.
     let getDistance (v : 'Vertex) (t : LRTree<'Vertex, 'Distance>) : 'Distance option =
         match findP v t with
         | [] -> None

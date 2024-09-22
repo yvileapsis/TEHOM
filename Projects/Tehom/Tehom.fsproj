@@ -48,6 +48,7 @@
 		<Compile Include="Simulants.fs" />
 		<Compile Include="Events.fs" />
 		<Compile Include="Prototypes\Combat.fs" />
+		<Compile Include="Prototypes\Rogue.fs" />
 		<Compile Include="Gameplay\Gameplay.fs" />
 		<Compile Include="Gameplay\GameplayGroups.fs" />
 		<Compile Include="Gameplay\GameplayDispatcher.fs" />
