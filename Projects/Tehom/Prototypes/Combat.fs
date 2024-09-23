@@ -84,13 +84,17 @@ with
 
 type PhysicalAction =
     | NoPhysicalAction
-    | Moves of Move list
+    | FullPhysicalAction
+    | Sequence of Move list
+
 
 type MentalAction =
     | NoMentalAction
+    | FullMentalAction
 
 type Character = {
     // Static stats
+    ID : String
     Name : String
     Stats : Stats
     Edges : Stat list
@@ -106,11 +110,6 @@ type Character = {
 
     Stance : Stance
     StancesLeft : int
-    Check : Element option
-    CheckSuccesses : int
-
-    PhysicalAction : PhysicalAction
-    MentalAction : MentalAction
 }
 with
     static member getElement element stats =
@@ -150,6 +149,7 @@ with
         |> List.fold (fun stance (toStat, fromStat) -> moveOne toStat fromStat stance) stance
 
     static member empty = {
+        ID = String.empty
         Name = String.empty
         Stats = Character.statsEmpty
         Stance = Character.stanceEmpty
@@ -165,16 +165,11 @@ with
         MinorWounds = 0
 
         Initiative = 0
-
-        Check = None
-        CheckSuccesses = 0
-
-        PhysicalAction = NoPhysicalAction
-        MentalAction = NoMentalAction
     }
 
     static member player = {
         Character.empty with
+            ID = "player"
             Name = "Player"
             Stats = Stat.Gifted, Stat.Gifted, Stat.Gifted, Stat.Gifted
 
@@ -184,6 +179,7 @@ with
 
     static member enemy = {
         Character.empty with
+            ID = "enemy"
             Name = "Enemy"
             Stats = Stat.Average, Stat.Average, Stat.Average, Stat.Average
 
@@ -358,23 +354,99 @@ with
 
     }
 
+type CharacterAction = {
+    Turn : int
+    Target : String
+    PhysicalAction : PhysicalAction
+    MentalAction : MentalAction
+    Element : Element option
+    Successes : int option
+}
+with
+    static member empty = {
+        Turn = 0
+        Target = String.empty
+        PhysicalAction = NoPhysicalAction
+        MentalAction = NoMentalAction
+        Element = None
+        Successes = None
+    }
+
+type GameEffect =
+    | Damage of Character * int
+    | Move of Character : Character * ToLocation : String
+with
+    static member handleMoves attacker defender = function
+        | Block
+        | Climb
+        | Crawl
+        | Crouch
+        | Dash
+        | Delay
+        | Dodge
+        | Jump
+        | Roll
+        | Sidestep
+        | Spin
+        | Stride
+        | Swim ->
+            []
+        | Burst
+        | Cast
+        | Fire
+        | Grab
+        | Knockout
+        | Power
+        | Press
+        | Ready
+        | Retarget
+        | Slam
+        | Strike
+        | Sweep
+        | Toss
+        | Throw ->
+            let damage = Character.getDamage attacker
+            [Damage (defender, damage)]
+
+    static member handleAction action attacker defender =
+
+        let attack = action.PhysicalAction
+
+        match attack with
+        | NoPhysicalAction ->
+            []
+        | FullPhysicalAction ->
+            []
+        | Sequence moves ->
+            let successes = match action.Successes with Some x -> x | None -> 0
+
+            moves
+            |> List.indexed
+            |> List.map (fun (i, move) ->
+                if i < successes then
+                    GameEffect.handleMoves attacker defender move
+                else
+                    []
+            )
+            |> List.concat
+
 type CombatState =
     | Playing
     | Quit
 
+type CharacterExtended = Character * CharacterAction list
 
 // this is our MMCC model type representing gameplay.
 // this model representation uses update time, that is, time based on number of engine updates.
 type [<SymbolicExpansion>] Combat = {
     GameplayTime : int64
     GameplayState : CombatState
-    Combatants : Character list
+    Combatants : CharacterExtended list
+    CombatantID : String
 
     DisplayLeft : String
     DisplayRight : String
 
-    OldCombatant : int
-    CurrentCombatant : int
     Turn : int
 
     Level : Level
@@ -385,13 +457,12 @@ with
         GameplayTime = 0L
         GameplayState = Quit
 
-        Combatants = []
+        Combatants = List.empty
+        CombatantID = String.empty
 
         DisplayLeft = String.empty
         DisplayRight = String.empty
 
-        OldCombatant = 0
-        CurrentCombatant = 0
         Turn = 0
 
         Level = Level.empty
@@ -410,8 +481,10 @@ with
                 )
                 |> List.sortBy (_.Initiative)
                 |> List.rev
-            DisplayLeft = "Player"
-            DisplayRight = "Enemy"
+                |> List.map (fun c -> c, [])
+
+            DisplayLeft = Character.player.ID
+            DisplayRight = Character.enemy.ID
             Level = Level.level1
     }
 
@@ -421,30 +494,34 @@ with
         | Playing
         | Playing | Quit -> gameplay
 
-    // TODO: separate combat into initiative phase, action phase and end phase.
-    // TODO: separate turn into beginning, middle and end too
+    // TODO: make combat end
+    // TODO: make positioning system based on directed graphs
+    // TODO: roguelike prototype screen
     // To handle different moves in sequences I need working positioning and limb systems
 
 
     // attack, prototype of attacker AI
-    static member turnCombatantPlan combatantID combatant gameplay world =
+    static member turnAttackerPlan attacker gameplay =
+
         // pick target with the most wounds, excluding combatant himself
         let target =
             gameplay.Combatants
-            |> List.removeAt combatantID
+            |> List.map fst
+            |> List.remove ((=) attacker)
             |> List.sortBy (_.MajorWounds)
             |> List.last
 
         let targetID =
             gameplay.Combatants
+            |> List.map fst
             |> List.findIndex ((=) target)
 
-        let statCombatant = Character.getStat Gall combatant
+        let statCombatant = Character.getStat Gall attacker
 
         let movesCombatant =
-            if (combatant.MajorWounds < MajorWounds.Down) then
+            if (attacker.MajorWounds < MajorWounds.Down) then
 
-                let combatantName = combatant.Name
+                let combatantName = attacker.Name
                 let targetName = target.Name
 
                 let combatantVertex =
@@ -477,11 +554,62 @@ with
             else
                 []
 
-        let combatant = { combatant with PhysicalAction = Moves movesCombatant }
+        let action = {
+            CharacterAction.empty with
+                Turn = gameplay.Turn
+                Target = target.ID
+                PhysicalAction = Sequence movesCombatant
+                MentalAction = NoMentalAction
+                Element = Some Gall
+        }
 
-        // btw thinking with high enough air you should be able to tell enemy's stance
-        // TODO: implement correct stance selection once skills are implemented
-        let combatant = { combatant with Check = Some Gall }
+        target, action
+
+    // response, prototype of defender AI
+    static member turnDefenderPlan attacker attackerAction defender gameplay =
+
+        let movesCombatant =
+            match attackerAction.PhysicalAction with
+            | Sequence moves -> moves
+            | _ -> []
+
+        let statDefender = Character.getStat Lymph defender
+
+        let movesTarget =
+            if (defender.MajorWounds < MajorWounds.Down) then
+
+                let combatantBlockableMoves =
+                    List.fold (fun number move ->
+                        if List.contains move Move.attacks then number + 1 else number
+                    ) 0 movesCombatant
+
+                Random.getItemsFromList (min statDefender combatantBlockableMoves) Move.defence
+                @
+                if (statDefender > combatantBlockableMoves) then
+                    [ Move.Ready ]
+                    @
+                    Random.getItemsFromList (statDefender - combatantBlockableMoves) Move.attacks
+                else
+                    []
+            else
+                []
+
+        let action = {
+            CharacterAction.empty with
+                Turn = gameplay.Turn
+                Target = attacker.ID
+                PhysicalAction = Sequence movesTarget
+                MentalAction = NoMentalAction
+                Element = Some Lymph
+        }
+
+        action
+
+
+    // btw thinking with high enough air you should be able to tell enemy's stance
+    // TODO: implement correct stance selection once skills are implemented
+    // Thoughts: you can change stance before action, after action, before mental action, after mental action, before enemy attack, after eney attack?
+    static member turnAttackerStanceChange combatant =
 
         let combatant =
             Character.stanceChange (Character.stanceMove
@@ -490,142 +618,147 @@ with
                 Character.stanceEmpty
             ) combatant
 
-        combatantID, combatant, targetID, target
+        combatant
 
-    // response, prototype of defender AI
-    static member turnTargetPlan combatantID combatant targetID target gameplay world =
-        let movesCombatant =
-            match combatant.PhysicalAction with
-            | Moves moves -> moves
-            | _ -> []
 
-        let statTarget = Character.getStat Lymph target
+    static member turnDefenderStanceChange combatant =
 
-        let movesTarget =
-            if (target.MajorWounds < MajorWounds.Down) then
-
-                let combatantBlockableMoves =
-                    List.fold (fun number move ->
-                        if List.contains move Move.attacks then number + 1 else number
-                    ) 0 movesCombatant
-
-                Random.getItemsFromList (min statTarget combatantBlockableMoves) Move.defence
-                @
-                if (statTarget > combatantBlockableMoves) then
-                    [ Move.Ready ]
-                    @
-                    Random.getItemsFromList (statTarget - combatantBlockableMoves) Move.attacks
-                else
-                    []
-            else
-                []
-
-        let target = { target with PhysicalAction = Moves movesTarget }
-
-        let target = { target with Check = Some Lymph }
-
-        let target =
+        let combatant =
             Character.stanceChange (Character.stanceMove
                 [Lymph; Lymph; Lymph]
                 [Gall; Oil; Plasma]
                 Character.stanceEmpty
-            ) target
+            ) combatant
 
-        combatantID, combatant, targetID, target
-
-    // resolution
-    static member turnResolution combatantID combatant targetID target gameplay world =
-
-        let movesCombatant =
-            match combatant.PhysicalAction with
-            | Moves moves -> moves
-            | _ -> []
-
-        let movesTarget =
-            match target.PhysicalAction with
-            | Moves moves -> moves
-            | _ -> []
-
-        let statCombatant = Character.getStancedStat Gall combatant
-        let statTarget = Character.getStancedStat Lymph target
-
-        let successesCombatant = Random.rollDiceThreshold statCombatant 3
-        let successesTarget = Random.rollDiceThreshold statTarget 3
-
-        let combatant = { combatant with CheckSuccesses = successesCombatant }
-        let target = { target with CheckSuccesses = successesTarget }
+        combatant
 
 
-        let (combatant, target) =
-            let handleMoves successes moves attacker defender =
-                moves
-                |> List.indexed
-                |> List.foldWhile (fun (attacker, defender) (i, move) ->
-                    if (i < successes) then
-                        // really simple handler, just checks if it's an attack
-                        // should be turned into a separate function that accumulates bonuses, etc
-                        if List.contains move Move.attacks then
-                            let damage = Character.getDamage attacker
-                            let defender = Character.doDamage damage defender
-                            Some (attacker, defender)
-                        else
-                            Some (attacker, defender)
-                    else
-                        None
-                ) (attacker, defender)
+    static member applyStanceToAction combatant combatantAction =
 
-            if (successesCombatant > successesTarget) then
-                let (combatant, target) = handleMoves successesCombatant movesCombatant combatant target
-                combatant, target
-            else if (successesCombatant < successesTarget) then
-                let (target, combatant) = handleMoves successesTarget movesTarget target combatant
-                combatant, target
+        match combatantAction.Element with
+        | Some element ->
+            let stat = Character.getStancedStat element combatant
+
+            let successes = Random.rollDiceThreshold stat 3
+
+            let combatantAction = { combatantAction with Successes = Some successes }
+
+            combatantAction
+
+        | None ->
+
+            combatantAction
+
+    static member opposedCheck attacker attackerAction defender defenderAction =
+
+        // add karma betting
+
+        let signals =
+
+            if (attackerAction.Successes > defenderAction.Successes) then
+                GameEffect.handleAction attackerAction attacker defender
+            else if (attackerAction.Successes < defenderAction.Successes) then
+                GameEffect.handleAction defenderAction defender attacker
             else
-                combatant, target
+                []
 
-
-        combatantID, combatant, targetID, target
+        signals
 
 
     static member turn gameplay world =
 
-        let combatantID = gameplay.CurrentCombatant
+        let attackerID = gameplay.CombatantID
 
-        let combatant = gameplay.Combatants[combatantID]
+        let attacker =
+            gameplay.Combatants
+            |> List.map fst
+            |> List.find (fun c -> c.ID = attackerID)
 
-        let combatant = Character.stanceReset combatant
+        let defender, attackerAction =
+            Combat.turnAttackerPlan attacker gameplay
 
-        let combatantID, combatant, targetID, target =
-            Combat.turnCombatantPlan combatantID combatant gameplay world
+        let defenderAction =
+            Combat.turnDefenderPlan attacker attackerAction defender gameplay
 
-        let combatantID, combatant, targetID, target =
-            Combat.turnTargetPlan combatantID combatant targetID target gameplay world
+        let attackerIndex =
+            gameplay.Combatants
+            |> List.map fst
+            |> List.findIndex ((=) attacker)
 
-        let combatantID, combatant, targetID, target =
-            Combat.turnResolution combatantID combatant targetID target gameplay world
+        let defenderIndex =
+            gameplay.Combatants
+            |> List.map fst
+            |> List.findIndex ((=) defender)
+
+        let attacker = Character.stanceReset attacker
+
+        let attacker = Combat.turnAttackerStanceChange attacker
+        let attackerAction = Combat.applyStanceToAction attacker attackerAction
+
+        let defender = Combat.turnAttackerStanceChange defender
+        let defenderAction = Combat.applyStanceToAction defender defenderAction
+
+
+        let signals =
+            Combat.opposedCheck attacker attackerAction defender defenderAction
 
         let combatants =
             gameplay.Combatants
-            |> List.mapi (fun i x ->
-                if i = combatantID then combatant
-                else if i = targetID then target
-                else x
+            |> List.mapi (fun i (x, history) ->
+                if i = attackerIndex then attacker, attackerAction::history
+                else if i = defenderIndex then defender, defenderAction::history
+                else x, history
             )
 
         let nextCombatantID =
-            if combatantID + 1 < List.length combatants then
-                combatantID + 1
-            else
-                0
+            let index =
+                if attackerIndex + 1 < List.length combatants then
+                    attackerIndex + 1
+                else
+                    0
 
-        {
+            combatants
+            |> List.item index
+            |> fst
+            |> _.ID
+
+        let gameplay = {
             gameplay with
                 Combatants = combatants
-                CurrentCombatant = nextCombatantID
-                OldCombatant = combatantID
+                CombatantID = nextCombatantID
                 Turn = gameplay.Turn + 1
         }
 
+        signals, gameplay
+
+
+    static member doEffect effect gameplay =
+        match effect with
+        | Damage (character, damage) ->
+
+            let character = Character.doDamage damage character
+
+            let characterIndex =
+                gameplay.Combatants
+                |> List.map fst
+                |> List.findIndex (fun (c : Character) -> c.Name = character.Name)
+
+            let combatants =
+                gameplay.Combatants
+                |> List.mapi (fun i (x, history) ->
+                    let x =
+                        if i = characterIndex then character
+                        else x
+                    x, history
+                )
+
+            let gameplay = { gameplay with Combatants = combatants }
+
+            gameplay
+
+        | Move (character, location) ->
+
+            gameplay
 
 
 // this is our gameplay MMCC message type.
@@ -634,6 +767,7 @@ type CombatMessage =
     | FinishQuitting
     | Update
     | Turn
+    | GameEffect of GameEffect
     | TimeUpdate
     interface Message
 
@@ -686,7 +820,17 @@ type CombatDispatcher () =
             just gameplay
 
         | Turn ->
-            let gameplay = Combat.turn gameplay world
+            let effects, gameplay = Combat.turn gameplay world
+
+            let signals : Signal list =
+                List.map (fun effect -> GameEffect effect) effects
+
+            withSignals signals gameplay
+
+        | GameEffect effect ->
+
+            let gameplay = Combat.doEffect effect gameplay
+
             just gameplay
 
         | TimeUpdate ->
@@ -707,31 +851,34 @@ type CombatDispatcher () =
         // the gui group
         let player =
             gameplay.Combatants
-            |> List.tryFind (fun combatant -> combatant.Name = gameplay.DisplayLeft)
+            |> List.tryFind (fun (combatant, _) -> combatant.Name = gameplay.DisplayLeft)
         let enemy =
             gameplay.Combatants
-            |> List.tryFind (fun combatant -> combatant.Name = gameplay.DisplayRight)
+            |> List.tryFind (fun (combatant, _) -> combatant.Name = gameplay.DisplayRight)
 
         match player, enemy with
-            | Some player, Some enemy ->
+            | Some (player, playerHistory), Some (enemy, enemyHistory) ->
 
-                let currentCombatant = gameplay.Combatants[gameplay.OldCombatant].Name
+                let playerLastTurn = List.head playerHistory
+                let enemyLastTurn = List.head enemyHistory
 
                 let playerMoves =
-                    match player.PhysicalAction with
+                    match playerLastTurn.PhysicalAction with
                     | NoPhysicalAction -> []
-                    | Moves x -> x
+                    | Sequence x -> x
+                    | FullPhysicalAction -> []
 
                 let enemyMoves =
-                    match enemy.PhysicalAction with
+                    match enemyLastTurn.PhysicalAction with
                     | NoPhysicalAction -> []
-                    | Moves x -> x
+                    | Sequence x -> x
+                    | FullPhysicalAction -> []
 
 
                 let turnWinner =
-                    if player.CheckSuccesses = enemy.CheckSuccesses then
+                    if playerLastTurn.Successes = enemyLastTurn.Successes then
                         "Draw!"
-                    else if player.CheckSuccesses > enemy.CheckSuccesses then
+                    else if playerLastTurn.Successes > enemyLastTurn.Successes then
                         $"{player.Name} advances!"
                     else
                         $"{enemy.Name} advances!"
@@ -752,7 +899,7 @@ type CombatDispatcher () =
                         Entity.Size == v3 240.0f 40.0f 0.0f
                         Entity.Elevation == 10.0f
                         Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.Text := $"{currentCombatant} - {player.CheckSuccesses} - {enemy.CheckSuccesses} - {turnWinner}
+                        Entity.Text := $" {playerLastTurn.Successes} - {enemyLastTurn.Successes} - {turnWinner}
 
                         Turn: {gameplay.Turn} {combatWinner}"
                         Entity.TextColor == Color.FloralWhite
@@ -874,7 +1021,7 @@ type CombatDispatcher () =
                                 Entity.FontSizing == Some 10
                                 Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                                 Entity.TextColor :=
-                                    if i < player.CheckSuccesses then
+                                    if Some i < playerLastTurn.Successes then
                                         Color.FloralWhite
                                     else
                                         Color.Gray
@@ -896,7 +1043,7 @@ type CombatDispatcher () =
                                 Entity.FontSizing == Some 10
                                 Entity.Justification == Justified (JustifyRight, JustifyMiddle)
                                 Entity.TextColor :=
-                                    if i < enemy.CheckSuccesses then
+                                    if Some i < enemyLastTurn.Successes then
                                         Color.FloralWhite
                                     else
                                         Color.Gray
