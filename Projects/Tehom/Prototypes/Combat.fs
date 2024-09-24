@@ -39,59 +39,6 @@ type Stat =
 type Stats = Stat * Stat * Stat * Stat
 
 type Stance = int * int * int * int
-
-type Move =
-    | Block
-    | Burst
-    | Cast
-    | Climb
-    | Crawl
-    | Crouch
-    | Dash
-    | Delay
-    | Dodge
-    | Fire
-    | Grab
-    | Jump
-    | Knockout
-    | Power
-    | Press
-    | Ready
-    | Retarget
-    | Roll
-    | Sidestep
-    | Slam
-    | Spin
-    | Stride
-    | Strike
-    | Sweep
-    | Swim
-    | Toss
-    | Throw
-with
-    static member positioning = [
-        Climb; Crawl; Crouch; Dash; Jump; Roll; Sidestep; Stride; Swim;
-    ]
-    static member attacks = [
-        Fire; Grab; Knockout; Power; Press; Retarget; Slam; Strike; Throw; Toss;
-    ]
-    static member defence = [
-        Block; Crouch; Dodge; Jump; Roll; Spin;
-    ]
-    static member special = [
-        Burst; Ready; Sweep;
-    ]
-
-type PhysicalAction =
-    | NoPhysicalAction
-    | FullPhysicalAction
-    | Sequence of Move list
-
-
-type MentalAction =
-    | NoMentalAction
-    | FullMentalAction
-
 type Character = {
     // Static stats
     ID : String
@@ -271,6 +218,59 @@ with
         int gall, int plasma
 
 
+type Move =
+    | Block
+    | Burst
+    | Cast
+    | Climb
+    | Crawl
+    | Crouch
+    | Dash
+    | Delay
+    | Dodge
+    | Fire
+    | Grab
+    | Jump
+    | Knockout
+    | Power
+    | Press
+    | Ready
+    | Retarget
+    | Roll
+    | Sidestep
+    | Slam
+    | Spin
+    | Stride
+    | Strike
+    | Sweep
+    | Swim
+    | Toss
+    | Throw
+with
+    static member positioning = [
+        Climb; Crawl; Crouch; Dash; Jump; Roll; Sidestep; Stride; Swim;
+    ]
+    static member attacks = [
+        Fire; Grab; Knockout; Power; Press; Retarget; Slam; Strike; Throw; Toss;
+    ]
+    static member defence = [
+        Block; Crouch; Dodge; Jump; Roll; Spin;
+    ]
+    static member special = [
+        Burst; Ready; Sweep;
+    ]
+
+type PhysicalAction =
+    | NoPhysicalAction
+    | FullPhysicalAction
+    | Sequence of Move list
+
+
+type MentalAction =
+    | NoMentalAction
+    | FullMentalAction
+
+
 module Random =
     let rollDie () = Gen.random2 1 7
     let rollDice count =
@@ -300,7 +300,7 @@ with
 
     static member room1 = {
         Name = "Dark Room"
-        Actors = Set.ofList ["Player"; "Table"; "Cat"; "Key"]
+        Actors = Set.ofList ["player"; "table"; "cat"; "key"]
     }
 
     static member room2 = {
@@ -310,7 +310,7 @@ with
 
     static member room3 = {
         Name = "Bright Room"
-        Actors = Set.ofList [ "Enemy" ]
+        Actors = Set.ofList [ "enemy" ]
     }
 
 type Pathway = {
@@ -351,8 +351,40 @@ with
             |> Undirected.Edges.add ("Room 4", "Room 6", Pathway.empty)
             |> Undirected.Edges.add ("Room 4", "Room 7", Pathway.empty)
             |> Undirected.Edges.add ("Room 5", "Room 6", Pathway.empty)
-
     }
+
+    static member find finder (level : Level) =
+        level.Areas
+        |> Vertices.toVertexList
+        |> List.tryFind finder
+        |> function | Some v -> Some (fst v) | None -> None
+
+    static member findArea area (level : Level) =
+        Level.find (fun (string, vertex) -> string = area) level
+
+    static member findActor actor (level : Level) =
+        Level.find (fun (string, vertex) -> Set.contains actor vertex.Actors) level
+
+    static member findPath fromDestination toDestination level =
+        level.Areas
+        |> Undirected.Edges.map (fun v1 v2 edge -> 1u)
+        |> Query.sp fromDestination toDestination
+
+    static member moveActor actor fromDestination toDestination level =
+        if not (fromDestination = toDestination) then
+            {
+                level with
+                    Areas = Vertices.map (fun string vertex ->
+                        if string = fromDestination then
+                            { vertex with Actors = Set.remove actor vertex.Actors }
+                        elif string = toDestination then
+                            { vertex with Actors = Set.add actor vertex.Actors }
+                        else
+                            vertex
+                    ) level.Areas
+            }
+        else
+            level
 
 type CharacterAction = {
     Turn : int
@@ -376,7 +408,8 @@ type GameEffect =
     | Damage of Character * int
     | Move of Character : Character * ToLocation : String
 with
-    static member handleMoves attacker defender = function
+    static member handleMoves move attacker defender level =
+        match move with
         | Block
         | Climb
         | Crawl
@@ -390,7 +423,13 @@ with
         | Spin
         | Stride
         | Swim ->
-            []
+            let location = Level.findActor defender.ID level
+            match location with
+            | Some location ->
+                [Move (attacker, location)]
+            | None ->
+                printfn $"errored out in handleMoves {move} {attacker} {location}"
+                []
         | Burst
         | Cast
         | Fire
@@ -408,7 +447,7 @@ with
             let damage = Character.getDamage attacker
             [Damage (defender, damage)]
 
-    static member handleAction action attacker defender =
+    static member handleAction action attacker defender level =
 
         let attack = action.PhysicalAction
 
@@ -424,7 +463,7 @@ with
             |> List.indexed
             |> List.map (fun (i, move) ->
                 if i < successes then
-                    GameEffect.handleMoves attacker defender move
+                    GameEffect.handleMoves move attacker defender level
                 else
                     []
             )
@@ -494,12 +533,6 @@ with
         | Playing
         | Playing | Quit -> gameplay
 
-    // TODO: make combat end
-    // TODO: make positioning system based on directed graphs
-    // TODO: roguelike prototype screen
-    // To handle different moves in sequences I need working positioning and limb systems
-
-
     // attack, prototype of attacker AI
     static member turnAttackerPlan attacker gameplay =
 
@@ -511,35 +544,23 @@ with
             |> List.sortBy (_.MajorWounds)
             |> List.last
 
-        let targetID =
-            gameplay.Combatants
-            |> List.map fst
-            |> List.findIndex ((=) target)
-
         let statCombatant = Character.getStat Gall attacker
 
         let movesCombatant =
             if (attacker.MajorWounds < MajorWounds.Down) then
 
-                let combatantName = attacker.Name
-                let targetName = target.Name
+                let combatantName = attacker.ID
+                let targetName = target.ID
 
-                let combatantVertex =
-                    gameplay.Level.Areas
-                    |> Vertices.toVertexList
-                    |> List.find (fun (string, vertex) -> Set.contains combatantName vertex.Actors)
-                    |> fst
+                let level = gameplay.Level
 
-                let targetVertex =
-                    gameplay.Level.Areas
-                    |> Vertices.toVertexList
-                    |> List.find (fun (string, vertex) -> Set.contains targetName vertex.Actors)
-                    |> fst
 
                 let path =
-                    gameplay.Level.Areas
-                    |> Undirected.Edges.map (fun v1 v2 edge -> 1u)
-                    |> Query.sp combatantVertex targetVertex
+                    match Level.findActor combatantName level, Level.findActor targetName level with
+                    | Some playerLocation, Some enemyLocation ->
+                        Level.findPath playerLocation enemyLocation level
+                    | _ ->
+                        []
 
                 let movementMoves = List.length path - 1
 
@@ -649,16 +670,16 @@ with
 
             combatantAction
 
-    static member opposedCheck attacker attackerAction defender defenderAction =
+    static member opposedCheck attacker attackerAction defender defenderAction level =
 
         // add karma betting
 
         let signals =
 
             if (attackerAction.Successes > defenderAction.Successes) then
-                GameEffect.handleAction attackerAction attacker defender
+                GameEffect.handleAction attackerAction attacker defender level
             else if (attackerAction.Successes < defenderAction.Successes) then
-                GameEffect.handleAction defenderAction defender attacker
+                GameEffect.handleAction defenderAction defender attacker level
             else
                 []
 
@@ -706,9 +727,9 @@ with
         let defender = Combat.turnDefenderStanceChange defender
         let defenderAction = Combat.applyStanceToAction defender defenderAction
 
+        let level = gameplay.Level
 
-        let signals =
-            Combat.opposedCheck attacker attackerAction defender defenderAction
+        let signals = Combat.opposedCheck attacker attackerAction defender defenderAction level
 
         let combatants =
             gameplay.Combatants
@@ -746,25 +767,26 @@ with
 
             let character = Character.doDamage damage character
 
-            let characterIndex =
-                gameplay.Combatants
-                |> List.map fst
-                |> List.findIndex (fun (c : Character) -> c.Name = character.Name)
-
             let combatants =
                 gameplay.Combatants
-                |> List.mapi (fun i (x, history) ->
-                    let x =
-                        if i = characterIndex then character
-                        else x
-                    x, history
-                )
+                |> List.map (fun (c, history) -> (if c.ID = character.ID then character else c), history)
 
             let gameplay = { gameplay with Combatants = combatants }
 
             gameplay
 
         | Move (character, location) ->
+
+            let level = gameplay.Level
+
+            let level =
+                match Level.findActor character.ID level with
+                | Some characterLocation ->
+                    Level.moveActor character.ID characterLocation location level
+                | None ->
+                    level
+
+            let gameplay = { gameplay with Level = level }
 
             gameplay
 
