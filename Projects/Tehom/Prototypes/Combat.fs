@@ -667,7 +667,15 @@ with
 
     static member turn gameplay world =
 
-        let attackerID = gameplay.CombatantID
+        let attackerID =
+            if gameplay.CombatantID <> String.empty then
+                gameplay.CombatantID
+            else
+                gameplay.Combatants
+                |> List.head
+                |> fst
+                |> _.ID
+
 
         let attacker =
             gameplay.Combatants
@@ -683,19 +691,19 @@ with
         let attackerIndex =
             gameplay.Combatants
             |> List.map fst
-            |> List.findIndex ((=) attacker)
+            |> List.findIndex (fun c -> c.ID = attacker.ID)
 
         let defenderIndex =
             gameplay.Combatants
             |> List.map fst
-            |> List.findIndex ((=) defender)
+            |> List.findIndex (fun c -> c.ID = defender.ID)
 
         let attacker = Character.stanceReset attacker
 
         let attacker = Combat.turnAttackerStanceChange attacker
         let attackerAction = Combat.applyStanceToAction attacker attackerAction
 
-        let defender = Combat.turnAttackerStanceChange defender
+        let defender = Combat.turnDefenderStanceChange defender
         let defenderAction = Combat.applyStanceToAction defender defenderAction
 
 
@@ -849,18 +857,120 @@ type CombatDispatcher () =
     // here we describe the content of the game including the hud, the scene, and the player
     override this.Content (gameplay, _) = [
         // the gui group
-        let player =
-            gameplay.Combatants
-            |> List.tryFind (fun (combatant, _) -> combatant.Name = gameplay.DisplayLeft)
-        let enemy =
-            gameplay.Combatants
-            |> List.tryFind (fun (combatant, _) -> combatant.Name = gameplay.DisplayRight)
 
-        match player, enemy with
-            | Some (player, playerHistory), Some (enemy, enemyHistory) ->
+        Content.group Simulants.GameplayGui.Name [] [
 
-                let playerLastTurn = List.head playerHistory
-                let enemyLastTurn = List.head enemyHistory
+            Content.button "AdvanceTurn" [
+                Entity.Position == v3 40.0f 150.0f 0.0f
+                Entity.Size == v3 80.0f 20.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Text == "Advance Turn"
+                Entity.Font == Assets.Gui.ClearSansFont
+                Entity.FontSizing == Some 10
+                Entity.ClickEvent => Turn
+            ]
+
+            Content.button "ResetGame" [
+                Entity.Position == v3 -40.0f 150.0f 0.0f
+                Entity.Size == v3 80.0f 20.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Text == "Reset Game"
+                Entity.Font == Assets.Gui.ClearSansFont
+                Entity.FontSizing == Some 10
+                Entity.ClickEvent => StartPlaying
+            ]
+
+            let player =
+                gameplay.Combatants
+                |> List.tryFind (fun (combatant, _) -> combatant.ID = gameplay.DisplayLeft)
+            let enemy =
+                gameplay.Combatants
+                |> List.tryFind (fun (combatant, _) -> combatant.ID = gameplay.DisplayRight)
+
+
+            match player, enemy with
+            | Some (player, _), Some (enemy, _) ->
+                let statsBox character = [
+                    let (gall, lymph, oil, plasma) = character.Stats
+                    let (gallStance, lymphStance, oilStance, plasmaStance) = character.Stance
+                    let minorWounds = character.MinorWounds
+                    let majorWounds = character.MajorWounds
+
+                    Content.text "Minor Wounds" [
+                        Entity.Size == v3 80.0f 10.0f 0.0f
+                        Entity.Text := $"Wounds {minorWounds}"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 10
+                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    ]
+
+                    Content.text "Major Wounds" [
+                        Entity.Size == v3 80.0f 10.0f 0.0f
+                        Entity.Text := $"{majorWounds}"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 10
+                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    ]
+
+                    Content.text "Gall" [
+                        Entity.Size == v3 80.0f 10.0f 0.0f
+                        Entity.Text := $"{gall} {gallStance}"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 10
+                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    ]
+                    Content.text "Lymph" [
+                        Entity.Size == v3 80.0f 10.0f 0.0f
+                        Entity.Text := $"{lymph} {lymphStance}"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 10
+                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    ]
+                    Content.text "Oil" [
+                        Entity.Size == v3 80.0f 10.0f 0.0f
+                        Entity.Text := $"{oil} {oilStance}"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 10
+                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    ]
+                    Content.text "Plasma" [
+                        Entity.Size == v3 80.0f 10.0f 0.0f
+                        Entity.Text := $"{plasma} {plasmaStance}"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 10
+                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    ]
+                    Content.text "Stances" [
+                        Entity.Size == v3 80.0f 10.0f 0.0f
+                        Entity.Text := $"Stances {character.StancesLeft}"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 10
+                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    ]
+                ]
+
+                Content.association "StatsBoxPlayer" [
+                    Entity.Position == v3 -160.0f 0.0f 0.0f
+                    Entity.Size == v3 80.0f 80.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+                ] (statsBox player)
+
+                Content.association "StatsBoxEnemy" [
+                    Entity.Position == v3 200.0f 0.0f 0.0f
+                    Entity.Size == v3 80.0f 80.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+                ] (statsBox enemy)
+            | _ ->
+                ()
+
+            match player, enemy with
+            | Some (player, playerLastTurn::_), Some (enemy, enemyLastTurn::_) ->
 
                 let playerMoves =
                     match playerLastTurn.PhysicalAction with
@@ -874,11 +984,20 @@ type CombatDispatcher () =
                     | Sequence x -> x
                     | FullPhysicalAction -> []
 
+                let playerSuccesses =
+                    match playerLastTurn.Successes with
+                    | Some x -> x
+                    | None -> -1
+
+                let enemySuccesses =
+                    match enemyLastTurn.Successes with
+                    | Some x -> x
+                    | None -> -1
 
                 let turnWinner =
-                    if playerLastTurn.Successes = enemyLastTurn.Successes then
+                    if playerSuccesses = enemySuccesses then
                         "Draw!"
-                    else if playerLastTurn.Successes > enemyLastTurn.Successes then
+                    else if playerSuccesses > enemySuccesses then
                         $"{player.Name} advances!"
                     else
                         $"{enemy.Name} advances!"
@@ -893,164 +1012,66 @@ type CombatDispatcher () =
                     else
                         ""
 
-                Content.group Simulants.GameplayGui.Name [] [
-                    richText "CombatSummary" [
-                        Entity.Position == v3 0.0f 80.0f 0.0f
-                        Entity.Size == v3 240.0f 40.0f 0.0f
-                        Entity.Elevation == 10.0f
-                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.Text := $" {playerLastTurn.Successes} - {enemyLastTurn.Successes} - {turnWinner}
 
-                        Turn: {gameplay.Turn} {combatWinner}"
-                        Entity.TextColor == Color.FloralWhite
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
-                    ]
+                richText "CombatSummary" [
+                    Entity.Position == v3 0.0f 80.0f 0.0f
+                    Entity.Size == v3 240.0f 40.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                    Entity.Text := $" {playerSuccesses} - {enemySuccesses} - {turnWinner}
 
-                    Content.button "AdvanceTurn" [
-                        Entity.Position == v3 40.0f 150.0f 0.0f
-                        Entity.Size == v3 80.0f 20.0f 0.0f
-                        Entity.Elevation == 10.0f
-                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.Text == "Advance Turn"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
-                        Entity.ClickEvent => Turn
-                    ]
+                    Turn: {gameplay.Turn} {combatWinner}"
+                    Entity.TextColor == Color.FloralWhite
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 10
+                ]
 
-                    Content.button "ResetGame" [
-                        Entity.Position == v3 -40.0f 150.0f 0.0f
-                        Entity.Size == v3 80.0f 20.0f 0.0f
-                        Entity.Elevation == 10.0f
-                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.Text == "Reset Game"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
-                        Entity.ClickEvent => StartPlaying
-                    ]
-
-
-                    let statsBox character = [
-                        let (gall, lymph, oil, plasma) = character.Stats
-                        let (gallStance, lymphStance, oilStance, plasmaStance) = character.Stance
-                        let minorWounds = character.MinorWounds
-                        let majorWounds = character.MajorWounds
-
-                        Content.text "Minor Wounds" [
+                Content.association "MovesPlayer" [
+                    Entity.Position == v3 -80.0f 0.0f 0.0f
+                    Entity.Size == v3 80.0f 80.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+                ] [
+                    for i, move in List.indexed playerMoves ->
+                        Content.text $"MovesPlayer{i}" [
                             Entity.Size == v3 80.0f 10.0f 0.0f
-                            Entity.Text := $"Wounds {minorWounds}"
+                            Entity.Text := $"{move}"
                             Entity.Font == Assets.Gui.ClearSansFont
                             Entity.FontSizing == Some 10
                             Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                            Entity.TextColor :=
+                                if i < playerSuccesses then
+                                    Color.FloralWhite
+                                else
+                                    Color.Gray
                         ]
+                ]
 
-                        Content.text "Major Wounds" [
+                Content.association "MovesEnemy" [
+                    Entity.Position == v3 80.0f 0.0f 0.0f
+                    Entity.Size == v3 80.0f 80.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+                ] [
+                    for i, move in List.indexed enemyMoves ->
+                        Content.text $"MovesEnemy{i}" [
                             Entity.Size == v3 80.0f 10.0f 0.0f
-                            Entity.Text := $"{majorWounds}"
+                            Entity.Text := $"{move}"
                             Entity.Font == Assets.Gui.ClearSansFont
                             Entity.FontSizing == Some 10
-                            Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                            Entity.Justification == Justified (JustifyRight, JustifyMiddle)
+                            Entity.TextColor :=
+                                if i < enemySuccesses then
+                                    Color.FloralWhite
+                                else
+                                    Color.Gray
                         ]
-
-                        Content.text "Gall" [
-                            Entity.Size == v3 80.0f 10.0f 0.0f
-                            Entity.Text := $"{gall} {gallStance}"
-                            Entity.Font == Assets.Gui.ClearSansFont
-                            Entity.FontSizing == Some 10
-                            Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                        ]
-                        Content.text "Lymph" [
-                            Entity.Size == v3 80.0f 10.0f 0.0f
-                            Entity.Text := $"{lymph} {lymphStance}"
-                            Entity.Font == Assets.Gui.ClearSansFont
-                            Entity.FontSizing == Some 10
-                            Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                        ]
-                        Content.text "Oil" [
-                            Entity.Size == v3 80.0f 10.0f 0.0f
-                            Entity.Text := $"{oil} {oilStance}"
-                            Entity.Font == Assets.Gui.ClearSansFont
-                            Entity.FontSizing == Some 10
-                            Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                        ]
-                        Content.text "Plasma" [
-                            Entity.Size == v3 80.0f 10.0f 0.0f
-                            Entity.Text := $"{plasma} {plasmaStance}"
-                            Entity.Font == Assets.Gui.ClearSansFont
-                            Entity.FontSizing == Some 10
-                            Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                        ]
-                        Content.text "Stances" [
-                            Entity.Size == v3 80.0f 10.0f 0.0f
-                            Entity.Text := $"Stances {character.StancesLeft}"
-                            Entity.Font == Assets.Gui.ClearSansFont
-                            Entity.FontSizing == Some 10
-                            Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                        ]
-                    ]
-
-                    Content.association "StatsBoxPlayer" [
-                        Entity.Position == v3 -160.0f 0.0f 0.0f
-                        Entity.Size == v3 80.0f 80.0f 0.0f
-                        Entity.Elevation == 10.0f
-                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.Layout == Flow (FlowDownward, FlowUnlimited)
-                    ] (statsBox player)
-
-                    Content.association "StatsBoxEnemy" [
-                        Entity.Position == v3 200.0f 0.0f 0.0f
-                        Entity.Size == v3 80.0f 80.0f 0.0f
-                        Entity.Elevation == 10.0f
-                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.Layout == Flow (FlowDownward, FlowUnlimited)
-                    ] (statsBox enemy)
-
-
-                    Content.association "MovesPlayer" [
-                        Entity.Position == v3 -80.0f 0.0f 0.0f
-                        Entity.Size == v3 80.0f 80.0f 0.0f
-                        Entity.Elevation == 10.0f
-                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.Layout == Flow (FlowDownward, FlowUnlimited)
-                    ] [
-                        for i, move in List.indexed playerMoves ->
-                            Content.text $"MovesPlayer{i}" [
-                                Entity.Size == v3 80.0f 10.0f 0.0f
-                                Entity.Text := $"{move}"
-                                Entity.Font == Assets.Gui.ClearSansFont
-                                Entity.FontSizing == Some 10
-                                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                                Entity.TextColor :=
-                                    if Some i < playerLastTurn.Successes then
-                                        Color.FloralWhite
-                                    else
-                                        Color.Gray
-                            ]
-                    ]
-
-                    Content.association "MovesEnemy" [
-                        Entity.Position == v3 80.0f 0.0f 0.0f
-                        Entity.Size == v3 80.0f 80.0f 0.0f
-                        Entity.Elevation == 10.0f
-                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.Layout == Flow (FlowDownward, FlowUnlimited)
-                    ] [
-                        for i, move in List.indexed enemyMoves ->
-                            Content.text $"MovesEnemy{i}" [
-                                Entity.Size == v3 80.0f 10.0f 0.0f
-                                Entity.Text := $"{move}"
-                                Entity.Font == Assets.Gui.ClearSansFont
-                                Entity.FontSizing == Some 10
-                                Entity.Justification == Justified (JustifyRight, JustifyMiddle)
-                                Entity.TextColor :=
-                                    if Some i < enemyLastTurn.Successes then
-                                        Color.FloralWhite
-                                    else
-                                        Color.Gray
-                            ]
-                    ]
                 ]
             | _ -> ()
+
+        ]
 
         // the scene group while playing
         match gameplay.GameplayState with
