@@ -20,7 +20,8 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 *)
 
 /// Currently using default FSharp map, but it's important to consider using one of Prime's fancy new maps in the future.
-type Map<'k, 'v when 'k : comparison> = FSharp.Collections.Map<'k, 'v>
+type Dictionary<'k, 'v when 'k : comparison> = FSharp.Collections.Map<'k, 'v>
+module Dictionary = FSharp.Collections.Map
 
 open Aether
 
@@ -49,7 +50,7 @@ type Context<'Vertex,'Label,'Edge> when 'Vertex: comparison=
 
 ///Map of adjacent vertices as key and the linking edges as values
 type MAdj<'Vertex,'Edge> when 'Vertex: comparison =
-    Map<'Vertex,'Edge>
+    Dictionary<'Vertex,'Edge>
 
 ///Context of a vertices as defined by Martin Erwig. Adjacency of type 'MAdj'
 type MContext<'Vertex,'Label,'Edge> when 'Vertex: comparison =
@@ -57,7 +58,7 @@ type MContext<'Vertex,'Label,'Edge> when 'Vertex: comparison =
 
 ///Map of Vertices as keys and MContexts as values
 type Graph<'Vertex,'Label,'Edge> when 'Vertex: comparison =
-    Map<'Vertex, MContext<'Vertex,'Label,'Edge>>
+    Dictionary<'Vertex, MContext<'Vertex,'Label,'Edge>>
 
 ///Lenses for working with contexts
 module Lenses = 
@@ -87,13 +88,13 @@ module Graph =
     (* Transition functions *)
 
     let internal fromAdj<'Vertex,'Edge when 'Vertex: comparison> : Adj<'Vertex,'Edge> -> MAdj<'Vertex,'Edge> =
-        Map.ofList 
+        Dictionary.ofList
 
     let internal fromContext<'Vertex,'Label,'Edge when 'Vertex: comparison> : Context<'Vertex,'Label,'Edge> -> MContext<'Vertex,'Label,'Edge> =
         fun (p, _, l, s) -> fromAdj p, l, fromAdj s
 
     let internal toAdj<'Vertex,'Edge when 'Vertex: comparison> : MAdj<'Vertex,'Edge> -> Adj<'Vertex,'Edge> =
-        Map.toList
+        Dictionary.toList
 
     let internal toContext (v:'Vertex) (mc : MContext<'Vertex,'Label,'Edge>) : Context<'Vertex,'Label,'Edge> =
         mc
@@ -107,13 +108,13 @@ module Graph =
         let g2 = 
             List.fold (fun g (value, edge) -> 
                 let composedPrism = (Compose.prism (Map.key_ value) Lenses.msucc_)
-                let adjListMapping = Map.add value edge
+                let adjListMapping = Dictionary.add value edge
                 let adjListInGraphMapping = Optic.map composedPrism adjListMapping
                 adjListInGraphMapping g) 
                 g1 p
         List.fold (fun g (edge, value) -> 
             let composedPrism = (Compose.prism (Map.key_ value) Lenses.mpred_)
-            let adjListMapping = Map.add value edge
+            let adjListMapping = Dictionary.add value edge
             let adjListInGraphMapping = Optic.map composedPrism adjListMapping
             adjListInGraphMapping g) 
             g2 s
@@ -149,7 +150,7 @@ module Graph =
 
     ///Lookup a context in the graph. If the binding exists, it returns the context and the graph minus the vertex and its edges. Raising KeyNotFoundException if no binding exists in the graph.
     let decompose (v:'Vertex) (g: Graph<'Vertex,'Label,'Edge>) = 
-        Map.find v g
+        Dictionary.find v g
         |> fun mc ->
             let c = toContext v mc
             let g = decomposeGraph v (Optic.get Lenses.pred_ c) (Optic.get Lenses.succ_ c) g
@@ -157,7 +158,7 @@ module Graph =
 
     ///Lookup a context in the graph. If the binding exists, it returns a Some value of the context and the graph minus the vertex and its edges. If it doesn't exist, returns None and the initial graph.
     let tryDecompose (v:'Vertex) (g: Graph<'Vertex,'Label,'Edge>) = 
-        match Map.tryFind v g with
+        match Dictionary.tryFind v g with
         | Some mc ->
             let c = toContext v mc
             let g = decomposeGraph v (Optic.get Lenses.pred_ c) (Optic.get Lenses.succ_ c) g
@@ -167,7 +168,7 @@ module Graph =
 
     ///If the given graph contains at least one vertex, returns a Some value of the first context and the graph minus the associated vertex and its edges. If the graph is empty, returns None and the initial graph.
     let decomposeFirst g : Context<'Vertex,'Label,'Edge> option * Graph<'Vertex,'Label,'Edge> =
-        match Map.tryFindKey (fun _ _ -> true) g with
+        match Dictionary.tryFindKey (fun _ _ -> true) g with
         | Some v -> tryDecompose v g
         | _ -> None, g
 
@@ -176,39 +177,39 @@ module Graph =
 
     ///Returns true, if the Graph does not contain any vertices. Returns false, if not.
     let isEmpty<'Vertex,'Label,'Edge when 'Vertex: comparison> : Graph<'Vertex,'Label,'Edge> -> bool =
-        Map.isEmpty
+        Dictionary.isEmpty
 
     ///Creates a new, empty graph.
     let empty : Graph<'Vertex,'Label,'Edge> =
-        Map.empty
+        Dictionary.empty
     
     ///Lookup a context in the graph, returning a Some value if a binding exists and None if not.
     let tryGetContext v (g:Graph<'Vertex,'Label,'Edge>) : Context<'Vertex,'Label,'Edge> option =
-            Map.tryFind v g
+            Dictionary.tryFind v g
             |> Option.map (fun mc -> toContext v mc)
 
     ///Lookup a context in the graph. Raising KeyNotFoundException if no binding exists in the graph.
     let getContext v (g:Graph<'Vertex,'Label,'Edge>) : Context<'Vertex,'Label,'Edge> =
-            Map.find v g
+            Dictionary.find v g
             |> fun mc -> toContext v mc
 
 
     (* Iterative *)
 
     ///Maps contexts of the graph.
-    let mapContexts (mapping : Context<'Vertex,'Label,'Edge> -> 'T) (g: Graph<'Vertex,'Label,'Edge>) : Map<'Vertex,'T>= 
+    let mapContexts (mapping : Context<'Vertex,'Label,'Edge> -> 'T) (g: Graph<'Vertex,'Label,'Edge>) : Dictionary<'Vertex,'T>=
         g
-        |> Map.map (fun v mc ->  mapping (toContext v mc))
+        |> Dictionary.map (fun v mc ->  mapping (toContext v mc))
     
     ///Folds over the contexts in the graph.
     let foldContexts (state: 'State) (folder : 'State -> Context<'Vertex,'Label,'Edge> -> 'State) (g: Graph<'Vertex,'Label,'Edge>) : 'State =
         g
-        |> Map.fold (fun s v mc -> folder s (toContext v mc)) state
+        |> Dictionary.fold (fun s v mc -> folder s (toContext v mc)) state
 
     ///Performs a given function on every edge of the graph.
     let iterContexts (action : Context<'Vertex,'Label,'Edge> -> unit) (g: Graph<'Vertex,'Label,'Edge>) : unit = 
         g
-        |> Map.iter (fun v mc ->  action (toContext v mc))
+        |> Dictionary.iter (fun v mc ->  action (toContext v mc))
 
 ///Functions for vertices of both directed and undirected graphs
 module Vertices = 
@@ -217,7 +218,7 @@ module Vertices =
 
     ///Adds a labeled vertex to the graph.
     let add ((v, l): LVertex<'Vertex,'Label>) (g:Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'Label,'Edge> =
-        Map.add v (Map.empty, l, Map.empty) g
+        Dictionary.add v (Map.empty, l, Map.empty) g
 
     ///Adds a list of labeled vertices to the graph.    
     let addMany (vertices:list<LVertex<'Vertex,'Label>>) (g:Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'Label,'Edge> =
@@ -235,27 +236,27 @@ module Vertices =
 
     ///Evaluates the number of vertices in the graph.
     let count (g: Graph<'Vertex,'Label,'Edge>) : int = 
-        g.Count
+        Dictionary.count g
 
  
     ///Returns true, if the vertex v is contained in the graph. Otherwise, it returns false.
     let contains v (g: Graph<'Vertex,'Label,'Edge>) : bool =
-        Map.containsKey v g
+        Dictionary.containsKey v g
 
     ///Lookup a labeled vertex in the graph. Raising KeyNotFoundException if no binding exists in the graph.
     let find (v: 'Vertex) (g: Graph<'Vertex,'Label,'Edge>) : LVertex<'Vertex,'Label> = 
-        Map.find v g
+        Dictionary.find v g
         |> fun (_, l, _) -> v, l
 
     ///Lookup a labeled vertex in the graph, returning a Some value if a binding exists and None if not.
     let tryFind (v: 'Vertex) (g: Graph<'Vertex,'Label,'Edge>) : LVertex<'Vertex,'Label> option = 
-        Map.tryFind v g
+        Dictionary.tryFind v g
         |> Option.map (fun (_, l, _) -> v, l)    
 
 
     ///Creates a list of all vertices and their labels.
     let toVertexList (g:Graph<'Vertex,'Label,'Edge>) : LVertex<'Vertex,'Label> list=
-        Map.toList g
+        Dictionary.toList g
         |> List.map (fun (v, (_, l, _)) -> v, l)
 
 
@@ -265,16 +266,16 @@ module Vertices =
     ///Maps the vertexlabels of the graph.
     let map (mapping: 'Vertex -> 'Label -> 'RLabel) (g: Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'RLabel,'Edge>=
         g
-        |> Map.map (fun vertex (p, l, s) ->
+        |> Dictionary.map (fun vertex (p, l, s) ->
             p, mapping vertex l, s)
 
     ///Maps the vertexlabels of the graph. The mapping function also receives an ascending integer index.
     let mapi (mapping: int -> 'Vertex -> 'Label -> 'RLabel) (g: Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'RLabel,'Edge> =
         g
-        |> Map.toArray
+        |> Dictionary.toArray
         |> Array.mapi (fun i (v,c) -> v,(i,c))
-        |> Map.ofArray
-        |> Map.map (fun vertex (i,(p, l, s)) ->
+        |> Dictionary.ofArray
+        |> Dictionary.map (fun vertex (i,(p, l, s)) ->
             p, mapping i vertex l, s)
     
     ///Performs a given function on every vertex and its label of a graph.
@@ -286,7 +287,7 @@ module Vertices =
     let iteri (action: int -> 'Vertex -> 'Label -> unit) (g: Graph<'Vertex,'Label,'Edge>) : unit =
         let mutable i = 0
         g
-        |> Map.iter (fun vertex (_, l, _) ->
+        |> Dictionary.iter (fun vertex (_, l, _) ->
             action i vertex l
             i <- i + 1)
  
