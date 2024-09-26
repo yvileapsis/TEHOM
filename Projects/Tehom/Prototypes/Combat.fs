@@ -309,86 +309,98 @@ module Random =
         Gen.random2 0 max
 
 
+type Site =
+    | Site
+with
+    static member empty = Site
+
+type Relationship =
+    | Relationship
+    | Consists
+    | Contains
+    | Distance of Distance: int
+    | LiesAbove
+    | Covers
+with
+    static member empty = Relationship
+
+type Sites = Graph<String, Site, Relationship>
+
 type Area = {
     Name : string
-    Actors : Set<String>
-}
-with
-
-    static member empty = {
-        Name = String.empty
-        Actors = Set.empty
-    }
-
-    static member room1 = {
-        Name = "Dark Room"
-        Actors = Set.ofList ["player"; "table"; "cat"; "key"]
-    }
-
-    static member room2 = {
-        Name = "Mediumly Lit Room"
-        Actors = Set.empty
-    }
-
-    static member room3 = {
-        Name = "Bright Room"
-        Actors = Set.ofList [ "enemy" ]
-    }
-
-type Pathway = {
-    Open : bool
-    Length : int
-}
-with
-    static member empty = { Open = true; Length = 10 }
-
-
-type Level = {
-    Name : string
-    Areas : Graph<String, Area, Pathway>
+    Sites : Sites
 }
 with
     static member empty = {
         Name = String.empty
-        Areas = Graph.empty
+        Sites = Graph.empty
     }
+
+    // * Waitroom, barricaded windows, rolling hospital bed, locked exit door, you wake up here
+
+    static member room1 : Sites =
+        Graph.empty
+        // room itself
+        |> Vertices.add ("room1", Site.empty)
+        // room parts
+        |> Vertices.add ("room1floor", Site.empty)
+        |> Vertices.add ("room1ceiling", Site.empty)
+        |> Vertices.add ("room1walls", Site.empty)
+        |> Vertices.add ("room1corners", Site.empty)
+        |> Vertices.add ("room1air", Site.empty)
+        // room consists of its parts
+        |> Directed.Edges.add ("room1", "room1floor", Consists)
+        |> Directed.Edges.add ("room1", "room1ceiling", Consists)
+        |> Directed.Edges.add ("room1", "room1walls", Consists)
+        |> Directed.Edges.add ("room1", "room1corners", Consists)
+        |> Directed.Edges.add ("room1", "room1air", Consists)
+        // room size
+        |> Undirected.Edges.add ("room1air", "room1floor", Distance 150)
+        |> Undirected.Edges.add ("room1air", "room1ceiling", Distance 100)
+        |> Undirected.Edges.add ("room1air", "room1walls", Distance 600)
+        |> Directed.Edges.add ("room1corners", "room1floor", LiesAbove)
+        // actors inside the room
+        |> Vertices.add ("room1barricadedWindow1", Site.empty)
+        |> Vertices.add ("room1barricadedWindow2", Site.empty)
+        |> Vertices.add ("room1exitFinal", Site.empty)
+        |> Vertices.add ("room1exitMainHall", Site.empty)
+        |> Vertices.add ("room1gurney", Site.empty)
+        // characters inside the room
+        |> Vertices.add ("player", Site.empty)
+
+    static member room2 : Sites =
+        Graph.empty
+        |> Vertices.add ("room2", Site.empty)
+
+        |> Vertices.add ("room2floor", Site.empty)
+        |> Vertices.add ("room2ceiling", Site.empty)
+        |> Vertices.add ("room2walls", Site.empty)
+        |> Vertices.add ("room2corners", Site.empty)
+        |> Vertices.add ("room2center", Site.empty)
+
+        |> Vertices.add ("room2exitWaitingRoom", Site.empty)
+
+        |> Vertices.add ("rat", Site.empty)
 
     static member level1 = {
         Name = "Sheol"
-        Areas =
-            Graph.empty
-            |> Vertices.add ("Room 1", Area.room1)
-            |> Vertices.add ("Room 2", Area.room2)
-            |> Undirected.Edges.add ("Room 1", "Room 2", Pathway.empty)
-            |> Vertices.add ("Room 3", Area.room3)
-            |> Undirected.Edges.add  ("Room 2", "Room 3", Pathway.empty)
-
-            |> Vertices.add ("Room 4", Area.empty)
-            |> Vertices.add ("Room 5", Area.empty)
-            |> Vertices.add ("Room 6", Area.empty)
-            |> Vertices.add ("Room 7", Area.empty)
-            |> Undirected.Edges.add ("Room 1", "Room 4", Pathway.empty)
-            |> Undirected.Edges.add ("Room 3", "Room 7", Pathway.empty)
-            |> Undirected.Edges.add ("Room 4", "Room 5", Pathway.empty)
-            |> Undirected.Edges.add ("Room 4", "Room 6", Pathway.empty)
-            |> Undirected.Edges.add ("Room 4", "Room 7", Pathway.empty)
-            |> Undirected.Edges.add ("Room 5", "Room 6", Pathway.empty)
+        Sites = Graph.empty
     }
 
-    static member find finder (level : Level) =
-        level.Areas
+    static member find finder (level : Area) =
+        level.Sites
         |> Vertices.toVertexList
         |> List.tryFind finder
         |> function | Some v -> Some (fst v) | None -> None
 
-    static member findArea area (level : Level) =
-        Level.find (fun (string, vertex) -> string = area) level
+    static member findArea area (level : Area) =
+        Area.find (fun (string, vertex) -> string = area) level
 
-    static member findActor actor (level : Level) =
-        Level.find (fun (string, vertex) -> Set.contains actor vertex.Actors) level
+    static member findActor actor (level : Area) =
+        Area.find (fun (string, vertex) -> Set.contains actor vertex.Actors) level
 
     static member findPath fromDestination toDestination level =
-        level.Areas
+        level.Sites
         |> Undirected.Edges.map (fun v1 v2 edge -> 1u)
         |> Query.sp fromDestination toDestination
 
@@ -396,14 +408,14 @@ with
         if not (fromDestination = toDestination) then
             {
                 level with
-                    Areas = Vertices.map (fun string vertex ->
+                    Sites = Vertices.map (fun string vertex ->
                         if string = fromDestination then
                             { vertex with Actors = Set.remove actor vertex.Actors }
                         elif string = toDestination then
                             { vertex with Actors = Set.add actor vertex.Actors }
                         else
                             vertex
-                    ) level.Areas
+                    ) level.Sites
             }
         else
             level
@@ -445,7 +457,7 @@ with
         | Spin
         | Stride
         | Swim ->
-            let location = Level.findActor defender.ID level
+            let location = Area.findActor defender.ID level
             match location with
             | Some location ->
                 [Move (attacker, location)]
@@ -510,7 +522,7 @@ type [<SymbolicExpansion>] Combat = {
 
     Turn : int
 
-    Level : Level
+    Level : Area
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
@@ -526,7 +538,7 @@ with
 
         Turn = 0
 
-        Level = Level.empty
+        Level = Area.empty
     }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
@@ -546,7 +558,7 @@ with
 
             DisplayLeft = Character.player.ID
             DisplayRight = Character.enemy.ID
-            Level = Level.level1
+            Level = Area.level1
     }
 
     // this updates the gameplay model every frame that gameplay is active.
@@ -578,9 +590,9 @@ with
 
 
                 let path =
-                    match Level.findActor combatantName level, Level.findActor targetName level with
+                    match Area.findActor combatantName level, Area.findActor targetName level with
                     | Some playerLocation, Some enemyLocation ->
-                        Level.findPath playerLocation enemyLocation level
+                        Area.findPath playerLocation enemyLocation level
                     | _ ->
                         []
 
@@ -802,9 +814,9 @@ with
             let level = gameplay.Level
 
             let level =
-                match Level.findActor character.ID level with
+                match Area.findActor character.ID level with
                 | Some characterLocation ->
-                    Level.moveActor character.ID characterLocation location level
+                    Area.moveActor character.ID characterLocation location level
                 | None ->
                     level
 
