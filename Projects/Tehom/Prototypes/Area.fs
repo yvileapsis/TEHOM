@@ -6,9 +6,6 @@ open Prime
 open Nu
 open FGL
 
-// TODO: merge graphs
-// TODO: moving in graph
-
 (*
 * 5 Rooms:
 * Waitroom, barricaded windows, rolling hospital bed, locked exit door, you wake up here
@@ -29,12 +26,12 @@ module Area =
         static member empty = Site
 
     type Relationship =
-        | Distance of Distance: float
+        | Distance of Distance: uint32
         | Consists
         | Contains
         | LiesAbove
         | Covers
-        | OnEdge
+        | IsOnEdge
 
     type Sites = Graph<String, Site, Relationship>
 
@@ -66,10 +63,15 @@ module Area =
             |> Directed.Edges.add ("room1", "room1corners", Consists)
             |> Directed.Edges.add ("room1", "room1air", Consists)
             // room size
-            |> Undirected.Edges.add ("room1air", "room1floor", Distance 150)
-            |> Undirected.Edges.add ("room1air", "room1ceiling", Distance 100)
-            |> Undirected.Edges.add ("room1air", "room1walls", Distance 600)
-            |> Directed.Edges.add ("room1corners", "room1floor", OnEdge)
+            |> Directed.Edges.add ("room1air", "room1floor", Distance 150u)
+            |> Directed.Edges.add ("room1floor", "room1air", Distance 150u)
+            |> Directed.Edges.add ("room1air", "room1ceiling", Distance 100u)
+            |> Directed.Edges.add ("room1ceiling", "room1air", Distance 100u)
+            |> Directed.Edges.add ("room1air", "room1walls", Distance 600u)
+            |> Directed.Edges.add ("room1walls", "room1air", Distance 600u)
+            |> Directed.Edges.add ("room1floor", "room1walls", Distance 600u)
+            |> Directed.Edges.add ("room1walls", "room1floor", Distance 600u)
+            |> Directed.Edges.add ("room1corners", "room1floor", IsOnEdge)
             // actors inside the room
             |> Vertices.add ("room1barricadedWindow1", Site.empty)
             |> Vertices.add ("room1barricadedWindow2", Site.empty)
@@ -77,10 +79,10 @@ module Area =
             |> Vertices.add ("room1exitMainHall", Site.empty)
             |> Vertices.add ("room1gurney", Site.empty)
             // locations of actors inside the room
-            |> Directed.Edges.add ("room1walls", "room1barricadedWindow1", OnEdge)
-            |> Directed.Edges.add ("room1walls", "room1barricadedWindow2", OnEdge)
-            |> Directed.Edges.add ("room1walls", "room1exitFinal", OnEdge)
-            |> Directed.Edges.add ("room1walls", "room1exitMainHall", OnEdge)
+            |> Directed.Edges.add ("room1walls", "room1barricadedWindow1", IsOnEdge)
+            |> Directed.Edges.add ("room1walls", "room1barricadedWindow2", IsOnEdge)
+            |> Directed.Edges.add ("room1walls", "room1exitFinal", IsOnEdge)
+            |> Directed.Edges.add ("room1walls", "room1exitMainHall", IsOnEdge)
             |> Directed.Edges.add ("room1floor", "room1gurney", LiesAbove)
 
             // characters inside the room
@@ -105,10 +107,15 @@ module Area =
             |> Directed.Edges.add ("room2", "room2corners", Consists)
             |> Directed.Edges.add ("room2", "room2air", Consists)
 
-            |> Undirected.Edges.add ("room2air", "room2floor", Distance 200)
-            |> Undirected.Edges.add ("room2air", "room2ceiling", Distance 200)
-            |> Undirected.Edges.add ("room2air", "room2walls", Distance 600)
-            |> Directed.Edges.add ("room2corners", "room2floor", OnEdge)
+            |> Directed.Edges.add ("room2air", "room2floor", Distance 200u)
+            |> Directed.Edges.add ("room2floor", "room2air", Distance 200u)
+            |> Directed.Edges.add ("room2air", "room2ceiling", Distance 200u)
+            |> Directed.Edges.add ("room2ceiling", "room2air", Distance 200u)
+            |> Directed.Edges.add ("room2air", "room2walls", Distance 600u)
+            |> Directed.Edges.add ("room2walls", "room2air", Distance 600u)
+            |> Directed.Edges.add ("room2floor", "room2walls", Distance 600u)
+            |> Directed.Edges.add ("room2walls", "room2floor", Distance 600u)
+            |> Directed.Edges.add ("room2corners", "room2floor", IsOnEdge)
 
             |> Vertices.add ("room2table1", Site.empty)
             |> Vertices.add ("room2table2", Site.empty)
@@ -121,7 +128,7 @@ module Area =
             |> Directed.Edges.add ("room2floor", "room2table3", LiesAbove)
 
             |> Vertices.add ("rat", Site.empty)
-            |> Directed.Edges.add ("room2floor", "player", LiesAbove)
+            |> Directed.Edges.add ("room2floor", "rat", LiesAbove)
 
         static member level1 = {
             Name = "Clinic"
@@ -129,45 +136,61 @@ module Area =
                 Graph.empty
                 |> Graph.join Area.room1
                 |> Graph.join Area.room2
-                |> Undirected.Edges.add ("room1exitMainHall", "room2exitWaitingRoom", OnEdge)
+                |> Undirected.Edges.add ("room1exitMainHall", "room2exitWaitingRoom", IsOnEdge)
         }
 
-        static member find finder (level : Area) =
-            level.Sites
+        static member find finder (area : Area) =
+            area.Sites
             |> Vertices.toVertexList
             |> List.tryFind finder
             |> function | Some v -> Some (fst v) | None -> None
 
-        static member findSite site (area : Area) =
-            Area.find (fun (string, vertex) -> string = site) area
-
-        static member findPath fromDestination toDestination level =
-            level.Sites
-            |> Directed.Edges.map (fun v1 v2 edge ->
+        static member findPath fromDestination toDestination area =
+            area.Sites
+            |> Edges.undirect2 (fun vertex1 vertex2 edge ->
                 match edge with
-                | Distance x -> uint x
-                | Consists -> UInt32.MaxValue
-                | Contains -> 0u
-                | LiesAbove -> 0u
-                | Covers -> 0u
-                | OnEdge -> 0u
+                | Contains -> true
+                | LiesAbove -> true
+                | Covers -> true
+                | IsOnEdge -> true
+                | _ -> false
+            ) (fun edge1 edge2 ->
+                edge1
             )
-            |> Query.sp fromDestination toDestination
+            |> Edges.choose (fun v1 v2 edge ->
+                match edge with
+                | Distance x -> Some (uint x)
+                | Consists -> None
+                | Contains -> Some 0u
+                | LiesAbove -> Some 0u
+                | Covers -> Some 0u
+                | IsOnEdge -> Some 0u
+            )
+            |> Query.sp2 fromDestination toDestination
 
-        static member moveActor actor fromDestination toDestination level =
-            if not (fromDestination = toDestination) then
-                {
-                    level with
-                        Sites = Vertices.map (fun string vertex ->
-                            if string = fromDestination then
-                                { vertex with Actors = Set.remove actor vertex.Actors }
-                            elif string = toDestination then
-                                { vertex with Actors = Set.add actor vertex.Actors }
-                            else
-                                vertex
-                        ) level.Sites
-                }
-            else
-                level
+        static member findClosestSiteWithinReach (reach: uint32) path =
+            let _, totalDistance = path |> List.last
+            path
+            |> List.rev
+            |> List.tryFindBack (fun (_, distance) ->
+                totalDistance - distance <= reach
+            )
+
+        static member moveSite site toDestination area =
+            let sites =
+                match Graph.tryDecompose site area.Sites with
+                | Some (p, v, l, s), sites' ->
+                    sites'
+                    |> Vertices.add (site, Site.empty)
+                    |> Directed.Edges.add (toDestination, site, LiesAbove)
+                | None, sites' ->
+                    sites'
+            { area with Sites = sites }
+
+        static member spareDistance distance site toDestination area =
+            let sites =
+                area.Sites
+                |> Undirected.Edges.add (site, toDestination, Distance distance)
+            { area with Sites = sites }
 
 type Area = Area.Area

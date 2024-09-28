@@ -174,15 +174,6 @@ module Vertices =
      
      
     (* Iterative *)
-
-    ///Maps edgelabels of the graph.
-    let map (mapping: 'Vertex -> 'Vertex -> 'Edge -> 'REdge) (g:Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'Label,'REdge>=
-            g
-            |> Map.map (fun vertex (p, l, s) -> 
-                Map.map (fun pvertex edge -> mapping pvertex vertex edge) p,
-                l,
-                Map.map (fun svertex edge -> mapping vertex svertex edge) s)  
-
     ///Performs a given function on every edge of the graph.                
     let iter (action: 'Vertex -> 'Vertex -> 'Edge -> unit) (graph:Graph<'Vertex,'Label,'Edge>) : unit =
         let rec recurse g =

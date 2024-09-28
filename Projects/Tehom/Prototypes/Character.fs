@@ -148,13 +148,13 @@ module Character =
         static member getStat element character =
             character.Stats
             |> Character.getElement element
-            |> int
+            |> uint32
 
         static member getStancedStat element character =
             character
             |> Character.getStancedStats
             |> Character.getElement element
-            |> int
+            |> uint32
 
         static member getDamage character =
             character.Damage
@@ -199,31 +199,56 @@ module Character =
             let baseSpeed =
                 // mouse to beagle
                 if character.Size <= -2 then
-                    5.0
+                    150
                 // human child
                 elif character.Size = -1 then
-                    10.0
+                    300
                 // human
                 elif character.Size = 0 then
-                    20.0
+                    600
                 // bear
                 elif character.Size = 1 then
-                    30.0
+                    900
                 // elephant
                 elif character.Size = 2 then
-                    40.0
+                    1200
                 // blue whale
                 elif character.Size = 3 then
-                    50.0
+                    1500
                 //
                 elif character.Size = 4 then
-                    60.0
+                    1800
                 // leviathan
-                elif character.Size = 5 then
-                    70.0
                 else
-                    70.0
-            baseSpeed * multiplier
+                    2100
+
+            float baseSpeed * multiplier |> uint32
+
+        static member getReach character =
+            if character.Size <= -2 then
+                25u
+            // human child
+            elif character.Size = -1 then
+                50u
+            // human
+            elif character.Size = 0 then
+                75u
+            // bear
+            elif character.Size = 1 then
+                100u
+            // elephant
+            elif character.Size = 2 then
+                150u
+            // blue whale
+            elif character.Size = 3 then
+                200u
+            //
+            elif character.Size = 4 then
+                300u
+            // leviathan
+            else
+                400u
+
 
         static member empty = {
             ID = String.empty
@@ -264,6 +289,16 @@ module Character =
 
                 Damage = 5
                 Stances = 1
+        }
+
+        static member rat = {
+            Character.enemy with
+                Stats = Stat.Gifted, Stat.Average, Stat.Average, Stat.Feeble
+
+                ID = "rat"
+                Name = "Rat"
+                Size = -4
+                Gait = Speedy
         }
 
 type Character = Character.Character

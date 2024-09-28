@@ -51,7 +51,7 @@ module Query =
                             |> List.fold OSet.concat heap'
 
                         | None ->
-                            [], heap'
+                            acc, heap'
 
                     dijkstra heap' minValues' graph'
 
@@ -91,3 +91,7 @@ module Query =
     let sp (v1 : 'Vertex) (v2 : 'Vertex) (g : Graph<'Vertex, 'Label, 'Distance>) : Path<'Vertex> =
         spTree v1 g
         |> getLPathNodes v2
+
+    let sp2 (v1 : 'Vertex) (v2 : 'Vertex) (g : Graph<'Vertex, 'Label, 'Distance>) : LPath<'Vertex, 'Distance> =
+        spTree v1 g
+        |> getLPath v2

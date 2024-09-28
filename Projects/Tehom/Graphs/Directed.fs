@@ -136,20 +136,6 @@ module Edges =
             |> Option.bind (fun (_, _, s) -> Map.tryFind v2 s)
             |> Option.map (fun e -> (v1,v2,e))
 
-    ///Transforms a directed graph to an undirected graph.
-    let undirect (computeEdge: 'Edge -> 'Edge -> 'Edge) (g: Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'Label,'Edge> =
-        g
-        |> Map.map (fun _ (p,l,s) -> 
-            Map.empty,
-            l,
-            Map.fold (fun s' v' e -> 
-                match Map.containsKey v' s' with
-                |true -> 
-                    let lense = Map.key_ v'
-                    (Optic.map lense (computeEdge e)) s'
-                |false -> Map.add v' e s') s p
-            )
-    
     ///Reverses all edges in the graph.
     let rev (g: Graph<'Vertex,'Label,'Edge>) : (Graph<'Vertex,'Label,'Edge>)= 
         Map.map (fun _ (p,l,s) -> (s,l,p)) g
@@ -215,15 +201,7 @@ module Edges =
             es
             |> List.map (fun (v2,e) -> v,v2,e))
 
-    //Iterative 
-
-    ///Maps edgelabels of the graph.
-    let map (mapping: 'Vertex -> 'Vertex -> 'Edge -> 'REdge) (g:Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'Label,'REdge>=
-            g
-            |> Map.map (fun vertex (p, l, s) -> 
-                Map.map (fun pvertex edge -> mapping pvertex vertex edge) p,
-                l,
-                Map.map (fun svertex edge -> mapping vertex svertex edge) s)
+    //Iterative
     
     ///Performs a given function on every edge of the graph.
     let iter (action: 'Vertex -> 'Vertex -> 'Edge -> unit) (g:Graph<'Vertex,'Label,'Edge>) : unit =

@@ -31,6 +31,9 @@ TODO: Tiniest vertical slice:
 * Optionally you can fix lights and fight spider chandalier.
 *)
 
+type GameEffect =
+    | Damage of String * int
+    | Move of String * String * (String * uint32) option
 
 type Move =
     | Block
@@ -74,6 +77,71 @@ with
         Burst; Ready; Sweep;
     ]
 
+    static member handle move attacker defender area =
+        match move with
+        | Stride
+        | Swim ->
+            let reach =
+                Character.getReach attacker
+            let speed =
+                Character.getSpeed attacker
+            let path =
+                Area.findPath attacker.ID defender.ID area
+
+            match Area.findClosestSiteWithinReach reach path with
+            | None -> []
+            | Some (target, distance) ->
+
+                let (moveTo, fix) =
+                    if (distance <= speed) then
+                        target, None
+                    else
+                        let index =
+                            List.findIndexBack (fun (_, distance) -> distance <= speed) path
+
+                        let (moveTo, distance) =
+                            List.item index path
+
+                        let fix =
+                            if (speed > distance) then
+                                List.item (index + 1) path
+                                |> fun (site, distance2) -> site, distance2 - speed
+                                |> Some
+                            else
+                                None
+
+                        moveTo, fix
+
+                [Move (attacker.ID, moveTo, fix)]
+        | Block
+        | Climb
+        | Crawl
+        | Crouch
+        | Dash
+        | Delay
+        | Dodge
+        | Jump
+        | Roll
+        | Sidestep
+        | Spin ->
+            []
+        | Burst
+        | Cast
+        | Fire
+        | Grab
+        | Knockout
+        | Power
+        | Press
+        | Ready
+        | Retarget
+        | Slam
+        | Strike
+        | Sweep
+        | Toss
+        | Throw ->
+            let damage = Character.getDamage attacker
+            [Damage (defender.ID, damage)]
+
 type PhysicalAction =
     | NoPhysicalAction
     | FullPhysicalAction
@@ -93,9 +161,9 @@ module Random =
         rollDice count
         |> Seq.fold (fun state x -> if x > threshold then state + 1 else state) 0
 
-    let getItemsFromList length list =
+    let getItemsFromList (length: uint32) list =
         let gen () = Gen.randomItem list
-        List.init length (fun _ -> gen ())
+        List.init (length |> int) (fun _ -> gen ())
 
     let rollInitiative max =
         Gen.random2 0 max
@@ -107,6 +175,7 @@ type CharacterAction = {
     MentalAction : MentalAction
     Element : Element option
     Successes : int option
+    Blocks : int option
 }
 with
     static member empty = {
@@ -116,72 +185,8 @@ with
         MentalAction = NoMentalAction
         Element = None
         Successes = None
+        Blocks = None
     }
-
-type GameEffect =
-    | Damage of Character * int
-    | Move of Character : Character * ToLocation : String
-with
-    static member handleMoves move attacker defender level =
-        match move with
-        | Block
-        | Climb
-        | Crawl
-        | Crouch
-        | Dash
-        | Delay
-        | Dodge
-        | Jump
-        | Roll
-        | Sidestep
-        | Spin
-        | Stride
-        | Swim ->
-            let location = Area.findActor defender.ID level
-            match location with
-            | Some location ->
-                [Move (attacker, location)]
-            | None ->
-                printfn $"errored out in handleMoves {move} {attacker} {location}"
-                []
-        | Burst
-        | Cast
-        | Fire
-        | Grab
-        | Knockout
-        | Power
-        | Press
-        | Ready
-        | Retarget
-        | Slam
-        | Strike
-        | Sweep
-        | Toss
-        | Throw ->
-            let damage = Character.getDamage attacker
-            [Damage (defender, damage)]
-
-    static member handleAction action attacker defender level =
-
-        let attack = action.PhysicalAction
-
-        match attack with
-        | NoPhysicalAction ->
-            []
-        | FullPhysicalAction ->
-            []
-        | Sequence moves ->
-            let successes = match action.Successes with Some x -> x | None -> 0
-
-            moves
-            |> List.indexed
-            |> List.map (fun (i, move) ->
-                if i < successes then
-                    GameEffect.handleMoves move attacker defender level
-                else
-                    []
-            )
-            |> List.concat
 
 type CombatState =
     | Playing
@@ -202,7 +207,7 @@ type [<SymbolicExpansion>] Combat = {
 
     Turn : int
 
-    Level : Area
+    Area : Area
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
@@ -218,7 +223,7 @@ with
 
         Turn = 0
 
-        Level = Area.empty
+        Area = Area.empty
     }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
@@ -226,7 +231,7 @@ with
         Combat.empty with
             GameplayState = Playing
             Combatants =
-                [ Character.player; Character.enemy ]
+                [ Character.player; Character.rat ]
                 |> List.map Character.stanceReset
                 |> List.map (fun c ->
                     let gall, plasma = Character.getMaxInitiative c
@@ -237,8 +242,8 @@ with
                 |> List.map (fun c -> c, [])
 
             DisplayLeft = Character.player.ID
-            DisplayRight = Character.enemy.ID
-            Level = Area.level1
+            DisplayRight = Character.rat.ID
+            Area = Area.level1
     }
 
     // this updates the gameplay model every frame that gameplay is active.
@@ -266,26 +271,30 @@ with
                 let combatantName = attacker.ID
                 let targetName = target.ID
 
-                let level = gameplay.Level
+                let area = gameplay.Area
 
-
-                let path =
-                    match Area.findActor combatantName level, Area.findActor targetName level with
-                    | Some playerLocation, Some enemyLocation ->
-                        Area.findPath playerLocation enemyLocation level
-                    | _ ->
-                        []
-
-                let movementMoves = List.length path - 1
-
-                if (movementMoves > 0) then
-                    if (statCombatant > movementMoves) then
-                        Random.getItemsFromList movementMoves Move.positioning
-                        @ Random.getItemsFromList (statCombatant - movementMoves) Move.attacks
+                match Area.findPath combatantName targetName area with
+                // no path
+                | [] -> []
+                | path ->
+                    let reach = Character.getReach attacker
+                    let distance = List.last path |> snd
+                    if (reach >= distance) then
+                        // in reach
+                        Random.getItemsFromList statCombatant Move.attacks
                     else
-                        Random.getItemsFromList statCombatant Move.positioning
-                else
-                    Random.getItemsFromList statCombatant Move.attacks
+                        // not in reach
+
+                        let speed = Character.getSpeed attacker
+
+                        if (speed * statCombatant >= distance) then
+                            // can run to
+                            let movementMoves = round (float distance / float speed + 0.5) |> uint32
+                            List.init (movementMoves |> int) (fun i -> Stride)
+                            @ Random.getItemsFromList (statCombatant - movementMoves) Move.attacks
+                        else
+                            // can't run to
+                            List.init (statCombatant |> int) (fun i -> Stride)
             else
                 []
 
@@ -313,19 +322,35 @@ with
         let movesTarget =
             if (defender.MajorWounds < MajorWounds.Down) then
 
-                let combatantBlockableMoves =
-                    List.fold (fun number move ->
-                        if List.contains move Move.attacks then number + 1 else number
-                    ) 0 movesCombatant
+                let combatantName = attacker.ID
+                let targetName = defender.ID
 
-                Random.getItemsFromList (min statDefender combatantBlockableMoves) Move.defence
-                @
-                if (statDefender > combatantBlockableMoves) then
-                    [ Move.Ready ]
-                    @
-                    Random.getItemsFromList (statDefender - combatantBlockableMoves) Move.attacks
-                else
-                    []
+                let area = gameplay.Area
+
+                match Area.findPath combatantName targetName area with
+                // no path
+                | [] -> []
+                | path ->
+                    let reach = Character.getReach attacker
+                    let distance = List.last path |> snd
+                    if (reach >= distance) then
+                        // in reach
+
+                        let combatantBlockableMoves =
+                            List.fold (fun number move ->
+                                if List.contains move Move.attacks then number + 1u else number
+                            ) 0u movesCombatant
+
+                        Random.getItemsFromList (min statDefender combatantBlockableMoves) Move.defence
+                        @
+                        if (statDefender > combatantBlockableMoves) then
+                            [ Move.Ready ]
+                            @
+                            Random.getItemsFromList (statDefender - combatantBlockableMoves) Move.attacks
+                        else
+                            []
+                    else
+                        []
             else
                 []
 
@@ -372,7 +397,7 @@ with
 
         match combatantAction.Element with
         | Some element ->
-            let stat = Character.getStancedStat element combatant
+            let stat = Character.getStancedStat element combatant |> int
 
             let successes = Random.rollDiceThreshold stat 3
 
@@ -388,14 +413,10 @@ with
 
         // add karma betting
 
-        let signals =
+        let attackerAction : CharacterAction = { attackerAction with Blocks = defenderAction.Successes }
+        let defenderAction : CharacterAction = { defenderAction with Blocks = attackerAction.Successes }
 
-            if (attackerAction.Successes > defenderAction.Successes) then
-                GameEffect.handleAction attackerAction attacker defender level
-            else if (attackerAction.Successes < defenderAction.Successes) then
-                GameEffect.handleAction defenderAction defender attacker level
-            else
-                []
+        let signals = [attacker, attackerAction] @ [defender, defenderAction]
 
         signals
 
@@ -441,7 +462,7 @@ with
         let defender = Combat.turnDefenderStanceChange defender
         let defenderAction = Combat.applyStanceToAction defender defenderAction
 
-        let level = gameplay.Level
+        let level = gameplay.Area
 
         let signals = Combat.opposedCheck attacker attackerAction defender defenderAction level
 
@@ -477,7 +498,12 @@ with
 
     static member doEffect effect gameplay =
         match effect with
-        | Damage (character, damage) ->
+        | Damage (characterID, damage) ->
+
+            let character =
+                gameplay.Combatants
+                |> List.find (fun (c, _) -> c.ID = characterID)
+                |> fst
 
             let character = Character.doDamage damage character
 
@@ -489,18 +515,21 @@ with
 
             gameplay
 
-        | Move (character, location) ->
+        | Move (character, location, spareDistanceFix) ->
 
-            let level = gameplay.Level
+            let level = gameplay.Area
 
             let level =
-                match Area.findActor character.ID level with
-                | Some characterLocation ->
-                    Area.moveActor character.ID characterLocation location level
+                Area.moveSite character location level
+
+            let level =
+                match spareDistanceFix with
+                | Some (location, distance) ->
+                    Area.spareDistance distance character location level
                 | None ->
                     level
 
-            let gameplay = { gameplay with Level = level }
+            let gameplay = { gameplay with Area = level }
 
             gameplay
 
@@ -511,6 +540,8 @@ type CombatMessage =
     | FinishQuitting
     | Update
     | Turn
+    | ActorAction of Character * CharacterAction
+    | ActorMove of String * String * Move
     | GameEffect of GameEffect
     | TimeUpdate
     interface Message
@@ -567,7 +598,51 @@ type CombatDispatcher () =
             let effects, gameplay = Combat.turn gameplay world
 
             let signals : Signal list =
-                List.map (fun effect -> GameEffect effect) effects
+                List.map (fun tuple -> ActorAction tuple) effects
+
+            withSignals signals gameplay
+
+        | ActorAction (actor, action) ->
+
+            let attack = action.PhysicalAction
+
+            match attack with
+            | NoPhysicalAction ->
+                just gameplay
+            | FullPhysicalAction ->
+                just gameplay
+            | Sequence moves ->
+
+                let successes = match action.Successes with Some x -> x | None -> 0
+                let blocks = match action.Blocks with Some x -> x | None -> 0
+
+                let signals : Signal list =
+                    moves
+                    |> List.indexed
+                    |> List.takeWhile (fun (i, move) ->
+                        // positioning is always successful for now, but should check if within reach of enemy later
+                        ((List.contains move Move.positioning) || (successes > blocks)) && (i < successes)
+                    )
+                    |> List.map snd
+                    |> List.map (fun move -> ActorMove (actor.ID, action.Target, move))
+
+                withSignals signals gameplay
+
+        | ActorMove (actorID, targetID, move) ->
+
+            let actor =
+                gameplay.Combatants
+                |> List.find (fun (c, _) -> c.ID = actorID)
+                |> fst
+
+            let target =
+                gameplay.Combatants
+                |> List.find (fun (c, _) -> c.ID = targetID)
+                |> fst
+
+            let signals : Signal list =
+                Move.handle move actor target gameplay.Area
+                |> List.map (fun signal -> GameEffect signal)
 
             withSignals signals gameplay
 
