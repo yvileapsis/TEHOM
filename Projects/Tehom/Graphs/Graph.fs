@@ -211,6 +211,19 @@ module Graph =
         g
         |> Dictionary.iter (fun v mc ->  action (toContext v mc))
 
+    ///Join two graphs, merging edges and taking labels from the second graph.
+    let join (a : Graph<'Vertex,'Label,'Edge>) (b : Graph<'Vertex,'Label,'Edge>) =
+        foldContexts a (fun (state : Graph<'Vertex,'Label,'Edge>) (left, vertex, label, right) ->
+            let context =
+                match tryGetContext vertex state with
+                | Some (left', _, label', right') ->
+                    left @ left', vertex, label', right @ right'
+                | None ->
+                    left, vertex, label, right
+
+            Dictionary.add vertex (fromContext context) state
+        ) b
+
 ///Functions for vertices of both directed and undirected graphs
 module Vertices = 
 

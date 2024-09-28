@@ -127,10 +127,9 @@ module Area =
             Name = "Clinic"
             Sites =
                 Graph.empty
-                |> Area.room1
-                |> Area.room2
+                |> Graph.join Area.room1
+                |> Graph.join Area.room2
                 |> Undirected.Edges.add ("room1exitMainHall", "room2exitWaitingRoom", OnEdge)
-
         }
 
         static member find finder (level : Area) =
@@ -144,7 +143,7 @@ module Area =
 
         static member findPath fromDestination toDestination level =
             level.Sites
-            |> Undirected.Edges.map (fun v1 v2 edge ->
+            |> Directed.Edges.map (fun v1 v2 edge ->
                 match edge with
                 | Distance x -> uint x
                 | Consists -> UInt32.MaxValue
