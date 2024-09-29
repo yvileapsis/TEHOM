@@ -176,6 +176,32 @@ module Area =
                 totalDistance - distance <= reach
             )
 
+        static member moveWithinReach actor target reach speed area =
+
+            let path = Area.findPath actor target area
+            match Area.findClosestSiteWithinReach reach path with
+            | None -> None
+            | Some (target, distance) ->
+
+                if (distance <= speed) then
+                    Some (target, None)
+                else
+                    let index =
+                        List.findIndexBack (fun (_, distance) -> distance <= speed) path
+
+                    let (moveTo, distance) =
+                        List.item index path
+
+                    let fix =
+                        if (speed > distance) then
+                            List.item (index + 1) path
+                            |> fun (site, distance2) -> site, distance2 - speed
+                            |> Some
+                        else
+                            None
+
+                    Some (moveTo, fix)
+
         static member moveSite site toDestination area =
             let sites =
                 match Graph.tryDecompose site area.Sites with
@@ -192,5 +218,7 @@ module Area =
                 area.Sites
                 |> Undirected.Edges.add (site, toDestination, Distance distance)
             { area with Sites = sites }
+
+
 
 type Area = Area.Area

@@ -77,70 +77,70 @@ with
         Burst; Ready; Sweep;
     ]
 
+    static member bonusDamage moveID moves damage =
+        let before, after = List.splitAt moveID moves
+        let damage =
+            before
+            |> List.rev
+            |> List.tail
+            |> List.foldWhile (fun bonus move ->
+                match move with
+                | Power -> Some (bonus + 5)
+                | _ -> None
+            ) damage
+        let damage =
+            after
+            |> List.foldWhile (fun bonus move ->
+                match move with
+                | Press -> Some (bonus + 2)
+                | _ -> None
+            ) damage
+        damage
+
     // TODO: fix bug where entity ends up disconnected from the floor due to spare distance fix
-    static member handle move attacker defender area =
+    static member handle moveID moves attacker defender area =
+        let move = List.item moveID moves
         match move with
         | Stride
-        | Swim ->
-            let reach =
-                Character.getReach attacker
-            let speed =
-                Character.getSpeed attacker
-            let path =
-                Area.findPath attacker.ID defender.ID area
-
-            match Area.findClosestSiteWithinReach reach path with
-            | None -> []
-            | Some (target, distance) ->
-
-                let (moveTo, fix) =
-                    if (distance <= speed) then
-                        target, None
-                    else
-                        let index =
-                            List.findIndexBack (fun (_, distance) -> distance <= speed) path
-
-                        let (moveTo, distance) =
-                            List.item index path
-
-                        let fix =
-                            if (speed > distance) then
-                                List.item (index + 1) path
-                                |> fun (site, distance2) -> site, distance2 - speed
-                                |> Some
-                            else
-                                None
-
-                        moveTo, fix
-
-                [Move (attacker.ID, moveTo, fix)]
-        | Block
         | Climb
         | Crawl
-        | Crouch
-        | Dash
-        | Delay
-        | Dodge
         | Jump
         | Roll
         | Sidestep
+        | Dash
+        | Swim ->
+                let reach = Character.getReach attacker
+                let speed = Character.getSpeed attacker
+
+                match Area.moveWithinReach attacker.ID defender.ID reach speed area with
+                | Some (moveTo, fix) ->
+                    [Move (attacker.ID, moveTo, fix)]
+                | None ->
+                    []
+        | Block
+        | Crouch
+        | Delay
+        | Dodge
         | Spin ->
             []
-        | Burst
         | Cast
-        | Fire
-        | Grab
-        | Knockout
         | Power
         | Press
         | Ready
-        | Retarget
+        | Retarget ->
+            []
+        | Burst
+        | Fire ->
+            []
+        | Grab
+        | Knockout
         | Slam
         | Strike
         | Sweep
         | Toss
         | Throw ->
             let damage = Character.getDamage attacker
+            let damage = Move.bonusDamage moveID moves damage
             [Damage (defender.ID, damage)]
 
 type PhysicalAction =
@@ -543,7 +543,7 @@ type CombatMessage =
     | Update
     | Turn
     | ActorAction of Character * CharacterAction
-    | ActorMove of String * String * Move
+    | ActorMove of String * String * int * Move list
     | GameEffect of GameEffect
     | TimeUpdate
     interface Message
@@ -619,18 +619,20 @@ type CombatDispatcher () =
                 let blocks = match action.Blocks with Some x -> x | None -> 0
 
                 let signals : Signal list =
-                    moves
-                    |> List.indexed
-                    |> List.takeWhile (fun (i, move) ->
-                        // positioning is always successful for now, but should check if within reach of enemy later
-                        ((List.contains move Move.positioning) || (successes > blocks)) && (i < successes)
-                    )
-                    |> List.map snd
-                    |> List.map (fun move -> ActorMove (actor.ID, action.Target, move))
+                    let indexes, moves =
+                        moves
+                        |> List.indexed
+                        |> List.takeWhile (fun (i, move) ->
+                            // positioning is always successful for now, but should check if within reach of enemy later
+                            ((List.contains move Move.positioning) || (successes > blocks)) && (i < successes)
+                        )
+                        |> List.unzip
+
+                    List.map (fun i -> ActorMove (actor.ID, action.Target, i, moves)) indexes
 
                 withSignals signals gameplay
 
-        | ActorMove (actorID, targetID, move) ->
+        | ActorMove (actorID, targetID, moveID, moves) ->
 
             let actor =
                 gameplay.Combatants
@@ -643,7 +645,7 @@ type CombatDispatcher () =
                 |> fst
 
             let signals : Signal list =
-                Move.handle move actor target gameplay.Area
+                Move.handle moveID moves actor target gameplay.Area
                 |> List.map (fun signal -> GameEffect signal)
 
             withSignals signals gameplay
