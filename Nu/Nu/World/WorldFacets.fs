@@ -438,42 +438,26 @@ type TextFacet () =
          define Entity.Justification (Justified (JustifyCenter, JustifyMiddle))
          define Entity.TextMargin v2Zero
          define Entity.TextColor Color.White
-         define Entity.TextDisabledColor (Color (0.75f, 0.75f, 0.75f, 0.75f))
+         define Entity.TextDisabledColor Constants.Gui.DisabledColorDefault
          define Entity.TextOffset v2Zero
          define Entity.TextShift 0.5f]
 
     override this.Render (_, entity, world) =
         let text = entity.GetText world
-        if not (String.IsNullOrWhiteSpace text) then
-            let mutable transform = entity.GetTransform world
-            let perimeter = transform.Perimeter // gui currently ignores rotation and scale
-            let horizon = transform.Horizon
-            let mutable textTransform = Transform.makeDefault ()
-            let margin = (entity.GetTextMargin world).V3
-            let offset = (entity.GetTextOffset world).V3
-            let shift = entity.GetTextShift world
-            textTransform.Position <- perimeter.Center + margin + offset
-            textTransform.Size <- perimeter.Size - margin * 2.0f
-            textTransform.Elevation <- transform.Elevation + shift
-            textTransform.Absolute <- transform.Absolute
-            let font = entity.GetFont world
-            let fontSizing = entity.GetFontSizing world
-            let fontStyling = entity.GetFontStyling world
-            World.enqueueLayeredOperation2d
-                { Elevation = textTransform.Elevation
-                  Horizon = horizon
-                  AssetTag = font
-                  RenderOperation2d =
-                    RenderText
-                        { Transform = textTransform
-                          ClipOpt = ValueSome textTransform.Bounds2d.Box2
-                          Text = text
-                          Font = font
-                          FontSizing = fontSizing
-                          FontStyling = fontStyling
-                          Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
-                          Justification = entity.GetJustification world }}
-                world
+        let mutable transform = entity.GetTransform world
+        let absolute = transform.Absolute
+        let perimeter = transform.Perimeter
+        let offset = (entity.GetTextOffset world).V3
+        let elevation = transform.Elevation
+        let shift = entity.GetTextShift world
+        let clipOpt = ValueSome transform.Bounds2d.Box2
+        let justification = entity.GetJustification world
+        let margin = (entity.GetTextMargin world).V3
+        let color = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
+        let font = entity.GetFont world
+        let fontSizing = entity.GetFontSizing world
+        let fontStyling = entity.GetFontStyling world
+        World.renderGuiText absolute perimeter offset elevation shift clipOpt justification margin color font fontSizing fontStyling text world
 
     override this.GetAttributesInferred (_, _) =
         AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
@@ -623,12 +607,12 @@ module ToggleButtonFacetExtensions =
         member this.GetToggledOffset world : Vector2 = this.Get (nameof this.ToggledOffset) world
         member this.SetToggledOffset (value : Vector2) world = this.Set (nameof this.ToggledOffset) value world
         member this.ToggledOffset = lens (nameof this.ToggledOffset) this this.GetToggledOffset this.SetToggledOffset
-        member this.GetPressed world : bool = this.Get (nameof this.Pressed) world
-        member this.SetPressed (value : bool) world = this.Set (nameof this.Pressed) value world
-        member this.Pressed = lens (nameof this.Pressed) this this.GetPressed this.SetPressed
-        member this.GetPressedOffset world : Vector2 = this.Get (nameof this.PressedOffset) world
-        member this.SetPressedOffset (value : Vector2) world = this.Set (nameof this.PressedOffset) value world
-        member this.PressedOffset = lens (nameof this.PressedOffset) this this.GetPressedOffset this.SetPressedOffset
+        member this.GetPushed world : bool = this.Get (nameof this.Pushed) world
+        member this.SetPushed (value : bool) world = this.Set (nameof this.Pushed) value world
+        member this.Pushed = lens (nameof this.Pushed) this this.GetPushed this.SetPushed
+        member this.GetPushedOffset world : Vector2 = this.Get (nameof this.PushedOffset) world
+        member this.SetPushedOffset (value : Vector2) world = this.Set (nameof this.PushedOffset) value world
+        member this.PushedOffset = lens (nameof this.PushedOffset) this this.GetPushedOffset this.SetPushedOffset
         member this.GetUntoggledImage world : Image AssetTag = this.Get (nameof this.UntoggledImage) world
         member this.SetUntoggledImage (value : Image AssetTag) world = this.Set (nameof this.UntoggledImage) value world
         member this.UntoggledImage = lens (nameof this.UntoggledImage) this this.GetUntoggledImage this.SetUntoggledImage
@@ -657,7 +641,7 @@ type ToggleButtonFacet () =
             let mousePositionWorld = World.getMousePostion2dWorld transform.Absolute world
             if perimeter.Intersects mousePositionWorld then
                 if transform.Enabled then
-                    let world = entity.SetPressed true world
+                    let world = entity.SetPushed true world
                     (Resolve, world)
                 else (Resolve, world)
             else (Cascade, world)
@@ -665,14 +649,14 @@ type ToggleButtonFacet () =
 
     static let handleMouseLeftUp evt world =
         let entity = evt.Subscriber : Entity
-        let wasPressed = entity.GetPressed world
-        let world = if wasPressed then entity.SetPressed false world else world
+        let wasPushed = entity.GetPushed world
+        let world = if wasPushed then entity.SetPushed false world else world
         if entity.GetVisible world then
             let mutable transform = entity.GetTransform world
             let perimeter = transform.Perimeter.Box2 // gui currently ignores rotation
             let mousePositionWorld = World.getMousePostion2dWorld transform.Absolute world
             if perimeter.Intersects mousePositionWorld then
-                if transform.Enabled && wasPressed then
+                if transform.Enabled && wasPushed then
                     let world = entity.SetToggled (not (entity.GetToggled world)) world
                     let toggled = entity.GetToggled world
                     let eventAddress = if toggled then entity.ToggledEvent else entity.UntoggledEvent
@@ -693,8 +677,8 @@ type ToggleButtonFacet () =
          define Entity.DisabledColor Constants.Gui.DisabledColorDefault
          define Entity.Toggled false
          define Entity.ToggledOffset v2Zero
-         define Entity.Pressed false
-         define Entity.PressedOffset v2Zero
+         define Entity.Pushed false
+         define Entity.PushedOffset v2Zero
          define Entity.UntoggledImage Assets.Default.ButtonUp
          define Entity.ToggledImage Assets.Default.ButtonDown
          define Entity.ToggleSoundOpt (Some Assets.Default.Sound)
@@ -707,7 +691,7 @@ type ToggleButtonFacet () =
 
     override this.Update (entity, world) =
         let textOffset =
-            if entity.GetPressed world then entity.GetPressedOffset world
+            if entity.GetPushed world then entity.GetPushedOffset world
             elif entity.GetToggled world then entity.GetToggledOffset world
             else v2Zero
         let struct (_, _, world) = entity.TrySet (nameof Entity.TextOffset) textOffset world
@@ -717,7 +701,7 @@ type ToggleButtonFacet () =
         let mutable transform = entity.GetTransform world
         let sliceMargin = entity.GetSliceMargin world
         let spriteImage =
-            if entity.GetToggled world || entity.GetPressed world
+            if entity.GetToggled world || entity.GetPushed world
             then entity.GetToggledImage world
             else entity.GetUntoggledImage world
         let color = if transform.Enabled then Color.One else entity.GetDisabledColor world
@@ -765,7 +749,7 @@ type RadioButtonFacet () =
             let mousePositionWorld = World.getMousePostion2dWorld transform.Absolute world
             if perimeter.Intersects mousePositionWorld then
                 if transform.Enabled then
-                    let world = entity.SetPressed true world
+                    let world = entity.SetPushed true world
                     (Resolve, world)
                 else (Resolve, world)
             else (Cascade, world)
@@ -773,15 +757,15 @@ type RadioButtonFacet () =
 
     static let handleMouseLeftUp evt world =
         let entity = evt.Subscriber : Entity
-        let wasPressed = entity.GetPressed world
-        let world = if wasPressed then entity.SetPressed false world else world
+        let wasPushed = entity.GetPushed world
+        let world = if wasPushed then entity.SetPushed false world else world
         let wasDialed = entity.GetDialed world
         if entity.GetVisible world then
             let mutable transform = entity.GetTransform world
             let perimeter = transform.Perimeter.Box2 // gui currently ignores rotation
             let mousePositionWorld = World.getMousePostion2dWorld transform.Absolute world
             if perimeter.Intersects mousePositionWorld then
-                if transform.Enabled && wasPressed && not wasDialed then
+                if transform.Enabled && wasPushed && not wasDialed then
                     let world = entity.SetDialed true world
                     let dialed = entity.GetDialed world
                     let eventAddress = if dialed then entity.DialedEvent else entity.UndialedEvent
@@ -802,8 +786,8 @@ type RadioButtonFacet () =
          define Entity.DisabledColor Constants.Gui.DisabledColorDefault
          define Entity.Dialed false
          define Entity.DialedOffset v2Zero
-         define Entity.Pressed false
-         define Entity.PressedOffset v2Zero
+         define Entity.Pushed false
+         define Entity.PushedOffset v2Zero
          define Entity.UndialedImage Assets.Default.ButtonUp
          define Entity.DialedImage Assets.Default.ButtonDown
          define Entity.DialSoundOpt (Some Assets.Default.Sound)
@@ -816,7 +800,7 @@ type RadioButtonFacet () =
 
     override this.Update (entity, world) =
         let textOffset =
-            if entity.GetPressed world then entity.GetPressedOffset world
+            if entity.GetPushed world then entity.GetPushedOffset world
             elif entity.GetDialed world then entity.GetDialedOffset world
             else v2Zero
         let struct (_, _, world) = entity.TrySet (nameof Entity.TextOffset) textOffset world
@@ -826,7 +810,7 @@ type RadioButtonFacet () =
         let mutable transform = entity.GetTransform world
         let sliceMargin = entity.GetSliceMargin world
         let spriteImage =
-            if entity.GetDialed world || entity.GetPressed world
+            if entity.GetDialed world || entity.GetPushed world
             then entity.GetDialedImage world
             else entity.GetUndialedImage world
         let color = if transform.Enabled then Color.One else entity.GetDisabledColor world
@@ -1305,7 +1289,8 @@ type RigidBodyFacet () =
         (Cascade, world)
 
     static member Properties =
-        [define Entity.BodyEnabled true
+        [define Entity.Static true
+         define Entity.BodyEnabled true
          define Entity.BodyType Static
          define Entity.SleepingAllowed true
          define Entity.Friction 0.5f
@@ -1325,7 +1310,7 @@ type RigidBodyFacet () =
          define Entity.PhysicsMotion SynchronizedMotion
          define Entity.Sensor false
          define Entity.Observable false
-         define Entity.AwakeTimeStamp 0L
+         nonPersistent Entity.AwakeTimeStamp 0L
          computed Entity.Awake (fun (entity : Entity) world -> entity.GetAwakeTimeStamp world = world.UpdateTime) None
          computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = Constants.Physics.InternalIndex }) None]
 
@@ -1333,7 +1318,7 @@ type RigidBodyFacet () =
 
         // OPTIMIZATION: using manual unsubscription in order to use less live objects for subscriptions.
         // OPTIMIZATION: share lambdas to reduce live object count.
-        let subIds = Array.init 24 (fun _ -> makeGuid ())
+        let subIds = Array.init 24 (fun _ -> Gen.id64)
         let world = World.subscribePlus subIds.[0] (propagatePhysicsCenter entity) (entity.ChangeEvent (nameof entity.Position)) entity world |> snd
         let world = World.subscribePlus subIds.[1] (propagatePhysicsRotation entity) (entity.ChangeEvent (nameof entity.Rotation)) entity world |> snd
         let world = World.subscribePlus subIds.[2] (propagatePhysicsLinearVelocity entity) (entity.ChangeEvent (nameof entity.LinearVelocity)) entity world |> snd
@@ -1522,7 +1507,7 @@ type TileMapFacet () =
          define Entity.TileIndexOffset 0
          define Entity.TileIndexOffsetRange (0, 0)
          define Entity.TileMap Assets.Default.TileMap
-         define Entity.AwakeTimeStamp 0L
+         nonPersistent Entity.AwakeTimeStamp 0L
          computed Entity.Awake (fun (entity : Entity) world -> entity.GetAwakeTimeStamp world = world.UpdateTime) None
          computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = 0 }) None]
 
@@ -1631,7 +1616,7 @@ type TmxMapFacet () =
          define Entity.TileIndexOffset 0
          define Entity.TileIndexOffsetRange (0, 0)
          nonPersistent Entity.TmxMap (TmxMap.makeDefault ())
-         define Entity.AwakeTimeStamp 0L
+         nonPersistent Entity.AwakeTimeStamp 0L
          computed Entity.Awake (fun (entity : Entity) world -> entity.GetAwakeTimeStamp world = world.UpdateTime) None
          computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = 0 }) None]
 
@@ -1798,10 +1783,10 @@ type LayoutFacet () =
                 flowDownward false topY margin wrapLimit &offsetX &offsetY &maximum child world)
                 world children
         | FlowLeftward ->
-            // TODO: P1: implement.
+            Log.warnOnce "FlowLeftward not yet implemented." // TODO: P1: implement.
             world
         | FlowUpward ->
-            // TODO: P1: implement.
+            Log.warnOnce "FlowUpward not yet implemented." // TODO: P1: implement.
             world
 
     static let dockLayout (perimeter : Box2) margin (margins : Vector4) children world =
@@ -1972,7 +1957,7 @@ type SkyBoxFacet () =
          define Entity.Presence Omnipresent
          define Entity.Static true
          define Entity.AmbientColor Color.White
-         define Entity.AmbientBrightness 1.0f
+         define Entity.AmbientBrightness 0.5f
          define Entity.Color Color.White
          define Entity.Brightness 1.0f
          define Entity.CubeMap Assets.Default.SkyBoxMap]
@@ -2030,6 +2015,8 @@ type LightProbe3dFacet () =
          define Entity.LightProbe true
          define Entity.Presence Omnipresent
          define Entity.Static true
+         define Entity.AmbientColor Color.White
+         define Entity.AmbientBrightness 0.5f
          define Entity.ProbeBounds (box3 (v3Dup Constants.Render.LightProbeSizeDefault * -0.5f) (v3Dup Constants.Render.LightProbeSizeDefault))
          nonPersistent Entity.ProbeStale false]
 
@@ -2041,8 +2028,10 @@ type LightProbe3dFacet () =
         let id = entity.GetId world
         let enabled = entity.GetEnabled world
         let position = entity.GetPosition world
+        let ambientColor = entity.GetAmbientColor world
+        let ambientBrightness = entity.GetAmbientBrightness world
         let bounds = entity.GetProbeBounds world
-        World.enqueueRenderMessage3d (RenderLightProbe3d { LightProbeId = id; Enabled = enabled; Origin = position; Bounds = bounds; RenderPass = renderPass }) world
+        World.enqueueRenderMessage3d (RenderLightProbe3d { LightProbeId = id; Enabled = enabled; Origin = position; AmbientColor = ambientColor; AmbientBrightness = ambientBrightness; Bounds = bounds; RenderPass = renderPass }) world
 
     override this.RayCast (ray, entity, world) =
         let intersectionOpt = ray.Intersects (entity.GetBounds world)
@@ -2056,9 +2045,8 @@ type LightProbe3dFacet () =
         match op with
         | AppendProperties append ->
             let world =
-                if ImGui.Button "Rerender Light Map" then
-                    let world = append.EditContext.Snapshot RerenderLightMap world
-                    entity.SetProbeStale true world
+                if ImGui.Button "Rerender Light Map"
+                then entity.SetProbeStale true world // this isn't undoable
                 else world
             let world =
                 if ImGui.Button "Recenter in Probe Bounds" then
@@ -2101,6 +2089,7 @@ type Light3dFacet () =
 
     static member Properties =
         [define Entity.Size (v3Dup 0.25f)
+         define Entity.Static true
          define Entity.Light true
          define Entity.Color Color.White
          define Entity.Brightness Constants.Render.BrightnessDefault
@@ -2868,7 +2857,7 @@ type TerrainFacet () =
          define Entity.HeightMap (RawHeightMap { Resolution = v2i 513 513; RawFormat = RawUInt16 LittleEndian; RawAsset = Assets.Default.HeightMap })
          define Entity.Segments v2iOne
          define Entity.Observable false
-         define Entity.AwakeTimeStamp 0L
+         nonPersistent Entity.AwakeTimeStamp 0L
          computed Entity.Awake (fun (entity : Entity) world -> entity.GetAwakeTimeStamp world = world.UpdateTime) None
          computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = 0 }) None]
 
@@ -2984,7 +2973,7 @@ type NavBodyFacet () =
     override this.Register (entity, world) =
 
         // OPTIMIZATION: conditionally subscribe to transform change event.
-        let subId = Gen.id
+        let subId = Gen.id64
         let subscribe world =
             World.subscribePlus subId (fun _ world -> (Cascade, propagateNavBody entity world)) (entity.ChangeEvent (nameof entity.Bounds)) entity world |> snd
         let unsubscribe world =

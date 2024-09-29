@@ -47,7 +47,6 @@ and Unsubscription = World -> World
 
 /// Describes the type of snapshot taken for operation tracking.
 and SnapshotType =
-    | RerenderLightMap
     | WipePropagationTargets
     | TranslateEntity
     | RotateEntity
@@ -83,7 +82,6 @@ and SnapshotType =
 
     member this.Label =
         match this with
-        | RerenderLightMap -> (scstringMemo this).Spaced
         | WipePropagationTargets -> (scstringMemo this).Spaced
         | TranslateEntity -> (scstringMemo this).Spaced
         | RotateEntity -> (scstringMemo this).Spaced
@@ -128,7 +126,9 @@ and EditContext =
       SnapDrag : single
       SelectedScreen : Screen
       SelectedGroup : Group
-      SelectedEntityOpt : Entity option }
+      SelectedEntityOpt : Entity option
+      ToSymbolMemo : IDictionary<struct (Type * obj), Symbol>
+      OfSymbolMemo : IDictionary<struct (Type * Symbol), obj> }
 
 /// Details replacement for editing behavior for a simulant property, allowing the user to indicate that a property was
 /// replaced.
@@ -171,7 +171,7 @@ and ChangeData =
       Previous : obj
       Value : obj }
 
-/// A generalized simulant lens.
+/// A property lens interface.
 and Lens =
     interface
         /// The name of the property accessed by the lens.
@@ -273,8 +273,8 @@ and [<ReferenceEquality>] Lens<'a, 's when 's :> Simulant> =
             // HACK: this case is a hack to allow Nu to resolve events contextually.
             let hashCode = Constants.Lens.ChangeNameHash ^^^ hash this.Name ^^^ Constants.Lens.EventNameHash
             let changeEventAddress = { Names = names; HashCode = hashCode; Anonymous = true }
-            changeEventAddress 
-        | _ -> rtoa names --> this.This.SimulantAddress
+            changeEventAddress
+        | _ -> rtoa (Array.append names this.This.SimulantAddress.Names)
 
     /// The type of the lensed property.
     member inline this.Type = typeof<'a>
@@ -436,6 +436,10 @@ and GameDispatcher () =
     abstract Unregister : Game * World -> World
     default this.Unregister (_, world) = world
 
+    /// Attempt to ImNui run a game.
+    abstract TryRun : Game * World -> World
+    default this.TryRun (_, world) = world
+
     /// Pre-update a game.
     abstract PreUpdate : Game * World -> World
     default this.PreUpdate (_, world) = world
@@ -488,6 +492,10 @@ and ScreenDispatcher () =
     abstract Unregister : Screen * World -> World
     default this.Unregister (_, world) = world
 
+    /// Attempt to ImNui run a screen.
+    abstract TryRun : Screen * World -> World
+    default this.TryRun (_, world) = world
+
     /// Pre-update a screen.
     abstract PreUpdate : Screen * World -> World
     default this.PreUpdate (_, world) = world
@@ -525,7 +533,7 @@ and ScreenDispatcher () =
     default this.TryTruncateModel _ = None
 
     /// Attempt to untruncate a screen model.
-    abstract TryUntruncateModel<'a> : 'a * Screen* World  -> 'a option
+    abstract TryUntruncateModel<'a> : 'a * Screen * World -> 'a option
     default this.TryUntruncateModel (_, _, _) = None
 
 /// The default dispatcher for groups.
@@ -538,6 +546,10 @@ and GroupDispatcher () =
 
     /// Unregister a group when removing it from a screen.
     abstract Unregister : Group * World -> World
+
+    /// Attempt to ImNui run a group.
+    abstract TryRun : Group * World -> World
+    default this.TryRun (_, world) = world
     default this.Unregister (_, world) = world
 
     /// Pre-update a group.
@@ -577,7 +589,7 @@ and GroupDispatcher () =
     default this.TryTruncateModel _ = None
 
     /// Attempt to untruncate a group model.
-    abstract TryUntruncateModel<'a> : 'a * Group* World  -> 'a option
+    abstract TryUntruncateModel<'a> : 'a * Group * World -> 'a option
     default this.TryUntruncateModel (_, _, _) = None
 
 /// The default dispatcher for entities.
@@ -628,6 +640,10 @@ and EntityDispatcher (is2d, physical, lightProbe, light) =
     abstract Unregister : Entity * World -> World
     default this.Unregister (_, world) = world
 
+    /// Attempt to ImNui run an entity.
+    abstract TryRun : Entity * World -> World
+    default this.TryRun (_, world) = world
+
     /// Update an entity.
     abstract Update : Entity * World -> World
     default this.Update (_, world) = world
@@ -672,7 +688,7 @@ and EntityDispatcher (is2d, physical, lightProbe, light) =
     default this.TryTruncateModel _ = None
 
     /// Attempt to untruncate an entity model.
-    abstract TryUntruncateModel<'a> : 'a * Entity* World  -> 'a option
+    abstract TryUntruncateModel<'a> : 'a * Entity * World -> 'a option
     default this.TryUntruncateModel (_, _, _) = None
 
     /// Whether the dispatcher has a 2-dimensional transform interpretation.
@@ -708,6 +724,10 @@ and Facet (physical, lightProbe, light) =
     /// Participate in the unregistration of an entity's physics from the physics subsystem.
     abstract UnregisterPhysics : Entity * World -> World
     default this.UnregisterPhysics (_, world) = world
+
+    /// Attempt to ImNui run a facet.
+    abstract TryRun : Entity * World -> World
+    default this.TryRun (_, world) = world
 
     /// Update a facet.
     abstract Update : Entity * World -> World
@@ -754,7 +774,7 @@ and [<ReferenceEquality>] PropertyContent =
           PropertyValue = value }
 
 /// Describes definition content to the MMCC content system.
-and [<ReferenceEquality>] DefinitionContent =
+and [<ReferenceEquality>] DefinitionContent<'s when 's :> Simulant> =
     | PropertyContent of PropertyContent
     | EventSignalContent of obj Address * obj
     | EventHandlerContent of PartialEquatable<obj Address, Event -> obj>
@@ -764,8 +784,8 @@ and SimulantContent =
     abstract DispatcherNameOpt : string option
     abstract SimulantNameOpt : string option
     abstract SimulantCachedOpt : Simulant with get, set
-    abstract EventSignalContentsOpt : OrderedDictionary<obj Address * obj, Guid>
-    abstract EventHandlerContentsOpt : OrderedDictionary<int * obj Address, Guid * (Event -> obj)>
+    abstract EventSignalContentsOpt : OrderedDictionary<obj Address * obj, uint64>
+    abstract EventHandlerContentsOpt : OrderedDictionary<int * obj Address, uint64 * (Event -> obj)>
     abstract PropertyContentsOpt : List<PropertyContent>
     abstract GetChildContentsOpt<'v when 'v :> SimulantContent> : unit -> OrderedDictionary<string, 'v>
 
@@ -773,8 +793,8 @@ and SimulantContent =
 and [<ReferenceEquality>] GameContent =
     { InitialScreenNameOpt : string option
       mutable SimulantCachedOpt : Simulant
-      mutable EventSignalContentsOpt : OrderedDictionary<obj Address * obj, Guid> // OPTIMIZATION: lazily created.
-      mutable EventHandlerContentsOpt : OrderedDictionary<int * obj Address, Guid * (Event -> obj)> // OPTIMIZATION: lazily created.
+      mutable EventSignalContentsOpt : OrderedDictionary<obj Address * obj, uint64> // OPTIMIZATION: lazily created.
+      mutable EventHandlerContentsOpt : OrderedDictionary<int * obj Address, uint64 * (Event -> obj)> // OPTIMIZATION: lazily created.
       mutable PropertyContentsOpt : List<PropertyContent> // OPTIMIZATION: lazily created.
       ScreenContents : OrderedDictionary<string, ScreenContent> }
     interface SimulantContent with
@@ -800,8 +820,8 @@ and [<ReferenceEquality>] ScreenContent =
       ScreenBehavior : ScreenBehavior
       GroupFilePathOpt : string option
       mutable SimulantCachedOpt : Simulant
-      mutable EventSignalContentsOpt : OrderedDictionary<obj Address * obj, Guid> // OPTIMIZATION: lazily created.
-      mutable EventHandlerContentsOpt : OrderedDictionary<int * obj Address, Guid * (Event -> obj)> // OPTIMIZATION: lazily created.
+      mutable EventSignalContentsOpt : OrderedDictionary<obj Address * obj, uint64> // OPTIMIZATION: lazily created.
+      mutable EventHandlerContentsOpt : OrderedDictionary<int * obj Address, uint64 * (Event -> obj)> // OPTIMIZATION: lazily created.
       mutable PropertyContentsOpt : List<PropertyContent> // OPTIMIZATION: lazily created.
       GroupContents : OrderedDictionary<string, GroupContent> }
     interface SimulantContent with
@@ -829,8 +849,8 @@ and [<ReferenceEquality>] GroupContent =
       GroupName : string
       GroupFilePathOpt : string option
       mutable SimulantCachedOpt : Simulant
-      mutable EventSignalContentsOpt : OrderedDictionary<obj Address * obj, Guid> // OPTIMIZATION: lazily created.
-      mutable EventHandlerContentsOpt : OrderedDictionary<int * obj Address, Guid * (Event -> obj)> // OPTIMIZATION: lazily created.
+      mutable EventSignalContentsOpt : OrderedDictionary<obj Address * obj, uint64> // OPTIMIZATION: lazily created.
+      mutable EventHandlerContentsOpt : OrderedDictionary<int * obj Address, uint64 * (Event -> obj)> // OPTIMIZATION: lazily created.
       mutable PropertyContentsOpt : List<PropertyContent> // OPTIMIZATION: lazily created.
       mutable EntityContentsOpt : OrderedDictionary<string, EntityContent> } // OPTIMIZATION: lazily created.
     interface SimulantContent with
@@ -857,8 +877,8 @@ and [<ReferenceEquality>] EntityContent =
       EntityName : string
       EntityFilePathOpt : string option
       mutable EntityCachedOpt : Entity // OPTIMIZATION: allows us to more often hit the EntityStateOpt cache. May be null.
-      mutable EventSignalContentsOpt : OrderedDictionary<obj Address * obj, Guid> // OPTIMIZATION: lazily created.
-      mutable EventHandlerContentsOpt : OrderedDictionary<int * obj Address, Guid * (Event -> obj)> // OPTIMIZATION: lazily created.
+      mutable EventSignalContentsOpt : OrderedDictionary<obj Address * obj, uint64> // OPTIMIZATION: lazily created.
+      mutable EventHandlerContentsOpt : OrderedDictionary<int * obj Address, uint64 * (Event -> obj)> // OPTIMIZATION: lazily created.
       mutable PropertyContentsOpt : List<PropertyContent> // OPTIMIZATION: lazily created.
       mutable EntityContentsOpt : OrderedDictionary<string, EntityContent> } // OPTIMIZATION: lazily created.
     interface SimulantContent with
@@ -902,7 +922,7 @@ and [<ReferenceEquality; CLIMutable>] GameState =
       Eye3dFrustumExterior : Frustum // OPTIMIZATION: cached value.
       Eye3dFrustumImposter : Frustum // OPTIMIZATION: cached value.
       Order : int64
-      Id : Guid }
+      Id : uint64 }
 
     /// Try to get an xtension property and its type information.
     static member tryGetProperty (propertyName, gameState, propertyRef : Property outref) =
@@ -957,7 +977,7 @@ and [<ReferenceEquality; CLIMutable>] GameState =
           Eye3dFrustumExterior = viewportExterior.Frustum (eye3dCenter, eye3dRotation)
           Eye3dFrustumImposter = viewportImposter.Frustum (eye3dCenter, eye3dRotation)
           Order = Core.getTimeStampUnique ()
-          Id = Gen.id }
+          Id = Gen.id64 }
 
     interface SimulantState with
         member this.GetXtension () = this.Xtension
@@ -1166,6 +1186,8 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     member this.Light with get () = this.Dispatcher.Light || Array.exists (fun (facet : Facet) -> facet.Light) this.Facets
     member this.Static with get () = this.Transform.Static and set value = this.Transform.Static <- value
     member this.Optimized with get () = this.Transform.Optimized
+    member internal this.VisibleSpatial with get () = this.Visible || this.AlwaysRender
+    member internal this.StaticSpatial with get () = this.Static && not this.AlwaysUpdate
 
     /// Copy an entity state.
     /// This is used when we want to retain an old version of an entity state in face of mutation.
@@ -1292,9 +1314,6 @@ and [<TypeConverter (typeof<GameConverter>)>] Game (gameAddress : Game Address) 
     /// A convenience reference to get the universal game handle.
     static let handle = Game (ntoa Constants.Engine.GameName)
 
-    // cache the simulant address to avoid allocation
-    let simulantAddress = atoa<Game, Simulant> gameAddress
-
     /// The address of the game.
     member this.GameAddress = gameAddress
 
@@ -1331,7 +1350,7 @@ and [<TypeConverter (typeof<GameConverter>)>] Game (gameAddress : Game Address) 
         Address.hash this.GameAddress
 
     interface Simulant with
-        member this.SimulantAddress = simulantAddress
+        member this.SimulantAddress = gameAddress
         end
 
     interface Game IComparable with
@@ -1384,9 +1403,6 @@ and [<TypeConverter (typeof<ScreenConverter>)>] Screen (screenAddress) =
     do if screenAddress.Length <> 2 || screenAddress.Names.[0] <> Constants.Engine.GameName then
         failwith "Screen address must be length of 2 with Game name = 'Game'."
 #endif
-
-    // cache the simulant address to avoid allocation
-    let simulantAddress = atoa<Screen, Simulant> screenAddress
 
     /// Create a group reference from an address string.
     new (screenAddressStr : string) = Screen (stoa screenAddressStr)
@@ -1443,7 +1459,7 @@ and [<TypeConverter (typeof<ScreenConverter>)>] Screen (screenAddress) =
             Address.compare this.ScreenAddress that.ScreenAddress
 
     interface Simulant with
-        member this.SimulantAddress = simulantAddress
+        member this.SimulantAddress = screenAddress
         end
 
 /// Converts Group types, interning its strings for look-up speed.
@@ -1485,9 +1501,6 @@ and [<TypeConverter (typeof<GroupConverter>)>] Group (groupAddress) =
     do if groupAddress.Length <> 3 || groupAddress.Names.[0] <> Constants.Engine.GameName then
         failwith "Group address must be length of 3 with Game name = 'Game'."
 #endif
-
-    // cache the simulant address to avoid allocation
-    let simulantAddress = atoa<Group, Simulant> groupAddress
 
     /// Create a group reference from an address string.
     new (groupAddressStr : string) = Group (stoa groupAddressStr)
@@ -1537,7 +1550,7 @@ and [<TypeConverter (typeof<GroupConverter>)>] Group (groupAddress) =
         Address.hash this.GroupAddress
 
     interface Simulant with
-        member this.SimulantAddress = simulantAddress
+        member this.SimulantAddress = groupAddress
         end
 
     interface Group IComparable with
@@ -1593,9 +1606,6 @@ and [<TypeConverter (typeof<EntityConverter>)>] Entity (entityAddress) =
 
     /// The entity's cached state.
     let mutable entityStateOpt = Unchecked.defaultof<EntityState>
-
-    // cache the simulant address to avoid allocation
-    let simulantAddress = atoa<Entity, Simulant> entityAddress
 
     /// Create an entity reference from an address string.
     new (entityAddressStr : string) = Entity (stoa entityAddressStr)
@@ -1664,7 +1674,7 @@ and [<TypeConverter (typeof<EntityConverter>)>] Entity (entityAddress) =
         Address.hash this.EntityAddress
 
     interface Simulant with
-        member this.SimulantAddress = simulantAddress
+        member this.SimulantAddress = entityAddress
         end
 
     interface Entity IComparable with
@@ -1761,6 +1771,17 @@ and GameDescriptor =
           GameProperties = Map.empty
           ScreenDescriptors = [] }
 
+/// Provides bookkeeping information with the ImNui API.
+and [<NoEquality; NoComparison>] internal SimulantImNui =
+    { mutable Utilized : bool
+      Result : obj }
+
+/// Describes an argument used with the ImNui API.
+and [<Struct>] ArgImNui<'s when 's :> Simulant> =
+    { ArgStatic : bool
+      ArgLens : Lens
+      ArgValue : obj }
+
 /// The world's dispatchers (including facets).
 /// NOTE: it would be nice to make this structure internal, but doing so would non-trivially increase the number of
 /// parameters of World.make, which is already rather long.
@@ -1781,7 +1802,10 @@ and [<ReferenceEquality>] internal Subsystems =
 
 /// Keeps the World from occupying more than two cache lines.
 and [<ReferenceEquality>] internal WorldExtension =
-    { DestructionListRev : Simulant list
+    { mutable ContextImNui : Address
+      mutable RecentImNui : Address
+      mutable SimulantImNuis : OMap<Simulant, SimulantImNui>
+      DestructionListRev : Simulant list
       Dispatchers : Dispatchers
       Plugin : NuPlugin
       PropagationTargets : UMap<Entity, Entity USet> }
@@ -1874,6 +1898,71 @@ and [<ReferenceEquality>] World =
     /// Get the timers.
     member this.Timers =
         AmbientState.getTimers this.AmbientState
+
+    /// Get the current ImNui context.
+    member this.ContextImNui =
+        this.WorldExtension.ContextImNui
+
+    /// Get the current ImNui Game context (throwing upon failure).
+    member this.ContextGame =
+        if this.WorldExtension.ContextImNui.Names.Length > 0
+        then Game.Handle
+        else raise (InvalidOperationException "ImNui context not of type needed to construct requested handle.")
+
+    /// Get the current ImNui Screen context (throwing upon failure).
+    member this.ContextScreen =
+        match this.WorldExtension.ContextImNui with
+        | :? (Screen Address) as screenAddress -> Screen screenAddress
+        | :? (Group Address) as groupAddress -> Screen (Array.take 2 groupAddress.Names)
+        | :? (Entity Address) as entityAddress -> Screen (Array.take 2 entityAddress.Names)
+        | _ -> raise (InvalidOperationException "ImNui context not of type needed to construct requested handle.")
+
+    /// Get the current ImNui Group context (throwing upon failure).
+    member this.ContextGroup =
+        match this.WorldExtension.ContextImNui with
+        | :? (Group Address) as groupAddress -> Group (Array.take 3 groupAddress.Names)
+        | :? (Entity Address) as entityAddress -> Group (Array.take 3 entityAddress.Names)
+        | _ -> raise (InvalidOperationException "ImNui context not of type needed to construct requested handle.")
+
+    /// Get the current ImNui Entity context (throwing upon failure).
+    member this.ContextEntity =
+        match this.WorldExtension.ContextImNui with
+        | :? (Entity Address) as entityAddress -> Entity entityAddress
+        | _ -> raise (InvalidOperationException "ImNui context not of type needed to construct requested handle.")
+
+    /// Get the most recent ImNui context.
+    member this.RecentImNui =
+        this.WorldExtension.RecentImNui
+
+    /// Get the most recent ImNui Game context (throwing upon failure).
+    member this.RecentGame =
+        if this.WorldExtension.RecentImNui.Names.Length > 0
+        then Game.Handle
+        else raise (InvalidOperationException "Recent ImNui context not of type needed to construct requested handle.")
+
+    /// Get the most recent ImNui Screen context (throwing upon failure).
+    member this.RecentScreen =
+        match this.WorldExtension.RecentImNui with
+        | :? (Screen Address) as screenAddress -> Screen screenAddress
+        | :? (Group Address) as groupAddress -> Screen (Array.take 2 groupAddress.Names)
+        | :? (Entity Address) as entityAddress -> Screen (Array.take 2 entityAddress.Names)
+        | _ -> raise (InvalidOperationException "Recent ImNui context not of type needed to construct requested handle.")
+
+    /// Get the most recent ImNui Group context (throwing upon failure).
+    member this.RecentGroup =
+        match this.WorldExtension.RecentImNui with
+        | :? (Group Address) as groupAddress -> Group (Array.take 3 groupAddress.Names)
+        | :? (Entity Address) as entityAddress -> Group (Array.take 3 entityAddress.Names)
+        | _ -> raise (InvalidOperationException "Recent ImNui context not of type needed to construct requested handle.")
+
+    /// Get the most recent ImNui Entity context (throwing upon failure).
+    member this.RecentEntity =
+        match this.WorldExtension.RecentImNui with
+        | :? (Entity Address) as entityAddress -> Entity entityAddress
+        | _ -> raise (InvalidOperationException "Recent ImNui context not of type needed to construct requested handle.")
+
+    member internal this.SimulantImNuis =
+        this.WorldExtension.SimulantImNuis
 
 #if DEBUG
     member internal this.Choose () =

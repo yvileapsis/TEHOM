@@ -22,8 +22,10 @@ type GuiDispatcher () =
         [typeof<LayoutFacet>]
 
     static member Properties =
-        [define Entity.Size Constants.Engine.EntityGuiSizeDefault
-         define Entity.Absolute true
+        [define Entity.Absolute true
+         define Entity.Size Constants.Engine.EntityGuiSizeDefault
+         define Entity.Elevation 1.0f
+         define Entity.ElevationLocal 1.0f
          define Entity.Presence Omnipresent
          define Entity.DisabledColor Constants.Gui.DisabledColorDefault]
 
@@ -169,7 +171,8 @@ type PanelDispatcher () =
         [typeof<BackdroppableFacet>]
 
     static member Properties =
-        [define Entity.BackdropImageOpt (Some Assets.Default.Panel)]
+        [define Entity.Size (v3 Constants.Engine.EntityGuiSizeDefault.X Constants.Engine.EntityGuiSizeDefault.X 0.0f)
+         define Entity.BackdropImageOpt (Some Assets.Default.Panel)]
 
 /// Gives an entity the base behavior of basic static sprite emitter.
 type BasicStaticSpriteEmitterDispatcher () =
@@ -196,9 +199,6 @@ type Block2dDispatcher () =
         [typeof<RigidBodyFacet>
          typeof<StaticSpriteFacet>]
 
-    static member Properties =
-        [define Entity.Static true]
-
 /// Gives an entity the base behavior of a rigid 2d box using dynamic physics.
 type Box2dDispatcher () =
     inherit Entity2dDispatcher (true, false, false)
@@ -208,7 +208,35 @@ type Box2dDispatcher () =
          typeof<StaticSpriteFacet>]
 
     static member Properties =
-        [define Entity.BodyType Dynamic]
+        [define Entity.Static false
+         define Entity.BodyType Dynamic
+         define Entity.BodyShape (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })]
+
+/// Gives an entity the base behavior of a rigid 2d sphere using static physics.
+type Sphere2dDispatcher () =
+    inherit Entity2dDispatcher (true, false, false)
+
+    static member Facets =
+        [typeof<RigidBodyFacet>
+         typeof<StaticSpriteFacet>]
+
+    static member Properties =
+        [define Entity.BodyShape (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
+         define Entity.StaticImage Assets.Default.Ball]
+
+/// Gives an entity the base behavior of a rigid 2d ball using dynamic physics.
+type Ball2dDispatcher () =
+    inherit Entity2dDispatcher (true, false, false)
+
+    static member Facets =
+        [typeof<RigidBodyFacet>
+         typeof<StaticSpriteFacet>]
+
+    static member Properties =
+        [define Entity.Static false
+         define Entity.BodyType Dynamic
+         define Entity.BodyShape (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
+         define Entity.StaticImage Assets.Default.Ball]
 
 [<AutoOpen>]
 module Character2dDispatcherExtensions =
@@ -246,7 +274,8 @@ type Character2dDispatcher () =
         [typeof<RigidBodyFacet>]
 
     static member Properties =
-        [define Entity.CelSize (v2 28.0f 28.0f)
+        [define Entity.Static false
+         define Entity.CelSize (v2 28.0f 28.0f)
          define Entity.CelRun 8
          define Entity.AnimationDelay (GameTime.ofSeconds (1.0f / 15.0f))
          define Entity.BodyType Dynamic
@@ -496,9 +525,6 @@ type Block3dDispatcher () =
          typeof<StaticModelFacet>
          typeof<NavBodyFacet>]
 
-    static member Properties =
-        [define Entity.Static true]
-
 /// Gives an entity the base behavior of a rigid 3d box using dynamic physics.
 type Box3dDispatcher () =
     inherit Entity3dDispatcher (true, false, false)
@@ -509,7 +535,36 @@ type Box3dDispatcher () =
          typeof<NavBodyFacet>]
 
     static member Properties =
-        [define Entity.BodyType Dynamic]
+        [define Entity.Static false
+         define Entity.BodyType Dynamic]
+
+/// Gives an entity the base behavior of a rigid 3d sphere using static physics.
+type Sphere3dDispatcher () =
+    inherit Entity3dDispatcher (true, false, false)
+
+    static member Facets =
+        [typeof<RigidBodyFacet>
+         typeof<StaticModelFacet>
+         typeof<NavBodyFacet>]
+
+    static member Properties =
+        [define Entity.BodyShape (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
+         define Entity.StaticModel Assets.Default.BallModel]
+
+/// Gives an entity the base behavior of a rigid 3d ball using dynamic physics.
+type Ball3dDispatcher () =
+    inherit Entity3dDispatcher (true, false, false)
+
+    static member Facets =
+        [typeof<RigidBodyFacet>
+         typeof<StaticModelFacet>
+         typeof<NavBodyFacet>]
+
+    static member Properties =
+        [define Entity.Static false
+         define Entity.BodyType Dynamic
+         define Entity.BodyShape (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
+         define Entity.StaticModel Assets.Default.BallModel]
 
 [<AutoOpen>]
 module Character3dDispatcherExtensions =
@@ -530,7 +585,8 @@ type Character3dDispatcher () =
          typeof<RigidBodyFacet>]
 
     static member Properties =
-        [define Entity.BodyType KinematicCharacter
+        [define Entity.Static false
+         define Entity.BodyType KinematicCharacter
          define Entity.BodyShape (CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None })
          define Entity.LinearVelocityPrevious v3Zero
          define Entity.AngularVelocityPrevious v3Zero]
@@ -550,18 +606,18 @@ type Character3dDispatcher () =
         let turnRightness = if angularVelocity.Y < 0.0f then -angularVelocity.Y * 48.0f else 0.0f
         let turnLeftness = if angularVelocity.Y > 0.0f then angularVelocity.Y * 48.0f else 0.0f
         let animations =
-            [Animation.make 0L None "Armature|Idle" Loop 1.0f 0.5f None]
+            [Animation.make GameTime.zero None "Armature|Idle" Loop 1.0f 0.5f None]
         let animations =
-            if forwardness >= 0.01f then Animation.make 0L None "Armature|WalkForward" Loop 1.0f (max 0.025f forwardness) None :: animations
-            elif backness >= 0.01f then Animation.make 0L None "Armature|WalkBack" Loop 1.0f (max 0.025f backness) None :: animations
+            if forwardness >= 0.01f then Animation.make GameTime.zero None "Armature|WalkForward" Loop 1.0f (max 0.025f forwardness) None :: animations
+            elif backness >= 0.01f then Animation.make GameTime.zero None "Armature|WalkBack" Loop 1.0f (max 0.025f backness) None :: animations
             else animations
         let animations =
-            if rightness >= 0.01f then Animation.make 0L None "Armature|WalkRight" Loop 1.0f (max 0.025f rightness) None :: animations
-            elif leftness >= 0.01f then Animation.make 0L None "Armature|WalkLeft" Loop 1.0f (max 0.025f leftness) None :: animations
+            if rightness >= 0.01f then Animation.make GameTime.zero None "Armature|WalkRight" Loop 1.0f (max 0.025f rightness) None :: animations
+            elif leftness >= 0.01f then Animation.make GameTime.zero None "Armature|WalkLeft" Loop 1.0f (max 0.025f leftness) None :: animations
             else animations
         let animations =
-            if turnRightness >= 0.01f then Animation.make 0L None "Armature|TurnRight" Loop 1.0f (max 0.025f turnRightness) None :: animations
-            elif turnLeftness >= 0.01f then Animation.make 0L None "Armature|TurnLeft" Loop 1.0f (max 0.025f turnLeftness) None :: animations
+            if turnRightness >= 0.01f then Animation.make GameTime.zero None "Armature|TurnRight" Loop 1.0f (max 0.025f turnRightness) None :: animations
+            elif turnLeftness >= 0.01f then Animation.make GameTime.zero None "Armature|TurnLeft" Loop 1.0f (max 0.025f turnLeftness) None :: animations
             else animations
         let world = entity.SetAnimations (List.toArray animations) world
         let world = entity.SetLinearVelocityPrevious linearVelocityAvg world

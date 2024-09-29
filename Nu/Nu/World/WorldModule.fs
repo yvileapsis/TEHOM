@@ -11,7 +11,7 @@ module WorldModuleOperators =
 
     /// Attempt to resolve a relationship from a simulant.
     let tryResolve<'t when 't :> Simulant> (simulant : Simulant) (relation : 't Relation) : 't option =
-        let simulant2 = Relation.resolve<Simulant, 't> simulant.SimulantAddress relation
+        let simulant2 = Relation.resolve<Simulant, 't> (itoa simulant.SimulantAddress) relation
         if simulant2.Names.Length >= 4 && typeof<'t> = typeof<Entity> then Some (Entity (simulant2.Names) :> Simulant :?> 't)
         elif simulant2.Names.Length = 3 && typeof<'t> = typeof<Group> then Some (Group (simulant2.Names) :> Simulant :?> 't)
         elif simulant2.Names.Length = 2 && typeof<'t> = typeof<Screen> then Some (Screen (simulant2.Names) :> Simulant :?> 't)
@@ -20,13 +20,17 @@ module WorldModuleOperators =
 
     /// Relate the second simulant to the first.
     let relate<'t when 't :> Simulant> (simulant : Simulant) (simulant2 : 't) : 't Relation =
-        Relation.relate<Simulant, 't> simulant.SimulantAddress (atoa simulant2.SimulantAddress)
+        Relation.relate<Simulant, 't> (itoa simulant.SimulantAddress) (itoa simulant2.SimulantAddress)
 
 [<AutoOpen>]
 module WorldModule =
 
+    /// Track if we're in the portion of the frame simulants are being updated.
+    /// TODO: P1: consider making this an AmbientState flag.
+    let mutable internal UpdatingSimulants = false
+
     /// Track if we're in the portion of the frame before tasklet processing has started or after.
-    /// TODO: consider making this an AmbientState flag.
+    /// TODO: P1: consider making this an AmbientState flag.
     let mutable internal TaskletProcessingStarted = false
 
     /// F# reach-around for adding script unsubscriptions to simulants.
@@ -46,7 +50,7 @@ module WorldModule =
         Unchecked.defaultof<_>
 
     /// F# reach-around for sorting subscriptions by elevation.
-    let mutable internal sortSubscriptionsByElevation : (Guid * SubscriptionEntry) seq -> obj -> (Guid * SubscriptionEntry) seq =
+    let mutable internal sortSubscriptionsByElevation : (uint64 * SubscriptionEntry) seq -> obj -> (uint64 * SubscriptionEntry) seq =
         Unchecked.defaultof<_>
 
     /// F# reach-around for registering physics entities of an entire screen.
@@ -64,14 +68,17 @@ module WorldModule =
     /// F# reach-around for unregistering physics entities of an entire screen.
     let mutable internal unregisterScreenPhysics : Screen -> World -> World =
         Unchecked.defaultof<_>
-        
-    let mutable internal signal : obj -> Simulant -> World -> World =
-        Unchecked.defaultof<_>
 
     let mutable internal register : Simulant -> World -> World =
         Unchecked.defaultof<_>
 
     let mutable internal unregister : Simulant -> World -> World =
+        Unchecked.defaultof<_>
+        
+    let mutable internal tryRunEntity : Entity -> World -> World =
+        Unchecked.defaultof<_>
+        
+    let mutable internal signal : obj -> Simulant -> World -> World =
         Unchecked.defaultof<_>
 
     let mutable internal destroyImmediate : Simulant -> World -> World =
@@ -218,6 +225,103 @@ module WorldModule =
         /// Get the world's game time.
         static member getGameTime world =
             World.getAmbientStateBy AmbientState.getGameTime world
+
+        /// Get the current ImNui context.
+        static member getContextImNui (world : World) =
+            world.ContextImNui
+
+        /// Get the current ImNui context translated to a Game handle (throwing upon failure).
+        static member getContextGame (world : World) =
+            world.ContextGame
+
+        /// Get the current ImNui context translated to a Screen handle (throwing upon failure).
+        static member getContextScreen (world : World) =
+            world.ContextScreen
+
+        /// Get the current ImNui context translated to a Group handle (throwing upon failure).
+        static member getContextGroup (world : World) =
+            world.ContextGroup
+
+        /// Get the current ImNui context translated to a Entity handle (throwing upon failure).
+        static member getContextEntity (world : World) =
+            world.ContextEntity
+
+        /// Get the most recent ImNui context.
+        static member getRecentImNui (world : World) =
+            world.RecentImNui
+
+        /// Get the most recent ImNui context translated to a Game handle (throwing upon failure).
+        static member getRecentGame (world : World) =
+            world.RecentGame
+
+        /// Get the most recent ImNui context translated to a Screen handle (throwing upon failure).
+        static member getRecentScreen (world : World) =
+            world.RecentScreen
+
+        /// Get the most recent ImNui context translated to a Group handle (throwing upon failure).
+        static member getRecentGroup (world : World) =
+            world.RecentGroup
+
+        /// Get the most recent ImNui context translated to a Entity handle (throwing upon failure).
+        static member getRecentEntity (world : World) =
+            world.RecentEntity
+
+        static member internal setContext context (world : World) =
+            if world.Imperative then
+                world.WorldExtension.RecentImNui <- world.WorldExtension.ContextImNui
+                world.WorldExtension.ContextImNui <- context
+                world
+            else
+                let worldExtension = { world.WorldExtension with RecentImNui = world.WorldExtension.ContextImNui; ContextImNui = context }
+                World.choose { world with WorldExtension = worldExtension }
+
+        static member internal advanceContext recent context (world : World) =
+            if world.Imperative then
+                world.WorldExtension.RecentImNui <- recent
+                world.WorldExtension.ContextImNui <- context
+                world
+            else
+                let worldExtension = { world.WorldExtension with RecentImNui = recent; ContextImNui = context }
+                World.choose { world with WorldExtension = worldExtension }
+
+        static member internal getSimulantImNuis (world : World) =
+            world.SimulantImNuis
+
+        static member internal setSimulantImNuis simulantImNuis (world : World) =
+            if world.Imperative then
+                world.WorldExtension.SimulantImNuis <- simulantImNuis
+                world
+            else
+                let worldExtension = { world.WorldExtension with SimulantImNuis = simulantImNuis }
+                World.choose { world with WorldExtension = worldExtension }
+
+        static member internal getSimulantImNui simulant (world : World) =
+            world.SimulantImNuis.[simulant] |> __c'
+
+        static member internal addSimulantImNui simulant simulantImNui (world : World) =
+            let simulantImNuis = OMap.add simulant simulantImNui world.SimulantImNuis
+            World.setSimulantImNuis simulantImNuis world
+
+        static member internal tryMapSimulantImNui mapper simulant (world : World) =
+            match world.SimulantImNuis.TryGetValue simulant with
+            | (true, simulantImNui) ->
+                let simulantImNui = mapper simulantImNui
+                World.addSimulantImNui simulant simulantImNui world
+            | (false, _) -> world
+
+        static member internal mapSimulantImNui mapper simulant world =
+            let simulantImNui = World.getSimulantImNui simulant world
+            let simulantImNui = mapper simulantImNui
+            World.addSimulantImNui simulant simulantImNui world
+
+        static member internal utilizeSimulantImNui simulant simulantImNui (world : World) =
+            if world.Imperative then
+                simulantImNui.Utilized <- true
+                world
+            else
+                let simulantImNui = { simulantImNui with Utilized = true }
+                let simulantImNuis = OMap.add simulant simulantImNui world.SimulantImNuis
+                World.setSimulantImNuis simulantImNuis world
 
         /// Switch simulation to use this ambient state.
         static member internal switchAmbientState world =
@@ -545,7 +649,7 @@ module WorldModule =
 
         /// Subscribe to an event using the given subscriptionId and be provided with an unsubscription callback.
         static member subscribePlus<'a, 's when 's :> Simulant>
-            (subscriptionId : Guid)
+            (subscriptionId : uint64)
             (callback : Event<'a, 's> -> World -> Handling * World)
             (eventAddress : 'a Address)
             (subscriber : 's)
@@ -562,11 +666,11 @@ module WorldModule =
                             let subscriptionEntries = OMap.add subscriptionId subscriptionEntry subscriptionEntries
                             UMap.add eventAddressObj subscriptionEntries subscriptions
                         | None ->
-                            let subscriptionEntry = { SubscriptionCallback = World.boxCallback callback; SubscriptionSubscriber = subscriber; SubscriptionId = subscriptionId }
+                            let subscriptionEntry = { SubscriptionCallback = World.boxCallback callback; SubscriptionSubscriber = subscriber }
                             let subscriptionEntries = OMap.add subscriptionId subscriptionEntry subscriptionEntries
                             UMap.add eventAddressObj subscriptionEntries subscriptions
                     | None ->
-                        let subscriptionEntry = { SubscriptionCallback = World.boxCallback callback; SubscriptionSubscriber = subscriber; SubscriptionId = subscriptionId }
+                        let subscriptionEntry = { SubscriptionCallback = World.boxCallback callback; SubscriptionSubscriber = subscriber }
                         UMap.add eventAddressObj (OMap.singleton HashIdentity.Structural (World.getCollectionConfig world) subscriptionId subscriptionEntry) subscriptions
                 let unsubscriptions = UMap.add subscriptionId (eventAddressObj, subscriber :> Simulant) unsubscriptions
                 let world = World.setSubscriptions subscriptions world
@@ -578,7 +682,7 @@ module WorldModule =
         /// Subscribe to an event.
         static member subscribe<'a, 's when 's :> Simulant>
             (callback : Event<'a, 's> -> World -> Handling * World) (eventAddress : 'a Address) (subscriber : 's) world =
-            World.subscribePlus (makeGuid ()) callback eventAddress subscriber world |> snd
+            World.subscribePlus Gen.id64 callback eventAddress subscriber world |> snd
 
         /// Keep active a subscription for the life span of a simulant.
         static member monitorPlus<'a, 's when 's :> Simulant>
@@ -586,15 +690,15 @@ module WorldModule =
             (eventAddress : 'a Address)
             (subscriber : 's)
             (world : World) =
-            let removalId = makeGuid ()
-            let monitorId = makeGuid ()
+            let removalId = Gen.id64
+            let monitorId = Gen.id64
             let world = World.subscribePlus<'a, 's> monitorId callback eventAddress subscriber world |> snd
             let unsubscribe = fun (world : World) ->
                 let world = World.unsubscribe removalId world
                 let world = World.unsubscribe monitorId world
                 world
             let callback' = fun _ world -> (Cascade, unsubscribe world)
-            let unregisteringEventAddress = rtoa<unit> [|"Unregistering"; "Event"|] --> subscriber.SimulantAddress
+            let unregisteringEventAddress = rtoa<unit> [|"Unregistering"; "Event"|] --> itoa subscriber.SimulantAddress
             let world = World.subscribePlus<unit, Simulant> removalId callback' unregisteringEventAddress subscriber world |> snd
             (unsubscribe, world)
 
@@ -610,9 +714,9 @@ module WorldModule =
             (entity : Entity)
             (facetName : string)
             (world : World) =
-            let removalId = makeGuid ()
-            let fastenId = makeGuid ()
-            let senseId = makeGuid ()
+            let removalId = Gen.id64
+            let fastenId = Gen.id64
+            let senseId = Gen.id64
             let world = World.subscribePlus<'a, Entity> senseId callback eventAddress entity world |> snd
             let unsubscribe = fun (world : World) ->
                 let world = World.unsubscribe removalId world

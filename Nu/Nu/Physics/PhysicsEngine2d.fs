@@ -64,12 +64,6 @@ type [<ReferenceEquality>] PhysicsEngine2d =
               Normal = Vector3 (normal.X, normal.Y, 0.0f) }
         let integrationMessage = BodyPenetrationMessage bodyPenetrationMessage
         integrationMessages.Add integrationMessage
-        let bodyPenetrationMessage2 =
-            { BodyShapeSource = bodyPenetrationMessage.BodyShapeSource2
-              BodyShapeSource2 = bodyPenetrationMessage.BodyShapeSource
-              Normal = -bodyPenetrationMessage.Normal }
-        let integrationMessage = BodyPenetrationMessage bodyPenetrationMessage2
-        integrationMessages.Add integrationMessage
         true
 
     static member private handleSeparation
@@ -463,9 +457,14 @@ type [<ReferenceEquality>] PhysicsEngine2d =
         match physicsEngine.Bodies.TryGetValue applyBodyLinearImpulseMessage.BodyId with
         | (true, (_, body)) ->
             if not (Single.IsNaN applyBodyLinearImpulseMessage.LinearImpulse.X) then
-                body.ApplyLinearImpulse
-                    (PhysicsEngine2d.toPhysicsV2 applyBodyLinearImpulseMessage.LinearImpulse,
-                     PhysicsEngine2d.toPhysicsV2 applyBodyLinearImpulseMessage.Offset)
+                match applyBodyLinearImpulseMessage.OriginWorldOpt with
+                | Some originWorld ->
+                    body.ApplyLinearImpulse
+                        (PhysicsEngine2d.toPhysicsV2 applyBodyLinearImpulseMessage.LinearImpulse,
+                         PhysicsEngine2d.toPhysicsV2 originWorld)
+                | None ->
+                    body.ApplyLinearImpulse
+                        (PhysicsEngine2d.toPhysicsV2 applyBodyLinearImpulseMessage.LinearImpulse)
             else Log.info ("Applying invalid linear impulse '" + scstring applyBodyLinearImpulseMessage.LinearImpulse + "'; this may destabilize Aether.")
         | (false, _) -> ()
 
@@ -481,9 +480,14 @@ type [<ReferenceEquality>] PhysicsEngine2d =
         match physicsEngine.Bodies.TryGetValue applyBodyForceMessage.BodyId with
         | (true, (_, body)) ->
             if not (Single.IsNaN applyBodyForceMessage.Force.X) then
-                body.ApplyForce
-                    (PhysicsEngine2d.toPhysicsV2 applyBodyForceMessage.Force,
-                     PhysicsEngine2d.toPhysicsV2 applyBodyForceMessage.Offset)
+                match applyBodyForceMessage.OriginWorldOpt with
+                | Some originWorld ->
+                    body.ApplyForce
+                        (PhysicsEngine2d.toPhysicsV2 applyBodyForceMessage.Force,
+                         PhysicsEngine2d.toPhysicsV2 originWorld)
+                | None ->
+                    body.ApplyForce
+                        (PhysicsEngine2d.toPhysicsV2 applyBodyForceMessage.Force)
             else Log.info ("Applying invalid force '" + scstring applyBodyForceMessage.Force + "'; this may destabilize Aether.")
         | (false, _) -> ()
 
