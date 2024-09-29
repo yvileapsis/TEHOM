@@ -80,21 +80,26 @@ with
     static member bonusDamage moveID moves damage =
         let before, after = List.splitAt moveID moves
         let damage =
-            before
-            |> List.rev
-            |> List.tail
-            |> List.foldWhile (fun bonus move ->
-                match move with
-                | Power -> Some (bonus + 5)
-                | _ -> None
-            ) damage
+            match before with
+            | [] -> damage
+            | _ ->
+                before
+                |> List.rev
+                |> List.foldWhile (fun bonus move ->
+                    match move with
+                    | Power -> Some (bonus + 5)
+                    | _ -> None
+                ) damage
         let damage =
-            after
-            |> List.foldWhile (fun bonus move ->
-                match move with
-                | Press -> Some (bonus + 2)
-                | _ -> None
-            ) damage
+            match after with
+            | _::after ->
+                after
+                |> List.foldWhile (fun bonus move ->
+                    match move with
+                    | Press -> Some (bonus + 2)
+                    | _ -> None
+                ) damage
+            | _ -> damage
         damage
 
     // TODO: fix bug where entity ends up disconnected from the floor due to spare distance fix
