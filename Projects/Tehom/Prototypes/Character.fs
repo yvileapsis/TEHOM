@@ -297,7 +297,7 @@ module Character =
 
                 ID = "rat"
                 Name = "Rat"
-                Size = -4
+                Size = -2
                 Gait = Speedy
         }
 

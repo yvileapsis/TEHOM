@@ -77,6 +77,7 @@ with
         Burst; Ready; Sweep;
     ]
 
+    // TODO: fix bug where entity ends up disconnected from the floor due to spare distance fix
     static member handle move attacker defender area =
         match move with
         | Stride
@@ -208,6 +209,7 @@ type [<SymbolicExpansion>] Combat = {
     Turn : int
 
     Area : Area
+//    Characters : Character list
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
