@@ -48,7 +48,34 @@ module WorldImNui =
 
     type World with
 
-        ///
+        /// ImNui subscribe to the given event address.
+        static member doSubscription<'d> name (eventAddress : 'd Address) (world : World) : 'd FQueue * World =
+            let eventAddress' =
+                if not (Array.contains "Event" eventAddress.Names)
+                then Address.makeFromArray<'d> (Array.concat [|eventAddress.Names; [|"Event"|]; world.ContextImNui.Names|])
+                else eventAddress
+            let subscriptionKey = (name, eventAddress :> Address, eventAddress' :> Address)
+            let world =
+                match world.SubscriptionImNuis.TryGetValue subscriptionKey with
+                | (true, subscriptionImNui) -> World.utilizeSubscriptionImNui subscriptionKey subscriptionImNui world
+                | (false, _) ->
+                    let subId = Gen.id64
+                    let (_, world) =
+                        World.subscribePlus subId (fun event world ->
+                            let mapSubscriptionImNui subscriptionImNui =
+                                let results = subscriptionImNui.Results :?> 'd FQueue
+                                { subscriptionImNui with Results = FQueue.conj event.Data results }
+                            let world = World.tryMapSubscriptionImNui mapSubscriptionImNui subscriptionKey world
+                            (Cascade, world))
+                            eventAddress'
+                            Game
+                            world
+                    World.addSubscriptionImNui subscriptionKey { SubscriptionUtilized = true; Results = FQueue.empty<'d>; SubscriptionId = subId } world
+            let results = (World.getSubscriptionImNui subscriptionKey world).Results :?> 'd FQueue
+            let world = World.mapSubscriptionImNui (fun subscriptionImNui -> { subscriptionImNui with Results = FQueue.empty<'d> }) subscriptionKey world
+            (results, world)
+
+        /// TODO: document this!
         static member initBodyResult mapResult (entity : Entity) world =
             let world = World.monitor (fun event world -> (Cascade, mapResult (FQueue.conj $ BodyPenetration event.Data) world)) entity.BodyPenetrationEvent entity world
             let world = World.monitor (fun event world -> (Cascade, mapResult (FQueue.conj $ BodySeparationExplicit event.Data) world)) entity.BodySeparationExplicitEvent entity world
@@ -70,7 +97,7 @@ module WorldImNui =
                 match world.SimulantImNuis.TryGetValue game with
                 | (true, gameImNui) -> (false, World.utilizeSimulantImNui game gameImNui world)
                 | (false, _) ->
-                    let world = World.addSimulantImNui game { Utilized = true; Result = () } world
+                    let world = World.addSimulantImNui game { SimulantUtilized = true; Result = () } world
                     (true, world)
             let initializing = initializing || Reinitializing
             Seq.fold
@@ -111,7 +138,7 @@ module WorldImNui =
                 match world.SimulantImNuis.TryGetValue screen with
                 | (true, screenImNui) -> (false, World.utilizeSimulantImNui screen screenImNui world)
                 | (false, _) ->
-                    let world = World.addSimulantImNui screen { Utilized = true; Result = (FQueue.empty<ScreenResult>, zero) } world
+                    let world = World.addSimulantImNui screen { SimulantUtilized = true; Result = (FQueue.empty<ScreenResult>, zero) } world
                     let mapFstResult (mapper : ScreenResult FQueue -> ScreenResult FQueue) world =
                         let mapScreenImNui screenImNui =
                             let (screenResult, userResult) = screenImNui.Result :?> ScreenResult FQueue * 'r
@@ -184,7 +211,7 @@ module WorldImNui =
                 match world.SimulantImNuis.TryGetValue group with
                 | (true, groupImNui) -> (false, World.utilizeSimulantImNui group groupImNui world)
                 | (false, _) ->
-                    let world = World.addSimulantImNui group { Utilized = true; Result = () } world
+                    let world = World.addSimulantImNui group { SimulantUtilized = true; Result = () } world
                     let mapResult (mapper : 'r -> 'r) world =
                         let mapGroupImNui groupImNui = { groupImNui with Result = mapper (groupImNui.Result :?> 'r) }
                         World.tryMapSimulantImNui mapGroupImNui group world
@@ -204,24 +231,24 @@ module WorldImNui =
         static member private beginGroup4<'d> name groupFilePathOpt args world =
             World.beginGroupPlus6 () (fun _ _ world -> world) name groupFilePathOpt args world |> snd
 
-        static member internal beginGroupFromDescriptor nameOpt groupDescriptor args (world : World) =
+        /// Begin the ImNui declaration of a group read from the given file path with the given arguments.
+        /// Note that changing the file path over time has no effect as only the first moment is used.
+        static member beginGroupFromFile (name : string) (groupFilePath : string) args (world : World) =
             if world.ContextImNui.Names.Length < 2 then raise (InvalidOperationException "ImNui group declared outside of valid ImNui context (must be called in a Screen context).")
-            let groupName =
-                match nameOpt with
-                | Some name -> name
-                | None -> match GroupDescriptor.getNameOpt groupDescriptor with Some name -> name | None -> "Group"
-            let groupAddress = Address.makeFromArray (Array.add groupName world.ContextImNui.Names)
+            let groupAddress = Address.makeFromArray (Array.add name world.ContextImNui.Names)
             let world = World.setContext groupAddress world
             let group = Nu.Group groupAddress
             let world =
                 if not (group.GetExists world) then
+                    let groupDescriptorStr = File.ReadAllText groupFilePath
+                    let groupDescriptor = scvalue<GroupDescriptor> groupDescriptorStr
                     let world = World.readGroup groupDescriptor None group.Screen world |> snd
                     World.setGroupProtected true group world |> snd'
                 else world
             let (initializing, world) =
                 match world.SimulantImNuis.TryGetValue group with
                 | (true, groupImNui) -> (false, World.utilizeSimulantImNui group groupImNui world)
-                | (false, _) -> (true, World.addSimulantImNui group { Utilized = true; Result = () } world)
+                | (false, _) -> (true, World.addSimulantImNui group { SimulantUtilized = true; Result = () } world)
             let initializing = initializing || Reinitializing
             Seq.fold
                 (fun world arg ->
@@ -229,13 +256,6 @@ module WorldImNui =
                     then group.TrySetProperty arg.ArgLens.Name { PropertyType = arg.ArgLens.Type; PropertyValue = arg.ArgValue } world |> __c'
                     else world)
                 world args
-
-        /// Begin the ImNui declaration of a group read from the given file path with the given arguments.
-        /// Note that changing the file path over time has no effect as only the first moment is used.
-        static member beginGroupFromFile (name : string) (groupFilePath : string) args (world : World) =
-            let groupDescriptorStr = File.ReadAllText groupFilePath
-            let groupDescriptor = scvalue<GroupDescriptor> groupDescriptorStr
-            World.beginGroupFromDescriptor (Some name) groupDescriptor args world
 
         /// Begin the ImNui declaration of a group with the given arguments.
         static member beginGroupPlus<'d, 'r when 'd :> GroupDispatcher> zero init name args world =
@@ -280,7 +300,7 @@ module WorldImNui =
                 match world.SimulantImNuis.TryGetValue entity with
                 | (true, entityImNui) -> (false, World.utilizeSimulantImNui entity entityImNui world)
                 | (false, _) ->
-                    let world = World.addSimulantImNui entity { Utilized = true; Result = zero } world
+                    let world = World.addSimulantImNui entity { SimulantUtilized = true; Result = zero } world
                     let mapResult (mapper : 'r -> 'r) world =
                         let mapEntityImNui entityImNui = { entityImNui with Result = mapper (entityImNui.Result :?> 'r) }
                         World.tryMapSimulantImNui mapEntityImNui entity world
@@ -314,7 +334,7 @@ module WorldImNui =
                 else world
             match world.SimulantImNuis.TryGetValue entity with
             | (true, entityImNui) -> (false, entity, World.utilizeSimulantImNui entity entityImNui world)
-            | (false, _) -> (true, entity, World.addSimulantImNui entity { Utilized = true; Result = () } world)
+            | (false, _) -> (true, entity, World.addSimulantImNui entity { SimulantUtilized = true; Result = () } world)
 
         /// Begin the ImNui declaration of a group read from the given file path with the given arguments.
         /// Note that changing the file path over time has no effect as only the first moment is used.
