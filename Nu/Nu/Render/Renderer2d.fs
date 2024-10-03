@@ -777,13 +777,13 @@ type [<ReferenceEquality>] GlRenderer2d =
          text : RichTextParagraph list,
          eyeCenter : Vector2,
          eyeSize : Vector2,
-         windowSize : Vector2,
+         windowSize,
          renderer : GlRenderer2d) =
 
         let transform = transform
         let clipOpt = clipOpt
 
-        flip OpenGL.SpriteBatch.InterruptSpriteBatchFrame renderer.SpriteBatchEnv $ fun () ->
+        flip3 OpenGL.SpriteBatch.InterruptSpriteBatchFrame windowSize renderer.SpriteBatchEnv $ fun () ->
 
             // gather context for rendering text
             let mutable transform = transform
@@ -1179,7 +1179,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                 let insetOpt : Box2 voption = ValueNone
                 let color = Color.White
 
-                OpenGL.Sprite.DrawSprite (vertices, indices, vao, &viewProjection, modelViewProjection.ToArray (), &insetOpt, &clipOpt, &color, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, modelViewProjectionUniform, texCoords4Uniform, colorUniform, textureUniform, shader)
+                OpenGL.Sprite.DrawSprite (vertices, indices, vao, &viewProjection, modelViewProjection.ToArray (), &insetOpt, &clipOpt, &color, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, windowSize, modelViewProjectionUniform, texCoords4Uniform, colorUniform, textureUniform, shader)
                 OpenGL.Hl.Assert ()
 
                 // destroy texture

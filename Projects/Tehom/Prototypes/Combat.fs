@@ -33,7 +33,8 @@ TODO: Tiniest vertical slice:
 
 type GameEffect =
     | Damage of String * int
-    | Move of String * String * (String * uint32) option
+    | MoveInter of String * String
+    | MoveIntra of String * String * uint32
 
 type Move =
     | Block
@@ -118,9 +119,13 @@ with
                 let speed = Character.getSpeed attacker
 
                 match Area.moveWithinReach attacker.ID defender.ID reach speed area with
-                | Some (moveTo, fix) ->
-                    [Move (attacker.ID, moveTo, fix)]
-                | None ->
+                | Some moveInter, Some moveIntra ->
+                    [MoveInter moveInter; MoveIntra moveIntra]
+                | Some moveInter, None ->
+                    [MoveInter moveInter]
+                | None, Some moveIntra ->
+                    [MoveIntra moveIntra]
+                | None, None ->
                     []
         | Block
         | Crouch
@@ -522,22 +527,20 @@ with
 
             gameplay
 
-        | Move (character, location, spareDistanceFix) ->
+        | MoveInter (character, location) ->
 
-            let level = gameplay.Area
+            let area = gameplay.Area
+            let area = Area.moveSite character location area
 
-            let level =
-                Area.moveSite character location level
+            let gameplay = { gameplay with Area = area }
+            gameplay
 
-            let level =
-                match spareDistanceFix with
-                | Some (location, distance) ->
-                    Area.spareDistance distance character location level
-                | None ->
-                    level
+        | MoveIntra (character, location, distance) ->
 
-            let gameplay = { gameplay with Area = level }
+            let area = gameplay.Area
+            let area = Area.establishDistance distance character location area
 
+            let gameplay = { gameplay with Area = area }
             gameplay
 
 
@@ -889,6 +892,18 @@ type CombatDispatcher () =
                                     Color.Gray
                         ]
                 ]
+
+                richText "CombatLocations" [
+                    Entity.Position == v3 0.0f -160.0f 0.0f
+                    Entity.Size == v3 360.0f 40.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                    Entity.Text := $"{Area.getConnections player.ID gameplay.Area} -- {Area.getConnections enemy.ID gameplay.Area}"
+                    Entity.TextColor == Color.FloralWhite
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 10
+                ]
+
             | _ -> ()
 
         ]

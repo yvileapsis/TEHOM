@@ -168,41 +168,51 @@ module Area =
             )
             |> Query.sp2 fromDestination toDestination
 
-        static member findClosestSiteWithinReach (reach: uint32) path =
-            let _, totalDistance = path |> List.last
-            path
-            |> List.rev
-            |> List.tryFindBack (fun (_, distance) ->
-                totalDistance - distance <= reach
-            )
+        static member findReachableSitePath (reach: uint32) path =
+            match path with
+            | [] -> []
+            | path ->
+                let _, fullDistance = List.last path
+                List.takeTillInclusive (fun (_, distance) -> fullDistance - distance <= reach) path
 
         static member moveWithinReach actor target reach speed area =
 
             let path = Area.findPath actor target area
-            match Area.findClosestSiteWithinReach reach path with
-            | None -> None
-            | Some (target, distance) ->
+            let path = Area.findReachableSitePath reach path
 
-                if (distance <= speed) then
-                    Some (target, None)
-                else
-                    let index =
-                        List.findIndexBack (fun (_, distance) -> distance <= speed) path
+            match path with
+            | _::_ ->
 
-                    let (moveTo, distance) =
-                        List.item index path
+                let index =
+                    List.findIndexBack (fun (_, distance) -> distance <= speed) path
 
-                    let fix =
-                        if (speed > distance) then
-                            List.item (index + 1) path
-                            |> fun (site, distance2) -> site, distance2 - speed
-                            |> Some
-                        else
+                let (targetInter, distanceInter) =
+                    List.item index path
+
+                let moveInter =
+                    if targetInter <> actor then
+                        Some (actor, targetInter)
+                    else
+                        None
+
+                let moveIntra =
+                    let speedIntra = max 0u (speed - distanceInter)
+                    if speedIntra > 0u then
+                        match List.tryItem (index + 1) path with
+                        | Some (targetIntra, distanceIntra) ->
+                            Some (actor, targetIntra, distanceIntra - speedIntra)
+                        | None ->
                             None
+                    else
+                        None
 
-                    Some (moveTo, fix)
+                moveInter, moveIntra
+            | _ ->
+                printf $"err: {actor} {target} {speed} {area} {path}"
+                None, None
 
         static member moveSite site toDestination area =
+            // resets all relations, maybe this isn't the best
             let sites =
                 match Graph.tryDecompose site area.Sites with
                 | Some (p, v, l, s), sites' ->
@@ -213,12 +223,30 @@ module Area =
                     sites'
             { area with Sites = sites }
 
-        static member spareDistance distance site toDestination area =
+        static member establishDistance distance site toDestination area =
+            let sites = area.Sites
+
             let sites =
-                area.Sites
+                match Undirected.Edges.tryFind site toDestination sites with
+                | Some _ ->
+                    sites
+                    |> Undirected.Edges.remove (site, toDestination)
+                | None ->
+                    sites
+
+            let sites =
+                sites
                 |> Undirected.Edges.add (site, toDestination, Distance distance)
+
             { area with Sites = sites }
 
+        static member getConnections site area =
+            area.Sites
+            |> Graph.tryDecompose site
+            |> fun (c, _) ->
+                match c with
+                | Some (p, v, l, s) -> $"{p} {v} {l} {s}"
+                | None -> String.empty
 
 
 type Area = Area.Area
