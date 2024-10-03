@@ -75,17 +75,32 @@ module WorldModule2 =
             let world =
                 match World.getSelectedScreenOpt world with
                 | Some selectedScreen ->
-                    let eventTrace = EventTrace.debug "World" "selectScreen" "Deselecting" EventTrace.empty
-                    World.publishPlus () selectedScreen.DeselectingEvent eventTrace selectedScreen false false world
+                    let deselecting =
+                        match transitionStateAndScreenOpt with
+                        | Some (_, screen) when selectedScreen = screen -> false
+                        | Some _ | None -> true
+                    if deselecting then
+                        let eventTrace = EventTrace.debug "World" "selectScreen" "Deselecting" EventTrace.empty
+                        World.publishPlus () selectedScreen.DeselectingEvent eventTrace selectedScreen false false world
+                    else world
                 | None -> world
             match transitionStateAndScreenOpt with
             | Some (transitionState, screen) ->
-                let world = World.setScreenTransitionStatePlus transitionState screen world
-                let world = World.setSelectedScreen screen world
-                let eventTrace = EventTrace.debug "World" "selectScreen" "Select" EventTrace.empty
-                World.publishPlus () screen.SelectEvent eventTrace screen false false world
-            | None ->
-                World.setSelectedScreenOpt None world
+                let world =
+                    match World.getSelectedScreenOpt world with
+                    | Some selectedScreen ->
+                        let select =
+                            match transitionStateAndScreenOpt with
+                            | Some (_, screen) when selectedScreen = screen -> false
+                            | Some _ | None -> true
+                        if select then
+                            let world = World.setSelectedScreen screen world
+                            let eventTrace = EventTrace.debug "World" "selectScreen" "Select" EventTrace.empty
+                            World.publishPlus () screen.SelectEvent eventTrace screen false false world
+                        else world
+                    | None -> world
+                World.setScreenTransitionStatePlus transitionState screen world
+            | None -> World.setSelectedScreenOpt None world
 
         /// Select the given screen without transitioning, even if another transition is taking place.
         static member selectScreen transitionState screen world =
@@ -598,6 +613,14 @@ module WorldModule2 =
 
             // propagate entity
             let targets = entity.GetPropagationTargets world
+            let targetsValid =
+                Seq.filter (fun (target : Entity) ->
+                    let targetToEntity = Relation.relate target.EntityAddress entity.EntityAddress
+                    let linkLast = Array.tryLast targetToEntity.Links
+                    let valid = linkLast <> Some Parent && linkLast <> Some Current
+                    if not valid then Log.warn ("Invalid propagation target '" + scstring target + "' from source '" + scstring entity + "'.")
+                    valid)
+                    targets
             let currentDescriptor = World.writeEntity true EntityDescriptor.empty entity world
             let previousDescriptor = Option.defaultValue EntityDescriptor.empty (entity.GetPropagatedDescriptorOpt world)
             let world =
@@ -612,13 +635,22 @@ module WorldModule2 =
                         let world = target.SetOrder order world
                         world
                     else world)
-                    world targets
+                    world targetsValid
             let currentDescriptor = { currentDescriptor with EntityProperties = Map.remove (nameof Entity.PropagatedDescriptorOpt) currentDescriptor.EntityProperties }
             let world = entity.SetPropagatedDescriptorOpt (Some currentDescriptor) world
 
             // propagate sourced ancestor entities
             seq {
-                for target in entity.GetPropagationTargets world do
+                let targets = entity.GetPropagationTargets world
+                let targetsValid =
+                    Seq.filter (fun (target : Entity) ->
+                        let targetToEntity = Relation.relate target.EntityAddress entity.EntityAddress
+                        let linkLast = Array.tryLast targetToEntity.Links
+                        let valid = linkLast <> Some Parent && linkLast <> Some Current
+                        if not valid then Log.warn ("Invalid propagation target '" + scstring target + "' from source '" + scstring entity + "'.")
+                        valid)
+                        targets
+                for target in targetsValid do
                     if target.GetExists world then
                         for ancestor in World.getEntityAncestors target world do
                             if ancestor.GetExists world && ancestor.HasPropagationTargets world then

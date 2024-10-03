@@ -511,7 +511,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         let (group, world) =
             match Seq.tryHead groups with
             | Some group -> (group, world)
-            | None -> World.createGroup (Some "Group") screen world
+            | None -> (SelectedScreen.GetDispatcher world).CreateDefaultGroup (SelectedScreen, world)
         selectGroup false group
         world
 
@@ -729,7 +729,6 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
           FocusProperty = match focusPropertyOpt with Some focus -> focus | None -> fun () -> ()
           UnfocusProperty = match unfocusPropertyOpt with Some unfocus -> unfocus | None -> fun () -> ()
           SearchAssetViewer = fun () -> searchAssetViewer ()
-          PropertyValueStrPreviousRef = ref PropertyValueStrPrevious
           DragDropPayloadOpt = DragDropPayloadOpt
           SnapDrag = SnapDrag
           SelectedScreen = SelectedScreen
@@ -752,7 +751,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 if SelectedGroup :> Simulant = simulant then
                     let groups = World.getGroups SelectedScreen world
                     if Seq.isEmpty groups then
-                        let (group, world) = World.createGroup (Some "Group") SelectedScreen world // create default group if no group remains
+                        let (group, world) = (SelectedScreen.GetDispatcher world).CreateDefaultGroup (SelectedScreen, world) // create default group if no group remains
                         SelectedGroup <- group
                         world
                     else
@@ -1602,8 +1601,6 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             elif ImGui.IsKeyPressed ImGuiKey.O && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltDown () then ShowOpenEntityDialog <- true; world
             elif ImGui.IsKeyPressed ImGuiKey.S && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltDown () then ShowSaveEntityDialog <- true; world
             elif ImGui.IsKeyPressed ImGuiKey.R && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then ReloadAllRequested <- 1; world
-            elif ImGui.IsKeyPressed ImGuiKey.P && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then tryPropagateSelectedEntityStructure world |> snd
-            elif ImGui.IsKeyPressed ImGuiKey.U && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then tryWipeSelectedEntityPropagationTargets world |> snd
             elif ImGui.IsKeyPressed ImGuiKey.F && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then searchEntityHierarchy (); world
             elif ImGui.IsKeyPressed ImGuiKey.O && ImGui.IsCtrlDown () && ImGui.IsShiftDown () && ImGui.IsAltUp () then ShowOpenProjectDialog <- true; world
             elif ImGui.IsKeyPressed ImGuiKey.F && ImGui.IsCtrlDown () && ImGui.IsShiftDown () && ImGui.IsAltUp () then freezeEntities world
@@ -1695,8 +1692,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         NewEntityParentOpt <- SelectedEntityOpt
                         ShowEntityContextMenu <- false
                 let world = if ImGui.MenuItem ("Auto Bounds Entity", "Ctrl+B") then tryAutoBoundsSelectedEntity world |> snd else world
-                let world = if ImGui.MenuItem ("Propagate Entity", "Ctrl+P") then tryPropagateSelectedEntityStructure world |> snd else world
-                let world = if ImGui.MenuItem ("Wipe Propagated Descriptor", "Ctrl+W") then tryWipeSelectedEntityPropagationTargets world |> snd else world
+                let world = if ImGui.MenuItem ("Propagate Entity") then tryPropagateSelectedEntityStructure world |> snd else world
+                let world = if ImGui.MenuItem ("Wipe Propagated Descriptor") then tryWipeSelectedEntityPropagationTargets world |> snd else world
                 let world =
                     match SelectedEntityOpt with
                     | Some entity when entity.GetExists world ->
@@ -1897,7 +1894,6 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         let propertyValue = getProperty propertyDescriptor simulant world
         let context = makeContext (Some focusProperty) None
         let (changed, propertyValue) = World.imGuiEditPropertyRecord headered propertyDescriptor.PropertyName propertyDescriptor.PropertyType propertyValue context world
-        PropertyValueStrPrevious <- context.PropertyValueStrPreviousRef.Value
         if changed then setProperty propertyValue propertyDescriptor simulant world else world
 
     let private imGuiEditProperty
@@ -1910,7 +1906,6 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         let propertyValue = getProperty propertyDescriptor simulant world
         let context = makeContext (Some focusProperty) None
         let (changed, propertyValue) = World.imGuiEditProperty propertyDescriptor.PropertyName propertyDescriptor.PropertyType propertyValue context world
-        PropertyValueStrPrevious <- context.PropertyValueStrPreviousRef.Value
         if changed then setProperty propertyValue propertyDescriptor simulant world else world
 
     let private imGuiEditEntityAppliedTypes (entity : Entity) world =
@@ -1975,7 +1970,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                 | Some mount ->
                                     let parentAddress = Relation.resolve entity.EntityAddress mount
                                     let parent = World.derive (atooa parentAddress)
-                                    World.getExists parent world
+                                    parent.Names.Length >= 4 && World.getExists parent world
                                 | None -> false
                             | _ -> false
                         let propertyDescriptors =
@@ -2469,8 +2464,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                     NewEntityParentOpt <- SelectedEntityOpt
                                     ShowEntityContextMenu <- false
                             let world = if ImGui.MenuItem ("Auto Bounds Entity", "Ctrl+B") then tryAutoBoundsSelectedEntity world |> snd else world
-                            let world = if ImGui.MenuItem ("Propagate Entity", "Ctrl+P") then tryPropagateSelectedEntityStructure world |> snd else world
-                            let world = if ImGui.MenuItem ("Wipe Propagation Targets", "Ctrl+W") then tryWipeSelectedEntityPropagationTargets world |> snd else world
+                            let world = if ImGui.MenuItem ("Propagate Entity") then tryPropagateSelectedEntityStructure world |> snd else world
+                            let world = if ImGui.MenuItem ("Wipe Propagation Targets") then tryWipeSelectedEntityPropagationTargets world |> snd else world
                             ImGui.EndMenu ()
                             world
                         else world
@@ -3703,7 +3698,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                     if ImGui.Button "Wipe propagation targets and cut entity." || ImGui.IsKeyReleased ImGuiKey.Enter then
                         let world = snapshot CutEntity world
                         let world = World.clearPropagationTargets entity world
-                        let world = World.destroyEntity entity world
+                        let world = World.cutEntityToClipboard entity world
                         SelectedEntityOpt <- None
                         ShowCutEntityDialog <- false
                         world
@@ -3711,7 +3706,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                 let world =
                     if ImGui.Button "Ignore propagation targets and cut entity (if you plan on pasting or replacing it)." then
                         let world = snapshot CutEntity world
-                        let world = World.destroyEntity entity world
+                        let world = World.cutEntityToClipboard entity world
                         SelectedEntityOpt <- None
                         ShowCutEntityDialog <- false
                         world
