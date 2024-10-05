@@ -47,6 +47,7 @@
 		<Compile Include="Assets.fs" />
 		<Compile Include="Simulants.fs" />
 		<Compile Include="Events.fs" />
+		<Compile Include="Prototypes\Body.fs" />
 		<Compile Include="Prototypes\Character.fs" />
 		<Compile Include="Prototypes\Area.fs" />
 		<Compile Include="Prototypes\Combat.fs" />
