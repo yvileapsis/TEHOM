@@ -7,29 +7,53 @@ open Nu
 open FGL
 
 (*
+Organs consume and produce resource same as money system.
+There are 4 different systems.
+Issues (like say wounds) are new organs.
+
 Distance : float
 
-Bones : bool
-Muscles : bool
+Systems:
+* Musculoskeletal
+* * Skeletal
+* * Joints
+* * Muscular
 
-Veins : bool
-Arteries : bool
+* Circulatory
+* * Cardiovascular
+* * Lymphatic
 
-Sensory : bool
-Motor : bool
+* Nervous
+* * Somatic
+* * Sensory
+* * Autonomous
 
+* Immune
+* * Myeloid (bone marrow)
+* * Lymphoid (lymph)
+* * Integumentary (skin)
 
-Connective tissue
-Bones
-Cartilage
-Blood
-Adipose
+* Respiratory
 
-Epithelial
+* Endocrine
 
-Muscle
+not doing these ones
+* Digestive
+* Urinary
+* Reproductive
 
-Neural
+Tissues:
+* Connective tissue : Earth
+* * Bones : Earth
+* * Cartilage : Water
+* * Blood : Air
+* * Adipose : Fire
+
+* Epithelial : Lymph
+
+* Muscle : Gall
+
+* Neural : Plasma
 
 Damage begins with skin
 *)
