@@ -96,7 +96,7 @@ type CombatDispatcher () =
             let model = { model with Combatants = combatants }
 
             let attacker, model =
-                match model.CombatantID with
+                match model.CurrentCombatant with
                 | Some attacker ->
                     attacker, model
                 | None ->
@@ -105,7 +105,7 @@ type CombatDispatcher () =
                         |> List.head
                         |> fst
                     attacker,
-                    { model with CombatantID = Some attacker }
+                    { model with CurrentCombatant = Some attacker }
 
             let nextCombatantID =
 
@@ -126,15 +126,12 @@ type CombatDispatcher () =
 
             let model = {
                 model with
-                    CombatantID = Some nextCombatantID
+                    CurrentCombatant = Some nextCombatantID
                     Turn = model.Turn + 1
             }
 
-            let resetCharacter =
-                Character.turnReset
-
             let signals : Signal list = [
-                GameEffect (CharacterFunction (attacker, resetCharacter))
+                GameEffect (CharacterReset attacker)
                 CombatantAttacks attacker
             ]
 
@@ -213,9 +210,9 @@ type CombatDispatcher () =
                         signals
                     | FullPhysicalAction ->
                         signals
-                    | StanceChange change ->
+                    | StanceChange stance ->
                         let signal : Signal =
-                            GameEffect (CharacterFunction (actor, change))
+                            GameEffect (CharacterStanceChange (actor, stance))
                         signals @ [ signal ]
                     | PhysicalSequence moves ->
 
@@ -275,9 +272,15 @@ type CombatDispatcher () =
 
             just world
 
-        | GameEffect (CharacterFunction (entity, func)) ->
+        | GameEffect (CharacterReset entity) ->
             let character = entity.GetCharacter world
-            let character = func character
+            let character = Character.turnReset character
+            let world = entity.SetCharacter character world
+            just world
+
+        | GameEffect (CharacterStanceChange (entity, stance)) ->
+            let character = entity.GetCharacter world
+            let character = Character.stanceChange stance character
             let world = entity.SetCharacter character world
             just world
 

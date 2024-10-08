@@ -32,7 +32,8 @@ TODO: Tiniest vertical slice:
 *)
 
 type GameEffect =
-    | CharacterFunction of Entity * (Character -> Character)
+    | CharacterReset of Entity
+    | CharacterStanceChange of Entity * Stance
     | Damage of Entity * int
     | TravelInter of String * String
     | TravelIntra of String * String * uint32
@@ -171,11 +172,10 @@ module Random =
     let rollInitiative max =
         Gen.random2 0 max
 
-// TODO: actions should be together, have some sort of cost, stance should be an action
 type Action =
     | FullMentalAction
     | FullPhysicalAction
-    | StanceChange of (Character -> Character)
+    | StanceChange of Stance
     | PhysicalSequence of Move list
 
 type TurnType =
@@ -225,8 +225,8 @@ with
             turn.Checks
             |> List.foldMap (fun check combatant ->
                 match check.Action with
-                | StanceChange change ->
-                    let combatant = change combatant
+                | StanceChange stance ->
+                    let combatant = Character.stanceChange stance combatant
                     check, combatant
                 | _ ->
                     match check.Element with
@@ -284,8 +284,9 @@ type CombatState =
 type [<SymbolicExpansion>] Combat = {
     GameplayTime : int64
     GameplayState : CombatState
+
     Combatants : (Entity * Turn list) list
-    CombatantID : Entity option
+    CurrentCombatant : Entity option
 
     DisplayLeft : Character
     DisplayRight : Character
@@ -293,7 +294,6 @@ type [<SymbolicExpansion>] Combat = {
     Turn : int
 
     Area : Area
-//    Characters : Character list
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
@@ -302,7 +302,7 @@ with
         GameplayState = Quit
 
         Combatants = List.empty
-        CombatantID = None
+        CurrentCombatant = None
 
         DisplayLeft = Character.empty
         DisplayRight = Character.empty
@@ -355,28 +355,13 @@ with
 
     // btw thinking with high enough air you should be able to tell enemy's stance
     // TODO: implement correct stance selection once skills are implemented
+    static member turnAttackerStance =
+        Character.stanceMove [Gall; Gall; Gall] [Lymph; Oil; Plasma] Character.stanceEmpty
 
-    static member turnAttackerStanceChange combatant =
+    static member turnDefenderStance =
 
-        let combatant =
-            Character.stanceChange (Character.stanceMove
-                [Gall; Gall; Gall]
-                [Lymph; Oil; Plasma]
-                Character.stanceEmpty
-            ) combatant
+        Character.stanceMove [Lymph; Lymph; Lymph] [Gall; Oil; Plasma] Character.stanceEmpty
 
-        combatant
-
-    static member turnDefenderStanceChange combatant =
-
-        let combatant =
-            Character.stanceChange (Character.stanceMove
-                [Lymph; Lymph; Lymph]
-                [Gall; Oil; Plasma]
-                Character.stanceEmpty
-            ) combatant
-
-        combatant
 
     // attack, prototype of attacker AI
     static member turnAttackerPlan (attacker: Entity) gameplay world =
@@ -402,7 +387,7 @@ with
 
             let stanceChange = [{
                 Check.empty with
-                    Action = StanceChange Combat.turnAttackerStanceChange
+                    Action = StanceChange Combat.turnAttackerStance
             }]
 
             let area = gameplay.Area
@@ -486,7 +471,7 @@ with
 
             let stanceChange = [{
                 Check.empty with
-                    Action = StanceChange Combat.turnDefenderStanceChange
+                    Action = StanceChange Combat.turnDefenderStance
             }]
 
             let physicalAction =
