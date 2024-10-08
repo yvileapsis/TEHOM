@@ -25,6 +25,7 @@ module Simulants =
 
     // combat screen
     let Combat = Game / "Combat"
+    let CombatCharacters = Combat / "Characters"
     let CombatGui = Combat / "Gui"
 
     let Rogue = Game / "Rogue"
@@ -32,5 +33,6 @@ module Simulants =
     // gameplay screen
     let Gameplay = Game / "Gameplay"
     let GameplayGui = Gameplay / "Gui"
+    let GameplayGuiAdvanceTurn = GameplayGui / "Advance Turn"
     let GameplayQuit = GameplayGui / "Quit"
     let GameplayScene = Gameplay / "Scene"

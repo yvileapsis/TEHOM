@@ -32,7 +32,8 @@ TODO: Tiniest vertical slice:
 *)
 
 type GameEffect =
-    | Damage of String * int
+    | CharacterFunction of Entity * (Character -> Character)
+    | Damage of Entity * int
     | MoveInter of String * String
     | MoveIntra of String * String * uint32
 
@@ -104,7 +105,7 @@ with
         damage
 
     // TODO: fix bug where entity ends up disconnected from the floor due to spare distance fix
-    static member handle moveID moves attacker defender area =
+    static member handle moveID moves (attacker : Entity) (defender : Entity) area world =
         let move = List.item moveID moves
         match move with
         | Stride
@@ -115,10 +116,11 @@ with
         | Sidestep
         | Dash
         | Swim ->
-                let reach = Character.getReach attacker
-                let speed = Character.getSpeed attacker
+                let attackerCharacter = attacker.GetCharacter world
+                let reach = Character.getReach attackerCharacter
+                let speed = Character.getSpeed attackerCharacter
 
-                match Area.moveWithinReach attacker.ID defender.ID reach speed area with
+                match Area.moveWithinReach attacker.Name defender.Name reach speed area with
                 | Some moveInter, Some moveIntra ->
                     [MoveInter moveInter; MoveIntra moveIntra]
                 | Some moveInter, None ->
@@ -149,10 +151,12 @@ with
         | Sweep
         | Toss
         | Throw ->
-            let damage = Character.getDamage attacker
+            let attackerCharacter = attacker.GetCharacter world
+            let damage = Character.getDamage attackerCharacter
             let damage = Move.bonusDamage moveID moves damage
-            [Damage (defender.ID, damage)]
+            [Damage (defender, damage)]
 
+// TODO: actions should be together, have some sort of cost, stance should be an action
 type PhysicalAction =
     | NoPhysicalAction
     | FullPhysicalAction
@@ -181,7 +185,7 @@ module Random =
 
 type CharacterAction = {
     Turn : int
-    Target : String
+    Target : Entity option
     PhysicalAction : PhysicalAction
     MentalAction : MentalAction
     Element : Element option
@@ -191,7 +195,7 @@ type CharacterAction = {
 with
     static member empty = {
         Turn = 0
-        Target = String.empty
+        Target = None
         PhysicalAction = NoPhysicalAction
         MentalAction = NoMentalAction
         Element = None
@@ -203,7 +207,7 @@ type CombatState =
     | Playing
     | Quit
 
-type CharacterExtended = Character * CharacterAction list
+type CharacterExtended = Entity * CharacterAction list
 
 // this is our MMCC model type representing gameplay.
 // this model representation uses update time, that is, time based on number of engine updates.
@@ -211,10 +215,10 @@ type [<SymbolicExpansion>] Combat = {
     GameplayTime : int64
     GameplayState : CombatState
     Combatants : CharacterExtended list
-    CombatantID : String
+    CombatantID : Entity option
 
-    DisplayLeft : String
-    DisplayRight : String
+    DisplayLeft : Character
+    DisplayRight : Character
 
     Turn : int
 
@@ -228,10 +232,10 @@ with
         GameplayState = Quit
 
         Combatants = List.empty
-        CombatantID = String.empty
+        CombatantID = None
 
-        DisplayLeft = String.empty
-        DisplayRight = String.empty
+        DisplayLeft = Character.empty
+        DisplayRight = Character.empty
 
         Turn = 0
 
@@ -242,63 +246,85 @@ with
     static member initial = {
         Combat.empty with
             GameplayState = Playing
-            Combatants =
-                [ Character.player; Character.rat ]
-                |> List.map Character.stanceReset
-                |> List.map (fun c ->
-                    let gall, plasma = Character.getMaxInitiative c
-                    { c with Initiative = Random.rollInitiative (gall + plasma) }
-                )
-                |> List.sortBy (_.Initiative)
-                |> List.rev
-                |> List.map (fun c -> c, [])
-
-            DisplayLeft = Character.player.ID
-            DisplayRight = Character.rat.ID
+            DisplayLeft = Character.player
+            DisplayRight = Character.rat
             Area = Area.level1
     }
 
     // this updates the gameplay model every frame that gameplay is active.
     static member update gameplay world =
         match gameplay.GameplayState with
-        | Playing
-        | Playing | Quit -> gameplay
+        | Playing ->
+
+            let left = gameplay.DisplayLeft.ID
+            let right = gameplay.DisplayRight.ID
+
+            let actors = World.getEntities Simulants.CombatCharacters world
+
+            let leftCharacter =
+                actors
+                |> Seq.map (fun entity -> entity.GetCharacter world)
+                |> Seq.find (fun character-> character.ID = left)
+
+            let rightCharacter =
+                actors
+                |> Seq.map (fun entity -> entity.GetCharacter world)
+                |> Seq.find (fun character-> character.ID = right)
+
+            { gameplay with DisplayLeft = leftCharacter; DisplayRight = rightCharacter }
+        | Quit -> gameplay
+
+
+    static member getCharacterMostWounds entities world =
+        entities
+        |> List.sortBy (fun (entity: Entity) ->
+            let character = entity.GetCharacter world
+            character.MajorWounds
+        )
+        |> List.last
 
     // attack, prototype of attacker AI
-    static member turnAttackerPlan attacker gameplay =
+    static member turnAttackerPlan (attacker: Entity) gameplay world =
 
         // pick target with the most wounds, excluding combatant himself
         let target =
-            gameplay.Combatants
-            |> List.map fst
-            |> List.remove ((=) attacker)
-            |> List.sortBy (_.MajorWounds)
-            |> List.last
+            let otherCombatants =
+                gameplay.Combatants
+                |> List.map fst
+                |> List.remove (fun entity -> entity = attacker)
+            Combat.getCharacterMostWounds otherCombatants world
 
-        let statCombatant = Character.getStat Gall attacker
+        // check if actor can do moves
+        let canAct =
+            let character = attacker.GetCharacter world
+            character.MajorWounds < MajorWounds.Down
 
-        let movesCombatant =
-            if (attacker.MajorWounds < MajorWounds.Down) then
+        if canAct then
 
-                let combatantName = attacker.ID
-                let targetName = target.ID
+            let combatantName = attacker.Name
+            let targetName = target.Name
 
-                let area = gameplay.Area
+            let area = gameplay.Area
 
+            let physicalAction =
                 match Area.findPath combatantName targetName area with
                 // no path
-                | [] -> []
+                | [] ->
+                    NoPhysicalAction
                 | path ->
-                    let reach = Character.getReach attacker
+
+                    let character = attacker.GetCharacter world
+                    let statCombatant = Character.getStat Gall character
+                    let reach = Character.getReach character
+                    let speed = Character.getSpeed character
+
                     let distance = List.last path |> snd
+
                     if (reach >= distance) then
                         // in reach
                         Random.getItemsFromList statCombatant Move.attacks
                     else
                         // not in reach
-
-                        let speed = Character.getSpeed attacker
-
                         if (speed * statCombatant >= distance) then
                             // can run to
                             let movementMoves = round (float distance / float speed + 0.5) |> uint32
@@ -307,43 +333,61 @@ with
                         else
                             // can't run to
                             List.init (statCombatant |> int) (fun i -> Stride)
-            else
-                []
+                    |> Sequence
 
-        let action = {
-            CharacterAction.empty with
-                Turn = gameplay.Turn
-                Target = target.ID
-                PhysicalAction = Sequence movesCombatant
-                MentalAction = NoMentalAction
-                Element = Some Gall
-        }
+            let action = {
+                CharacterAction.empty with
+                    Turn = gameplay.Turn
+                    Target = Some target
+                    PhysicalAction = physicalAction
+                    MentalAction = NoMentalAction
+                    Element = Some Gall
+            }
 
-        target, action
+            action
+        else
+            let action = {
+                CharacterAction.empty with
+                    Turn = gameplay.Turn
+                    Target = Some target
+                    PhysicalAction = NoPhysicalAction
+                    MentalAction = NoMentalAction
+                    Element = Some Gall
+            }
+
+            action
+
 
     // response, prototype of defender AI
-    static member turnDefenderPlan attacker attackerAction defender gameplay =
+    static member turnDefenderPlan (attacker: Entity) attackerAction (defender: Entity) gameplay world =
 
-        let movesCombatant =
-            match attackerAction.PhysicalAction with
-            | Sequence moves -> moves
-            | _ -> []
+        let canAct =
+            let character = defender.GetCharacter world
+            character.MajorWounds < MajorWounds.Down
 
-        let statDefender = Character.getStat Lymph defender
+        if canAct then
 
-        let movesTarget =
-            if (defender.MajorWounds < MajorWounds.Down) then
+            let movesCombatant =
+                match attackerAction.PhysicalAction with
+                | Sequence moves -> moves
+                | _ -> []
 
-                let combatantName = attacker.ID
-                let targetName = defender.ID
 
-                let area = gameplay.Area
+            let combatantName = attacker.Name
+            let targetName = defender.Name
 
+            let area = gameplay.Area
+
+            let physicalAction =
                 match Area.findPath combatantName targetName area with
                 // no path
-                | [] -> []
+                | [] ->
+                    NoPhysicalAction
                 | path ->
-                    let reach = Character.getReach attacker
+                    let character = defender.GetCharacter world
+                    let reach = Character.getReach character
+                    let statDefender = Character.getStat Lymph character
+
                     let distance = List.last path |> snd
                     if (reach >= distance) then
                         // in reach
@@ -363,19 +407,32 @@ with
                             []
                     else
                         []
-            else
-                []
+                    |> Sequence
 
-        let action = {
-            CharacterAction.empty with
-                Turn = gameplay.Turn
-                Target = attacker.ID
-                PhysicalAction = Sequence movesTarget
-                MentalAction = NoMentalAction
-                Element = Some Lymph
-        }
+            let action = {
+                CharacterAction.empty with
+                    Turn = gameplay.Turn
+                    Target = Some attacker
+                    PhysicalAction = physicalAction
+                    MentalAction = NoMentalAction
+                    Element = Some Lymph
+            }
 
-        action
+            action
+
+        else
+            let action = {
+                CharacterAction.empty with
+                    Turn = gameplay.Turn
+                    Target = Some attacker
+                    PhysicalAction = NoPhysicalAction
+                    MentalAction = NoMentalAction
+                    Element = Some Lymph
+            }
+
+            action
+
+
 
 
     // btw thinking with high enough air you should be able to tell enemy's stance
@@ -421,143 +478,25 @@ with
 
             combatantAction
 
-    static member opposedCheck attacker attackerAction defender defenderAction level =
-
-        // add karma betting
-
-        let attackerAction : CharacterAction = { attackerAction with Blocks = defenderAction.Successes }
-        let defenderAction : CharacterAction = { defenderAction with Blocks = attackerAction.Successes }
-
-        let signals = [attacker, attackerAction] @ [defender, defenderAction]
-
-        signals
-
-
-    static member turn gameplay world =
-
-        let attackerID =
-            if gameplay.CombatantID <> String.empty then
-                gameplay.CombatantID
-            else
-                gameplay.Combatants
-                |> List.head
-                |> fst
-                |> _.ID
-
-
-        let attacker =
-            gameplay.Combatants
-            |> List.map fst
-            |> List.find (fun c -> c.ID = attackerID)
-
-        let defender, attackerAction =
-            Combat.turnAttackerPlan attacker gameplay
-
-        let defenderAction =
-            Combat.turnDefenderPlan attacker attackerAction defender gameplay
-
-        let attackerIndex =
-            gameplay.Combatants
-            |> List.map fst
-            |> List.findIndex (fun c -> c.ID = attacker.ID)
-
-        let defenderIndex =
-            gameplay.Combatants
-            |> List.map fst
-            |> List.findIndex (fun c -> c.ID = defender.ID)
-
-        let attacker = Character.stanceReset attacker
-
-        let attacker = Combat.turnAttackerStanceChange attacker
-        let attackerAction = Combat.applyStanceToAction attacker attackerAction
-
-        let defender = Combat.turnDefenderStanceChange defender
-        let defenderAction = Combat.applyStanceToAction defender defenderAction
-
-        let level = gameplay.Area
-
-        let signals = Combat.opposedCheck attacker attackerAction defender defenderAction level
-
-        let combatants =
-            gameplay.Combatants
-            |> List.mapi (fun i (x, history) ->
-                if i = attackerIndex then attacker, attackerAction::history
-                else if i = defenderIndex then defender, defenderAction::history
-                else x, history
-            )
-
-        let nextCombatantID =
-            let index =
-                if attackerIndex + 1 < List.length combatants then
-                    attackerIndex + 1
-                else
-                    0
-
-            combatants
-            |> List.item index
-            |> fst
-            |> _.ID
-
-        let gameplay = {
-            gameplay with
-                Combatants = combatants
-                CombatantID = nextCombatantID
-                Turn = gameplay.Turn + 1
-        }
-
-        signals, gameplay
-
-
-    static member doEffect effect gameplay =
-        match effect with
-        | Damage (characterID, damage) ->
-
-            let character =
-                gameplay.Combatants
-                |> List.find (fun (c, _) -> c.ID = characterID)
-                |> fst
-
-            let character = Character.doDamage damage character
-
-            let combatants =
-                gameplay.Combatants
-                |> List.map (fun (c, history) -> (if c.ID = character.ID then character else c), history)
-
-            let gameplay = { gameplay with Combatants = combatants }
-
-            gameplay
-
-        | MoveInter (character, location) ->
-
-            let area = gameplay.Area
-            let area = Area.moveSite character location area
-
-            let gameplay = { gameplay with Area = area }
-            gameplay
-
-        | MoveIntra (character, location, distance) ->
-
-            let area = gameplay.Area
-            let area = Area.establishDistance distance character location area
-
-            let gameplay = { gameplay with Area = area }
-            gameplay
-
 
 // this is our gameplay MMCC message type.
 type CombatMessage =
     | StartPlaying
     | FinishQuitting
     | Update
-    | Turn
-    | ActorAction of Character * CharacterAction
+    | TurnBegin
+    | CombatantAttacks of Entity
+    | CombatantDefends of Entity * CharacterAction
+    | TurnEnd of Entity * CharacterAction * Entity * CharacterAction
+    | ActorAction of Entity * CharacterAction
     | ActorMove of String * String * int * Move list
-    | GameEffect of GameEffect
     | TimeUpdate
     interface Message
 
 // this is our gameplay MMCC command type.
 type CombatCommand =
+    | RollInitiative
+    | GameEffect of GameEffect
     | StartQuitting
     interface Command
 
@@ -589,28 +528,142 @@ type CombatDispatcher () =
     ]
 
     // here we handle the above messages
-    override this.Message (gameplay, message, _, world) =
+    override this.Message (model, message, screen, world) =
 
         match message with
         | StartPlaying ->
+
             let gameplay = Combat.initial
-            just gameplay
+
+            let gameplay = {
+                gameplay with
+                    Combatants =
+                        world
+                        |> World.getEntities Simulants.CombatCharacters
+                        |> Seq.map (fun c -> c, [])
+                        |> List.ofSeq
+            }
+
+            let signal : Signal = RollInitiative
+
+            withSignal signal gameplay
 
         | FinishQuitting ->
             let gameplay = Combat.empty
             just gameplay
 
         | Update ->
-            let gameplay = Combat.update gameplay world
+            let gameplay = Combat.update model world
             just gameplay
 
-        | Turn ->
-            let effects, gameplay = Combat.turn gameplay world
 
-            let signals : Signal list =
-                List.map (fun tuple -> ActorAction tuple) effects
+        | TurnBegin ->
+            let attacker, model =
+                match model.CombatantID with
+                | Some attacker ->
+                    attacker, model
+                | None ->
+                    let attacker =
+                        model.Combatants
+                        |> List.head
+                        |> fst
+                    attacker,
+                    { model with CombatantID = Some attacker }
 
-            withSignals signals gameplay
+            let nextCombatantID =
+
+                let combatants = model.Combatants |> List.map fst
+
+                let attackerIndex =
+                    combatants
+                    |> List.findIndex (fun c -> c = attacker)
+
+                let index =
+                    if attackerIndex + 1 < List.length combatants then
+                        attackerIndex + 1
+                    else
+                        0
+
+                combatants
+                |> List.item index
+
+            let model = {
+                model with
+                    CombatantID = Some nextCombatantID
+                    Turn = model.Turn + 1
+            }
+
+            let resetCharacter =
+                Character.stanceReset
+
+            let signals : Signal list = [
+                GameEffect (CharacterFunction (attacker, resetCharacter))
+                CombatantAttacks attacker
+            ]
+
+            withSignals signals model
+
+        | CombatantAttacks attacker ->
+
+            let attackerAction =
+                Combat.turnAttackerPlan attacker model world
+
+            let signals : Signal list = [
+                GameEffect (CharacterFunction (attacker, Combat.turnAttackerStanceChange))
+                CombatantDefends (attacker, attackerAction)
+            ]
+
+            withSignals signals model
+
+        | CombatantDefends (attacker, attackerAction) ->
+            match attackerAction with
+            | { Target = Some defender } as action ->
+                let defenderAction =
+                    Combat.turnDefenderPlan attacker action defender model world
+
+                let signals : Signal list = [
+                    GameEffect (CharacterFunction (defender, Combat.turnDefenderStanceChange))
+                    TurnEnd (attacker, attackerAction, defender, defenderAction)
+                ]
+
+                withSignals signals model
+            | _ ->
+                just model
+
+        | TurnEnd (attacker, attackerAction, defender, defenderAction) ->
+
+            let attackerAction =
+                let character = attacker.GetCharacter world
+                Combat.applyStanceToAction character attackerAction
+
+            let defenderAction =
+                let character = defender.GetCharacter world
+                Combat.applyStanceToAction character defenderAction
+
+            // add karma betting
+
+            let attackerAction = { attackerAction with Blocks = defenderAction.Successes }
+            let defenderAction = { defenderAction with Blocks = attackerAction.Successes }
+
+            let combatants =
+                model.Combatants
+                |> List.map (fun (entity, history) ->
+                    if entity = attacker then
+                        entity, attackerAction::history
+                    elif entity = defender then
+                        entity, defenderAction::history
+                    else
+                        entity, history
+                )
+
+            let model = { model with Combatants = combatants }
+
+            let signals : Signal list = [
+                ActorAction (attacker, attackerAction)
+                ActorAction (defender, defenderAction)
+            ]
+
+            withSignals signals model
 
         | ActorAction (actor, action) ->
 
@@ -618,9 +671,9 @@ type CombatDispatcher () =
 
             match attack with
             | NoPhysicalAction ->
-                just gameplay
+                just model
             | FullPhysicalAction ->
-                just gameplay
+                just model
             | Sequence moves ->
 
                 let successes = match action.Successes with Some x -> x | None -> 0
@@ -636,164 +689,212 @@ type CombatDispatcher () =
                         )
                         |> List.unzip
 
-                    List.map (fun i -> ActorMove (actor.ID, action.Target, i, moves)) indexes
+                    match action.Target with
+                    | Some target ->
+                        List.map (fun i -> ActorMove (actor.Name, target.Name, i, moves)) indexes
+                    | None ->
+                        []
 
-                withSignals signals gameplay
+                withSignals signals model
 
         | ActorMove (actorID, targetID, moveID, moves) ->
 
+            let actors = World.getEntities Simulants.CombatCharacters world
+
             let actor =
-                gameplay.Combatants
-                |> List.find (fun (c, _) -> c.ID = actorID)
-                |> fst
+                actors
+                |> Seq.find (fun entity -> entity.Name = actorID)
 
             let target =
-                gameplay.Combatants
-                |> List.find (fun (c, _) -> c.ID = targetID)
-                |> fst
+                actors
+                |> Seq.find (fun entity  -> entity.Name = targetID)
 
             let signals : Signal list =
-                Move.handle moveID moves actor target gameplay.Area
+                Move.handle moveID moves actor target model.Area world
                 |> List.map (fun signal -> GameEffect signal)
 
-            withSignals signals gameplay
+            withSignals signals model
 
-        | GameEffect effect ->
-
-            let gameplay = Combat.doEffect effect gameplay
-
-            just gameplay
 
         | TimeUpdate ->
             let gameDelta = world.GameDelta
-            let gameplay = { gameplay with GameplayTime = gameplay.GameplayTime + gameDelta.Updates }
+            let gameplay = { model with GameplayTime = model.GameplayTime + gameDelta.Updates }
             just gameplay
 
     // here we handle the above commands
-    override this.Command (_, command, screen, world) =
+    override this.Command (model, command, screen, world) =
 
         match command with
         | StartQuitting ->
             let world = World.publish () screen.QuitEvent screen world
             just world
 
+        | RollInitiative ->
+
+            let world =
+                model.Combatants
+                |> List.map fst
+                |> List.fold (fun (world : World) (entity : Entity) ->
+                    let character = entity.GetCharacter world
+
+                    let character = Character.stanceReset character
+                    let gall, plasma = Character.getMaxInitiative character
+                    let character = { character with Initiative = Random.rollInitiative (gall + plasma) }
+
+                    let world = entity.SetCharacter character world
+                    world
+                ) world
+
+            let combatants =
+                model.Combatants
+                |> List.sortBy (fun (entity, _) ->
+                    let character = entity.GetCharacter world
+                    character.Initiative
+                )
+
+            let model = { model with Combatants = combatants }
+
+            let world = screen.SetCombat model world
+
+            just world
+
+        | GameEffect (CharacterFunction (entity, func)) ->
+            let character = entity.GetCharacter world
+            let character = func character
+            let world = entity.SetCharacter character world
+            just world
+
+        | GameEffect (Damage (entity, damage)) ->
+
+            let character = entity.GetCharacter world
+            let character = Character.doDamage damage character
+            let world = entity.SetCharacter character world
+
+            just world
+
+        | GameEffect (MoveInter (character, location)) ->
+
+            let area = model.Area
+            let area = Area.moveSite character location area
+            let model = { model with Area = area }
+            let world = screen.SetCombat model world
+            just world
+
+        | GameEffect (MoveIntra (character, location, distance)) ->
+
+            let area = model.Area
+            let area = Area.establishDistance distance character location area
+            let model = { model with Area = area }
+            let world = screen.SetCombat model world
+            just world
+
     // here we describe the content of the game including the hud, the scene, and the player
-    override this.Content (gameplay, _) = [
+    override this.Content (gameplay, screen) = [
         // the gui group
 
         Content.group Simulants.GameplayGui.Name [] [
 
-            Content.button "AdvanceTurn" [
-                Entity.Position == v3 40.0f 150.0f 0.0f
+            Content.button Simulants.GameplayGuiAdvanceTurn.Name [
+                Entity.Position == v3 0.0f 150.0f 0.0f
                 Entity.Size == v3 80.0f 20.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                 Entity.Text == "Advance Turn"
                 Entity.Font == Assets.Gui.ClearSansFont
                 Entity.FontSizing == Some 10
-                Entity.ClickEvent => Turn
+                Entity.ClickEvent => TurnBegin
             ]
 
-            Content.button "ResetGame" [
-                Entity.Position == v3 -40.0f 150.0f 0.0f
-                Entity.Size == v3 80.0f 20.0f 0.0f
-                Entity.Elevation == 10.0f
-                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                Entity.Text == "Reset Game"
-                Entity.Font == Assets.Gui.ClearSansFont
-                Entity.FontSizing == Some 10
-                Entity.ClickEvent => StartPlaying
-            ]
+            let player = gameplay.DisplayLeft
+            let enemy = gameplay.DisplayRight
 
-            let player =
+            let playerHistory =
                 gameplay.Combatants
-                |> List.tryFind (fun (combatant, _) -> combatant.ID = gameplay.DisplayLeft)
-            let enemy =
+                |> List.tryFind (fun (entity, _) -> player.ID = entity.Name)
+
+            let enemyHistory =
                 gameplay.Combatants
-                |> List.tryFind (fun (combatant, _) -> combatant.ID = gameplay.DisplayRight)
+                |> List.tryFind (fun (entity, _) -> enemy.ID = entity.Name)
 
 
-            match player, enemy with
-            | Some (player, _), Some (enemy, _) ->
-                let statsBox character = [
-                    let (gall, lymph, oil, plasma) = character.Stats
-                    let (gallStance, lymphStance, oilStance, plasmaStance) = character.Stance
-                    let minorWounds = character.MinorWounds
-                    let majorWounds = character.MajorWounds
+            let statsBox character = [
+                let (gall, lymph, oil, plasma) = character.Stats
+                let (gallStance, lymphStance, oilStance, plasmaStance) = character.Stance
+                let minorWounds = character.MinorWounds
+                let majorWounds = character.MajorWounds
 
-                    Content.text "Minor Wounds" [
-                        Entity.Size == v3 80.0f 10.0f 0.0f
-                        Entity.Text := $"Wounds {minorWounds}"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
-                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                    ]
-
-                    Content.text "Major Wounds" [
-                        Entity.Size == v3 80.0f 10.0f 0.0f
-                        Entity.Text := $"{majorWounds}"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
-                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                    ]
-
-                    Content.text "Gall" [
-                        Entity.Size == v3 80.0f 10.0f 0.0f
-                        Entity.Text := $"{gall} {gallStance}"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
-                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                    ]
-                    Content.text "Lymph" [
-                        Entity.Size == v3 80.0f 10.0f 0.0f
-                        Entity.Text := $"{lymph} {lymphStance}"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
-                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                    ]
-                    Content.text "Oil" [
-                        Entity.Size == v3 80.0f 10.0f 0.0f
-                        Entity.Text := $"{oil} {oilStance}"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
-                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                    ]
-                    Content.text "Plasma" [
-                        Entity.Size == v3 80.0f 10.0f 0.0f
-                        Entity.Text := $"{plasma} {plasmaStance}"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
-                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                    ]
-                    Content.text "Stances" [
-                        Entity.Size == v3 80.0f 10.0f 0.0f
-                        Entity.Text := $"Stances {character.StancesLeft}"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
-                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                    ]
+                Content.text "Minor Wounds" [
+                    Entity.Size == v3 80.0f 10.0f 0.0f
+                    Entity.Text := $"Wounds {minorWounds}"
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 10
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                 ]
 
-                Content.association "StatsBoxPlayer" [
-                    Entity.Position == v3 -160.0f 0.0f 0.0f
-                    Entity.Size == v3 80.0f 80.0f 0.0f
-                    Entity.Elevation == 10.0f
-                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
-                ] (statsBox player)
+                Content.text "Major Wounds" [
+                    Entity.Size == v3 80.0f 10.0f 0.0f
+                    Entity.Text := $"{majorWounds}"
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 10
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                ]
 
-                Content.association "StatsBoxEnemy" [
-                    Entity.Position == v3 200.0f 0.0f 0.0f
-                    Entity.Size == v3 80.0f 80.0f 0.0f
-                    Entity.Elevation == 10.0f
-                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
-                ] (statsBox enemy)
-            | _ ->
-                ()
+                Content.text "Gall" [
+                    Entity.Size == v3 80.0f 10.0f 0.0f
+                    Entity.Text := $"{gall} {gallStance}"
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 10
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                ]
+                Content.text "Lymph" [
+                    Entity.Size == v3 80.0f 10.0f 0.0f
+                    Entity.Text := $"{lymph} {lymphStance}"
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 10
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                ]
+                Content.text "Oil" [
+                    Entity.Size == v3 80.0f 10.0f 0.0f
+                    Entity.Text := $"{oil} {oilStance}"
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 10
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                ]
+                Content.text "Plasma" [
+                    Entity.Size == v3 80.0f 10.0f 0.0f
+                    Entity.Text := $"{plasma} {plasmaStance}"
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 10
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                ]
+                Content.text "Stances" [
+                    Entity.Size == v3 80.0f 10.0f 0.0f
+                    Entity.Text := $"Stances {character.StancesLeft}"
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 10
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                ]
+            ]
 
-            match player, enemy with
-            | Some (player, playerLastTurn::_), Some (enemy, enemyLastTurn::_) ->
+            Content.association "StatsBoxPlayer" [
+                Entity.Position == v3 -160.0f 0.0f 0.0f
+                Entity.Size == v3 80.0f 80.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+            ] (statsBox player)
+
+            Content.association "StatsBoxEnemy" [
+                Entity.Position == v3 200.0f 0.0f 0.0f
+                Entity.Size == v3 80.0f 80.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+            ] (statsBox enemy)
+
+
+            match playerHistory, enemyHistory with
+            | Some (_, playerLastTurn::_), Some (_, enemyLastTurn::_) ->
 
                 let playerMoves =
                     match playerLastTurn.PhysicalAction with
@@ -910,7 +1011,11 @@ type CombatDispatcher () =
 
         // the scene group while playing
         match gameplay.GameplayState with
-        | Playing -> ()
+        | Playing ->
+            Content.group Simulants.CombatCharacters.Name [] [
+                character Character.player
+                character Character.rat
+            ]
         // no scene group otherwise
         | Quit -> ()
     ]
