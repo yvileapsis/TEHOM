@@ -19,6 +19,7 @@ type TehomMessage =
     | ShowTitle
     | ShowCredits
     | ShowGameplay
+    | ShowCombat
     interface Message
 
 // this is our top-level MMCC command type. Commands are used instead of messages when the world is to be transformed.
@@ -63,6 +64,7 @@ type TehomDispatcher () =
         | ShowTitle -> just Title
         | ShowCredits -> just Credits
         | ShowGameplay -> just Gameplay
+        | ShowCombat -> just Combat
 
     // here we handle the above commands
     override this.Command (_, command, _, world) =
