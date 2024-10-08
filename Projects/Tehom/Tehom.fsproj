@@ -52,6 +52,7 @@
 		<Compile Include="Prototypes\CharacterDispatcher.fs" />
 		<Compile Include="Prototypes\Area.fs" />
 		<Compile Include="Prototypes\Combat.fs" />
+		<Compile Include="Prototypes\CombatDispatcher.fs" />
 		<Compile Include="Prototypes\Rogue.fs" />
 		<Compile Include="Gameplay\Gameplay.fs" />
 		<Compile Include="Gameplay\GameplayGroups.fs" />

@@ -57,9 +57,18 @@ module Character =
         // Static stats
         ID : String
         Name : String
-        Stats : Stats
+
+        Gall : Stat
+        Lymph : Stat
+        Oil : Stat
+        Plasma : Stat
+
         Edges : Stat list
+
+        PhysicalActions : int
+        MentalActions : int
         Stances : int
+        Fracture : int
 
         // Dynamic stats
         Damage : int
@@ -71,8 +80,15 @@ module Character =
 
         Initiative : int
 
-        Stance : Stance
+        GallStance : int
+        LymphStance : int
+        OilStance : int
+        PlasmaStance : int
+
+        PhysicalActionsLeft : int
+        MentalActionsLeft : int
         StancesLeft : int
+        FractureLeft : int
     }
     with
         static member getElement element stats =
@@ -122,31 +138,42 @@ module Character =
 
         static member stanceChange (stance : Stance) character =
             if (character.StancesLeft > 0) then
+                let (gallChange, lymphChange, oilChange, plasmaChange) = stance
                 {
                     character with
-                        Stance = stance
+                        GallStance = gallChange
+                        LymphStance = lymphChange
+                        OilStance = oilChange
+                        PlasmaStance = plasmaChange
                         StancesLeft = character.StancesLeft - 1
                 }
             else
                 character
 
-        static member stanceReset (character : Character) =
-            {
+        static member turnReset (character : Character) =
+            let character = Character.stanceChange Character.stanceEmpty character
+            let character = {
                 character with
-                    Stance = Character.stanceEmpty
+                    PhysicalActionsLeft = character.PhysicalActions
+                    MentalActionsLeft = character.MentalActions
                     StancesLeft = character.Stances
             }
+            character
 
         static member getStats character : Stats =
-            character.Stats
+            character.Gall, character.Lymph, character.Oil, character.Plasma
+
+        static member getStance character : Stance =
+            character.GallStance, character.LymphStance, character.OilStance, character.PlasmaStance
 
         static member getStancedStats character : Stats =
-            let (gall, lymph, oil, plasma) = character.Stats
-            let (gallChange, lymphChange, oilChange, plasmaChange) = character.Stance
+            let (gall, lymph, oil, plasma) = Character.getStats character
+            let (gallChange, lymphChange, oilChange, plasmaChange) = Character.getStance character
             gall + enum gallChange, lymph + enum lymphChange, oil + enum oilChange, plasma + enum plasmaChange
 
         static member getStat element character =
-            character.Stats
+            character
+            |> Character.getStats
             |> Character.getElement element
             |> uint32
 
@@ -253,8 +280,15 @@ module Character =
         static member empty = {
             ID = String.empty
             Name = String.empty
-            Stats = Character.statsEmpty
-            Stance = Character.stanceEmpty
+            Gall = Stat.Crippled
+            Lymph = Stat.Crippled
+            Oil = Stat.Crippled
+            Plasma = Stat.Crippled
+
+            GallStance = 0
+            LymphStance = 0
+            OilStance = 0
+            PlasmaStance = 0
 
             Damage = 0
             Size = 0
@@ -262,8 +296,14 @@ module Character =
 
             Edges = []
 
+            PhysicalActions = 0
+            PhysicalActionsLeft = 0
+            MentalActions = 0
+            MentalActionsLeft = 0
             Stances = 0
             StancesLeft = 0
+            Fracture = 0
+            FractureLeft = 0
 
             MajorWounds = MajorWounds.Healthy
             MinorWounds = 0
@@ -275,9 +315,14 @@ module Character =
             Character.empty with
                 ID = "player"
                 Name = "Player"
-                Stats = Stat.Gifted, Stat.Gifted, Stat.Gifted, Stat.Gifted
+                Gall = Stat.Gifted
+                Lymph = Stat.Gifted
+                Oil = Stat.Gifted
+                Plasma = Stat.Gifted
 
                 Damage = 5
+                PhysicalActions = 1
+                MentalActions = 1
                 Stances = 2
         }
 
@@ -285,15 +330,23 @@ module Character =
             Character.empty with
                 ID = "enemy"
                 Name = "Enemy"
-                Stats = Stat.Average, Stat.Average, Stat.Average, Stat.Average
+                Gall = Stat.Average
+                Lymph = Stat.Average
+                Oil = Stat.Average
+                Plasma = Stat.Average
 
                 Damage = 5
+                PhysicalActions = 1
+                MentalActions = 1
                 Stances = 1
         }
 
         static member rat = {
             Character.enemy with
-                Stats = Stat.Gifted, Stat.Average, Stat.Average, Stat.Feeble
+                Gall = Stat.Gifted
+                Lymph = Stat.Average
+                Oil = Stat.Average
+                Plasma = Stat.Feeble
 
                 ID = "rat"
                 Name = "Rat"
