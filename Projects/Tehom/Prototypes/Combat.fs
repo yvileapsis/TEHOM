@@ -355,7 +355,7 @@ with
 
     // btw thinking with high enough air you should be able to tell enemy's stance
     // TODO: implement correct stance selection once skills are implemented
-    // Thoughts: you can change stance before action, after action, before mental action, after mental action, before enemy attack, after eney attack?
+
     static member turnAttackerStanceChange combatant =
 
         let combatant =
