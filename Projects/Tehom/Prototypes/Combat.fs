@@ -558,6 +558,17 @@ type CombatDispatcher () =
 
 
         | TurnBegin ->
+
+            let combatants =
+                model.Combatants
+                |> List.sortBy (fun (entity, _) ->
+                    let character = entity.GetCharacter world
+                    character.Initiative
+                )
+                |> List.rev
+
+            let model = { model with Combatants = combatants }
+
             let attacker, model =
                 match model.CombatantID with
                 | Some attacker ->
@@ -745,17 +756,6 @@ type CombatDispatcher () =
                     world
                 ) world
 
-            let combatants =
-                model.Combatants
-                |> List.sortBy (fun (entity, _) ->
-                    let character = entity.GetCharacter world
-                    character.Initiative
-                )
-
-            let model = { model with Combatants = combatants }
-
-            let world = screen.SetCombat model world
-
             just world
 
         | GameEffect (CharacterFunction (entity, func)) ->
@@ -870,6 +870,13 @@ type CombatDispatcher () =
                 Content.text "Stances" [
                     Entity.Size == v3 80.0f 10.0f 0.0f
                     Entity.Text := $"Stances {character.StancesLeft}"
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 10
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                ]
+                Content.text "Initiative" [
+                    Entity.Size == v3 80.0f 10.0f 0.0f
+                    Entity.Text := $"Initiative {character.Initiative}"
                     Entity.Font == Assets.Gui.ClearSansFont
                     Entity.FontSizing == Some 10
                     Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
