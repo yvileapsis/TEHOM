@@ -282,6 +282,8 @@ module Character =
             else
                 400u
 
+        static member isDead character =
+            character.MajorWounds = MajorWounds.Dead
 
         static member empty = {
             ID = String.empty

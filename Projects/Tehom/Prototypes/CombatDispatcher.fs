@@ -3,8 +3,6 @@ namespace Tehom
 open System
 open Prime
 open Nu
-open Character
-open Area
 
 // this is our gameplay MMCC message type.
 type CombatMessage =
@@ -138,7 +136,7 @@ type CombatDispatcher () =
                 let character = defender.GetCharacter world
                 Turn.applyStance character defenderAction
 
-            // add karma betting
+            // TODO: add karma betting
 
             let attackerTurn, defenderTurn = Turn.opposedTurns attackerTurn defenderTurn
 
@@ -390,11 +388,11 @@ type CombatDispatcher () =
                         $"{enemy.Name} advances!"
 
                 let combatWinner =
-                    if player.MajorWounds = MajorWounds.Dead && enemy.MajorWounds = MajorWounds.Dead then
+                    if Character.isDead player && Character.isDead enemy then
                         "Everyone died!"
-                    else if player.MajorWounds = MajorWounds.Dead then
+                    else if Character.isDead player then
                         $"{enemy.Name} won!"
-                    else if enemy.MajorWounds = MajorWounds.Dead then
+                    else if Character.isDead enemy then
                         $"{player.Name} won!"
                     else
                         ""
