@@ -285,15 +285,15 @@ type [<SymbolicExpansion>] Combat = {
     GameplayTime : int64
     GameplayState : CombatState
 
-    Combatants : (Entity * Turn list) list
-    CurrentCombatant : Entity option
+    Turn : int
+    Combatants : Entity list
+    History : Map<Entity, Turn list>
+    Area : Area
 
     DisplayLeft : Character
     DisplayRight : Character
 
-    Turn : int
 
-    Area : Area
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
@@ -301,15 +301,13 @@ with
         GameplayTime = 0L
         GameplayState = Quit
 
-        Combatants = List.empty
-        CurrentCombatant = None
+        Turn = 0
+        Combatants = []
+        History = Map.empty
+        Area = Area.empty
 
         DisplayLeft = Character.empty
         DisplayRight = Character.empty
-
-        Turn = 0
-
-        Area = Area.empty
     }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
@@ -369,8 +367,9 @@ with
         // pick target with the most wounds, excluding combatant himself
         let target =
             let otherCombatants =
-                gameplay.Combatants
-                |> List.map fst
+                gameplay.History
+                |> Map.keys
+                |> List.ofSeq
                 |> List.remove (fun entity -> entity = attacker)
             Combat.getCharacterMostWounds otherCombatants world
 

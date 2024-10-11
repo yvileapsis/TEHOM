@@ -219,7 +219,13 @@ module Character =
 
         static member getMaxInitiative character =
             let (gall, _, _, plasma) = Character.getStats character
-            int gall, int plasma
+            int gall + int plasma
+
+        static member getInitiative character =
+            character.Initiative
+
+        static member setInitiative initiative character =
+            { character with Initiative = initiative }
 
         static member getSpeed character =
             let multiplier = Gait.multiplier character.Gait

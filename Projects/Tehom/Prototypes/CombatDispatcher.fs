@@ -3,7 +3,6 @@ namespace Tehom
 open System
 open Prime
 open Nu
-open FGL
 open Character
 open Area
 
@@ -56,24 +55,24 @@ type CombatDispatcher () =
 
     // here we handle the above messages
     override this.Message (model, message, screen, world) =
-
         match message with
         | StartPlaying ->
+            let gameplay =
+                Combat.initial
 
-            let gameplay = Combat.initial
+            let combatants =
+                world
+                |> World.getEntities Simulants.CombatCharacters
+                |> List.ofSeq
 
-            let gameplay = {
-                gameplay with
-                    Combatants =
-                        world
-                        |> World.getEntities Simulants.CombatCharacters
-                        |> Seq.map (fun c -> c, [])
-                        |> List.ofSeq
-            }
+            let history =
+                combatants
+                |> List.map (fun c -> c, [])
+                |> Map.ofSeq
 
-            let signal : Signal = RollInitiative
+            let gameplay = { gameplay with Combatants = combatants; History = history }
 
-            withSignal signal gameplay
+            withSignal RollInitiative gameplay
 
         | FinishQuitting ->
             let gameplay = Combat.empty
@@ -84,61 +83,26 @@ type CombatDispatcher () =
             just gameplay
 
         | TurnBegin ->
+            match model.Combatants with
+            | attacker::combatants ->
 
-            let combatants =
-                model.Combatants
-                |> List.sortBy (fun (entity, _) ->
-                    let character = entity.GetCharacter world
-                    character.Initiative
-                )
-                |> List.rev
+                let model = {
+                    model with
+                        Combatants = combatants @ [attacker]
+                        Turn = model.Turn + 1
+                }
 
-            let model = { model with Combatants = combatants }
+                let signals : Signal list = [
+                    GameEffect (CharacterReset attacker)
+                    CombatantAttacks attacker
+                ]
 
-            let attacker, model =
-                match model.CurrentCombatant with
-                | Some attacker ->
-                    attacker, model
-                | None ->
-                    let attacker =
-                        model.Combatants
-                        |> List.head
-                        |> fst
-                    attacker,
-                    { model with CurrentCombatant = Some attacker }
+                withSignals signals model
 
-            let nextCombatantID =
-
-                let combatants = model.Combatants |> List.map fst
-
-                let attackerIndex =
-                    combatants
-                    |> List.findIndex (fun c -> c = attacker)
-
-                let index =
-                    if attackerIndex + 1 < List.length combatants then
-                        attackerIndex + 1
-                    else
-                        0
-
-                combatants
-                |> List.item index
-
-            let model = {
-                model with
-                    CurrentCombatant = Some nextCombatantID
-                    Turn = model.Turn + 1
-            }
-
-            let signals : Signal list = [
-                GameEffect (CharacterReset attacker)
-                CombatantAttacks attacker
-            ]
-
-            withSignals signals model
+            | _ ->
+                just model
 
         | CombatantAttacks attacker ->
-
             let attackerAction =
                 Combat.turnAttackerPlan attacker model world
 
@@ -153,8 +117,7 @@ type CombatDispatcher () =
             |> List.tryFind (fun check ->
                 not (List.isEmpty check.OpposedBy)
             )
-            |> fun check ->
-                match check with
+            |> function
                 | Some { OpposedBy = [defender] } as Some action ->
                     let defenderAction =
                         Combat.turnDefenderPlan attacker action defender model world
@@ -167,7 +130,6 @@ type CombatDispatcher () =
                     just model
 
         | TurnEnd (attacker, attackerAction, defender, defenderAction) ->
-
             let attackerTurn =
                 let character = attacker.GetCharacter world
                 Turn.applyStance character attackerAction
@@ -180,18 +142,18 @@ type CombatDispatcher () =
 
             let attackerTurn, defenderTurn = Turn.opposedTurns attackerTurn defenderTurn
 
-            let combatants =
-                model.Combatants
-                |> List.map (fun (entity, history) ->
+            let history =
+                model.History
+                |> Map.map (fun entity turns ->
                     if entity = attacker then
-                        entity, attackerTurn::history
+                        attackerTurn::turns
                     elif entity = defender then
-                        entity, defenderTurn::history
+                        defenderTurn::turns
                     else
-                        entity, history
+                        turns
                 )
 
-            let model = { model with Combatants = combatants }
+            let model = { model with History = history }
 
             let signals : Signal list = [
                 CharacterTurn (attacker, attackerTurn)
@@ -201,7 +163,6 @@ type CombatDispatcher () =
             withSignals signals model
 
         | CharacterTurn (actor, turn) ->
-
             let signals : Signal list =
                 turn.Checks
                 |> List.fold (fun signals check ->
@@ -255,20 +216,31 @@ type CombatDispatcher () =
             just world
 
         | RollInitiative ->
-
-            let world =
+            let combatants, world =
                 model.Combatants
-                |> List.map fst
-                |> List.fold (fun (world : World) (entity : Entity) ->
+                |> List.foldMap (fun (entity : Entity) (world : World)  ->
                     let character = entity.GetCharacter world
 
                     let character = Character.turnReset character
-                    let gall, plasma = Character.getMaxInitiative character
-                    let character = { character with Initiative = Random.rollInitiative (gall + plasma) }
+
+                    let maxInitiative = Character.getMaxInitiative character
+                    let initiative = Random.rollInitiative maxInitiative
+                    let character = Character.setInitiative initiative character
 
                     let world = entity.SetCharacter character world
-                    world
+
+                    (entity, initiative), world
                 ) world
+
+            let combatants =
+                combatants
+                |> List.sortBy snd
+                |> List.rev
+                |> List.map fst
+
+            let model = { model with Combatants = combatants }
+
+            let world = screen.SetCombat model world
 
             just world
 
@@ -285,15 +257,12 @@ type CombatDispatcher () =
             just world
 
         | GameEffect (Damage (entity, damage)) ->
-
             let character = entity.GetCharacter world
             let character = Character.doDamage damage character
             let world = entity.SetCharacter character world
-
             just world
 
         | GameEffect (TravelInter (character, location)) ->
-
             let area = model.Area
             let area = Area.moveSite character location area
             let model = { model with Area = area }
@@ -301,7 +270,6 @@ type CombatDispatcher () =
             just world
 
         | GameEffect (TravelIntra (character, location, distance)) ->
-
             let area = model.Area
             let area = Area.establishDistance distance character location area
             let model = { model with Area = area }
@@ -329,13 +297,14 @@ type CombatDispatcher () =
             let enemy = gameplay.DisplayRight
 
             let playerHistory =
-                gameplay.Combatants
+                gameplay.History
+                |> Map.toList
                 |> List.tryFind (fun (entity, _) -> player.ID = entity.Name)
 
             let enemyHistory =
-                gameplay.Combatants
+                gameplay.History
+                |> Map.toList
                 |> List.tryFind (fun (entity, _) -> enemy.ID = entity.Name)
-
 
             let statsBox character = [
                 let (gall, lymph, oil, plasma) = Character.getStats character
@@ -343,64 +312,22 @@ type CombatDispatcher () =
                 let minorWounds = character.MinorWounds
                 let majorWounds = character.MajorWounds
 
-                Content.text "Minor Wounds" [
+                let stat name text = Content.text name [
                     Entity.Size == v3 80.0f 10.0f 0.0f
-                    Entity.Text := $"Wounds {minorWounds}"
+                    Entity.Text := text
                     Entity.Font == Assets.Gui.ClearSansFont
                     Entity.FontSizing == Some 10
                     Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                 ]
 
-                Content.text "Major Wounds" [
-                    Entity.Size == v3 80.0f 10.0f 0.0f
-                    Entity.Text := $"{majorWounds}"
-                    Entity.Font == Assets.Gui.ClearSansFont
-                    Entity.FontSizing == Some 10
-                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                ]
-
-                Content.text "Gall" [
-                    Entity.Size == v3 80.0f 10.0f 0.0f
-                    Entity.Text := $"{gall} {gallStance}"
-                    Entity.Font == Assets.Gui.ClearSansFont
-                    Entity.FontSizing == Some 10
-                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                ]
-                Content.text "Lymph" [
-                    Entity.Size == v3 80.0f 10.0f 0.0f
-                    Entity.Text := $"{lymph} {lymphStance}"
-                    Entity.Font == Assets.Gui.ClearSansFont
-                    Entity.FontSizing == Some 10
-                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                ]
-                Content.text "Oil" [
-                    Entity.Size == v3 80.0f 10.0f 0.0f
-                    Entity.Text := $"{oil} {oilStance}"
-                    Entity.Font == Assets.Gui.ClearSansFont
-                    Entity.FontSizing == Some 10
-                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                ]
-                Content.text "Plasma" [
-                    Entity.Size == v3 80.0f 10.0f 0.0f
-                    Entity.Text := $"{plasma} {plasmaStance}"
-                    Entity.Font == Assets.Gui.ClearSansFont
-                    Entity.FontSizing == Some 10
-                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                ]
-                Content.text "Stances" [
-                    Entity.Size == v3 80.0f 10.0f 0.0f
-                    Entity.Text := $"Stances {character.StancesLeft}"
-                    Entity.Font == Assets.Gui.ClearSansFont
-                    Entity.FontSizing == Some 10
-                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                ]
-                Content.text "Initiative" [
-                    Entity.Size == v3 80.0f 10.0f 0.0f
-                    Entity.Text := $"Initiative {character.Initiative}"
-                    Entity.Font == Assets.Gui.ClearSansFont
-                    Entity.FontSizing == Some 10
-                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                ]
+                stat "Minor Wounds" $"Wounds {minorWounds}"
+                stat "Major Wounds" $"{majorWounds}"
+                stat "Gall" $"{gall} {gallStance}"
+                stat "Lymph" $"{lymph} {lymphStance}"
+                stat "Oil" $"{oil} {oilStance}"
+                stat "Plasma" $"{plasma} {plasmaStance}"
+                stat "Stances" $"Stances {character.StancesLeft}"
+                stat "Initiative" $"Initiative {character.Initiative}"
             ]
 
             Content.association "StatsBoxPlayer" [
@@ -494,7 +421,7 @@ type CombatDispatcher () =
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
                 ] [
                     for i, move in List.indexed playerMoves ->
-                        Content.text $"MovesPlayer{i}" [
+                        Content.text $"Move{i}" [
                             Entity.Size == v3 80.0f 10.0f 0.0f
                             Entity.Text := $"{move}"
                             Entity.Font == Assets.Gui.ClearSansFont
@@ -516,7 +443,7 @@ type CombatDispatcher () =
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
                 ] [
                     for i, move in List.indexed enemyMoves ->
-                        Content.text $"MovesEnemy{i}" [
+                        Content.text $"Move{i}" [
                             Entity.Size == v3 80.0f 10.0f 0.0f
                             Entity.Text := $"{move}"
                             Entity.Font == Assets.Gui.ClearSansFont
