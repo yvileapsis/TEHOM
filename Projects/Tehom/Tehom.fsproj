@@ -41,7 +41,6 @@
 		<Compile Include="Graphs\Directed.fs" />
 		<Compile Include="Graphs\Undirected.fs" />
 		<Compile Include="Graphs\Query.fs" />
-		<Compile Include="Engine\Graph.fs" />
 		<Compile Include="Engine\NuMark.fs" />
 		<Compile Include="Engine\Facets.fs" />
 		<Compile Include="Assets.fs" />
