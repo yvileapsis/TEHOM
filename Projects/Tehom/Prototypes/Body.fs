@@ -9,6 +9,7 @@ open FGL
 (*
 Issues (like say wounds) are new organs.
 
+
 Systems:
 * Energoskeletal - cardinal
 * - kinetics, weight, pressure, energy, size
@@ -26,7 +27,8 @@ Muscular system sets force.
 Everything has weight.
 No need for transportation, assumed possible always.
 list bone joint bone joint musccle between organs
-l
+
+
 * Immunocirculatory - fixed
 * - protection and resource management
 * - without this your organs fail
@@ -52,6 +54,15 @@ Tissues determine throughput of resources. (?)
 * * Endocrine - Earth - Virgo
 * * Somatic - Fire - Sagittarius
 * * Autonomous - Water - Pisces
+Signals are counterracted by noise.
+All signals are treated as the same abstract concept.
+As signal travels from sensory organs it stops on the first organ on the line.
+Organ processes the signal and issues new signals.
+Complex interactions are managed by complex organs such as i.e. eyes.
+Human eyes have two cones and two rods. This equates to list of four perceivers.
+Each has minimal and maximal wavelength and noise ratio.
+Exceeding maximum signal should stop eyes from processing information. (rods in the light, cones in the flashbang)
+
 
 * Externalized Systems
 * - Mostly consist of organs
@@ -61,6 +72,9 @@ Tissues determine throughput of resources. (?)
 * * Anything custom
 
 Damage begins with skin
+
+
+Pain meters take input from the systems and convert into some sort of score that determines type of pain and its intensity.
 *)
 
 module Body =
