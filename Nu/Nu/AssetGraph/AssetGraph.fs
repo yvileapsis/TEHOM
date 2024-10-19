@@ -193,7 +193,7 @@ module AssetGraph =
                 with _ -> Log.info ("Resource lock on '" + outputFilePath + "' has prevented build for asset '" + scstring asset.AssetTag + "'.")
 
     /// Collect the associated assets from package descriptor assets value.
-    let private collectAssetsFromPackageDescriptorAssets packageName directory extensions associations refinements : Asset list =
+    let private collectAssetsFromPackageDescriptorAssets packageName directory extensions refinements associations : Asset list =
         [if Directory.Exists directory then
             let filePaths =
                 [for extension in extensions do
@@ -212,7 +212,7 @@ module AssetGraph =
             | Asset (assetName, filePath, refinements, associations) ->
                 let tag = AssetTag.make<obj> packageName assetName
                 yield Asset.make tag filePath refinements associations
-            | Assets (directory, extensions, associations, refinements) ->
+            | Assets (directory, extensions, refinements, associations) ->
                 yield! collectAssetsFromPackageDescriptorAssets packageName directory extensions refinements associations]
 
     /// Attempt to collect all the available assets from a package.
