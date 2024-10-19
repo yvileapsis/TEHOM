@@ -98,7 +98,7 @@ module WorldModule2 =
                             let eventTrace = EventTrace.debug "World" "selectScreen" "Select" EventTrace.empty
                             World.publishPlus () screen.SelectEvent eventTrace screen false false world
                         else world
-                    | None -> world
+                    | None -> World.setSelectedScreen screen world
                 World.setScreenTransitionStatePlus transitionState screen world
             | None -> World.setSelectedScreenOpt None world
 
@@ -495,10 +495,15 @@ module WorldModule2 =
                                             | None -> Overlay.dispatcherNameToOverlayName currentDescriptor.EntityDispatcherName
                                         with _ -> Overlay.dispatcherNameToOverlayName currentDescriptor.EntityDispatcherName
                                     | (false, _) -> Overlay.dispatcherNameToOverlayName currentDescriptor.EntityDispatcherName
-                                let facetNames =
+                                let facetNamesIntrinsic =
+                                    let entityDispatchers = World.getEntityDispatchers world
+                                    let currentDispatcher = entityDispatchers.[currentDescriptor.EntityDispatcherName]
+                                    currentDispatcher |> getType |> Reflection.getIntrinsicFacetNames
+                                let facetNamesExtrinsic =
                                     match currentDescriptor.EntityProperties.TryGetValue Constants.Engine.FacetNamesPropertyName with
                                     | (true, facetNamesSymbol) -> symbolToValue<string Set> facetNamesSymbol
                                     | (false, _) -> Set.empty
+                                let facetNames = Set.addMany facetNamesIntrinsic facetNamesExtrinsic
                                 let overlayer = World.getOverlayer world
                                 let overlaySymbols = Overlayer.getOverlaySymbols overlayName facetNames overlayer
                                 match overlaySymbols.TryGetValue propertyName with
@@ -526,10 +531,15 @@ module WorldModule2 =
                                                 | None -> Overlay.dispatcherNameToOverlayName targetDescriptor.EntityDispatcherName
                                             with _ -> Overlay.dispatcherNameToOverlayName targetDescriptor.EntityDispatcherName
                                         | (false, _) -> Overlay.dispatcherNameToOverlayName targetDescriptor.EntityDispatcherName
-                                    let facetNames =
+                                    let facetNamesIntrinsic =
+                                        let entityDispatchers = World.getEntityDispatchers world
+                                        let targetDispatcher = entityDispatchers.[targetDescriptor.EntityDispatcherName]
+                                        targetDispatcher |> getType |> Reflection.getIntrinsicFacetNames
+                                    let facetNamesExtrinsic =
                                         match targetDescriptor.EntityProperties.TryGetValue Constants.Engine.FacetNamesPropertyName with
                                         | (true, facetNamesSymbol) -> symbolToValue<string Set> facetNamesSymbol
                                         | (false, _) -> Set.empty
+                                    let facetNames = Set.addMany facetNamesIntrinsic facetNamesExtrinsic
                                     let overlayer = World.getOverlayer world
                                     let overlaySymbols = Overlayer.getOverlaySymbols overlayName facetNames overlayer
                                     match overlaySymbols.TryGetValue propertyName with
@@ -616,8 +626,12 @@ module WorldModule2 =
             let targetsValid =
                 Seq.filter (fun (target : Entity) ->
                     let targetToEntity = Relation.relate target.EntityAddress entity.EntityAddress
-                    let linkLast = Array.tryLast targetToEntity.Links
-                    let valid = linkLast <> Some Parent && linkLast <> Some Current
+                    let linkHeadOpt = Array.tryHead targetToEntity.Links
+                    let linkLastOpt = Array.tryLast targetToEntity.Links
+                    let valid =
+                        not (linkHeadOpt = Some Parent && linkLastOpt = Some (Name target.Name)) && // propagation target is not descendent
+                        Array.contains Parent targetToEntity.Links && // propagation target is not ancestor
+                        linkLastOpt <> Some Current // propagation target is not self
                     if not valid then Log.warn ("Invalid propagation target '" + scstring target + "' from source '" + scstring entity + "'.")
                     valid)
                     targets
@@ -645,8 +659,12 @@ module WorldModule2 =
                 let targetsValid =
                     Seq.filter (fun (target : Entity) ->
                         let targetToEntity = Relation.relate target.EntityAddress entity.EntityAddress
-                        let linkLast = Array.tryLast targetToEntity.Links
-                        let valid = linkLast <> Some Parent && linkLast <> Some Current
+                        let linkHeadOpt = Array.tryHead targetToEntity.Links
+                        let linkLastOpt = Array.tryLast targetToEntity.Links
+                        let valid =
+                            not (linkHeadOpt = Some Parent && linkLastOpt = Some (Name target.Name)) && // propagation target is not descendent
+                            Array.contains Parent targetToEntity.Links && // propagation target is not ancestor
+                            linkLastOpt <> Some Current // propagation target is not self
                         if not valid then Log.warn ("Invalid propagation target '" + scstring target + "' from source '" + scstring entity + "'.")
                         valid)
                         targets
@@ -1322,13 +1340,19 @@ module WorldModule2 =
         static member internal sweepImNui (world : World) =
             if world.Advancing then
                 let world =
-                    OMap.fold (fun world simulant simulantImNui ->
+                    OMap.fold (fun world simulantAddress simulantImNui ->
                         if not simulantImNui.SimulantUtilized then
+                            let simulant = World.deriveFromAddress simulantAddress
                             let world = World.destroy simulant world
-                            World.setSimulantImNuis (OMap.remove simulant world.SimulantImNuis) world
+                            World.setSimulantImNuis (OMap.remove simulantAddress world.SimulantImNuis) world
                         else
-                            if world.Imperative then simulantImNui.SimulantUtilized <- false; world
-                            else World.setSimulantImNuis (OMap.add simulant { simulantImNui with SimulantUtilized = false } world.SimulantImNuis) world)
+                            if world.Imperative then
+                                simulantImNui.SimulantUtilized <- false
+                                simulantImNui.SimulantInitializing <- false
+                                world
+                            else
+                                let simulantImNuis = OMap.add simulantAddress { simulantImNui with SimulantUtilized = false; SimulantInitializing = false } world.SimulantImNuis
+                                World.setSimulantImNuis simulantImNuis world)
                         world world.SimulantImNuis
                 let world =
                     OMap.fold (fun world subscriptionKey subscriptionImNui ->
@@ -1336,8 +1360,12 @@ module WorldModule2 =
                             let world = World.unsubscribe subscriptionImNui.SubscriptionId world
                             World.setSubscriptionImNuis (OMap.remove subscriptionKey world.SubscriptionImNuis) world
                         else
-                            if world.Imperative then subscriptionImNui.SubscriptionUtilized <- false; world
-                            else World.setSubscriptionImNuis (OMap.add subscriptionKey { subscriptionImNui with SubscriptionUtilized = false } world.SubscriptionImNuis) world)
+                            if world.Imperative then
+                                subscriptionImNui.SubscriptionUtilized <- false
+                                world
+                            else
+                                let simulantImNuis = OMap.add subscriptionKey { subscriptionImNui with SubscriptionUtilized = false } world.SubscriptionImNuis
+                                World.setSubscriptionImNuis simulantImNuis world)
                         world world.SubscriptionImNuis
                 world
             else world
@@ -1670,8 +1698,7 @@ module WorldModule2 =
                     Array.sortBy fst' |>
                     Array.tryTake Constants.Render.ShadowsMax |>
                     Array.fold (fun world struct (struct (directionalSort, _), struct (shadowFrustum, light)) ->
-                        let shadowRotation = light.GetRotation world * Quaternion.CreateFromAxisAngle (v3Right, -MathF.PI_OVER_2)
-                        World.renderSimulantsInternal (ShadowPass (light.GetId world, isZero directionalSort, shadowRotation, shadowFrustum)) world)
+                        World.renderSimulantsInternal (ShadowPass (light.GetId world, isZero directionalSort, light.GetRotation world, shadowFrustum)) world)
                         world
 
                 // render simulants normally, remember to clear 3d shadow cache
@@ -1965,6 +1992,11 @@ module EntityDispatcherModule2 =
         (is2d, physical, lightProbe, light, makeInitial : World -> 'model) =
         inherit EntityDispatcher (is2d, physical, lightProbe, light)
 
+#if DEBUG
+        static let modelHasValueType =
+            typeof<'model>.IsValueType
+#endif
+
         new (is2d, physical, lightProbe, light, initial : 'model) =
             EntityDispatcher<'model> (is2d, physical, lightProbe, light, fun _ -> initial)
 
@@ -2004,9 +2036,14 @@ module EntityDispatcherModule2 =
             let model = entity.GetModelGeneric<'model> world
             let context = world.ContextImNui
             let world = World.scopeEntity entity [] world
-            let (model, world) = this.Run (model, entity, world)
+            let (model', world) = this.Run (model, entity, world)
             let world = World.advanceContext entity.EntityAddress context world
-            this.SetModel model entity world
+#if DEBUG
+            let model'' = this.GetModel entity world
+            if modelHasValueType && objNeq model model'' || not modelHasValueType && refNeq model model'' then
+                Log.warnOnce "Model has been changed by another operation during the Run method. Any changes to the model outside of Run will be lost."
+#endif
+            this.SetModel model' entity world
 
         override this.Edit (operation, entity, world) =
             let model = entity.GetModelGeneric<'model> world
@@ -2075,7 +2112,7 @@ module EntityDispatcherModule2 =
         static member Properties =
             [define Entity.Absolute true
              define Entity.Presence Omnipresent
-             define Entity.DisabledColor Constants.Gui.DisabledColorDefault
+             define Entity.ColorDisabled Constants.Gui.ColorDisabledDefault
              define Entity.Layout Manual
              define Entity.LayoutMargin v2Zero
              define Entity.LayoutOrder 0
@@ -2278,7 +2315,7 @@ module EntityDispatcherModule2 =
         static member Properties =
             [define Entity.Absolute true
              define Entity.Presence Omnipresent
-             define Entity.DisabledColor Constants.Gui.DisabledColorDefault
+             define Entity.ColorDisabled Constants.Gui.ColorDisabledDefault
              define Entity.Layout Manual
              define Entity.LayoutMargin v2Zero
              define Entity.LayoutOrder 0
@@ -2443,6 +2480,11 @@ module GroupDispatcherModule =
     type [<AbstractClass>] GroupDispatcher<'model> (makeInitial : World -> 'model) =
         inherit GroupDispatcher ()
 
+#if DEBUG
+        static let modelHasValueType =
+            typeof<'model>.IsValueType
+#endif
+
         new (initial : 'model) =
             GroupDispatcher<'model> (fun _ -> initial)
 
@@ -2479,9 +2521,14 @@ module GroupDispatcherModule =
             let model = group.GetModelGeneric<'model> world
             let context = world.ContextImNui
             let world = World.scopeGroup group [] world
-            let (model, world) = this.Run (model, group, world)
+            let (model', world) = this.Run (model, group, world)
             let world = World.advanceContext group.GroupAddress context world
-            this.SetModel model group world
+#if DEBUG
+            let model'' = this.GetModel group world
+            if modelHasValueType && objNeq model model'' || not modelHasValueType && refNeq model model'' then
+                Log.warnOnce "Model has been changed by another operation during the Run method. Any changes to the model outside of Run will be lost."
+#endif
+            this.SetModel model' group world
 
         override this.Edit (operation, group, world) =
             let model = group.GetModelGeneric<'model> world
@@ -2710,6 +2757,11 @@ module ScreenDispatcherModule =
     type [<AbstractClass>] ScreenDispatcher<'model> (makeInitial : World -> 'model) =
         inherit ScreenDispatcher ()
 
+#if DEBUG
+        static let modelHasValueType =
+            typeof<'model>.IsValueType
+#endif
+
         new (initial : 'model) =
             ScreenDispatcher<'model> (fun _ -> initial)
 
@@ -2746,9 +2798,14 @@ module ScreenDispatcherModule =
             let model = screen.GetModelGeneric<'model> world
             let context = world.ContextImNui
             let world = World.scopeScreen screen [] world
-            let (model, world) = this.Run (model, screen, world)
+            let (model', world) = this.Run (model, screen, world)
             let world = World.advanceContext screen.ScreenAddress context world
-            this.SetModel model screen world
+#if DEBUG
+            let model'' = this.GetModel screen world
+            if modelHasValueType && objNeq model model'' || not modelHasValueType && refNeq model model'' then
+                Log.warnOnce "Model has been changed by another operation during the Run method. Any changes to the model outside of Run will be lost."
+#endif
+            this.SetModel model' screen world
 
         override this.Edit (operation, screen, world) =
             let model = screen.GetModelGeneric<'model> world
@@ -2931,20 +2988,22 @@ module ScreenDispatcherModule =
     type World with
 
         /// Begin the ImNui declaration of a screen with the given arguments using a child group read from the given file path.
-        /// Note that changing the file path over time has no effect as only the first moment is used.
+        /// Note that changing the screen behavior and file path over time has no effect as only the first moment is used.
         static member beginScreenWithGroupFromFilePlus<'d, 'r when 'd :> ScreenDispatcher> (zero : 'r) init name select behavior groupFilePath world args =
             World.beginScreenPlus10<'d, 'r> zero init World.transitionScreen World.setScreenSlide name select behavior (Some groupFilePath) world args
 
         /// Begin the ImNui declaration of a screen with the given arguments using a child group read from the given file path.
-        /// Note that changing the file path over time has no effect as only the first moment is used.
+        /// Note that changing the screen behavior and file path over time has no effect as only the first moment is used.
         static member beginScreenWithGroupFromFile<'d when 'd :> ScreenDispatcher> name select behavior groupFilePath world args =
             World.beginScreen8<'d> World.transitionScreen World.setScreenSlide name select behavior (Some groupFilePath) world args
 
         /// Begin the ImNui declaration of a screen with the given arguments.
+        /// Note that changing the screen behavior over time has no effect as only the first moment is used.
         static member beginScreenPlus<'d, 'r when 'd :> ScreenDispatcher> zero init name select behavior world args =
             World.beginScreenPlus10<'d, 'r> zero init World.transitionScreen World.setScreenSlide name select behavior None world args
 
         /// Begin the ImNui declaration of a screen with the given arguments.
+        /// Note that changing the screen behavior over time has no effect as only the first moment is used.
         static member beginScreen<'d when 'd :> ScreenDispatcher> name select behavior world args =
             World.beginScreen8<'d> World.transitionScreen World.setScreenSlide name select behavior None world args
 
@@ -2997,6 +3056,11 @@ module GameDispatcherModule =
     type [<AbstractClass>] GameDispatcher<'model> (makeInitial : World -> 'model) =
         inherit GameDispatcher ()
 
+#if DEBUG
+        static let modelHasValueType =
+            typeof<'model>.IsValueType
+#endif
+
         new (initial : 'model) =
             GameDispatcher<'model> (fun _ -> initial)
 
@@ -3033,9 +3097,14 @@ module GameDispatcherModule =
             let model = game.GetModelGeneric<'model> world
             let context = world.ContextImNui
             let world = World.scopeGame [] world
-            let (model, world) = this.Run (model, game, world)
+            let (model', world) = this.Run (model, game, world)
             let world = World.advanceContext game.GameAddress context world
-            this.SetModel model game world
+#if DEBUG
+            let model'' = this.GetModel game world
+            if modelHasValueType && objNeq model model'' || not modelHasValueType && refNeq model model'' then
+                Log.warnOnce "Model has been changed by another operation during the Run method. Any changes to the model outside of Run will be lost."
+#endif
+            this.SetModel model' game world
 
         override this.Edit (operation, game, world) =
             let model = game.GetModelGeneric<'model> world

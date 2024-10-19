@@ -9,8 +9,7 @@ type GameplayState =
     | Quitting
     | Quit
 
-// this is our MMCC model type representing gameplay.
-// this model representation uses update time, that is, time based on number of engine updates.
+// this is our ImNui model type representing gameplay.
 type Gameplay =
     { GameplayState : GameplayState }
 
@@ -55,10 +54,8 @@ type GameplayDispatcher () =
 
         // declare gui group
         let world = World.beginGroup "Gui" [] world
-        let (gameplay, world) =
-            match World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Text .= "Quit"] world with
-            | (true, world) -> ({ gameplay with GameplayState = Quitting }, world)
-            | (false, world) -> (gameplay, world)
+        let (clicked, world) = World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Text .= "Quit"] world
+        let gameplay = if clicked then { gameplay with GameplayState = Quitting } else gameplay
         let world = World.endGroup world
 
         // return gameplay and world values

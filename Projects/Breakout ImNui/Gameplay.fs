@@ -43,7 +43,7 @@ type Brick =
           Size = v3 64.0f 16.0f 0.0f
           Color = color (Gen.randomf1 0.5f + 0.5f) (Gen.randomf1 0.5f + 0.5f) (Gen.randomf1 0.5f + 0.5f) 1.0f }
 
-// this is our MMCC model type representing gameplay.
+// this is our ImNui model type representing gameplay.
 // this model representation uses update time, that is, time based on number of engine updates.
 type [<SymbolicExpansion>] Gameplay =
     { GameplayTime : int64
@@ -221,7 +221,7 @@ type GameplayDispatcher () =
                                         else failwithumf ()
                                     let world =
                                         let velocity = ball.GetLinearVelocity world
-                                        let bounce = velocity - 2.0f * Vector3.Dot(velocity, normal) * normal
+                                        let bounce = velocity - 2.0f * Vector3.Dot (velocity, normal) * normal
                                         World.setBodyLinearVelocity bounce ballBodyId world
                                     World.playSound 1.0f Assets.Default.Sound world
                                     (gameplay, world)
@@ -267,10 +267,8 @@ type GameplayDispatcher () =
         let world = World.doText "Message" [Entity.Text @= messageText] world
 
         // declare quit button
-        let (gameplay, world) =
-            match World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Text .= "Quit"] world with
-            | (true, world) -> ({ gameplay with GameplayState = Quitting }, world)
-            | (false, world) -> (gameplay, world)
+        let (clicked, world) = World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Text .= "Quit"] world
+        let gameplay = if clicked then { gameplay with GameplayState = Quitting } else gameplay
 
         // end group declaration
         let world = World.endGroup world

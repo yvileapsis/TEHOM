@@ -1761,7 +1761,13 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                 let next = Nu.Entity (SelectedGroup.GroupAddress <-- Address.makeFromArray entity.Surnames)
                                 let previousOpt = World.tryGetPreviousEntity next world
                                 let parentOpt = match next.Parent with :? Entity as parent -> Some parent | _ -> None
-                                if not ((scstringMemo parentOpt).Contains (scstringMemo sourceEntity)) then
+                                let canMove =
+                                    match parentOpt with
+                                    | Some parent ->
+                                        let parentToSource = Relation.relate sourceEntity.EntityAddress parent.EntityAddress
+                                        Array.contains Parent parentToSource.Links
+                                    | None -> true
+                                if canMove then
                                     let mountOpt = match parentOpt with Some _ -> Some (Relation.makeParent ()) | None -> None
                                     let sourceEntity' = match parentOpt with Some parent -> parent / sourceEntity.Name | None -> SelectedGroup / sourceEntity.Name
                                     if sourceEntity'.GetExists world then
@@ -1781,12 +1787,15 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                         selectEntityOpt (Some sourceEntity') world
                                         ShowSelectedEntity <- true
                                         world
-                                else world
+                                else Log.warn "Cannot mount an entity circularly."; world
                             else
                                 let parent = Nu.Entity (SelectedGroup.GroupAddress <-- Address.makeFromArray entity.Surnames)
                                 let sourceEntity' = parent / sourceEntity.Name
-                                if not ((scstringMemo parent).Contains (scstringMemo sourceEntity)) then
-                                    if not (sourceEntity'.GetExists world) then
+                                let parentToSource = Relation.relate sourceEntity.EntityAddress parent.EntityAddress
+                                if Array.contains Parent parentToSource.Links then
+                                    if sourceEntity'.GetExists world
+                                    then MessageBoxOpt <- Some "Cannot reparent an entity where the parent entity contains a child with the same name."; world
+                                    else
                                         let world = snapshot RenameEntity world
                                         let world = World.renameEntityImmediate sourceEntity sourceEntity' world
                                         let world =
@@ -1797,8 +1806,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                         selectEntityOpt (Some sourceEntity') world
                                         ShowSelectedEntity <- true
                                         world
-                                    else MessageBoxOpt <- Some "Cannot reparent an entity where the parent entity contains a child with the same name."; world
-                                else world
+                                else Log.warn "Cannot mount an entity circularly."; world
                         else MessageBoxOpt <- Some "Cannot relocate a protected simulant (such as an entity created by the MMCC API)."; world
                     | None -> world
                 else world
@@ -1969,7 +1977,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                                 match entity.GetMountOpt world with
                                 | Some mount ->
                                     let parentAddress = Relation.resolve entity.EntityAddress mount
-                                    let parent = World.derive (atooa parentAddress)
+                                    let parent = World.deriveFromAddress parentAddress
                                     parent.Names.Length >= 4 && World.getExists parent world
                                 | None -> false
                             | _ -> false
@@ -3185,17 +3193,11 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
         if ImGui.Begin ("Renderer", ImGuiWindowFlags.NoNav) then
             let renderer3dConfig = World.getRenderer3dConfig world
             let mutable renderer3dChanged = false
-            let mutable staticSurfaceOcclusionPrePassEnabled = renderer3dConfig.StaticSurfaceOcclusionPrePassEnabled
-            let mutable animatedSurfaceOcclusionPrePassEnabled = renderer3dConfig.AnimatedSurfaceOcclusionPrePassEnabled
-            let mutable terrainOcclusionPrePassEnabled = renderer3dConfig.TerrainOcclusionPrePassEnabled
             let mutable lightMappingEnabled = renderer3dConfig.LightMappingEnabled
             let mutable ssaoEnabled = renderer3dConfig.SsaoEnabled
             let mutable ssaoSampleCount = renderer3dConfig.SsaoSampleCount
             let mutable ssvfEnabled = renderer3dConfig.SsvfEnabled
             let mutable ssrEnabled = renderer3dConfig.SsrEnabled
-            renderer3dChanged <- ImGui.Checkbox ("Static Surface Occlusion Pre-Pass Enabled", &staticSurfaceOcclusionPrePassEnabled) || renderer3dChanged
-            renderer3dChanged <- ImGui.Checkbox ("Animated Surface Occlusion Pre-Pass Enabled", &animatedSurfaceOcclusionPrePassEnabled) || renderer3dChanged
-            renderer3dChanged <- ImGui.Checkbox ("Terrain Occlusion Pre-Pass Enabled", &terrainOcclusionPrePassEnabled) || renderer3dChanged
             renderer3dChanged <- ImGui.Checkbox ("Light Mapping Enabled", &lightMappingEnabled) || renderer3dChanged
             renderer3dChanged <- ImGui.Checkbox ("Ssao Enabled", &ssaoEnabled) || renderer3dChanged
             renderer3dChanged <- ImGui.SliderInt ("Ssao Sample Count", &ssaoSampleCount, 0, Constants.Render.SsaoSampleCountMax) || renderer3dChanged
@@ -3203,10 +3205,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             renderer3dChanged <- ImGui.Checkbox ("Ssr Enabled", &ssrEnabled) || renderer3dChanged
             if renderer3dChanged then
                 let renderer3dConfig =
-                    { StaticSurfaceOcclusionPrePassEnabled = staticSurfaceOcclusionPrePassEnabled
-                      AnimatedSurfaceOcclusionPrePassEnabled = animatedSurfaceOcclusionPrePassEnabled
-                      TerrainOcclusionPrePassEnabled = terrainOcclusionPrePassEnabled
-                      LightMappingEnabled = lightMappingEnabled
+                    { LightMappingEnabled = lightMappingEnabled
                       SsaoEnabled = ssaoEnabled
                       SsaoSampleCount = ssaoSampleCount
                       SsvfEnabled = ssvfEnabled
@@ -3218,7 +3217,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
 
     let private imGuiLogWindow world =
         let lines = LogStr.Split '\n'
-        let warnings = lines |> Seq.filter (fun line -> line.Contains "|Warn|") |> Seq.length
+        let warnings = lines |> Seq.filter (fun line -> line.Contains "|Warning|") |> Seq.length
         let errors = lines |> Seq.filter (fun line -> line.Contains "|Error|") |> Seq.length
         let flag = warnings > 0 || errors > 0
         let flash = flag && DateTimeOffset.Now.Millisecond / 400 % 2 = 0
@@ -3233,6 +3232,8 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             ImGui.PushStyleColor (ImGuiCol.Tab, flashColor)
             ImGui.PushStyleColor (ImGuiCol.TabActive, flashColor)
             ImGui.PushStyleColor (ImGuiCol.TabHovered, flashColor)
+            ImGui.PushStyleColor (ImGuiCol.TabUnfocused, flashColor)
+            ImGui.PushStyleColor (ImGuiCol.TabUnfocusedActive, flashColor)
         if ImGui.Begin ("Log", ImGuiWindowFlags.NoNav) then
             ImGui.Text "Log:"
             ImGui.SameLine ()
@@ -3244,7 +3245,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             ImGui.TextUnformatted LogStr
             ImGui.EndChild ()
             ImGui.End ()
-        if flash then for i in 0 .. 6 do ImGui.PopStyleColor ()
+        if flash then for i in 0 .. dec 8 do ImGui.PopStyleColor ()
         world
 
     let private imGuiEditorConfigWindow () =
@@ -3334,16 +3335,16 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
             ImGui.Text "Project Type"
             ImGui.SameLine ()
             if ImGui.BeginCombo ("##newProjectType", NewProjectType) then
-                for projectType in ["MMCC Empty"; "MMCC Game"; "ImNui Empty"; "ImNui Game"] do
+                for projectType in ["ImNui Empty"; "ImNui Game"; "MMCC Empty"; "MMCC Game"] do
                     if ImGui.Selectable projectType then
                         NewProjectType <- projectType
                 ImGui.EndCombo ()
             let projectTypeDescription =
                 match NewProjectType with
-                | "MMCC Empty" -> "Create an empty MMCC game project. This contains the minimum code needed to experiment with Nu in a sandbox environment."
-                | "MMCC Game" -> "Create a full MMCC game project. This contains the structures and pieces that embody the best practices of Nu usage."
-                | "ImNui Empty" -> "Create an empty ImNui game project. This contains the minimum code needed to experiment with Nu in a sandbox environment."
-                | "ImNui Game" -> "Create a full ImNui game project. This contains the structures and pieces that embody the best practices of Nu usage."
+                | "ImNui Empty" -> "Create an empty ImNui project. This contains the minimum code needed to experiment with ImNui in a sandbox environment."
+                | "ImNui Game" -> "Create a full ImNui game project. This contains the structures and pieces that embody the best practices of ImNui usage."
+                | "MMCC Empty" -> "Create an empty MMCC project. This contains the minimum code needed to experiment with the MMCC API."
+                | "MMCC Game" -> "Create a full MMCC game project. This contains the structures and pieces that embody the best practices of MMCC usage."
                 | _ -> failwithumf ()
             ImGui.Separator ()
             ImGui.TextWrapped ("Description: " + projectTypeDescription)
@@ -3363,12 +3364,12 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
 
                 // choose a template, ensuring it exists
                 let slnDir = PathF.GetFullPath (programDir + "/../../../../..")
-                let (templateFileName, templateDir, editMode) =
+                let (templateFileName, templateDir, editMode, shortName) =
                     match NewProjectType with
-                    | "MMCC Empty" -> ("Nu.Template.Mmcc.Empty.fsproj", PathF.GetFullPath (programDir + "/../../../../Nu.Template.Mmcc.Empty"), "Initial")
-                    | "MMCC Game" -> ("Nu.Template.Mmcc.Game.fsproj", PathF.GetFullPath (programDir + "/../../../../Nu.Template.Mmcc.Game"), "Title")
-                    | "ImNui Empty" -> ("Nu.Template.ImNui.Empty.fsproj", PathF.GetFullPath (programDir + "/../../../../Nu.Template.ImNui.Empty"), "Initial")
-                    | "ImNui Game" -> ("Nu.Template.ImNui.Game.fsproj", PathF.GetFullPath (programDir + "/../../../../Nu.Template.ImNui.Game"), "Title")
+                    | "ImNui Empty" -> ("Nu.Template.ImNui.Empty.fsproj", PathF.GetFullPath (programDir + "/../../../../Nu.Template.ImNui.Empty"), "Initial", "nu-template-imnui-empty")
+                    | "ImNui Game" -> ("Nu.Template.ImNui.Game.fsproj", PathF.GetFullPath (programDir + "/../../../../Nu.Template.ImNui.Game"), "Title", "nu-template-imnui-game")
+                    | "MMCC Empty" -> ("Nu.Template.Mmcc.Empty.fsproj", PathF.GetFullPath (programDir + "/../../../../Nu.Template.Mmcc.Empty"), "Initial", "nu-template-mmcc-empty")
+                    | "MMCC Game" -> ("Nu.Template.Mmcc.Game.fsproj", PathF.GetFullPath (programDir + "/../../../../Nu.Template.Mmcc.Game"), "Title", "nu-template-mmcc-game")
                     | _ -> failwithumf ()
                 if Directory.Exists templateDir then
 
@@ -3383,7 +3384,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,0 Size=1920,1080 Spl
                         Directory.SetCurrentDirectory projectsDir
                         Directory.CreateDirectory NewProjectName |> ignore<DirectoryInfo>
                         Directory.SetCurrentDirectory newProjectDir
-                        Process.Start("dotnet", "new nu-game --force").WaitForExit()
+                        Process.Start("dotnet", "new " + shortName + " --force").WaitForExit()
 
                         // rename project file
                         File.Copy (templateFileName, newFileName, true)

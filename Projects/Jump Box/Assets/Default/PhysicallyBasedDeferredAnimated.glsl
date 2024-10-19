@@ -100,6 +100,12 @@ layout(location = 3) out vec4 normalPlus;
 
 void main()
 {
+    // discard when depth out of range
+    float depthCutoff = heightPlusOut.z;
+    float depth = gl_FragCoord.z / gl_FragCoord.w;
+    if (depthCutoff >= 0.0) { if (depth > depthCutoff) discard; }
+    else if (depth <= -depthCutoff) discard;
+
     // forward position, marking w for writter
     position.xyz = positionOut.xyz;
     position.w = 1.0;
@@ -123,8 +129,9 @@ void main()
     vec2 parallax = toEyeTangent.xy * height;
     vec2 texCoords = texCoordsOut - parallax;
 
-    // compute albedo
+    // compute albedo, discarding fragment if even partly transparent
     vec4 albedoSample = texture(albedoTexture, texCoords);
+    if (albedoSample.w < 0.5) discard;
     albedo = pow(albedoSample.rgb, vec3(GAMMA)) * albedoOut.rgb;
 
     // compute material properties
