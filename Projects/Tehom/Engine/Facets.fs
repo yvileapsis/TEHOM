@@ -18,7 +18,7 @@ module GlyphFacetModule =
              define Entity.Justification (Justified (JustifyCenter, JustifyMiddle))
              define Entity.TextMargin v2Zero
              define Entity.TextColor Color.White
-             define Entity.TextDisabledColor (Color (0.75f, 0.75f, 0.75f, 0.75f))
+             define Entity.TextColorDisabled (Color (0.75f, 0.75f, 0.75f, 0.75f))
              define Entity.TextOffset v2Zero
              define Entity.TextShift 0.5f]
 
@@ -60,7 +60,7 @@ module GlyphFacetModule =
                               Font = font
                               FontSizing = fontSizing
                               FontStyling = fontStyling
-                              Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
+                              Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
                               Justification = entity.GetJustification world }}
 
                 )) world
@@ -105,7 +105,7 @@ module RichTextFacetModule =
             define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))
             define Entity.TextMargin v2Zero
             define Entity.TextColor Color.Black
-            define Entity.TextDisabledColor (Color (0.25f, 0.25f, 0.25f, 0.75f))
+            define Entity.TextColorDisabled (Color (0.25f, 0.25f, 0.25f, 0.75f))
             define Entity.TextOffset v2Zero
             define Entity.TextShift 0.5f
         ]
@@ -130,7 +130,7 @@ module RichTextFacetModule =
                 let font = entity.GetFont world
                 let fontSizing = entity.GetFontSizing world
                 let fontStyling = entity.GetFontStyling world
-                let color = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
+                let color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
                 let justification = entity.GetJustification world
 
                 let parsingResult = parseNuMark text
@@ -413,7 +413,7 @@ module TextInputFacetModule =
                         Font = font
                         FontSizing = fontSizing
                         FontStyling = fontStyling
-                        Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextDisabledColor world
+                        Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
                         Justification = entity.GetJustification world
                     }
                 } world
