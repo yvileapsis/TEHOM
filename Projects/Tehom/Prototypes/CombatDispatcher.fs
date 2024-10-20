@@ -4,16 +4,18 @@ open System
 open Prime
 open Nu
 
+open Action
+
 // this is our gameplay MMCC message type.
 type CombatMessage =
     | StartPlaying
     | FinishQuitting
     | Update
     | TurnBegin
-    | CombatantAttacks of Entity
-    | CombatantDefends of Entity * Turn
-    | TurnEnd of Entity * Turn * Entity * Turn
-    | CharacterTurn of Entity * Turn
+    | TurnAttack of Attacker : Entity
+    | TurnDefence of Attacker : Entity * Attack : Turn
+    | TurnEnd of Attacker : Entity * Attack : Turn * Defender : Entity * Defence : Turn
+    | ProcessCharacterTurn of Entity * Turn
     | TimeUpdate
     interface Message
 
@@ -53,8 +55,7 @@ type CombatDispatcher () =
 
     // here we handle the above messages
     override this.Message (model, message, screen, world) =
-        match message with
-        | StartPlaying ->
+        let startPlaying =
             let gameplay =
                 Combat.initial
 
@@ -72,13 +73,20 @@ type CombatDispatcher () =
 
             withSignal RollInitiative gameplay
 
+        match message with
+        | StartPlaying ->
+            startPlaying
+
         | FinishQuitting ->
             let gameplay = Combat.empty
             just gameplay
 
         | Update ->
-            let gameplay = Combat.update model world
-            just gameplay
+            if model.Combatants = Combat.initial.Combatants then
+                startPlaying
+            else
+                let gameplay = Combat.update model world
+                just gameplay
 
         | TurnBegin ->
             match model.Combatants with
@@ -92,7 +100,7 @@ type CombatDispatcher () =
 
                 let signals : Signal list = [
                     GameEffect (CharacterReset attacker)
-                    CombatantAttacks attacker
+                    TurnAttack attacker
                 ]
 
                 withSignals signals model
@@ -100,17 +108,19 @@ type CombatDispatcher () =
             | _ ->
                 just model
 
-        | CombatantAttacks attacker ->
-            let attackerAction =
-                Combat.turnAttackerPlan attacker model world
+        | TurnAttack attacker ->
+            match AttackerAI.tryPlan attacker model.Area model world with
+            | Some attackerAction ->
+                let signal : Signal =
+                    TurnDefence (attacker, attackerAction)
 
-            let signal : Signal =
-                CombatantDefends (attacker, attackerAction)
+                withSignal signal model
 
-            withSignal signal model
+            | None ->
+                just model
 
         // TODO: assumed one target
-        | CombatantDefends (attacker, attackerAction) ->
+        | TurnDefence (attacker, attackerAction) ->
             attackerAction.Checks
             |> List.tryFind (fun check ->
                 not (List.isEmpty check.OpposedBy)
@@ -118,7 +128,7 @@ type CombatDispatcher () =
             |> function
                 | Some { OpposedBy = [defender] } as Some action ->
                     let defenderAction =
-                        Combat.turnDefenderPlan attacker action defender model world
+                        DefenderAI.plan attacker action defender model world
 
                     let signal : Signal =
                         TurnEnd (attacker, attackerAction, defender, defenderAction)
@@ -154,49 +164,16 @@ type CombatDispatcher () =
             let model = { model with History = history }
 
             let signals : Signal list = [
-                CharacterTurn (attacker, attackerTurn)
-                CharacterTurn (defender, defenderTurn)
+                ProcessCharacterTurn (attacker, attackerTurn)
+                ProcessCharacterTurn (defender, defenderTurn)
             ]
 
             withSignals signals model
 
-        | CharacterTurn (actor, turn) ->
+        | ProcessCharacterTurn (actor, turn) ->
             let signals : Signal list =
-                turn.Checks
-                |> List.fold (fun signals check ->
-                    match check.Action with
-                    | FullMentalAction ->
-                        signals
-                    | FullPhysicalAction ->
-                        signals
-                    | StanceChange stance ->
-                        let signal : Signal =
-                            GameEffect (CharacterStanceChange (actor, stance))
-                        signals @ [ signal ]
-                    | PhysicalSequence moves ->
-
-                        let successes = check.Successes
-                        let blocks = check.OpposedSuccesses
-
-                        let signals' : Signal list =
-                            let indexes, moves =
-                                moves
-                                |> List.indexed
-                                |> List.takeWhile (fun (i, move) ->
-                                    // positioning is always successful for now, but should check if within reach of enemy later
-                                    ((List.contains move Move.positioning) || (successes > blocks)) && (i < successes)
-                                )
-                                |> List.unzip
-
-                            match check.Target with
-                            | Some target ->
-                                List.map (fun i -> Move.handle i moves actor target model.Area world) indexes
-                                |> List.concat
-                                |> List.map (fun signal -> GameEffect signal)
-                            | None ->
-                                []
-                        signals @ signals'
-                    ) []
+                Turn.processTurn actor turn model.Area world
+                |> List.map (fun signal -> GameEffect signal)
 
             withSignals signals model
 
@@ -254,9 +231,10 @@ type CombatDispatcher () =
             let world = entity.SetCharacter character world
             just world
 
-        | GameEffect (Damage (entity, damage)) ->
+        | GameEffect (Damage (entity, size, damage)) ->
             let character = entity.GetCharacter world
-            let character = Character.doDamage damage character
+            let sizeDifference = Character.getSize character - size
+            let character = Character.doDamage sizeDifference damage character
             let world = entity.SetCharacter character world
             just world
 
@@ -306,7 +284,10 @@ type CombatDispatcher () =
 
             let statsBox character = [
                 let (gall, lymph, oil, plasma) = Character.getStats character
-                let (gallStance, lymphStance, oilStance, plasmaStance) = Character.getStance character
+                let (gallStance, lymphStance, oilStance, plasmaStance) =
+                    character
+                    |> Character.getStance
+                    |> Stance.getStats
                 let minorWounds = character.MinorWounds
                 let majorWounds = character.MajorWounds
 
@@ -421,7 +402,7 @@ type CombatDispatcher () =
                     for i, move in List.indexed playerMoves ->
                         Content.text $"Move{i}" [
                             Entity.Size == v3 80.0f 10.0f 0.0f
-                            Entity.Text := $"{move}"
+                            Entity.Text := $"{Move.getName move}"
                             Entity.Font == Assets.Gui.ClearSansFont
                             Entity.FontSizing == Some 10
                             Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
@@ -443,7 +424,7 @@ type CombatDispatcher () =
                     for i, move in List.indexed enemyMoves ->
                         Content.text $"Move{i}" [
                             Entity.Size == v3 80.0f 10.0f 0.0f
-                            Entity.Text := $"{move}"
+                            Entity.Text := $"{Move.getName move}"
                             Entity.Font == Assets.Gui.ClearSansFont
                             Entity.FontSizing == Some 10
                             Entity.Justification == Justified (JustifyRight, JustifyMiddle)
@@ -474,8 +455,8 @@ type CombatDispatcher () =
         match gameplay.GameplayState with
         | Playing ->
             Content.group Simulants.CombatCharacters.Name [] [
-                character Character.player
-                character Character.rat
+                character CharacterContent.player
+                character CharacterContent.rat
             ]
         // no scene group otherwise
         | Quit -> ()

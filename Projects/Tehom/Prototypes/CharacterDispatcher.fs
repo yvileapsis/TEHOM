@@ -23,4 +23,8 @@ type CharacterDispatcher () =
 [<AutoOpen>]
 module CharacterEntity =
     let character (character : Character) =
-        Content.entity<CharacterDispatcher> character.ID [ Entity.Character == character ]
+        Content.composite<CharacterDispatcher> character.ID [
+            Entity.Character == character
+        ] [
+
+        ]

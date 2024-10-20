@@ -3,13 +3,205 @@ namespace Tehom
 open System
 open Prime
 
-module Character =
+module Weapon =
+    type Type =
+        | Small
+        | Medium
+        | Large
+(*
+    type Requirement =
+        | True
+        | And of Requirement * Requirement
+        | Or of Requirement * Requirement
+        | Not of Requirement
+        | HasLimb of string
+*)
+    type Weapon = {
+        Type : Type
+        Name : string
+        Damage : int
+        Range : uint32
+        Reload : int
+        ReloadLeft : int
+        RequiredLimb : String
+    }
+    with
+        static member empty = {
+            Type = Small
+            Name = String.empty
+            Damage = 0
+            Range = 0u
+            Reload = 0
+            ReloadLeft = 0
+            RequiredLimb = String.empty
+        }
 
-    type Element =
-        | Gall
-        | Lymph
-        | Oil
-        | Plasma
+        // only humans attack with fists
+        static member fist limb = {
+            Weapon.empty with
+                Type = Small
+                Name = "Fist Strike"
+                Damage = 3
+                RequiredLimb = limb
+        }
+
+        // only humans kick
+        static member kick limb = {
+            Weapon.empty with
+                Type = Medium
+                Name = "Kick Strike"
+                Damage = 4
+                RequiredLimb = limb
+        }
+
+        // charactertics differ a lot based on body stats
+        static member bite limb = {
+            Weapon.empty with
+                Type = Small
+                Name = "Bite"
+                Damage = 5
+                RequiredLimb = limb
+        }
+
+        // charactertics differ a lot based on body stats
+        static member claw limb = {
+            Weapon.empty with
+                Type = Small
+                Name = "Claw Swipe"
+                Damage = 5
+                RequiredLimb = limb
+        }
+
+        static member getRange weapon = weapon.Range
+        static member getDamage weapon = weapon.Damage
+        static member getSizeBoost weapon =
+            match weapon.Type with
+            | Small -> -1
+            | Medium -> 0
+            | Large -> 1
+
+
+type Weapon = Weapon.Weapon
+
+module Move =
+
+    type Move =
+        | Block
+        | Burst
+        | Cast
+        | Climb
+        | Crawl
+        | Crouch
+        | Dash
+        | Delay
+        | Dodge
+        | Fire
+        | Grab
+        | Jump
+        | Knockout
+        | Power
+        | Press
+        | Ready
+        | Retarget
+        | Roll
+        | Sidestep
+        | Slam
+        | Spin
+        | Stride
+        | Strike of Weapon
+        | Sweep
+        | Swim
+        | Toss
+        | Throw
+    with
+        static member positioning = [
+            Climb; Crawl; Crouch; Dash; Jump; Roll; Sidestep; Stride; Swim;
+        ]
+        static member attacks = [
+            Fire; Grab; Knockout; Power; Press; Retarget; Slam; Strike Weapon.empty; Throw; Toss;
+        ]
+        static member defence = [
+            Block; Crouch; Dodge; Jump; Roll; Spin;
+        ]
+        static member special = [
+            Burst; Ready; Sweep;
+        ]
+        static member getName move =
+            match move with
+            | Strike weapon -> weapon.Name
+            | x -> $"{x}"
+
+type Element =
+    | Gall
+    | Lymph
+    | Oil
+    | Plasma
+
+type Move = Move.Move
+
+// TODO: figure out where this should be
+type Stance = {
+    GallStance : int
+    LymphStance : int
+    OilStance : int
+    PlasmaStance : int
+}
+with
+    static member empty = {
+        GallStance = 0
+        LymphStance = 0
+        OilStance = 0
+        PlasmaStance = 0
+    }
+
+    static member getStats stance =
+        stance.GallStance, stance.LymphStance, stance.OilStance, stance.PlasmaStance
+
+    static member make toStat fromStats (stance : Stance) =
+
+        let moveOne toStat fromStat stance =
+            let stance : Stance =
+                match fromStat with
+                | Gall -> { stance with GallStance = stance.GallStance - 1 }
+                | Lymph -> { stance with LymphStance = stance.LymphStance - 1 }
+                | Oil -> { stance with OilStance = stance.OilStance - 1 }
+                | Plasma-> { stance with PlasmaStance = stance.PlasmaStance - 1 }
+
+            let stance : Stance =
+                match toStat with
+                | Gall -> { stance with GallStance = stance.GallStance + 1 }
+                | Lymph -> { stance with LymphStance = stance.LymphStance + 1 }
+                | Oil -> { stance with OilStance = stance.OilStance + 1 }
+                | Plasma-> { stance with PlasmaStance = stance.PlasmaStance + 1 }
+
+            stance
+
+        List.init (List.length fromStats) (fun _ -> toStat)
+        |> List.zip fromStats
+        |> List.fold (fun stance (fromStat, toStat) -> moveOne toStat fromStat stance) stance
+
+    // btw thinking with high enough air you should be able to tell enemy's stance
+    // TODO: implement correct stance selection once skills are implemented
+    static member attacker =
+        Stance.make Gall [Lymph; Oil; Plasma] Stance.empty
+    static member defender =
+        Stance.make Lymph [Gall; Oil; Plasma] Stance.empty
+
+module Action =
+    type Action =
+        | FullMentalAction
+        | FullPhysicalAction
+        | StanceChange of Stance
+        | PhysicalSequence of Move list
+
+    type CustomAction = {
+        Name : String
+        Actions : Action list
+    }
+
+type Action = Action.Action
+
+module Character =
 
     type MajorWounds =
         | Healthy = 0
@@ -51,44 +243,43 @@ module Character =
 
     type Stats = Stat * Stat * Stat * Stat
 
-    type Stance = int * int * int * int
-
     type Character = {
-        // Static stats
         ID : String
         Name : String
+        // Static stats
 
         Gall : Stat
         Lymph : Stat
         Oil : Stat
         Plasma : Stat
 
-        Edges : Stat list
-
         PhysicalActions : int
         MentalActions : int
         Stances : int
         Fracture : int
 
-        // Dynamic stats
-        Damage : int
+        Edges : Stat list
+        CustomActions : Action.CustomAction list
+
+        // depends on body type
+        Body : Body
         Size : int
         Gait : Gait
+        Weapons : Weapon list
 
+        // Dynamic stats
         MajorWounds : MajorWounds
         MinorWounds : int
 
         Initiative : int
 
-        GallStance : int
-        LymphStance : int
-        OilStance : int
-        PlasmaStance : int
-
         PhysicalActionsLeft : int
         MentalActionsLeft : int
         StancesLeft : int
         FractureLeft : int
+
+        Stance : Stance
+
     }
     with
         static member getElement element stats =
@@ -100,36 +291,10 @@ module Character =
             | Plasma -> plasma
 
         static member statsEmpty : Stats = Stat.Crippled, Stat.Crippled, Stat.Crippled, Stat.Crippled
-        static member stanceEmpty : Stance = 0, 0, 0, 0
-        static member stanceMove toStat fromStat (stance : Stance) =
-
-            let moveOne toStat fromStat stance =
-                let (gall, lymph, oil, plasma) = stance
-
-                let stance : Stance =
-                    match fromStat with
-                    | Gall -> gall - 1, lymph, oil, plasma
-                    | Lymph -> gall, lymph - 1, oil, plasma
-                    | Oil -> gall, lymph, oil - 1, plasma
-                    | Plasma-> gall, lymph, oil, plasma - 1
-
-                let (gall, lymph, oil, plasma) = stance
-
-                let stance : Stance =
-                    match toStat with
-                    | Gall -> gall + 1, lymph, oil, plasma
-                    | Lymph -> gall, lymph + 1, oil, plasma
-                    | Oil -> gall, lymph, oil + 1, plasma
-                    | Plasma-> gall, lymph, oil, plasma + 1
-
-                stance
-
-            List.zip toStat fromStat
-            |> List.fold (fun stance (toStat, fromStat) -> moveOne toStat fromStat stance) stance
 
         static member stanceVerify (stance : Stance) (stats : Stats) =
             let (gall, lymph, oil, plasma) = stats
-            let (gallChange, lymphChange, oilChange, plasmaChange) = stance
+            let (gallChange, lymphChange, oilChange, plasmaChange) = Stance.getStats stance
             gallChange + lymphChange + oilChange + plasmaChange |> int = 0
             && - int gallChange < int gall
             && - int lymphChange < int lymph
@@ -137,21 +302,18 @@ module Character =
             && - int plasmaChange < int plasma
 
         static member stanceChange (stance : Stance) character =
-            if (character.StancesLeft > 0) then
-                let (gallChange, lymphChange, oilChange, plasmaChange) = stance
+            let verified = Character.stanceVerify stance (Character.getStats character)
+            if (character.StancesLeft > 0 && verified) then
                 {
                     character with
-                        GallStance = gallChange
-                        LymphStance = lymphChange
-                        OilStance = oilChange
-                        PlasmaStance = plasmaChange
+                        Stance = stance
                         StancesLeft = character.StancesLeft - 1
                 }
             else
                 character
 
         static member turnReset (character : Character) =
-            let character = Character.stanceChange Character.stanceEmpty character
+            let character = Character.stanceChange Stance.empty character
             let character = {
                 character with
                     PhysicalActionsLeft = character.PhysicalActions
@@ -164,11 +326,13 @@ module Character =
             character.Gall, character.Lymph, character.Oil, character.Plasma
 
         static member getStance character : Stance =
-            character.GallStance, character.LymphStance, character.OilStance, character.PlasmaStance
+            character.Stance
 
         static member getStancedStats character : Stats =
             let (gall, lymph, oil, plasma) = Character.getStats character
-            let (gallChange, lymphChange, oilChange, plasmaChange) = Character.getStance character
+            let (gallChange, lymphChange, oilChange, plasmaChange) =
+                Character.getStance character
+                |> Stance.getStats
             gall + enum gallChange, lymph + enum lymphChange, oil + enum oilChange, plasma + enum plasmaChange
 
         static member getStat element character =
@@ -183,14 +347,36 @@ module Character =
             |> Character.getElement element
             |> uint32
 
-        static member getDamage character =
-            character.Damage
-
-        static member doDamage damage character =
+        static member doDamage size damage character =
             let (_, lymph, oil, _) = Character.getStats character
 
             let lymph = int lymph
             let oil = int oil
+
+            let check mult =
+                (mult + size) * lymph > damage
+
+            let wounds =
+                if check 1 then
+                    None
+                else if check 2 then
+                    if (character.MinorWounds < oil) then
+                        Some 0
+                    else
+                        Some 1
+                else
+                    if check 3 then
+                        Some 1
+                    else if check 4 then
+                        Some 2
+                    else if check 5 then
+                        Some 3
+                    else if check 6 then
+                        Some 4
+                    else if check 7 then
+                        Some 5
+                    else
+                        Some 6
 
             let maxDamage newValue =
                  MajorWounds.Dead
@@ -198,24 +384,14 @@ module Character =
                  |> min newValue
                  |> enum
 
-            if (damage < lymph) then character
-            else if (damage < 2 * lymph) then
-                if (character.MinorWounds < oil) then
-                    { character with MinorWounds = character.MinorWounds + 1 }
-                else
-                    { character with MajorWounds = maxDamage (1 + int character.MajorWounds) }
-            else if (damage < 3 * (int lymph)) then
-                { character with MajorWounds = maxDamage (1 + int character.MajorWounds) }
-            else if (damage < 4 * lymph) then
-                { character with MajorWounds = maxDamage (2 + int character.MajorWounds) }
-            else if (damage < 5 * lymph) then
-                { character with MajorWounds = maxDamage (3 + int character.MajorWounds) }
-            else if (damage < 6 * lymph) then
-                { character with MajorWounds = maxDamage (4 + int character.MajorWounds) }
-            else if (damage < 7 * lymph) then
-                { character with MajorWounds = maxDamage (5 + int character.MajorWounds) }
-            else
-                { character with MajorWounds = maxDamage (6 + int character.MajorWounds) }
+            match wounds with
+            | None ->
+                character
+            | Some 0 ->
+                { character with MinorWounds = character.MinorWounds + 1 }
+            | Some wounds ->
+                { character with MajorWounds = maxDamage (wounds + int character.MajorWounds) }
+
 
         static member getMaxInitiative character =
             let (gall, _, _, plasma) = Character.getStats character
@@ -226,6 +402,9 @@ module Character =
 
         static member setInitiative initiative character =
             { character with Initiative = initiative }
+
+        static member getSize character =
+            character.Size
 
         static member getSpeed character =
             let multiplier = Gait.multiplier character.Gait
@@ -282,8 +461,27 @@ module Character =
             else
                 400u
 
+        static member getRange weapon character =
+            let reach = Character.getReach character
+            let weapon = Weapon.getRange weapon
+            max reach weapon
+
+        static member canAct character =
+            character.MajorWounds < MajorWounds.Down
+
         static member isDead character =
             character.MajorWounds = MajorWounds.Dead
+
+        static member isDamaged character =
+            let (_, _, oil, _) = Character.getStats character
+            let oil = int oil
+            character.MinorWounds >= oil || character.MajorWounds > MajorWounds.Wounded
+
+        static member getWeapons character =
+            character.Weapons
+
+        static member hasCustomActions character =
+            not (List.isEmpty character.CustomActions)
 
         static member empty = {
             ID = String.empty
@@ -293,16 +491,15 @@ module Character =
             Oil = Stat.Crippled
             Plasma = Stat.Crippled
 
-            GallStance = 0
-            LymphStance = 0
-            OilStance = 0
-            PlasmaStance = 0
+            Stance = Stance.empty
 
-            Damage = 0
             Size = 0
             Gait = Moderate
 
+            Body = Body.empty
+            Weapons = []
             Edges = []
+            CustomActions = []
 
             PhysicalActions = 0
             PhysicalActionsLeft = 0
@@ -317,49 +514,6 @@ module Character =
             MinorWounds = 0
 
             Initiative = 0
-        }
-
-        static member player = {
-            Character.empty with
-                ID = "player"
-                Name = "Player"
-                Gall = Stat.Gifted
-                Lymph = Stat.Gifted
-                Oil = Stat.Gifted
-                Plasma = Stat.Gifted
-
-                Damage = 5
-                PhysicalActions = 1
-                MentalActions = 1
-                Stances = 2
-        }
-
-        static member enemy = {
-            Character.empty with
-                ID = "enemy"
-                Name = "Enemy"
-                Gall = Stat.Average
-                Lymph = Stat.Average
-                Oil = Stat.Average
-                Plasma = Stat.Average
-
-                Damage = 5
-                PhysicalActions = 1
-                MentalActions = 1
-                Stances = 1
-        }
-
-        static member rat = {
-            Character.enemy with
-                Gall = Stat.Gifted
-                Lymph = Stat.Average
-                Oil = Stat.Average
-                Plasma = Stat.Feeble
-
-                ID = "rat"
-                Name = "Rat"
-                Size = -2
-                Gait = Speedy
         }
 
 type Character = Character.Character

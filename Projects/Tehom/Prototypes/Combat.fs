@@ -4,9 +4,9 @@ open System
 open System.Numerics
 open Prime
 open Nu
-open FGL
+open Move
+open Action
 open Character
-open Area
 
 (*
 TODO: Positioning system
@@ -34,128 +34,9 @@ TODO: Tiniest vertical slice:
 type GameEffect =
     | CharacterReset of Entity
     | CharacterStanceChange of Entity * Stance
-    | Damage of Entity * int
+    | Damage of Entity * Size : int * Damage : int
     | TravelInter of String * String
     | TravelIntra of String * String * uint32
-
-type Move =
-    | Block
-    | Burst
-    | Cast
-    | Climb
-    | Crawl
-    | Crouch
-    | Dash
-    | Delay
-    | Dodge
-    | Fire
-    | Grab
-    | Jump
-    | Knockout
-    | Power
-    | Press
-    | Ready
-    | Retarget
-    | Roll
-    | Sidestep
-    | Slam
-    | Spin
-    | Stride
-    | Strike
-    | Sweep
-    | Swim
-    | Toss
-    | Throw
-with
-    static member positioning = [
-        Climb; Crawl; Crouch; Dash; Jump; Roll; Sidestep; Stride; Swim;
-    ]
-    static member attacks = [
-        Fire; Grab; Knockout; Power; Press; Retarget; Slam; Strike; Throw; Toss;
-    ]
-    static member defence = [
-        Block; Crouch; Dodge; Jump; Roll; Spin;
-    ]
-    static member special = [
-        Burst; Ready; Sweep;
-    ]
-
-    static member bonusDamage moveID moves damage =
-        let before, after = List.splitAt moveID moves
-        let damage =
-            match before with
-            | [] -> damage
-            | _ ->
-                before
-                |> List.rev
-                |> List.foldWhile (fun bonus move ->
-                    match move with
-                    | Power -> Some (bonus + 5)
-                    | _ -> None
-                ) damage
-        let damage =
-            match after with
-            | _::after ->
-                after
-                |> List.foldWhile (fun bonus move ->
-                    match move with
-                    | Press -> Some (bonus + 2)
-                    | _ -> None
-                ) damage
-            | _ -> damage
-        damage
-
-    // TODO: fix bug where entity ends up disconnected from the floor due to spare distance fix
-    static member handle moveID moves (attacker : Entity) (defender : Entity) area world =
-        let move = List.item moveID moves
-        match move with
-        | Stride
-        | Climb
-        | Crawl
-        | Jump
-        | Roll
-        | Sidestep
-        | Dash
-        | Swim ->
-            let attackerCharacter = attacker.GetCharacter world
-            let reach = Character.getReach attackerCharacter
-            let speed = Character.getSpeed attackerCharacter
-
-            match Area.moveWithinReach attacker.Name defender.Name reach speed area with
-            | Some moveInter, Some moveIntra ->
-                [TravelInter moveInter; TravelIntra moveIntra]
-            | Some moveInter, None ->
-                [TravelInter moveInter]
-            | None, Some moveIntra ->
-                [TravelIntra moveIntra]
-            | None, None ->
-                []
-        | Block
-        | Crouch
-        | Delay
-        | Dodge
-        | Spin ->
-            []
-        | Cast
-        | Power
-        | Press
-        | Ready
-        | Retarget ->
-            []
-        | Burst
-        | Fire ->
-            []
-        | Grab
-        | Knockout
-        | Slam
-        | Strike
-        | Sweep
-        | Toss
-        | Throw ->
-            let attackerCharacter = attacker.GetCharacter world
-            let damage = Character.getDamage attackerCharacter
-            let damage = Move.bonusDamage moveID moves damage
-            [Damage (defender, damage)]
 
 module Random =
     let rollDie () = Gen.random2 1 7
@@ -165,18 +46,15 @@ module Random =
         rollDice count
         |> Seq.fold (fun state x -> if x > threshold then state + 1 else state) 0
 
-    let getItemsFromList (length: uint32) list =
+    let getItemsFromList length list =
         let gen () = Gen.randomItem list
-        List.init (length |> int) (fun _ -> gen ())
+        List.init length (fun _ -> gen ())
+
+    let getItemFromList list =
+        Gen.randomItem list
 
     let rollInitiative max =
         Gen.random2 0 max
-
-type Action =
-    | FullMentalAction
-    | FullPhysicalAction
-    | StanceChange of Stance
-    | PhysicalSequence of Move list
 
 type TurnType =
     | Action
@@ -207,6 +85,34 @@ with
         OpposedBy = []
         OpposedSuccesses = 0
     }
+
+    static member unstoppable action = {
+        Check.empty with
+            Action = action
+    }
+
+    static member unopposed action threshold = {
+        Check.empty with
+            Action = action
+            Threshold = threshold
+    }
+
+    static member opposed action threshold target = {
+        Check.empty with
+            Action = action
+            Threshold = threshold
+            OpposedBy = [target]
+    }
+
+    static member attack action threshold target = {
+        Check.empty with
+            Action = action
+            Element = Some Gall
+            Threshold = threshold
+            OpposedBy = [target]
+            Target = Some target
+    }
+
 
 type Turn = {
     Turn : int
@@ -274,6 +180,129 @@ with
 
         { left with Checks = leftChecks }, { right with Checks = rightChecks }
 
+    static member processMove moveID moves (attacker : Entity) (defender : Entity) area world =
+
+        let bonusDamage moveID moves damage =
+            let before, after = List.splitAt moveID moves
+            let damage =
+                match before with
+                | [] -> damage
+                | _ ->
+                    before
+                    |> List.rev
+                    |> List.foldWhile (fun bonus move ->
+                        match move with
+                        | Power -> Some (bonus + 5)
+                        | _ -> None
+                    ) damage
+            let damage =
+                match after with
+                | _::after ->
+                    after
+                    |> List.foldWhile (fun bonus move ->
+                        match move with
+                        | Press -> Some (bonus + 2)
+                        | _ -> None
+                    ) damage
+                | _ -> damage
+            damage
+
+        let move = List.item moveID moves
+        match move with
+        | Stride
+        | Climb
+        | Crawl
+        | Jump
+        | Roll
+        | Sidestep
+        | Dash
+        | Swim ->
+            let attackerCharacter = attacker.GetCharacter world
+            let reach = Character.getReach attackerCharacter
+            let speed = Character.getSpeed attackerCharacter
+
+            match Area.moveWithinReach attacker.Name defender.Name reach speed area with
+            | Some moveInter, Some moveIntra ->
+                [TravelInter moveInter; TravelIntra moveIntra]
+            | Some moveInter, None ->
+                [TravelInter moveInter]
+            | None, Some moveIntra ->
+                [TravelIntra moveIntra]
+            | None, None ->
+                []
+        | Block
+        | Crouch
+        | Delay
+        | Dodge
+        | Spin ->
+            []
+        | Cast
+        | Power
+        | Press
+        | Ready
+        | Retarget ->
+            []
+        | Burst
+        | Fire ->
+            []
+        | Grab
+        | Knockout
+        | Slam
+        | Sweep
+        | Toss
+        | Throw ->
+            []
+        | Strike weapon ->
+            // weapon
+            let damage = Weapon.getDamage weapon
+            let size = Weapon.getSizeBoost weapon
+            // moves
+            let damage = bonusDamage moveID moves damage
+            // attacker
+            let attackerCharacter = attacker.GetCharacter world
+            let size = size + Character.getSize attackerCharacter
+            [Damage (defender, size, damage)]
+
+    static member processTurn actor turn area world =
+        turn.Checks
+        |> List.fold (fun effects check ->
+            match check.Action with
+            | FullMentalAction ->
+                effects
+
+            | FullPhysicalAction ->
+                effects
+
+            | StanceChange stance ->
+                let effect =
+                    CharacterStanceChange (actor, stance)
+                effects @ [ effect ]
+
+            | PhysicalSequence moves ->
+                let successes = check.Successes
+                let blocks = check.OpposedSuccesses
+
+                let effects' =
+                    let indexes, moves =
+                        moves
+                        |> List.indexed
+                        |> List.takeWhile (fun (i, move) ->
+                            // positioning is always successful for now, but should check if within reach of enemy later
+                            ((List.contains move Move.positioning) || (successes > blocks)) && (i < successes)
+                        )
+                        |> List.unzip
+
+                    match check.Target with
+                    | Some target ->
+                        List.map (fun i ->
+                            Turn.processMove i moves actor target area world
+                        ) indexes
+                        |> List.concat
+                    | None ->
+                        []
+                effects @ effects'
+            ) []
+
 
 type CombatState =
     | Playing
@@ -292,8 +321,6 @@ type [<SymbolicExpansion>] Combat = {
 
     DisplayLeft : Character
     DisplayRight : Character
-
-
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
@@ -314,8 +341,8 @@ with
     static member initial = {
         Combat.empty with
             GameplayState = Playing
-            DisplayLeft = Character.player
-            DisplayRight = Character.rat
+            DisplayLeft = CharacterContent.player
+            DisplayRight = CharacterContent.rat
             Area = Area.level1
     }
 
@@ -350,186 +377,3 @@ with
             character.MajorWounds
         )
         |> List.last
-
-    // btw thinking with high enough air you should be able to tell enemy's stance
-    // TODO: implement correct stance selection once skills are implemented
-    static member turnAttackerStance =
-        Character.stanceMove [Gall; Gall; Gall] [Lymph; Oil; Plasma] Character.stanceEmpty
-
-    static member turnDefenderStance =
-
-        Character.stanceMove [Lymph; Lymph; Lymph] [Gall; Oil; Plasma] Character.stanceEmpty
-
-
-    // attack, prototype of attacker AI
-    static member turnAttackerPlan (attacker: Entity) gameplay world =
-
-        // pick target with the most wounds, excluding combatant himself
-        let target =
-            let otherCombatants =
-                gameplay.History
-                |> Map.keys
-                |> List.ofSeq
-                |> List.remove (fun entity -> entity = attacker)
-            Combat.getCharacterMostWounds otherCombatants world
-
-        // check if actor can do moves
-        let canAct =
-            let character = attacker.GetCharacter world
-            character.MajorWounds < MajorWounds.Down
-
-        if canAct then
-
-            let combatantName = attacker.Name
-            let targetName = target.Name
-
-
-            let stanceChange = [{
-                Check.empty with
-                    Action = StanceChange Combat.turnAttackerStance
-            }]
-
-            let area = gameplay.Area
-
-            let physicalAction =
-                match Area.findPath combatantName targetName area with
-                // no path
-                | [] ->
-                    []
-                | path ->
-
-                    let character = attacker.GetCharacter world
-                    let statCombatant = Character.getStat Gall character
-                    let reach = Character.getReach character
-                    let speed = Character.getSpeed character
-
-                    let distance = List.last path |> snd
-
-                    if (reach >= distance) then
-                        // in reach
-                        Random.getItemsFromList statCombatant Move.attacks
-                    else
-                        // not in reach
-                        if (speed * statCombatant >= distance) then
-                            // can run to
-                            let movementMoves = round (float distance / float speed + 0.5) |> uint32
-                            List.init (movementMoves |> int) (fun i -> Stride)
-                            @ Random.getItemsFromList (statCombatant - movementMoves) Move.attacks
-                        else
-                            // can't run to
-                            List.init (statCombatant |> int) (fun i -> Stride)
-                    |> PhysicalSequence
-                    |> fun x -> [{
-                        Check.empty with
-                            Action = x
-                            Element = Some Gall
-                            Threshold = 1
-
-                            Target = Some target
-
-                            OpposedBy = [target]
-                    }]
-
-            let action = {
-                Turn.empty with
-                    Turn = gameplay.Turn
-                    Type = Action
-                    Checks = stanceChange @ physicalAction
-            }
-
-            action
-        else
-            let action = {
-                Turn.empty with
-                    Turn = gameplay.Turn
-                    Type = Action
-                    Checks = []
-            }
-
-            action
-
-
-    // response, prototype of defender AI
-    static member turnDefenderPlan (attacker: Entity) attackerAction (defender: Entity) gameplay world =
-
-        let canAct =
-            let character = defender.GetCharacter world
-            character.MajorWounds < MajorWounds.Down
-
-        if canAct then
-
-            let movesCombatant =
-                match attackerAction.Action with
-                | PhysicalSequence moves -> moves
-                | _ -> []
-
-            let combatantName = attacker.Name
-            let targetName = defender.Name
-
-            let area = gameplay.Area
-
-            let stanceChange = [{
-                Check.empty with
-                    Action = StanceChange Combat.turnDefenderStance
-            }]
-
-            let physicalAction =
-                match Area.findPath combatantName targetName area with
-                // no path
-                | [] ->
-                    []
-                | path ->
-                    let character = defender.GetCharacter world
-                    let reach = Character.getReach character
-                    let statDefender = Character.getStat Lymph character
-
-                    let distance = List.last path |> snd
-                    if (reach >= distance) then
-                        // in reach
-
-                        let combatantBlockableMoves =
-                            List.fold (fun number move ->
-                                if List.contains move Move.attacks then number + 1u else number
-                            ) 0u movesCombatant
-
-                        Random.getItemsFromList (min statDefender combatantBlockableMoves) Move.defence
-                        @
-                        if (statDefender > combatantBlockableMoves) then
-                            [ Move.Ready ]
-                            @
-                            Random.getItemsFromList (statDefender - combatantBlockableMoves) Move.attacks
-                        else
-                            []
-                    else
-                        []
-                    |> PhysicalSequence
-                    |> fun x -> [{
-                        Check.empty with
-                            Action = x
-                            Element = Some Lymph
-                            Threshold = 1
-
-                            Target = Some attacker
-
-                            OpposedBy = [attacker]
-                    }]
-
-
-            let action = {
-                Turn.empty with
-                    Type = Reaction
-                    Turn = gameplay.Turn
-                    Checks = stanceChange @ physicalAction
-            }
-
-            action
-
-        else
-            let action = {
-                Turn.empty with
-                    Type = Reaction
-                    Turn = gameplay.Turn
-                    Checks = []
-            }
-
-            action
