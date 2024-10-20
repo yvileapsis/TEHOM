@@ -101,6 +101,20 @@ floor/walls/ceiling/wings/air sacs are anchor points
 
 *)
 
+    type Gait =
+        | Sluggish
+        | Slow
+        | Moderate
+        | Fast
+        | Speedy
+    with
+        static member multiplier = function
+            | Sluggish -> 0.5
+            | Slow -> 0.75
+            | Moderate -> 1.0
+            | Fast -> 1.25
+            | Speedy -> 1.5
+
 
     type Organ =
         | Organ
@@ -113,10 +127,15 @@ floor/walls/ceiling/wings/air sacs are anchor points
 
     type Body = {
         Organs : Graph<String, Organ, Tissue>
+        Size : int
+        Gait : Gait
+
     }
     with
         static member empty = {
             Organs = Graph.empty
+            Size = 0
+            Gait = Moderate
         }
 
         static member humanOrgans =
@@ -173,7 +192,11 @@ floor/walls/ceiling/wings/air sacs are anchor points
                 Organs = Body.humanOrgans
         }
 
-        static member rat = Body.empty
+        static member rat = {
+            Body.empty with
+                Size = -2
+                Gait = Speedy
+        }
 
         static member contains limb (body : Body) =
             Vertices.contains limb body.Organs

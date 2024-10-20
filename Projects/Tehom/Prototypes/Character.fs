@@ -227,20 +227,6 @@ module Character =
         | Impossible = 9
     // C F P A S G E T D I
 
-    type Gait =
-        | Sluggish
-        | Slow
-        | Moderate
-        | Fast
-        | Speedy
-    with
-        static member multiplier = function
-            | Sluggish -> 0.5
-            | Slow -> 0.75
-            | Moderate -> 1.0
-            | Fast -> 1.25
-            | Speedy -> 1.5
-
     type Stats = Stat * Stat * Stat * Stat
 
     type Character = {
@@ -263,8 +249,6 @@ module Character =
 
         // depends on body type
         Body : Body
-        Size : int
-        Gait : Gait
         Weapons : Weapon list
 
         // Dynamic stats
@@ -404,31 +388,31 @@ module Character =
             { character with Initiative = initiative }
 
         static member getSize character =
-            character.Size
+            character.Body.Size
 
         static member getSpeed character =
-            let multiplier = Gait.multiplier character.Gait
+            let multiplier = Body.Gait.multiplier character.Body.Gait
             let baseSpeed =
                 // mouse to beagle
-                if character.Size <= -2 then
+                if character.Body.Size <= -2 then
                     150
                 // human child
-                elif character.Size = -1 then
+                elif character.Body.Size = -1 then
                     300
                 // human
-                elif character.Size = 0 then
+                elif character.Body.Size = 0 then
                     600
                 // bear
-                elif character.Size = 1 then
+                elif character.Body.Size = 1 then
                     900
                 // elephant
-                elif character.Size = 2 then
+                elif character.Body.Size = 2 then
                     1200
                 // blue whale
-                elif character.Size = 3 then
+                elif character.Body.Size = 3 then
                     1500
                 //
-                elif character.Size = 4 then
+                elif character.Body.Size = 4 then
                     1800
                 // leviathan
                 else
@@ -437,25 +421,25 @@ module Character =
             float baseSpeed * multiplier |> uint32
 
         static member getReach character =
-            if character.Size <= -2 then
+            if character.Body.Size <= -2 then
                 25u
             // human child
-            elif character.Size = -1 then
+            elif character.Body.Size = -1 then
                 50u
             // human
-            elif character.Size = 0 then
+            elif character.Body.Size = 0 then
                 75u
             // bear
-            elif character.Size = 1 then
+            elif character.Body.Size = 1 then
                 100u
             // elephant
-            elif character.Size = 2 then
+            elif character.Body.Size = 2 then
                 150u
             // blue whale
-            elif character.Size = 3 then
+            elif character.Body.Size = 3 then
                 200u
             //
-            elif character.Size = 4 then
+            elif character.Body.Size = 4 then
                 300u
             // leviathan
             else
@@ -493,17 +477,14 @@ module Character =
 
             Stance = Stance.empty
 
-            Size = 0
-            Gait = Moderate
-
             Body = Body.empty
             Weapons = []
             Edges = []
             CustomActions = []
 
-            PhysicalActions = 0
+            PhysicalActions = 1
             PhysicalActionsLeft = 0
-            MentalActions = 0
+            MentalActions = 1
             MentalActionsLeft = 0
             Stances = 0
             StancesLeft = 0

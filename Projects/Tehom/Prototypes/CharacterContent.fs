@@ -20,8 +20,7 @@ module CharacterContent =
             Plasma = Stat.Gifted
 
             Body = Body.human
-            PhysicalActions = 1
-            MentalActions = 1
+
             Stances = 2
 
             Weapons = [
@@ -41,9 +40,6 @@ module CharacterContent =
             Lymph = Stat.Average
             Oil = Stat.Average
             Plasma = Stat.Average
-
-            PhysicalActions = 1
-            MentalActions = 1
             Stances = 1
     }
 
@@ -56,8 +52,8 @@ module CharacterContent =
 
             ID = "rat"
             Name = "Rat"
-            Size = -2
-            Gait = Speedy
+
+            Body = Body.rat
 
             Weapons = [
                 Weapon.bite "head"
