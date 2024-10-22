@@ -113,6 +113,15 @@ with
             Target = Some target
     }
 
+    static member defence action threshold target = {
+        Check.empty with
+            Action = action
+            Element = Some Lymph
+            Threshold = threshold
+            OpposedBy = [target]
+            Target = Some target
+    }
+
 
 type Turn = {
     Turn : int

@@ -71,7 +71,7 @@ module CharacterContent =
                 ] }
                 { Name = "Defence"; Actions = [
                     StanceChange (Stance.make Lymph [Gall; Gall; Gall; Gall; Plasma; Plasma] Stance.empty)
-                    PhysicalSequence [ Dodge; Dodge; Dodge; ]
+                    PhysicalSequence [ Dodge; Dodge; Dodge; Dodge; ]
                 ] }
             ]
     }

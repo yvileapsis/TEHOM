@@ -35,7 +35,7 @@ module AttackerAI =
         move @ attack
         |> fun x -> [
             Check.unstoppable (StanceChange Stance.attacker)
-            Check.attack (PhysicalSequence x) (moves + attacks) target
+            Check.attack (PhysicalSequence x) (List.length x) target
         ]
 
     // attack in the case character is programmed
@@ -120,88 +120,109 @@ module AttackerAI =
 
 module DefenderAI =
 
-    // response, prototype of defender AI
-    let plan (attacker: Entity) attackerAction (defender: Entity) gameplay world =
+    let analyzeAttackerMoves attackerAction =
+        match attackerAction.Action with
+        | PhysicalSequence moves ->
+            moves
+            |> List.filter (fun move -> List.contains move Move.attacks)
+            |> List.length
+        | _ ->
+            0
 
-        let canAct =
-            let character = defender.GetCharacter world
-            character.MajorWounds < MajorWounds.Down
+    // defence in the case character has no programming
+    let defenceDefault character blocks attacks target =
+        // TODO: better selection of positioning moves
+        let defence =
+            Random.getItemsFromList blocks Move.defence
 
-        if canAct then
+        // TODO: much better selection of weapons
+        // TODO: much better selection of attack moves, power, press and such
+        let attack =
+            let weapon () =
+                Character.getWeapons character
+                |> Random.getItemFromList
 
-            let movesCombatant =
-                match attackerAction.Action with
-                | PhysicalSequence moves -> moves
-                | _ -> []
+            if attacks > 0 then
+                [ Ready ]
+            else
+                []
+            @
+            if attacks > 1 then
+                List.init attacks (fun _ -> Strike (weapon ()))
+            else
+                []
 
-            let combatantName = attacker.Name
-            let targetName = defender.Name
+        defence @ attack
+        |> fun x -> [
+            Check.unstoppable (StanceChange Stance.attacker)
+            Check.defence (PhysicalSequence x) (List.length x) target
+        ]
 
-            let area = gameplay.Area
+    // attack in the case character is programmed
+    let defenceCustom character threshold target =
+        character.CustomActions
+        |> List.sortByDescending (fun { Actions = actions } ->
+            actions
+            |> List.fold (fun priority action ->
+                match action with
+                | StanceChange { LymphStance = lymph } ->
+                    lymph
+                | _ ->
+                    priority
+            ) 0
+        )
+        |> List.head
+        |> _.Actions
+        |> List.map (function
+            | PhysicalSequence _ as action ->
+                Check.defence action threshold target
+            | StanceChange _ as action ->
+                Check.unstoppable action
+            | _ ->
+                Check.empty
+        )
 
-            let stanceChange = [{
-                Check.empty with
-                    Action = StanceChange Stance.defender
-            }]
+    // plan attacker actions
+    let tryPlan (attacker: Entity) attackerAction (defender: Entity) area gameplay world =
 
-            let physicalAction =
-                match Area.findPath combatantName targetName area with
-                // no path
-                | [] ->
-                    []
-                | path ->
-                    let character = defender.GetCharacter world
-                    let reach = Character.getReach character
-                    let statDefender = Character.getStat Lymph character |> int
+        let character = defender.GetCharacter world
 
-                    let distance = List.last path |> snd
-                    if (reach >= distance) then
-                        // in reach
+        if Character.canAct character then
 
-                        let combatantBlockableMoves =
-                            List.fold (fun number move ->
-                                if List.contains move Move.attacks then number + 1u else number
-                            ) 0u movesCombatant
-                            |> int
+            let target = attacker
 
-                        Random.getItemsFromList (min statDefender combatantBlockableMoves) Move.defence
-                        @
-                        if (statDefender > combatantBlockableMoves) then
-                            [ Ready ]
-                            @
-                            Random.getItemsFromList (statDefender - combatantBlockableMoves) Move.attacks
-                        else
-                            []
+            let defenderName = defender.Name
+            let targetName = target.Name
+
+            match Area.findPath defenderName targetName area with
+            | _::_ as path ->
+
+                let statCombatant = Character.getStat Gall character
+                let reach = Character.getReach character
+                let speed = Character.getSpeed character
+
+                let distance = List.last path |> snd
+
+                // in reach
+                if (reach >= distance) then
+                    // custom actions
+                    if Character.hasCustomActions character then
+                        defenceCustom character (int statCombatant) target
+                    // no custom actions
                     else
-                        []
-                    |> PhysicalSequence
-                    |> fun x -> [{
-                        Check.empty with
-                            Action = x
-                            Element = Some Lymph
-                            Threshold = 1
-
-                            Target = Some attacker
-
-                            OpposedBy = [attacker]
-                    }]
-
-
-            let action = {
-                Turn.empty with
-                    Type = Reaction
-                    Turn = gameplay.Turn
-                    Checks = stanceChange @ physicalAction
-            }
-
-            action
-
+                        let attackMoves = analyzeAttackerMoves attackerAction
+                        defenceDefault character attackMoves (int statCombatant) target
+                    |> fun checks -> Some {
+                        Turn.empty with
+                            Turn = gameplay.Turn
+                            Type = TurnType.Reaction
+                            Checks = checks
+                    }
+                // not in reach
+                // TODO: assumes enemy coordinate is static which is false
+                else
+                    None
+            | _ ->
+                None
         else
-            let action = {
-                Turn.empty with
-                    Type = Reaction
-                    Turn = gameplay.Turn
-                    Checks = []
-            }
-
-            action
+            None
