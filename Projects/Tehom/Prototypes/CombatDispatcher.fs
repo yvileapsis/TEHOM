@@ -122,18 +122,17 @@ type CombatDispatcher () =
         // TODO: assumed one target
         | TurnDefence (attacker, attackerAction) ->
             attackerAction.Checks
-            |> List.tryFind (fun check ->
-                not (List.isEmpty check.OpposedBy)
-            )
+            |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
             |> function
                 | Some { OpposedBy = [defender] } as Some action ->
-                    let defenderAction =
-                        DefenderAI.plan attacker action defender model world
+                    match DefenderAI.tryPlan attacker action defender model.Area model world with
+                    | Some defenderAction ->
+                        let signal : Signal =
+                            TurnEnd (attacker, attackerAction, defender, defenderAction)
 
-                    let signal : Signal =
-                        TurnEnd (attacker, attackerAction, defender, defenderAction)
-
-                    withSignal signal model
+                        withSignal signal model
+                    | None ->
+                        just model
                 | _ ->
                     just model
 
