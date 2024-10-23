@@ -9,10 +9,7 @@ open Action
 open Character
 
 (*
-TODO: Positioning system
-TODO: Limb system
-limbs should have min max angles which should impact reach
-TODO: Moves and their effects
+TODO: Always do the minimum implementation
 TODO: Skills and stances
 TODO: Player-controllable combat
 TODO: Combat start and combat end

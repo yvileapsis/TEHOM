@@ -115,7 +115,6 @@ type CombatDispatcher () =
                     TurnDefence (attacker, attackerAction)
 
                 withSignal signal model
-
             | None ->
                 just model
 

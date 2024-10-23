@@ -58,7 +58,11 @@ module AttackerAI =
         |> List.head
         |> _.Actions
         |> List.map (function
-            | PhysicalSequence _ as action ->
+            | PhysicalSequence seq ->
+                let action =
+                    seq
+                    |> List.truncate threshold
+                    |> PhysicalSequence
                 Check.attack action threshold target
             | StanceChange _ as action ->
                 Check.unstoppable action
@@ -148,7 +152,7 @@ module DefenderAI =
                 []
             @
             if attacks > 1 then
-                List.init attacks (fun _ -> Strike (weapon ()))
+                List.init (attacks - 1) (fun _ -> Strike (weapon ()))
             else
                 []
 
@@ -158,7 +162,7 @@ module DefenderAI =
             Check.defence (PhysicalSequence x) (List.length x) target
         ]
 
-    // attack in the case character is programmed
+    // defence in the case character is programmed
     let defenceCustom character threshold target =
         character.CustomActions
         |> List.sortByDescending (fun { Actions = actions } ->
@@ -174,7 +178,11 @@ module DefenderAI =
         |> List.head
         |> _.Actions
         |> List.map (function
-            | PhysicalSequence _ as action ->
+            | PhysicalSequence seq ->
+                let action =
+                    seq
+                    |> List.truncate threshold
+                    |> PhysicalSequence
                 Check.defence action threshold target
             | StanceChange _ as action ->
                 Check.unstoppable action
@@ -182,7 +190,7 @@ module DefenderAI =
                 Check.empty
         )
 
-    // plan attacker actions
+    // plan defender actions
     let tryPlan (attacker: Entity) attackerAction (defender: Entity) area gameplay world =
 
         let character = defender.GetCharacter world
@@ -211,17 +219,17 @@ module DefenderAI =
                     // no custom actions
                     else
                         let attackMoves = analyzeAttackerMoves attackerAction
-                        defenceDefault character attackMoves (int statCombatant) target
-                    |> fun checks -> Some {
-                        Turn.empty with
-                            Turn = gameplay.Turn
-                            Type = TurnType.Reaction
-                            Checks = checks
-                    }
+                        defenceDefault character attackMoves (int statCombatant - attackMoves) target
                 // not in reach
                 // TODO: assumes enemy coordinate is static which is false
                 else
-                    None
+                    []
+                |> fun checks -> Some {
+                    Turn.empty with
+                        Turn = gameplay.Turn
+                        Type = TurnType.Reaction
+                        Checks = checks
+                }
             | _ ->
                 None
         else
