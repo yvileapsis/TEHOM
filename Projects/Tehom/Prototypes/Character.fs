@@ -132,10 +132,12 @@ module Move =
             | x -> $"{x}"
 
 type Element =
-    | Gall
+    | Gall // Bile
     | Lymph
     | Oil
-    | Plasma
+    | Plasma // Hema
+    // GLOPS
+    // HOBLS
 
 type Move = Move.Move
 
