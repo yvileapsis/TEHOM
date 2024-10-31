@@ -1,9 +1,8 @@
-namespace FGL
+namespace Graph
 
 open Prime
 open System
-open Aether
-open FGL
+open Graph
 
 module Query =
 
@@ -18,7 +17,11 @@ module Query =
     /// Tree of shortest paths from a certain node to the rest of the (reachable) nodes.
     /// Corresponds to 'dijkstra' applied to a heap in which the only known node is the starting node, with a path of length
     /// 0 leading to it. The edge labels of type @b@ are the edge weights; negative edge weights are not supported.
+    [<TailCall>]
     let spTree (v : 'Vertex) (g : Graph<'Vertex, 'Label, 'Distance>) : LRTree<'Vertex, 'Distance> =
+
+        let isHeapEmpty heap =
+            OSet.isEmpty heap
 
         // heap is the main orderer of paths
         let decomposeHeap heap =
@@ -36,42 +39,37 @@ module Query =
         /// Basically a graph fold with extra rules. Tail recursive unlike FGL implementation.
         let rec dijkstra
             (minPathTree : LRTree<'Vertex, 'Distance>)
-            (heap : OSet<LPath<'Vertex,'Distance>>)
+            heap
             (graph : Graph<'Vertex, 'Label, 'Distance>)
             : LRTree<'Vertex, 'Distance> =
 
-            if OSet.isEmpty heap || Graph.isEmpty graph then
+            if isHeapEmpty heap || Graph.isEmpty graph then
                 minPathTree
             else
                 let minPath, heap' = decomposeHeap heap
 
                 match minPath with
-                | [] -> minPathTree
                 | (minVertex, minVertexDistance) :: _ ->
-
                     let context, graph' = Graph.tryDecompose minVertex graph
 
-                    let minPathTree', heap' =
-                        match context with
-                        | Some (_, _, _, rightEdge) ->
+                    match context with
+                    | Some (_, _, _, rightEdge) ->
+                        // rebuild heap and add minpath
+                        let minPathTree' =
+                            minPath :: minPathTree
 
-                            // rebuild heap and add minpath
-                            let minPathTree' =
-                                minPath :: minPathTree
+                        let heap' =
+                            composeHeap (fun (v, l) ->
+                                [v, l + minVertexDistance] @ minPath
+                            ) rightEdge heap'
 
-                            let heap' =
-                                composeHeap (fun (v, l) ->
-                                    [v, l + minVertexDistance] @ minPath
-                                ) rightEdge heap'
+                        dijkstra minPathTree' heap' graph'
 
-                            minPathTree', heap'
+                    | None ->
+                        // check next min value on heap
+                        dijkstra minPathTree heap' graph'
 
-                        | None ->
-
-                            // check next min value on heap
-                            minPathTree, heap'
-
-                    dijkstra minPathTree' heap' graph'
+                | [] -> minPathTree
 
         dijkstra List.empty (OSet.ofSeq1 [[v, 0u]]) g
 

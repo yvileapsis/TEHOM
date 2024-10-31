@@ -141,7 +141,7 @@ module Area =
 
         static member find finder (area : Area) =
             area.Sites
-            |> Vertices.toVertexList
+            |> Vertices.toList
             |> List.tryFind finder
             |> function | Some v -> Some (fst v) | None -> None
 

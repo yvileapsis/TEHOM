@@ -1,4 +1,4 @@
-namespace FGL.Directed
+namespace Graph.Directed
 
 (*
 Taken from FSharp.FGL, with the hope of altering it to the point of negligible code borrowing
@@ -20,9 +20,7 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 *)
 
 open System
-open Aether
-open FGL
-
+open Graph
 
 ///Functions for vertices of directed Graphs
 module Vertices = 
@@ -93,15 +91,6 @@ module Vertices =
         match c with
         | (_, v, _, s) ->
             s |> List.map (fun (v2,e) -> v,v2,e)
-
-    //General
-
-    ///Creates a list of all vertices and their labels.
-    [<Obsolete("Corrected Typo in function name: Use toVertexList instead")>]
-    let tovertexList (g:Graph<'Vertex,'Label,'Edge>) : LVertex<'Vertex,'Label> list=
-            Map.toList g
-            |> List.map (fun (v, (_, l, _)) -> v, l)
-
      
                        
 
@@ -148,13 +137,19 @@ module Edges =
         if (Vertices.contains v1 g |> not) || (Vertices.contains v2 g |> not) || contains v1 v2 g then
             None
         else 
-            let g1 = 
-                let composedPrism = Compose.prism (Map.key_ v1) Lenses.msucc_
-                let adjListMapping = Map.add v2 edge
-                (Optic.map composedPrism adjListMapping) g
-            let composedPrism = Compose.prism (Map.key_ v2) Lenses.mpred_
-            let adjListMapping = Map.add v1 edge
-            (Optic.map composedPrism adjListMapping) g1
+            let addToSucceeding v1 v2 g =
+                let p, l, s = Map.find v1 g
+                let s = Map.add v2 edge s
+                Map.add v1 (p, l, s) g
+
+            let addToPrevious v1 v2 g =
+                let p, l, s = Map.find v2 g
+                let p = Map.add v1 edge p
+                Map.add v2 (p,l,s) g
+
+            g
+            |> addToPrevious v1 v2
+            |> addToSucceeding v1 v2
             |> Some
 
     ///Adds a labeled, directed edge to the graph.
@@ -162,13 +157,20 @@ module Edges =
         if Vertices.contains v1 g |> not then failwithf "Source Vertex %O does not exist" v1 
         if Vertices.contains v2 g |> not then failwithf "Target Vertex %O does not exist" v2
         if contains v1 v2 g then failwithf "An Edge between Source vertex %O Target Vertex %O does already exist; FSharp.FGL does not allow for duplicate edges" v1 v2
-        let g1 = 
-            let composedPrism = Compose.prism (Map.key_ v1) Lenses.msucc_
-            let adjListMapping = Map.add v2 edge
-            (Optic.map composedPrism adjListMapping) g
-        let composedPrism = Compose.prism (Map.key_ v2) Lenses.mpred_
-        let adjListMapping = Map.add v1 edge
-        (Optic.map composedPrism adjListMapping) g1
+
+        let addToSucceeding v v' g =
+            let p, l, s = Map.find v g
+            let s = Map.add v' edge s
+            Map.add v (p, l, s) g
+
+        let addToPrevious v v' g =
+            let p, l, s = Map.find v g
+            let p = Map.add v' edge p
+            Map.add v (p,l,s) g
+
+        g
+        |> addToSucceeding v1 v2
+        |> addToPrevious v2 v1
 
     ///Adds a list of labeled, directed edges to the graph.
     let tryAddMany (edges : list<LEdge<'Vertex,'Edge>>) (g: Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'Label,'Edge> option =
@@ -180,20 +182,26 @@ module Edges =
 
     ///Removes an edge from the graph.
     let remove ((v1, v2): Edge<'Vertex>) (g: Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'Label,'Edge> =
-        let g1 = 
-            let composedPrism = Compose.prism (Map.key_ v1) Lenses.msucc_
-            let adjListMapping = Map.remove v2
-            (Optic.map composedPrism adjListMapping) g
-        let composedPrism = Compose.prism (Map.key_ v2) Lenses.mpred_
-        let adjListMapping = Map.remove v1
-        (Optic.map composedPrism adjListMapping) g1  
+        let removeFromSucceeding v v' g =
+            let p, l, s = Map.find v g
+            let s = Map.remove v' s
+            Map.add v (p, l, s) g
+
+        let removeFromPrevious v v' g =
+            let p, l, s = Map.find v g
+            let p = Map.remove v' p
+            Map.add v (p,l,s) g
+
+        g
+        |> removeFromSucceeding v1 v2
+        |> removeFromPrevious v2 v1
 
     ///Removes a list of edges from the graph.
     let removeMany (edges : list<Edge<'Vertex>>) (g: Graph<'Vertex,'Label,'Edge>) =
         List.fold (fun g e -> remove e g) g edges
 
     ///Creates a list of all edges and their labels.
-    let toEdgeList (g:Graph<'Vertex,'Label,'Edge>) : LEdge<'Vertex,'Edge> list = 
+    let toList (g:Graph<'Vertex,'Label,'Edge>) : LEdge<'Vertex,'Edge> list =
        g
        |> Graph.mapContexts (fun (p,v,l,s) -> s)
        |> Map.toList
@@ -300,8 +308,8 @@ module Models =
 
     ///Creates a directed graph of vertexcount n and edge probability p
     let gilbert (nodeInitializer: int -> LVertex<'Vertex,'Label>) (n: int) (p: float) : Graph<'Vertex,'Label,int> =
-        FGL.Algorithm.Models.gilbert Graph.empty nodeInitializer (fun lv g -> Vertices.add lv g) (fun (v1,_) (v2,_) g -> Edges.add (v1,v2,1) g) n p
+        Graph.Algorithm.Models.gilbert Graph.empty nodeInitializer (fun lv g -> Vertices.add lv g) (fun (v1,_) (v2,_) g -> Edges.add (v1,v2,1) g) n p
     
     ///Creates a directed graph of vertexcount v and edgecount e
     let erdosRenyi (nodeInitializer: int -> LVertex<'Vertex,'Label>) (v: int) (e: int) : Graph<'Vertex,'Label,int> =
-        FGL.Algorithm.Models.erdosRenyi Graph.empty nodeInitializer (fun lv g -> Vertices.add lv g) (fun (v1,_) (v2,_) g -> Edges.add (v1,v2,1) g) v e
+        Graph.Algorithm.Models.erdosRenyi Graph.empty nodeInitializer (fun lv g -> Vertices.add lv g) (fun (v1,_) (v2,_) g -> Edges.add (v1,v2,1) g) v e

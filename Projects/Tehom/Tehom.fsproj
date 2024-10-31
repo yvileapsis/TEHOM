@@ -71,7 +71,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Aether" Version="8.3.1" />
 		<Reference Include="AssimpNet">
 			<HintPath>..\..\Nu\Nu.Dependencies\AssimpNet\netstandard2.1\AssimpNet.dll</HintPath>
 		</Reference>

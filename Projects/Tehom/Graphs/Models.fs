@@ -1,4 +1,4 @@
-namespace FGL.Algorithm
+namespace Graph.Algorithm
 
 (*
 Taken from FSharp.FGL, with the hope of altering it to the point of negligible code borrowing
@@ -19,7 +19,7 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER I
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 *)
 
-open FGL
+open Graph
 
 ///Contains generic functions for creating model graphs
 module Models =
