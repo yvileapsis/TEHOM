@@ -20,42 +20,60 @@ module Query =
     /// 0 leading to it. The edge labels of type @b@ are the edge weights; negative edge weights are not supported.
     let spTree (v : 'Vertex) (g : Graph<'Vertex, 'Label, 'Distance>) : LRTree<'Vertex, 'Distance> =
 
+        // heap is the main orderer of paths
+        let decomposeHeap heap =
+            let firstValue = heap |> OSet.toSeq |> Seq.head
+            let heap' = OSet.remove firstValue heap
+            firstValue, heap'
+
+        let composeHeap composer newVertices heap =
+            newVertices
+            |> List.map composer
+            |> OSet.concat heap
+
         /// Dijkstra's shortest path algorithm.
         /// The edge labels of type @b@ are the edge weights; negative edge weights are not supported.
         /// Basically a graph fold with extra rules. Tail recursive unlike FGL implementation.
         let rec dijkstra
+            (minPathTree : LRTree<'Vertex, 'Distance>)
             (heap : OSet<LPath<'Vertex,'Distance>>)
-            (acc : LRTree<'Vertex, 'Distance>)
             (graph : Graph<'Vertex, 'Label, 'Distance>)
             : LRTree<'Vertex, 'Distance> =
 
             if OSet.isEmpty heap || Graph.isEmpty graph then
-                acc
+                minPathTree
             else
-                let minValues = heap |> OSet.toSeq |> Seq.head
-                let heap' = OSet.remove minValues heap
+                let minPath, heap' = decomposeHeap heap
 
-                match minValues with
-                | [] -> acc
+                match minPath with
+                | [] -> minPathTree
                 | (minVertex, minVertexDistance) :: _ ->
 
                     let context, graph' = Graph.tryDecompose minVertex graph
 
-                    let minValues', heap' =
+                    let minPathTree', heap' =
                         match context with
                         | Some (_, _, _, rightEdge) ->
 
-                            minValues :: acc,
-                            rightEdge
-                            |> List.map (fun (v, l) -> [[v, l + minVertexDistance] @ minValues])
-                            |> List.fold OSet.concat heap'
+                            // rebuild heap and add minpath
+                            let minPathTree' =
+                                minPath :: minPathTree
+
+                            let heap' =
+                                composeHeap (fun (v, l) ->
+                                    [v, l + minVertexDistance] @ minPath
+                                ) rightEdge heap'
+
+                            minPathTree', heap'
 
                         | None ->
-                            acc, heap'
 
-                    dijkstra heap' minValues' graph'
+                            // check next min value on heap
+                            minPathTree, heap'
 
-        dijkstra (OSet.ofSeq1 [[v, 0u]]) List.empty g
+                    dijkstra minPathTree' heap' graph'
+
+        dijkstra List.empty (OSet.ofSeq1 [[v, 0u]]) g
 
     /// Find the first path in a tree that starts with the given node.
     /// Returns an empty list if there is no such path.
