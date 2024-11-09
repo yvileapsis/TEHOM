@@ -1233,7 +1233,6 @@ type [<ReferenceEquality>] GlRenderer2d =
         | RenderRichText descriptor ->
             GlRenderer2d.renderRichText
                 (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Entries, eyeCenter, eyeSize, windowSize, renderer)
-pstream/master
         | RenderTiles descriptor ->
             GlRenderer2d.renderTiles
                 (&descriptor.Transform, &descriptor.ClipOpt, &descriptor.Color, &descriptor.Emission, descriptor.MapSize, descriptor.Tiles, descriptor.TileSourceSize, descriptor.TileSize, descriptor.TileAssets, eyeCenter, eyeSize, windowSize, renderer)

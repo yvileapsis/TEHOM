@@ -105,7 +105,7 @@ type GameplayDispatcher () =
         | Select ->
 
             let selectedOpt =
-                let ray = World.getMouseRay3dWorld false world
+                let ray = World.getMouseRay3dWorld world
                 let origin = ray.Origin
                 let finale = ray.Origin + 20f * ray.Direction
                 let array = World.rayCast3dBodies origin finale 0xFFFFFFFF 0xFFFFFFFF false world

@@ -96,7 +96,8 @@ type GlyphFacet () =
                           FontSizing = fontSizing
                           FontStyling = fontStyling
                           Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
-                          Justification = entity.GetJustification world }}
+                          Justification = entity.GetJustification world
+                          CursorOpt = None }}
 
             )) world
 

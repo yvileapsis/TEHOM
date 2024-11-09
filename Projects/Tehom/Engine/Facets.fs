@@ -161,10 +161,6 @@ module RichText =
 module TextInputFacetModule =
 
     type Entity with
-        member this.GetFocused world : bool = this.Get (nameof this.Focused) world
-        member this.SetFocused (value : bool) world = this.Set (nameof this.Focused) value world
-        member this.Focused = lens (nameof this.Focused) this this.GetFocused this.SetFocused
-
         member this.GetCaret world : int = this.Get (nameof this.Caret) world
         member this.SetCaret (value : int) world = this.Set (nameof this.Caret) value world
         member this.Caret = lens (nameof this.Caret) this this.GetCaret this.SetCaret
@@ -330,6 +326,7 @@ module TextInputFacetModule =
                         FontStyling = fontStyling
                         Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
                         Justification = entity.GetJustification world
+                        CursorOpt = None
                     }
                 } world
 
