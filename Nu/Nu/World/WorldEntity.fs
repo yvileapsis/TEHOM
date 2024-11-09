@@ -341,10 +341,6 @@ module WorldEntityModule =
             World.getEntityProperty propertyName this world
 
         /// Get an xtension property value.
-        member this.TryGet<'a> propertyName world : 'a =
-            World.tryGetEntityXtensionValue<'a> propertyName this world
-
-        /// Get an xtension property value.
         member this.Get<'a> propertyName world : 'a =
             World.getEntityXtensionValue<'a> propertyName this world
 
@@ -551,15 +547,6 @@ module WorldEntityModule =
 
     type World with
 
-        static member internal tryRunEntity (entity : Entity) world =
-            let facets = entity.GetFacets world
-            let mutable world = world // OPTIMIZATION: inlining fold for speed.
-            if Array.notEmpty facets then // OPTIMIZATION: eliding iteration setup for speed.
-                for facet in facets do
-                    world <- facet.TryRun (entity, world)
-            let dispatcher = entity.GetDispatcher world
-            dispatcher.TryRun (entity, world)
-
         static member internal updateEntity (entity : Entity) world =
             let facets = entity.GetFacets world
             let mutable world = world // OPTIMIZATION: inlining fold for speed.
@@ -675,7 +662,7 @@ module WorldEntityModule =
             let intersectionses =
                 Seq.map (fun (entity : Entity) ->
                     if entity.GetPickable world then
-                        let rayWorld = viewport.MouseToWorld3d (entity.GetAbsolute world, position, eyeCenter, eyeRotation)
+                        let rayWorld = viewport.MouseToWorld3d (position, eyeCenter, eyeRotation)
                         let bounds = entity.GetBounds world
                         let intersectionOpt = rayWorld.Intersects bounds
                         if intersectionOpt.HasValue then
@@ -814,7 +801,7 @@ module WorldEntityModule =
                             match pasteType with
                             | PasteAtMouse ->
                                 let viewport = Constants.Render.Viewport
-                                let ray = viewport.MouseToWorld3d (absolute, rightClickPosition, eyeCenter, eyeRotation)
+                                let ray = viewport.MouseToWorld3d (rightClickPosition, eyeCenter, eyeRotation)
                                 let forward = eyeRotation.Forward
                                 let plane = plane3 (eyeCenter + forward * distance) -forward
                                 let intersectionOpt = ray.Intersection plane
