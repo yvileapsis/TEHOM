@@ -4,7 +4,7 @@ open System
 open System.Numerics
 open Prime
 open Nu
-open FGL
+open Graph
 
 (*
 Issues (like say wounds) are new organs.
