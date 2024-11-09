@@ -180,6 +180,7 @@ module WorldModule3 =
                  // Extensions
                  CameraDispatcher ()
                  GlyphDispatcher ()
+                 ButtonExDispatcher ()
                  ]
 
         static member private makeDefaultFacets () =
@@ -218,6 +219,7 @@ module WorldModule3 =
                  // Extensions
                  CameraFacet ()
                  GlyphFacet ()
+                 HoverFacet ()
                  ]
 
         /// Update late bindings internally stored by the engine from types found in the given assemblies.

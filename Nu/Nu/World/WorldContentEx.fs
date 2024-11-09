@@ -115,9 +115,137 @@ type GlyphDispatcher () =
     static member Properties =
         [define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))]
 
+[<AutoOpen>]
+module HoverFacetExtensions =
+    type Entity with
+        member this.GetHover world : bool = this.Get (nameof this.Hover) world
+        member this.SetHover (value : bool) world = this.Set (nameof this.Hover) value world
+        member this.Hover = lens (nameof this.Hover) this this.GetHover this.SetHover
+        member this.GetHoverOffset world = this.Get (nameof this.HoverOffset) world
+        member this.SetHoverOffset (value) world = this.Set (nameof this.HoverOffset) value world
+        member this.HoverOffset = lens (nameof this.HoverOffset) this this.GetHoverOffset this.SetHoverOffset
+        member this.GetHoverImage world : Image AssetTag = this.Get (nameof this.HoverImage) world
+        member this.SetHoverImage (value : Image AssetTag) world = this.Set (nameof this.HoverImage) value world
+        member this.HoverImage = lens (nameof this.HoverImage) this this.GetHoverImage this.SetHoverImage
+        member this.GetHoverSoundOpt world : Sound AssetTag option = this.Get (nameof this.HoverSoundOpt) world
+        member this.SetHoverSoundOpt (value : Sound AssetTag option) world = this.Set (nameof this.HoverSoundOpt) value world
+        member this.HoverSoundOpt = lens (nameof this.HoverSoundOpt) this this.GetHoverSoundOpt this.SetHoverSoundOpt
+        member this.GetHoverSoundVolume world : single = this.Get (nameof this.HoverSoundVolume) world
+        member this.SetHoverSoundVolume (value : single) world = this.Set (nameof this.HoverSoundVolume) value world
+        member this.HoverSoundVolume = lens (nameof this.HoverSoundVolume) this this.GetHoverSoundVolume this.SetHoverSoundVolume
+        member this.HoverEvent = stoa<unit> "Hover/Event"  --> this
+        member this.HoveredEvent = stoa<unit> "Hovered/Event"  --> this
+        member this.UnhoveredEvent = stoa<unit> "Unhovered/Event" --> this
+
+/// Augments an entity with button behavior.
+type HoverFacet () =
+    inherit Facet (false, false, false)
+
+    static let handleMouseMove evt world =
+        let entity = evt.Subscriber : Entity
+        if entity.GetVisible world then
+            let mutable transform = entity.GetTransform world
+            let perimeter = transform.Perimeter.Box2 // gui currently ignores rotation
+            let mousePositionWorld = World.getMousePostion2dWorld transform.Absolute world
+            if perimeter.Intersects mousePositionWorld then
+                if transform.Enabled then
+                    let world =
+                        if entity.GetHover world = false then
+                            match entity.GetHoverSoundOpt world with
+                            | Some clickSound -> World.playSound (entity.GetHoverSoundVolume world) clickSound world
+                            | None -> ()
+
+                            let eventTrace = EventTrace.debug "HoverFacet" "handleMouseMove" "" EventTrace.empty
+                            World.publishPlus () entity.HoveredEvent eventTrace entity true false world
+                        else
+                            world
+                    let world = entity.SetHover true world
+                    let struct (_, _, world) = entity.TrySet (nameof Entity.HoverOffset) (entity.GetHoverOffset world) world
+                    let eventTrace = EventTrace.debug "HoverFacet" "handleMouseMove" "" EventTrace.empty
+                    let world = World.publishPlus () entity.HoverEvent eventTrace entity true false world
+                    (Cascade, world)
+                else (Cascade, world)
+            else
+                let world =
+                    if entity.GetHover world = true then
+                        let eventTrace = EventTrace.debug "HoverFacet" "handleMouseMove" "" EventTrace.empty
+                        World.publishPlus () entity.UnhoveredEvent eventTrace entity true false world
+                    else
+                        world
+
+                let world = entity.SetHover false world
+                (Cascade, world)
+        else (Cascade, world)
+
+    static let handleMouseLeftUp evt world =
+        let entity = evt.Subscriber : Entity
+        let wasDown = entity.GetDown world
+        let world = entity.SetDown false world
+        let struct (_, _, world) = entity.TrySet (nameof Entity.TextOffset) v2Zero world
+        if entity.GetVisible world then
+            let mutable transform = entity.GetTransform world
+            let perimeter = transform.Perimeter.Box2 // gui currently ignores rotation
+            let mousePositionWorld = World.getMousePostion2dWorld transform.Absolute world
+            if perimeter.Intersects mousePositionWorld then
+                if transform.Enabled && wasDown then
+                    let eventTrace = EventTrace.debug "ButtonFacet" "handleMouseLeftUp" "Up" EventTrace.empty
+                    let world = World.publishPlus () entity.UpEvent eventTrace entity true false world
+                    let eventTrace = EventTrace.debug "ButtonFacet" "handleMouseLeftUp" "Click" EventTrace.empty
+                    let world = World.publishPlus () entity.ClickEvent eventTrace entity true false world
+                    match entity.GetClickSoundOpt world with
+                    | Some clickSound -> World.playSound (entity.GetClickSoundVolume world) clickSound world
+                    | None -> ()
+                    (Resolve, world)
+                else (Cascade, world)
+            else (Cascade, world)
+        else (Cascade, world)
+
+    static member Properties =
+        [define Entity.SliceMargin Constants.Gui.SliceMarginDefault
+         define Entity.ColorDisabled Constants.Gui.ColorDisabledDefault
+         define Entity.Hover false
+         define Entity.HoverOffset v2Zero
+         define Entity.HoverImage Assets.Default.ButtonUp
+         define Entity.HoverSoundOpt (Some Assets.Default.Sound)
+         define Entity.HoverSoundVolume Constants.Audio.SoundVolumeDefault]
+
+    override this.Register (entity, world) =
+        let world = World.sense handleMouseMove Nu.Game.Handle.MouseMoveEvent entity (nameof ButtonFacet) world
+        world
+
+    override this.Render (_, entity, world) =
+        let mutable transform = entity.GetTransform world
+        let sliceMargin = entity.GetSliceMargin world
+        let spriteImage =
+            if entity.GetDown world then
+                entity.GetDownImage world
+            elif entity.GetHover world then
+                entity.GetHoverImage world
+            else
+                entity.GetUpImage world
+        let color = if transform.Enabled then Color.One else entity.GetColorDisabled world
+        World.renderGuiSpriteSliced transform.Absolute transform.Perimeter sliceMargin spriteImage transform.Offset transform.Elevation color world
+
+    override this.GetAttributesInferred (entity, world) =
+        match Metadata.tryGetTextureSizeF (entity.GetUpImage world) with
+        | Some size -> AttributesInferred.important size.V3 v3Zero
+        | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+
+/// Gives an entity the base behavior of a gui button.
+type ButtonExDispatcher () =
+    inherit GuiDispatcher ()
+
+    static member Facets =
+        [typeof<TextFacet>
+         typeof<ButtonFacet>
+         typeof<HoverFacet>]
+
+
 [<RequireQualifiedAccess>]
 module ContentEx =
 
     let camera entityName initializers = Content.entity<CameraDispatcher> entityName initializers
 
     let glyph entityName initializers = Content.entity<GlyphDispatcher> entityName initializers
+
+    let buttonEx entityName initializers = Content.entity<ButtonExDispatcher> entityName initializers
