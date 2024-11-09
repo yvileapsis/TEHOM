@@ -172,7 +172,11 @@ module WorldModule3 =
                  TerrainDispatcher ()
                  Nav3dConfigDispatcher ()
                  StaticModelHierarchyDispatcher ()
-                 RigidModelHierarchyDispatcher ()]
+                 RigidModelHierarchyDispatcher ()
+                 // Extensions
+                 CameraDispatcher ()
+                 GlyphDispatcher ()
+                 ]
 
         static member private makeDefaultFacets () =
             // TODO: consider if we should reflectively generate these.
@@ -205,7 +209,11 @@ module WorldModule3 =
                  TerrainFacet ()
                  NavBodyFacet ()
                  FollowerFacet ()
-                 FreezerFacet ()]
+                 FreezerFacet ()
+                 // Extensions
+                 CameraFacet ()
+                 GlyphFacet ()
+                 ]
 
         /// Update late bindings internally stored by the engine from types found in the given assemblies.
         static member updateLateBindings (assemblies : Assembly array) world =

@@ -140,7 +140,7 @@ W....!!....!!....!!....!!....!!....!"
                 Entity.Color == Color.Black
             ]
 
-            glyph "GlyphDisplay" [
+            ContentEx.glyph "GlyphDisplay" [
                 Entity.Position == v3 0.0f 32.0f 0.0f
                 Entity.Size == v3 360.0f 240.0f 0.0f
                 Entity.Elevation == 10.0f

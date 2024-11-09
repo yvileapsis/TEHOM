@@ -142,8 +142,6 @@ type GameplayDispatcher () =
 
         match command with
         | SetupScene ->
-            let world = World.setEye3dCenter (v3 8f 8f 8f) world
-            let world = World.setEye3dRotation (Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, Math.DegreesToRadians -45f, 0f)) world
 //            let world = Simulants.GameplayPlayer.SetPosition (v3 0.0f 1.65f 0.0f) world
             let world = World.synchronizeNav3d screen world
             just world
@@ -204,6 +202,16 @@ type GameplayDispatcher () =
                 Content.entity<PlayerDispatcher> Simulants.GameplayPlayer.Name [
                     Entity.Persistent == false
                     Entity.DieEvent => Die Simulants.GameplayPlayer
+                ]
+(*
+            let world = World.setEye3dCenter (v3 8f 8f 8f) world
+            let coords = Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, Math.DegreesToRadians -45f, 0f)
+            let world = World.setEye3dRotation coords world
+*)
+
+                ContentEx.camera "Camera" [
+                    Entity.Position == v3 8f 8f 8f
+                    Entity.Rotation == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, Math.DegreesToRadians -45f, 0f)
                 ]
             ]
 
