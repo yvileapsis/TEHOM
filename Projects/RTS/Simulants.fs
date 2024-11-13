@@ -32,4 +32,8 @@ module Simulants =
     let GameplayPlayer = GameplayScene / "Player"
     let GameplaySun = GameplayScene / "Environment" / "Sun"
     let GameplayMarker = GameplayGui / "Marker"
-    let GameplaySelectionManager = GameplayGui / "SelectionManager"
+
+
+    let GameplayManagers = Gameplay / "Managers"
+    let GameplaySelectionManager = GameplayManagers / "SelectionManager"
+    let GameplayCameraManager = GameplayManagers / "CameraManager"

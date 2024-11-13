@@ -58,7 +58,7 @@ type CharacterDispatcher (character : Character) =
          Entity.BodySeparationExplicitEvent =|> fun evt -> CharacterSeparationExplicit evt.Data
          Entity.BodySeparationImplicitEvent =|> fun evt -> CharacterSeparationImplicit evt.Data
          Game.PostUpdateEvent => SyncWeaponTransform
-         Events.SelectionEvent --> Simulants.GameplayGui --> Address.Wildcard =|> fun evt -> SelectMyself evt.Data
+         Events.SelectionEvent --> Simulants.GameplayManagers --> Address.Wildcard =|> fun evt -> SelectMyself evt.Data
 
          ]
 

@@ -87,7 +87,7 @@ type GameplayDispatcher () =
         Game.MouseRightDownEvent => RightClick
         // Game.MouseLeftUpEvent => SetEntities gameplay.Entities
         // Events.AttackEvent --> Simulants.GameplayScene --> Address.Wildcard =|> fun evt -> AttackCharacter evt.Data
-        Events.SelectionEvent --> Simulants.GameplayGui --> Address.Wildcard =|> fun evt -> SelectUnits evt.Data
+        Events.SelectionEvent --> Simulants.GameplayManagers --> Address.Wildcard =|> fun evt -> SelectUnits evt.Data
     ]
 
     // here we handle the above messages
@@ -240,16 +240,7 @@ type GameplayDispatcher () =
                     Entity.Persistent == false
                     Entity.DieEvent => Die Simulants.GameplayPlayer
                 ]
-(*
-            let world = World.setEye3dCenter (v3 8f 8f 8f) world
-            let coords = Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, Math.DegreesToRadians -45f, 0f)
-            let world = World.setEye3dRotation coords world
-*)
 
-                ContentEx.camera "Camera" [
-                    Entity.Position == v3 8f 8f 8f
-                    Entity.Rotation == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, Math.DegreesToRadians -45f, 0f)
-                ]
             ]
 
          // the gui group
@@ -269,6 +260,16 @@ type GameplayDispatcher () =
                 Entity.StaticModel == Assets.Default.BallModel
             ]
 
+        ]
+
+        Content.group Simulants.GameplayManagers.Name [] [
+
+            ContentEx.camera "Camera" [
+                Entity.Position == v3 8f 8f 8f
+                Entity.Rotation == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, Math.DegreesToRadians -45f, 0f)
+            ]
+
             Content.entity<SelectionManagerDispatcher> Simulants.GameplaySelectionManager.Name []
         ]
+
     ]
