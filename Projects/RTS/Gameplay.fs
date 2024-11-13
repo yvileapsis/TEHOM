@@ -16,6 +16,8 @@ type Gameplay = {
     GameplayState : GameplayState
     Selected : Entity option
     SelectedPosition : Vector3 option
+    Entities : Entity list
+    SelectedEntities : Entity list
 }
 with
     // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
@@ -24,6 +26,8 @@ with
         GameplayState = Quit
         Selected = None
         SelectedPosition = None
+        Entities = []
+        SelectedEntities = []
     }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
@@ -35,19 +39,22 @@ with
 // this is our gameplay MMCC message type.
 type GameplayMessage =
     | StartPlaying
-    | Select
     | FinishQuitting
     | TimeUpdate
+    | SelectUnits of Entity list
     | Die of Entity
     interface Message
 
 // this is our MMCC command type.
 type GameplayCommand =
     | SetupScene
+    | LeftClick
+    | RightClick
     | StartQuitting
     | AttackCharacter of Entity
     | DestroyEnemy of Entity
     | TrackPlayer
+    | PublishSelectionEvent
     interface Command
 
 
@@ -58,6 +65,7 @@ module GameplayExtensions =
         member this.GetGameplay world = this.GetModelGeneric<Gameplay> world
         member this.SetGameplay value world = this.SetModelGeneric<Gameplay> value world
         member this.Gameplay = this.ModelGeneric<Gameplay> ()
+        member this.BeginSelectingEvent = Events.BeginSelectingEvent --> this
         member this.QuitEvent = Events.QuitEvent --> this
 
 // this is the dispatcher that defines the behavior of the screen where gameplay takes place.
@@ -71,21 +79,35 @@ type GameplayDispatcher () =
         else Gameplay.empty
 
     // here we define the screen's property values and event handling
-    override this.Definitions (_, _) = [
+    override this.Definitions (gameplay, screen) = [
         Screen.SelectEvent => StartPlaying
         Screen.DeselectingEvent => FinishQuitting
         Screen.TimeUpdateEvent => TimeUpdate
-        Game.MouseLeftDownEvent => Select
+        Game.MouseLeftDownEvent => LeftClick
+        Game.MouseRightDownEvent => RightClick
+        // Game.MouseLeftUpEvent => SetEntities gameplay.Entities
+        // Events.AttackEvent --> Simulants.GameplayScene --> Address.Wildcard =|> fun evt -> AttackCharacter evt.Data
+        Events.SelectionEvent --> Simulants.GameplayGui --> Address.Wildcard =|> fun evt -> SelectUnits evt.Data
     ]
 
     // here we handle the above messages
-    override this.Message (gameplay, message, _, world) =
+    override this.Message (gameplay, message, screen, world) =
 
         match message with
         | StartPlaying ->
             let gameplay = Gameplay.initial
-            withSignals [SetupScene; TrackPlayer] gameplay
+            let entities =
+                World.getEntities Simulants.GameplayScene world
+                |> Seq.filter (fun entity -> entity.Is<CharacterDispatcher> world)
+                |> List.ofSeq
 
+            let gameplay = { gameplay with Entities = entities }
+
+            withSignals [SetupScene; TrackPlayer] gameplay
+        | SelectUnits entities ->
+
+            let gameplay = { gameplay with SelectedEntities = entities }
+            just gameplay
         | FinishQuitting ->
             let gameplay = Gameplay.empty
             just gameplay
@@ -102,43 +124,9 @@ type GameplayDispatcher () =
             let gameplay = { gameplay with GameplayTime = gameplay.GameplayTime + gameDelta.Updates }
             just gameplay
 
-        | Select ->
-
-            let selectedOpt =
-                let ray = World.getMouseRay3dWorld world
-                let origin = ray.Origin
-                let finale = ray.Origin + 20f * ray.Direction
-                let array = World.rayCast3dBodies origin finale 0xFFFFFFFF 0xFFFFFFFF false world
-                Array.tryHead array
-
-            let selectedOpt =
-                match selectedOpt with
-                | Some body ->
-                    let address = body.BodyShapeIntersected.BodyId.BodySource.SimulantAddress
-                    let entity = new Entity (string address)
-                    Some entity
-                | None ->
-                    None
-
-            let selectedPositionOpt =
-                match selectedOpt with
-                | Some entity ->
-                    let v3 = entity.GetPosition world
-                    World.position3dToPosition2d (v3) world
-                    / (single Constants.Render.VirtualScalar)
-                    |> Some
-                | None ->
-                    None
-
-            let gameplay = {
-                gameplay with
-                    Selected = selectedOpt
-                    SelectedPosition = selectedPositionOpt
-            }
-            just gameplay
 
     // here we handle the above commands
-    override this.Command (_, command, screen, world) =
+    override this.Command (gameplay, command, screen, world) =
 
         match command with
         | SetupScene ->
@@ -188,6 +176,55 @@ type GameplayDispatcher () =
             *)
             just world
 
+        | LeftClick ->
+
+            [PublishSelectionEvent], world
+
+        | RightClick ->
+            let firstIntersection =
+                let ray = World.getMouseRay3dWorld world
+                let origin = ray.Origin
+                let finale = ray.Origin + 20f * ray.Direction
+                let array = World.rayCast3dBodies origin finale 0xFFFFFFFF 0xFFFFFFFF false world
+                Array.tryHead array
+
+            match firstIntersection with
+            | Some intersectionData ->
+
+                let position =
+//                    World.position3dToPosition2d intersectionData.Position world
+//                    / (single Constants.Render.VirtualScalar)
+//                    |> Some
+                    Some intersectionData.Position
+
+                let gameplay = { gameplay with SelectedPosition = position }
+
+                let world = screen.SetGameplay gameplay world
+
+                just world
+
+            | None ->
+                just world
+
+        | PublishSelectionEvent ->
+
+            let entities = gameplay.Entities
+            let world = World.publish entities screen.BeginSelectingEvent screen world
+            just world
+(*
+            let selectedPositionOpt =
+                match selectedOpt with
+                | Some entity ->
+                    let v3 = entity.GetPosition world
+                    World.position3dToPosition2d (v3) world
+                    / (single Constants.Render.VirtualScalar)
+                    |> Some
+                | None ->
+                    None
+*)
+
+
+
     // here we describe the content of the game including the hud, the scene, and the player
     override this.Content (gameplay, screen) = [
         // the scene group while playing
@@ -224,12 +261,14 @@ type GameplayDispatcher () =
                 Entity.ClickEvent => StartQuitting
             ]
 
-            match gameplay.SelectedPosition with
-            | Some pos ->
-                Content.text "marker" [
-                    Entity.Position := pos
-                    Entity.Text == "v"
-                ]
-            | None -> ()
+            Content.staticModel Simulants.GameplayMarker.Name [
+                Entity.Position := match gameplay.SelectedPosition with | Some pos -> pos | None -> v3 0f 10f 0f
+                Entity.Scale == v3 0.5f 0.5f 0.5f
+                Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = Some Color.Red }
+                Entity.BodyShape == (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
+                Entity.StaticModel == Assets.Default.BallModel
+            ]
+
+            Content.entity<SelectionManagerDispatcher> Simulants.GameplaySelectionManager.Name []
         ]
     ]

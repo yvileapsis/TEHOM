@@ -12,6 +12,7 @@ type CharacterMessage =
     | WeaponSeparationExplicit of BodySeparationExplicitData
     | WeaponSeparationImplicit of BodySeparationImplicitData
     | UpdateInputKey of KeyboardKeyData
+    | SelectMyself of Entity list
     | Update
     interface Message
 
@@ -49,14 +50,17 @@ type CharacterDispatcher (character : Character) =
          Entity.CharacterProperties == character.CharacterProperties
          Entity.BodyShape == CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None }
          Entity.Observable == true
-         Entity.FollowTargetOpt := match character.CharacterType with Enemy -> Some Simulants.GameplayPlayer | Player -> None
+         Entity.FollowTargetOpt := Some Simulants.GameplayMarker
          Entity.RegisterEvent => Register
          Game.KeyboardKeyDownEvent =|> fun evt -> UpdateInputKey evt.Data
          Entity.UpdateEvent => Update
          Entity.BodyPenetrationEvent =|> fun evt -> CharacterPenetration evt.Data
          Entity.BodySeparationExplicitEvent =|> fun evt -> CharacterSeparationExplicit evt.Data
          Entity.BodySeparationImplicitEvent =|> fun evt -> CharacterSeparationImplicit evt.Data
-         Game.PostUpdateEvent => SyncWeaponTransform]
+         Game.PostUpdateEvent => SyncWeaponTransform
+         Events.SelectionEvent --> Simulants.GameplayGui --> Address.Wildcard =|> fun evt -> SelectMyself evt.Data
+
+         ]
 
     override this.Message (character, message, entity, world) =
 
@@ -75,7 +79,7 @@ type CharacterDispatcher (character : Character) =
             let angularVelocity = entity.GetAngularVelocity world
             let bodyId = entity.GetBodyId world
             let grounded = World.getBodyGrounded bodyId world
-            let playerPosition = Simulants.GameplayPlayer.GetPosition world
+            let playerPosition = Simulants.GameplayMarker.GetPosition world
             let (animations, invisible, attackedCharacters, position, rotation, character) =
                 Character.update time position rotation linearVelocity angularVelocity grounded playerPosition character world
 
@@ -134,6 +138,14 @@ type CharacterDispatcher (character : Character) =
                 let character = { character with WeaponCollisions = Set.remove separatee character.WeaponCollisions }
                 just character
             | _ -> just character
+
+        | SelectMyself entities ->
+            if List.contains entity entities then
+                let character = { character with Selected = true }
+                just character
+            else
+                let character = { character with Selected = false }
+                just character
 
     override this.Command (character, command, entity, world) =
 
@@ -199,37 +211,51 @@ type CharacterDispatcher (character : Character) =
             weapon.RayCast ray world
         | intersections -> intersections
 
-    override this.Content (character, _) =
-
-        [// hearts
-         if character.CharacterType = Player then
+    override this.Content (character, _) = [
+        // hearts
+        if character.CharacterType = Player then
             for i in 0 .. dec 5 do
-                Content.staticSprite ("Heart+" + string i)
-                    [Entity.Position == v3 (-284.0f + single i * 32.0f) -144.0f 0.0f
-                     Entity.Size == v3 32.0f 32.0f 0.0f
-                     Entity.StaticImage := if character.HitPoints >= inc i then Assets.Gameplay.HeartFull else Assets.Gameplay.HeartEmpty
-                     Entity.MountOpt == None]
+                Content.staticSprite ("Heart+" + string i) [
+                    Entity.Position == v3 (-284.0f + single i * 32.0f) -144.0f 0.0f
+                    Entity.Size == v3 32.0f 32.0f 0.0f
+                    Entity.StaticImage := if character.HitPoints >= inc i then Assets.Gameplay.HeartFull else Assets.Gameplay.HeartEmpty
+                    Entity.MountOpt == None
+                ]
 
-         // animated model
-         Content.entity<AnimatedModelDispatcher> Constants.Gameplay.CharacterAnimatedModelName
-            [Entity.Size == v3Dup 2.0f
-             Entity.Offset == v3 0.0f 1.0f 0.0f
-             Entity.MaterialProperties == MaterialProperties.defaultProperties
-             Entity.AnimatedModel == Assets.Gameplay.JoanModel
-             Entity.Pickable == false]
+        // animated model
+        Content.entity<AnimatedModelDispatcher> Constants.Gameplay.CharacterAnimatedModelName [
+            Entity.Size == v3Dup 2.0f
+            Entity.Offset == v3 0.0f 1.0f 0.0f
+            Entity.MaterialProperties == MaterialProperties.defaultProperties
+            Entity.AnimatedModel == Assets.Gameplay.JoanModel
+            Entity.Pickable == false
+        ]
 
-         // weapon
-         Content.entity<RigidModelDispatcher> Constants.Gameplay.CharacterWeaponName
-            [Entity.Offset == v3 0.0f 0.5f 0.0f
-             Entity.StaticModel := character.WeaponModel
-             Entity.BodyType == Static
-             Entity.BodyShape == BoxShape { Size = v3 0.3f 1.2f 0.3f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.6f 0.0f)); PropertiesOpt = None }
-             Entity.Sensor == true
-             Entity.NavShape == EmptyNavShape
-             Entity.Pickable == false
-             Entity.BodyPenetrationEvent =|> fun evt -> WeaponPenetration evt.Data
-             Entity.BodySeparationExplicitEvent =|> fun evt -> WeaponSeparationExplicit evt.Data
-             Entity.BodySeparationImplicitEvent =|> fun evt -> WeaponSeparationImplicit evt.Data]]
+        // weapon
+        Content.entity<RigidModelDispatcher> Constants.Gameplay.CharacterWeaponName [
+            Entity.Offset == v3 0.0f 0.5f 0.0f
+            Entity.StaticModel := character.WeaponModel
+            Entity.BodyType == Static
+            Entity.BodyShape == BoxShape { Size = v3 0.3f 1.2f 0.3f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.6f 0.0f)); PropertiesOpt = None }
+            Entity.Sensor == true
+            Entity.NavShape == EmptyNavShape
+            Entity.Pickable == false
+            Entity.BodyPenetrationEvent =|> fun evt -> WeaponPenetration evt.Data
+            Entity.BodySeparationExplicitEvent =|> fun evt -> WeaponSeparationExplicit evt.Data
+            Entity.BodySeparationImplicitEvent =|> fun evt -> WeaponSeparationImplicit evt.Data
+        ]
+
+        if character.Selected then
+            Content.staticModel "SelectionMarker" [
+                Entity.PositionLocal == v3 0f 0.1f 0f
+                Entity.ScaleLocal == v3 1f 0.1f 1f
+                Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = Some Color.Cyan }
+                Entity.BodyShape == (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
+                Entity.StaticModel == Assets.Default.BallModel
+            ]
+    ]
+
+
 
 type EnemyDispatcher () =
     inherit CharacterDispatcher (Character.initialEnemy)

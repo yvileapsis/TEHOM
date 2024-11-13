@@ -153,8 +153,152 @@
        [WalkSpeed 0.05]
        [TurnSpeed 0.05]
        [JumpSpeed 5]
-       [WeaponModel [Gameplay GreatSword]]]]]
+       [WeaponModel [Gameplay GreatSword]]
+       [Selected False]]]]
     [Name Enemy-0001]
     [Observable True]
-    [Position [-4 0 0]]]
+    [Offset [0 1 0]]
+    [Position [-4 0 0]]
+    [PropagatedDescriptorOpt
+     [Some
+      [EnemyDispatcher
+       [[BodyShape
+         [CapsuleShape
+          [1
+           0.35
+           [Some
+            [[0 0.85 0] [0 0 0 1] [1 1 1]]]
+           None]]]
+        [BodyType KinematicCharacter]
+        [CharacterProperties
+         [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
+        [Model
+         ["MyGame.Character, RTS, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+          [[CharacterType Enemy]
+           [PositionPrevious []]
+           [RotationPrevious []]
+           [LinearVelocityPrevious []]
+           [AngularVelocityPrevious []]
+           [HitPoints 3]
+           [ActionState NormalState]
+           [JumpState [0 0]]
+           [CharacterCollisions []]
+           [WeaponCollisions []]
+           [WalkSpeed 0.05]
+           [TurnSpeed 0.05]
+           [JumpSpeed 5]
+           [WeaponModel [Gameplay GreatSword]]
+           [Selected False]]]]
+        [Name Enemy-0001]
+        [Observable True]
+        [Offset [0 1 0]]
+        [Position [-4 0 0]]
+        [Size [2 2 2]]]
+       []]]]
+    [Size [2 2 2]]]
+   []]
+  [EnemyDispatcher
+   [[BodyShape
+     [CapsuleShape
+      [1
+       0.35
+       [Some
+        [[0 0.85 0] [0 0 0 1] [1 1 1]]]
+       None]]]
+    [BodyType KinematicCharacter]
+    [CharacterProperties
+     [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
+    [Model
+     ["MyGame.Character, RTS, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+      [[CharacterType Enemy]
+       [PositionPrevious []]
+       [RotationPrevious []]
+       [LinearVelocityPrevious []]
+       [AngularVelocityPrevious []]
+       [HitPoints 3]
+       [ActionState NormalState]
+       [JumpState [0 0]]
+       [CharacterCollisions []]
+       [WeaponCollisions []]
+       [WalkSpeed 0.05]
+       [TurnSpeed 0.05]
+       [JumpSpeed 5]
+       [WeaponModel [Gameplay GreatSword]]
+       [Selected False]]]]
+    [Name Enemy-0002]
+    [Observable True]
+    [Offset [0 1 0]]
+    [Position [-4.93 0 0]]
+    [PropagationSourceOpt [Some Game/Gameplay/Scene/Enemy-0001]]
+    [Size [2 2 2]]]
+   []]
+  [EnemyDispatcher
+   [[BodyShape
+     [CapsuleShape
+      [1
+       0.35
+       [Some
+        [[0 0.85 0] [0 0 0 1] [1 1 1]]]
+       None]]]
+    [BodyType KinematicCharacter]
+    [CharacterProperties
+     [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
+    [Model
+     ["MyGame.Character, RTS, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+      [[CharacterType Enemy]
+       [PositionPrevious []]
+       [RotationPrevious []]
+       [LinearVelocityPrevious []]
+       [AngularVelocityPrevious []]
+       [HitPoints 3]
+       [ActionState NormalState]
+       [JumpState [0 0]]
+       [CharacterCollisions []]
+       [WeaponCollisions []]
+       [WalkSpeed 0.05]
+       [TurnSpeed 0.05]
+       [JumpSpeed 5]
+       [WeaponModel [Gameplay GreatSword]]
+       [Selected False]]]]
+    [Name Enemy-0003]
+    [Observable True]
+    [Offset [0 1 0]]
+    [Position [-4.93 0 0.94]]
+    [PropagationSourceOpt [Some Game/Gameplay/Scene/Enemy-0001]]
+    [Size [2 2 2]]]
+   []]
+  [EnemyDispatcher
+   [[BodyShape
+     [CapsuleShape
+      [1
+       0.35
+       [Some
+        [[0 0.85 0] [0 0 0 1] [1 1 1]]]
+       None]]]
+    [BodyType KinematicCharacter]
+    [CharacterProperties
+     [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
+    [Model
+     ["MyGame.Character, RTS, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+      [[CharacterType Enemy]
+       [PositionPrevious []]
+       [RotationPrevious []]
+       [LinearVelocityPrevious []]
+       [AngularVelocityPrevious []]
+       [HitPoints 3]
+       [ActionState NormalState]
+       [JumpState [0 0]]
+       [CharacterCollisions []]
+       [WeaponCollisions []]
+       [WalkSpeed 0.05]
+       [TurnSpeed 0.05]
+       [JumpSpeed 5]
+       [WeaponModel [Gameplay GreatSword]]
+       [Selected False]]]]
+    [Name Enemy-0004]
+    [Observable True]
+    [Offset [0 1 0]]
+    [Position [-3.91 0 0.94]]
+    [PropagationSourceOpt [Some Game/Gameplay/Scene/Enemy-0001]]
+    [Size [2 2 2]]]
    []]]]

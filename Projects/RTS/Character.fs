@@ -56,7 +56,9 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
       WalkSpeed : single
       TurnSpeed : single
       JumpSpeed : single
-      WeaponModel : StaticModel AssetTag }
+      WeaponModel : StaticModel AssetTag
+
+      Selected : bool }
 
     member this.PositionInterp position =
         if not (FQueue.isEmpty this.PositionPrevious) then
@@ -233,8 +235,12 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
                     then Sphere (playerPosition, 0.1f) // when above player
                     else Sphere (playerPosition, 0.7f) // when at or below player
                 let nearest = sphere.Nearest position
-                let followOutput = World.nav3dFollow (Some 1.0f) (Some 10.0f) moveSpeed turnSpeed position rotation nearest Simulants.Gameplay world
-                (followOutput.NavPosition, followOutput.NavRotation, followOutput.NavLinearVelocity, followOutput.NavAngularVelocity, character)
+
+                if character.Selected then
+                    let followOutput = World.nav3dFollow (Some 1.0f) (Some 10.0f) moveSpeed turnSpeed position rotation nearest Simulants.Gameplay world
+                    (followOutput.NavPosition, followOutput.NavRotation, followOutput.NavLinearVelocity, followOutput.NavAngularVelocity, character)
+                else
+                    (position, rotation, v3Zero, v3Zero, character)
             | None -> (position, rotation, v3Zero, v3Zero, character)
 
     static member private updateAction time (position : Vector3) (rotation : Quaternion) (playerPosition : Vector3) character =
@@ -336,7 +342,8 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
 
     static member update time position rotation linearVelocity angularVelocity grounded playerPosition character world =
         let character = Character.updateInterps position rotation linearVelocity angularVelocity character
-        let (position, rotation, linearVelocity, angularVelocity, character) = Character.updateMotion time position rotation grounded playerPosition character world
+        let (position, rotation, linearVelocity, angularVelocity, character) =
+            Character.updateMotion time position rotation grounded playerPosition character world
         let character = Character.updateAction time position rotation playerPosition character
         let character = Character.updateState time character
         let (attackedCharacters, character) = Character.updateAttackedCharacters time character
@@ -357,7 +364,8 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
           WalkSpeed = 0.05f
           TurnSpeed = 0.05f
           JumpSpeed = 5.0f
-          WeaponModel = Assets.Gameplay.GreatSwordModel }
+          WeaponModel = Assets.Gameplay.GreatSwordModel
+          Selected = false }
 
     static member initialPlayer =
         { Character.initial Player with WalkSpeed = 0.06f }
