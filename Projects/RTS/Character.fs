@@ -179,28 +179,7 @@ type [<ReferenceEquality; SymbolicExpansion>] Character =
         | Player ->
 
             // player traversal
-            if character.ActionState = NormalState || not grounded then
-
-                // compute new position
-                let forward = rotation.Forward
-                let right = rotation.Right
-                let walkSpeed = character.WalkSpeed * if grounded then 1.0f else 0.75f
-                let walkVelocity =
-                    (if World.isKeyboardKeyDown KeyboardKey.W world || World.isKeyboardKeyDown KeyboardKey.Up world then forward * walkSpeed else v3Zero) +
-                    (if World.isKeyboardKeyDown KeyboardKey.S world || World.isKeyboardKeyDown KeyboardKey.Down world then -forward * walkSpeed else v3Zero) +
-                    (if World.isKeyboardKeyDown KeyboardKey.A world then -right * walkSpeed else v3Zero) +
-                    (if World.isKeyboardKeyDown KeyboardKey.D world then right * walkSpeed else v3Zero)
-                let position = if walkVelocity <> v3Zero then position + walkVelocity else position
-
-                // compute new rotation
-                let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
-                let turnVelocity =
-                    (if World.isKeyboardKeyDown KeyboardKey.Right world then -turnSpeed else 0.0f) +
-                    (if World.isKeyboardKeyDown KeyboardKey.Left world then turnSpeed else 0.0f)
-                let rotation = if turnVelocity <> 0.0f then rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity) else rotation
-                (position, rotation, walkVelocity, v3 0.0f turnVelocity 0.0f, character)
-
-            else (position, rotation, v3Zero, v3Zero, character)
+            (position, rotation, v3Zero, v3Zero, character)
 
         | Enemy ->
         

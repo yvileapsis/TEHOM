@@ -37,3 +37,4 @@ module Simulants =
     let GameplayManagers = Gameplay / "Managers"
     let GameplaySelectionManager = GameplayManagers / "SelectionManager"
     let GameplayCameraManager = GameplayManagers / "CameraManager"
+    let GameplayCursorManager = GameplayManagers / "CursorManager"

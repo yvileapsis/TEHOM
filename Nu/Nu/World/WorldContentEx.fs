@@ -3,14 +3,13 @@
 namespace Nu
 open System
 open Nu
+open SDL2
 
 /// Augments an entity with rich text.
 type CameraFacet () =
     inherit Facet (false, false, false)
 
-    static let synchronize evt world =
-        let entity = evt.Subscriber : Entity
-
+    static let synchronize (entity : Entity) world =
         if entity.GetEnabled world then
 
             let position = entity.GetPosition world
@@ -19,16 +18,17 @@ type CameraFacet () =
             let world = World.setEye3dCenter position world
             let world = World.setEye3dRotation rotation world
 
-            Cascade, world
-
+            world
         else
-
-            Cascade, world
+            world
 
     override this.Register (entity, world) =
         world
-        |> World.sense synchronize Nu.Game.Handle.RegisterEvent entity (nameof CameraFacet)
-        |> World.sense synchronize Nu.Game.Handle.PreUpdateEvent entity (nameof CameraFacet)
+        |> synchronize entity
+        |> World.sense (fun evt world ->
+            let entity = evt.Subscriber : Entity
+            Cascade, synchronize entity world
+        ) Nu.Game.Handle.PreUpdateEvent entity (nameof CameraFacet)
 
     override this.Render (_, _, _) =
         // TODO: add guizmos for display
@@ -40,6 +40,82 @@ type CameraDispatcher () =
 
     static member Facets = [
         typeof<CameraFacet>
+    ]
+
+/// Augments an entity with rich text.
+type CursorFacet () =
+    inherit Facet (false, false, false)
+
+    static let register evt world =
+        let entity = evt.Subscriber : Entity
+
+        if entity.GetEnabled world then
+
+            SDL.SDL_ShowCursor 0 |> ignore
+
+            Cascade, world
+
+        else
+            SDL.SDL_ShowCursor 1 |> ignore
+
+            Cascade, world
+
+    static let unregister evt world =
+        let entity = evt.Subscriber : Entity
+        SDL.SDL_ShowCursor 1 |> ignore
+        Cascade, world
+
+    static let synchronize evt world =
+        let entity = evt.Subscriber : Entity
+
+        if entity.GetEnabled world then
+
+            let position = World.getMousePosition2dScreen world
+
+            let world = entity.SetPosition position.V3 world
+
+            Cascade, world
+
+        else
+
+            Cascade, world
+
+    static member Properties =
+        [define Entity.InsetOpt None
+         // TODO: add default cursor
+         define Entity.StaticImage Assets.Default.StaticSprite
+         define Entity.Color Color.One
+         define Entity.Blend Transparent
+         define Entity.Emission Color.Zero
+         define Entity.Flip FlipNone
+         define Entity.Elevation 100f]
+
+    override this.Register (entity, world) =
+        world
+        |> World.sense register Nu.Game.Handle.RegisterEvent entity (nameof CameraFacet)
+        |> World.sense unregister Nu.Game.Handle.UnregisteringEvent entity (nameof CameraFacet)
+        |> World.sense synchronize Nu.Game.Handle.MouseMoveEvent entity (nameof CameraFacet)
+
+    override this.Render (_, entity, world) =
+        let mutable transform = entity.GetTransform world
+        let staticImage = entity.GetStaticImage world
+        let insetOpt = match entity.GetInsetOpt world with Some inset -> ValueSome inset | None -> ValueNone
+        let clipOpt = ValueNone : Box2 voption
+        let color = entity.GetColor world
+        let blend = entity.GetBlend world
+        let emission = entity.GetEmission world
+        let flip = entity.GetFlip world
+        // TODO: replace with special operation for cursor
+        let perimeter = transform.Perimeter
+        transform.Position <- perimeter.BottomRight
+        World.renderLayeredSpriteFast (transform.Elevation, transform.Horizon, staticImage, &transform, &insetOpt, &clipOpt, staticImage, &color, blend, &emission, flip, world)
+
+/// Gives an entity the base behavior of a gui text control.
+type CursorDispatcher () =
+    inherit Entity2dDispatcher (false, false, false)
+
+    static member Facets = [
+        typeof<CursorFacet>
     ]
 
 type GlyphFacet () =
@@ -245,6 +321,8 @@ type ButtonExDispatcher () =
 module ContentEx =
 
     let camera entityName initializers = Content.entity<CameraDispatcher> entityName initializers
+
+    let cursor entityName initializers = Content.entity<CursorDispatcher> entityName initializers
 
     let glyph entityName initializers = Content.entity<GlyphDispatcher> entityName initializers
 

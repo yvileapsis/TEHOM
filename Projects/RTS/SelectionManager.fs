@@ -33,9 +33,9 @@ type SelectionManagerCommand =
 [<AutoOpen>]
 module SelectionManagerExtensions =
     type Entity with
-        member this.GetSelectionBox world = this.GetModelGeneric<SelectionManager> world
-        member this.SetSelectionBox value world = this.SetModelGeneric<SelectionManager> value world
-        member this.SelectionBox = this.ModelGeneric<SelectionManager> ()
+        member this.GetSelectionManager world = this.GetModelGeneric<SelectionManager> world
+        member this.SetSelectionManager value world = this.SetModelGeneric<SelectionManager> value world
+        member this.SelectionManager = this.ModelGeneric<SelectionManager> ()
         member this.SelectionEvent = Events.SelectionEvent --> this
 
 

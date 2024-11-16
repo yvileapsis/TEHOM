@@ -23,3 +23,4 @@ module Assets =
         let HeartEmpty = asset<Image> PackageName "HeartEmpty"
         let JoanModel = asset<AnimatedModel> PackageName "Joan"
         let GreatSwordModel = asset<StaticModel> PackageName "GreatSword"
+        let CursorSprite = asset<Image> PackageName "cursor"

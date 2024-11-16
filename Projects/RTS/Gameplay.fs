@@ -184,7 +184,7 @@ type GameplayDispatcher () =
             let firstIntersection =
                 let ray = World.getMouseRay3dWorld world
                 let origin = ray.Origin
-                let finale = ray.Origin + 20f * ray.Direction
+                let finale = ray.Origin + 100f * ray.Direction
                 let array = World.rayCast3dBodies origin finale 0xFFFFFFFF 0xFFFFFFFF false world
                 Array.tryHead array
 
@@ -264,12 +264,9 @@ type GameplayDispatcher () =
 
         Content.group Simulants.GameplayManagers.Name [] [
 
-            ContentEx.camera "Camera" [
-                Entity.Position == v3 8f 8f 8f
-                Entity.Rotation == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, Math.DegreesToRadians -45f, 0f)
-            ]
-
+            Content.entity<CameraManagerDispatcher> Simulants.GameplayCameraManager.Name []
             Content.entity<SelectionManagerDispatcher> Simulants.GameplaySelectionManager.Name []
+            Content.entity<CursorManagerDispatcher> Simulants.GameplayCursorManager.Name  []
         ]
 
     ]
