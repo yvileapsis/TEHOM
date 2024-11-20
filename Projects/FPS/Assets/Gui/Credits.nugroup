@@ -16,9 +16,9 @@
    [[BackdropImageOpt
      [Some [Default Label]]]
     [Justification [Justified JustifyCenter JustifyMiddle]]
-    [Name YourNameHere]
+    [Name Code]
     [Size [342 32 0]]
-    [Text "Your Name Here!"]]
+    [Text "Code: Bryan Edds & Dean J. Lee"]]
    []]
   [ButtonDispatcher
    [[Name Back]
