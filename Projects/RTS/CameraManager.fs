@@ -96,6 +96,7 @@ type CameraManagerDispatcher () =
     inherit Entity3dDispatcher<CameraManager, CameraManagerMessage, CameraManagerCommand> (false, false, false, CameraManager.initial)
 
     override this.Definitions (_, _) = [
+        Entity.Absolute == true
         Entity.UpdateEvent => Update
         Game.MouseWheelEvent =|> fun evt -> MouseWheel evt.Data
         Game.MouseMoveEvent =|> fun evt -> MouseMove evt.Data

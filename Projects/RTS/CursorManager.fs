@@ -28,28 +28,27 @@ module CursorManagerExtensions =
         member this.SetCameraManager value world = this.SetModelGeneric<CameraManager> value world
         member this.CameraManager = this.ModelGeneric<CameraManager> ()
 
-
 type CursorManagerDispatcher () =
     inherit GuiDispatcher<CursorManager, CursorManagerMessage, CursorManagerCommand> (CursorManager.initial)
 
-    override this.Definitions (character, _) = [
+    override this.Definitions (_, _) = [
         Entity.UpdateEvent => Update
         Entity.RegisterEvent => Register
     ]
 
-    override this.Message (character, message, entity, world) =
+    override this.Message (model, message, _, _) =
 
         match message with
         | Update ->
-            just character
+            just model
 
-    override this.Command (character, command, entity, world) =
+    override this.Command (_, command, _, world) =
 
         match command with
         | Register ->
             just world
 
-    override this.Content (character, entity) = [
+    override this.Content (_, _) = [
 
         ContentEx.cursor "Cursor" [
             Entity.StaticImage == Assets.Gameplay.CursorSprite
