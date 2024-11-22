@@ -31,6 +31,13 @@ type [<ReferenceEquality; SymbolicExpansion>] CameraManager = {
 
       ActiveRotation : CameraRotation option
       ActiveQuickMove : CameraQuickMove option
+
+      PositionPrevious : Vector3 FQueue
+      RotationPrevious : Quaternion FQueue
+
+      Position : Vector3
+      Rotation : Quaternion
+      RotationDefault : Quaternion
 }
 with
     static member initial = {
@@ -50,6 +57,13 @@ with
 
         ActiveRotation = None
         ActiveQuickMove = None
+
+        PositionPrevious = FQueue.empty
+        RotationPrevious = FQueue.empty
+
+        Position = v3Zero
+        Rotation = Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, 0f, 0f)
+        RotationDefault = Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, 0f, 0f)
     }
 
 type CameraManagerMessage =
@@ -69,8 +83,6 @@ type CameraManagerMessage =
 
 type CameraManagerCommand =
     | Register
-    | SetTransform of Vector3 * Quaternion
-    | AddTransform of Vector3 * Quaternion
     interface Command
 
 [<AutoOpen>]
@@ -80,12 +92,10 @@ module CameraManagerExtensions =
         member this.SetCameraManager value world = this.SetModelGeneric<CameraManager> value world
         member this.CameraManager = this.ModelGeneric<CameraManager> ()
 
-
 type CameraManagerDispatcher () =
     inherit Entity3dDispatcher<CameraManager, CameraManagerMessage, CameraManagerCommand> (false, false, false, CameraManager.initial)
 
     override this.Definitions (_, _) = [
-        Entity.Rotation == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, 0f, 0f)
         Entity.UpdateEvent => Update
         Game.MouseWheelEvent =|> fun evt -> MouseWheel evt.Data
         Game.MouseMoveEvent =|> fun evt -> MouseMove evt.Data
@@ -95,7 +105,7 @@ type CameraManagerDispatcher () =
         Game.MouseRightUpEvent =|> fun evt -> MouseButton evt.Data
     ]
 
-    override this.Message (model, message, entity, world) =
+    override this.Message (model, message, _, world) =
 
         match message with
         | Update ->
@@ -132,8 +142,7 @@ type CameraManagerDispatcher () =
             withSignals signals model
 
         | Move ->
-            let rotation = entity.GetRotation world
-
+            let rotation = model.Rotation
             let forward = rotation.Forward
             let right = rotation.Right
             let speed = model.SpeedMinimum
@@ -154,11 +163,13 @@ type CameraManagerDispatcher () =
 
             let rotation = if turnVelocity <> 0.0f then Quaternion.CreateFromAxisAngle (v3Up, turnVelocity) else Quaternion.Identity
 
-            let signals : Signal list = [
-                AddTransform (position, rotation)
-            ]
+            let model = {
+                model with
+                    Position = model.Position + position
+                    Rotation = model.Rotation * rotation
+            }
 
-            withSignals signals model
+            just model
 
         | Zoom travel ->
             let zoom = model.ZoomCurrent
@@ -186,30 +197,36 @@ type CameraManagerDispatcher () =
             let turnVelocity =
                 (mousePosition.X - activeRotation.PositionLast) * turnSpeed * 0.1f
 
-            let signals : Signal list = [
-                if turnVelocity <> 0.0f then AddTransform (v3Zero, Quaternion.CreateFromAxisAngle (v3Up, turnVelocity))
-            ]
-
             let activeRotation = { activeRotation with PositionLast = mousePosition.X }
 
-            let character = { model with ActiveRotation = Some activeRotation }
+            let model = {
+                model with
+                    ActiveRotation = Some activeRotation
+                    Rotation = model.Rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity)
+            }
 
-            withSignals signals character
+            just model
 
         | RotationFinish activeRotation ->
             let mousePosition = World.getMousePosition2dScreen world
 
             if (activeRotation.PositionStart = mousePosition.X) then
-                let character = { model with ActiveRotation = None; ZoomCurrent = 1f }
 
-                let position = entity.GetPosition world
-                let rotation = Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 45f, 0f, 0f)
+                let model = {
+                    model with
+                        ActiveRotation = None
+                        ZoomCurrent = 1f
+                        Rotation = model.RotationDefault
+                }
 
-                withSignals [SetTransform (position, rotation)] character
+                just model
             else
-                let character = { model with ActiveRotation = None }
+                let model = {
+                    model with
+                        ActiveRotation = None
+                }
 
-                just character
+                just model
 
         | QuickMoveStart ->
             let mousePosition = World.getMousePosition2dScreen world
@@ -218,7 +235,7 @@ type CameraManagerDispatcher () =
             just character
 
         | QuickMoveProcess activeQuickMove ->
-            let rotation = entity.GetRotation world
+            let rotation = model.Rotation
 
             let forward = rotation.Forward
             let right = rotation.Right
@@ -231,43 +248,37 @@ type CameraManagerDispatcher () =
                 else
                     v2Zero
 
-            let signals : Signal list = [
-                if speed <> v2Zero then AddTransform (forward * speed.Y + right * speed.X, Quaternion.Identity)
-            ]
+            let model = {
+                model with
+                    Position = model.Position + forward * speed.Y + right * speed.X
+            }
 
-            withSignals signals model
+            just model
 
         | QuickMoveFinish ->
             let character = { model with ActiveQuickMove = None }
             just character
 
-    override this.Command (_, command, entity, world) =
+    override this.Command (_, command, _, world) =
 
         match command with
         | Register ->
             just world
 
-        | SetTransform (position, rotation) ->
-            let world = entity.SetPosition position world
-            let world = entity.SetRotation rotation world
-            just world
+    override this.Content (character, _) = [
 
-        | AddTransform (positionDelta, rotationDelta) ->
-            let position = entity.GetPosition world
-            let rotation = entity.GetRotation world
-            let world = entity.SetPosition (position + positionDelta) world
-            let world = entity.SetRotation (rotation * rotationDelta) world
-            just world
+        Content.composite "Object" [
+            Entity.Position := character.Position
+            Entity.Rotation := character.Rotation
+        ] [
 
-    override this.Content (character, entity) = [
+            let distance = character.DistanceMinimum + character.ZoomCurrent * (character.DistanceMaximum - character.DistanceMinimum)
+            let angle = Math.DegreesToRadians character.Angle
 
-        let distance = character.DistanceMinimum + character.ZoomCurrent * (character.DistanceMaximum - character.DistanceMinimum)
-        let verticalPosition = distance * sin (Math.DegreesToRadians character.Angle)
-        let horizontalPosition = distance * cos (Math.DegreesToRadians character.Angle)
-
-        ContentEx.camera "Camera" [
-            Entity.PositionLocal := v3 0f verticalPosition horizontalPosition
-            Entity.RotationLocal := Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -character.Angle, 0f)
+            ContentEx.camera "Subject" [
+                Entity.PositionLocal := distance * v3 0f (sin angle) (cos angle)
+                Entity.RotationLocal := Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -character.Angle, 0f)
+            ]
         ]
 
     ]
