@@ -132,6 +132,7 @@ type GameplayDispatcher () =
         | SetupScene ->
 //            let world = Simulants.GameplayPlayer.SetPosition (v3 0.0f 1.65f 0.0f) world
             let world = World.synchronizeNav3d screen world
+            let world = World.setEye2dCenter (v2 0f 0f) world
             just world
 
         | StartQuitting ->
