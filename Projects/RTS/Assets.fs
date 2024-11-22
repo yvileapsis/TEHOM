@@ -24,3 +24,7 @@ module Assets =
         let JoanModel = asset<AnimatedModel> PackageName "Joan"
         let GreatSwordModel = asset<StaticModel> PackageName "GreatSword"
         let CursorSprite = asset<Image> PackageName "cursor"
+        let CursorUpSprite = asset<Image> PackageName "Scroll_UP"
+        let CursorDownSprite = asset<Image> PackageName "Scroll_DOWN"
+        let CursorLeftSprite = asset<Image> PackageName "Scroll_LEFT"
+        let CursorRightSprite = asset<Image> PackageName "Scroll_RIGHT"

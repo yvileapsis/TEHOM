@@ -83,6 +83,7 @@ type CameraManagerMessage =
 
 type CameraManagerCommand =
     | Register
+    | PublishEvent of (CursorType * int) list
     interface Command
 
 [<AutoOpen>]
@@ -91,9 +92,10 @@ module CameraManagerExtensions =
         member this.GetCameraManager world = this.GetModelGeneric<CameraManager> world
         member this.SetCameraManager value world = this.SetModelGeneric<CameraManager> value world
         member this.CameraManager = this.ModelGeneric<CameraManager> ()
+        member this.SetCursorEvent = Events.SetCursorEvent --> this
 
 type CameraManagerDispatcher () =
-    inherit Entity3dDispatcher<CameraManager, CameraManagerMessage, CameraManagerCommand> (false, false, false, CameraManager.initial)
+    inherit Entity2dDispatcher<CameraManager, CameraManagerMessage, CameraManagerCommand> (false, false, false, CameraManager.initial)
 
     override this.Definitions (_, _) = [
         Entity.Absolute == true
@@ -241,29 +243,38 @@ type CameraManagerDispatcher () =
             let forward = rotation.Forward
             let right = rotation.Right
 
-            let mousePosition = World.getMousePosition2dScreen world
+            let positionDelta = World.getMousePosition2dScreen world - activeQuickMove.PositionStart
 
-            let speed =
-                if ((mousePosition - activeQuickMove.PositionStart).Length () > model.QuickMoveMargin.Length ()) then
-                    0.01f * model.SpeedMinimum * (mousePosition - activeQuickMove.PositionStart)
+            let signals, speed =
+                if (positionDelta.Length () > model.QuickMoveMargin.Length ()) then
+
+                    [ PublishEvent (CursorManager.direction positionDelta) :> Signal],
+                    0.01f * model.SpeedMinimum * positionDelta
                 else
-                    v2Zero
+
+                    [ PublishEvent CursorManager.resetDirection :> Signal], v2Zero
 
             let model = {
                 model with
                     Position = model.Position + forward * speed.Y + right * speed.X
             }
 
-            just model
+            withSignals signals model
 
         | QuickMoveFinish ->
             let character = { model with ActiveQuickMove = None }
-            just character
 
-    override this.Command (_, command, _, world) =
+            let signals = [ PublishEvent CursorManager.resetDirection :> Signal]
+
+            withSignals signals character
+
+    override this.Command (_, command, entity, world) =
 
         match command with
         | Register ->
+            just world
+        | PublishEvent cursor ->
+            let world = World.publish cursor entity.SetCursorEvent entity world
             just world
 
     override this.Content (character, _) = [
