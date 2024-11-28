@@ -53,12 +53,10 @@ flat out mat4 projectionTest;
 flat out mat4 modelTest;
 flat out mat4 view_translateTest;
 flat out mat4 view_rotateTest;
-flat out float size;
 
 void main()
 {
     vec3 position5 = position;
-    position5.y = 4;
 
     positionOut = model * ( vec4(position5, 1.0)) ;
 
@@ -75,33 +73,39 @@ void main()
     blendsOut[1] = blends[1];
     tintOut = tint;
 
-    positionTest = positionOut;
     viewTest = view;
     projectionTest = projection;
     modelTest = model;
     view_translateTest = view_translate;
     view_rotateTest = view_rotate;
 
-    float voxelSize = 128.0;
-    float sphereRadius = voxelSize * 1.732051;
-    vec4 positionTemp = (projection * view) * positionOut;
+    float u_lod = 1;
 
-    float pointSize = sphereRadius / (abs(positionTemp.z));
+    positionOut = model * view_translate * (vec4(position5, 1.0) + vec4(0.5, 0.5, 0.5, 0.0)*u_lod);
+    gl_Position = (projection * view_rotate) * positionOut;
+    positionTest = gl_Position;
 
-    size = 0;
+    float ratio = 1920.0 / 1080.0;
+    float reduce = max(
+        abs( gl_Position.x*ratio/gl_Position.w  ),
+        abs( gl_Position.y/gl_Position.w  )
+    );
+    // Following two values directly affect performance.
+    reduce += 0.03; 		// Overdraw nearing edges
 
-    // Square area
-    float stochasticCoverage = pointSize * pointSize;
+    float size = ( 1080 * 1.1 ) / gl_Position.z * max(reduce, 1.0);
+
+    gl_PointSize = size * u_lod;
+
+    float stochasticCoverage = gl_PointSize * gl_PointSize;
+
     if ((stochasticCoverage < 0.8) && ((gl_VertexID & 0xffff) > stochasticCoverage * (0xffff / 0.8))) {
         // "Cull" small voxels in a stable, stochastic way by moving past the z = 0 plane.
         // Assumes voxels are in randomized order.
         gl_Position = vec4(-1,-1,-1,-1);
         gl_PointSize = 1.0;
-    } else {
-        gl_Position = positionTemp;
-        gl_PointSize = pointSize * 256.0 / voxelSize;
-        size = gl_PointSize;
     }
+
 }
 
 #shader fragment
@@ -112,6 +116,7 @@ const int TERRAIN_LAYERS_MAX = 6;
 
 uniform mat4 inv_view;
 uniform mat4 inv_projection;
+uniform vec4 viewPort;
 uniform vec3 eyeCenter;
 uniform int layersCount;
 uniform sampler2D albedoTextures[TERRAIN_LAYERS_MAX];
@@ -136,12 +141,47 @@ flat in mat4 modelTest;
 
 flat in mat4 view_translateTest;
 flat in mat4 view_rotateTest;
-flat in float size;
 
 layout(location = 0) out vec4 position;
 layout(location = 1) out vec3 albedo;
 layout(location = 2) out vec4 material;
 layout(location = 3) out vec4 normalPlus;
+
+vec2 AABBIntersect(vec3 ro, vec3 rd, vec3 minV, vec3 maxV)
+{
+    vec3 invR = 1.0 / rd;
+
+    float t0, t1;
+
+    vec3 tbot = (minV - ro) * invR;
+    vec3 ttop = (maxV - ro) * invR;
+
+    vec3 tmin = min(ttop, tbot);
+    vec3 tmax = max(ttop, tbot);
+
+
+    vec2 t = max(tmin.xx, tmin.yz);
+
+    t0 = max(t.x, t.y);
+    t = min(tmax.xx, tmax.yz);
+    t1 = min(t.x, t.y);
+
+    return vec2(t0, t1);
+    // if (t0 <= t1) { did hit } else { did not hit }
+}
+
+vec4 ss2wsVec() {
+    vec4 ndcPos;
+    ndcPos.xy = ((2.0 * gl_FragCoord.xy) - (2.0 * viewPort.xy)) / (viewPort.zw) - 1;
+    ndcPos.z = (2.0 * gl_FragCoord.z - gl_DepthRange.near - gl_DepthRange.far) / (gl_DepthRange.far - gl_DepthRange.near);
+    ndcPos.w = 1.0;
+
+    vec4 clipPos = ndcPos / gl_FragCoord.w;
+    vec4 eyePos = inv_projection * clipPos;
+    vec4 worldPos = inv_view * eyePos;
+
+    return worldPos;
+}
 
 void main()
 {
@@ -204,50 +244,30 @@ void main()
 // gl_FragCoord, gl_PointCoord and coordinates of the point
 
     // trying to make a ray from eye to fragment's 3d position, like screen2world
-    float deltaX = (gl_FragCoord.x - 960.0) / 960.0;
-    float deltaY = (gl_FragCoord.y - 540.0) / 540.0;
 
-    vec4 ray_clip = vec4(deltaX, deltaY, -1, 1);
+    float u_lod = 1;
 
-    // matrices multiplied backwards
-    vec4 ray = inv_view * inv_projection * ray_clip;
+    vec3 vxl = positionOut.xyz;
 
-    vec3 ray_norm = normalize(ray.xyz / ray.w);
+    vec3 ray = ss2wsVec().xyz;
 
-    // trying to get voxel coords
-    vec3 voxel = positionTest.xyz;
-    // size of voxel
-    vec3 voxelMargin = vec3(0.5);
+    vec2 result = AABBIntersect(
+        vec3(0.0), ray,
+        vec3( vxl-0.4*u_lod),
+        vec3( vxl+0.4*u_lod)
+    );
 
-    vec3 inv_ray_norm = 1 / ray_norm;
+    if( !(result.x<=result.y) ) {
 
-    // efficient slab intersection algoritm
-    vec3 voxelMin = voxel + voxelMargin;
-    vec3 voxelMax = voxel - voxelMargin;
+        //gl_FragDepth = 0.99;
+        //out_Color = vec4(1);
 
-    vec3 ro = vec3(0.0);
-
-    vec3 tbot = (voxelMin - ro) * inv_ray_norm;
-    vec3 ttop = (voxelMax - ro) * inv_ray_norm;
-
-    vec3 tmin = min(ttop, tbot);
-    vec3 tmax = max(ttop, tbot);
-
-    vec2 t = max(tmin.xx, tmin.yz);
-    float t0 = max(t.x, t.y);
-    t = min(tmax.xx, tmax.yz);
-    float t1 = min(t.x, t.y);
-
-    // albedo = vec3(abs(ray_norm.x), abs(ray_norm.y), abs(ray_norm.z));
-
-    // color non-hits black
-    if (!(t0 <= t1)) {
-    //        discard;
-        albedo = vec3(0.0);
+        discard;
         return;
+
     }
 
-    vec3 hit = voxel - t0 * ray_norm;
+    vec3 hit = vxl - result.x * ray;
 
     vec3  hit_abs = abs(hit);
     float max_dim = max( max( hit_abs.x, hit_abs.y), hit_abs.z  );
@@ -256,6 +276,6 @@ void main()
         float(hit_abs.x == max_dim),
         float(hit_abs.y == max_dim),
         float(hit_abs.z == max_dim)
-    ) * sign(hit);
+    ) * - sign(hit);
 
 }
