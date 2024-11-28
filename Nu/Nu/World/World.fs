@@ -182,6 +182,7 @@ module WorldModule3 =
                  CursorDispatcher ()
                  GlyphDispatcher ()
                  ButtonExDispatcher ()
+                 VoxelDispatcher ()
                  ]
 
         static member private makeDefaultFacets () =
@@ -222,6 +223,7 @@ module WorldModule3 =
                  CursorFacet ()
                  GlyphFacet ()
                  HoverFacet ()
+                 VoxelFacet ()
                  ]
 
         /// Update late bindings internally stored by the engine from types found in the given assemblies.

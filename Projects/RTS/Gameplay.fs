@@ -242,6 +242,9 @@ type GameplayDispatcher () =
                     Entity.DieEvent => Die Simulants.GameplayPlayer
                 ]
 
+                ContentEx.voxel "VoxelTest" [
+                ]
+
             ]
 
          // the gui group

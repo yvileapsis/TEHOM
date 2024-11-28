@@ -2,8 +2,14 @@
 
 namespace Nu
 open System
-open Nu
+open System.Collections.Generic
+open System.Diagnostics
+open System.IO
+open System.Numerics
+open System.Threading
 open SDL2
+open ImGuiNET
+open Prime
 
 /// Augments an entity with rich text.
 type CameraFacet () =
@@ -316,6 +322,160 @@ type ButtonExDispatcher () =
          typeof<ButtonFacet>
          typeof<HoverFacet>]
 
+[<AutoOpen>]
+module VoxelFacetExtensions =
+    type Entity with
+
+        member this.GetVoxelMaterialProperties world : TerrainMaterialProperties = this.Get (nameof this.VoxelMaterialProperties) world
+        member this.SetVoxelMaterialProperties (value : TerrainMaterialProperties) world = this.Set (nameof this.VoxelMaterialProperties) value world
+        member this.VoxelMaterialProperties = lens (nameof this.VoxelMaterialProperties) this this.GetVoxelMaterialProperties this.SetVoxelMaterialProperties
+        member this.GetVoxelMaterial world : TerrainMaterial = this.Get (nameof this.VoxelMaterial) world
+        member this.SetVoxelMaterial (value : TerrainMaterial) world = this.Set (nameof this.VoxelMaterial) value world
+        member this.VoxelMaterial = lens (nameof this.VoxelMaterial) this this.GetVoxelMaterial this.SetVoxelMaterial
+
+        /// Attempt to get the resolution of the terrain.
+        member this.TryGetTerrainResolution world =
+            match this.GetHeightMap world with
+            | ImageHeightMap map ->
+                match Metadata.tryGetTextureSize map with
+                | Some textureSize -> Some textureSize
+                | None -> None
+            | RawHeightMap map -> Some map.Resolution
+
+        /// Attempt to get the size of each terrain quad.
+        member this.TryGetTerrainQuadSize world =
+            let bounds = this.GetBounds world
+            match this.TryGetTerrainResolution world with
+            | Some resolution -> Some (v2 (bounds.Size.X / single (dec resolution.X)) (bounds.Size.Z / single (dec resolution.Y)))
+            | None -> None
+
+/// Augments an entity with a rigid 3d terrain.
+type VoxelFacet () =
+    inherit Facet (true, false, false)
+
+    static member Properties =
+        [define Entity.Size (v3 512.0f 128.0f 512.0f)
+         define Entity.Presence Omnipresent
+         define Entity.Static true
+         define Entity.AlwaysRender true
+         define Entity.BodyEnabled true
+         define Entity.Friction 0.5f
+         define Entity.Restitution 0.0f
+         define Entity.CollisionCategories "1"
+         define Entity.CollisionMask Constants.Physics.CollisionWildcard
+         define Entity.InsetOpt None
+         define Entity.TerrainMaterialProperties TerrainMaterialProperties.defaultProperties
+         define Entity.TerrainMaterial
+            (BlendMaterial
+                { TerrainLayers =
+                    [|{ AlbedoImage = Assets.Default.TerrainLayer0Albedo
+                        RoughnessImage = Assets.Default.TerrainLayer0Roughness
+                        AmbientOcclusionImage = Assets.Default.TerrainLayer0AmbientOcclusion
+                        NormalImage = Assets.Default.TerrainLayer0Normal
+                        HeightImage = Assets.Default.TerrainLayer0Height }
+                      { AlbedoImage = Assets.Default.TerrainLayer1Albedo
+                        RoughnessImage = Assets.Default.TerrainLayer1Roughness
+                        AmbientOcclusionImage = Assets.Default.TerrainLayer1AmbientOcclusion
+                        NormalImage = Assets.Default.TerrainLayer1Normal
+                        HeightImage = Assets.Default.TerrainLayer1Height }|]
+                  BlendMap =
+                      RedsMap
+                        [|Assets.Default.TerrainLayer0Blend
+                          Assets.Default.TerrainLayer1Blend|]})
+         define Entity.TintImageOpt None
+         define Entity.NormalImageOpt None
+         define Entity.Tiles (v2 256.0f 256.0f)
+         define Entity.HeightMap (RawHeightMap { Resolution = v2i 513 513; RawFormat = RawUInt16 LittleEndian; RawAsset = Assets.Default.HeightMap })
+         define Entity.Segments v2iOne
+         define Entity.Observable false
+         nonPersistent Entity.AwakeTimeStamp 0L
+         computed Entity.Awake (fun (entity : Entity) world -> entity.GetAwakeTimeStamp world = world.UpdateTime) None
+         computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = 0 }) None]
+
+    override this.Register (entity, world) =
+        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyEnabled)) entity (nameof TerrainFacet) world
+        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Transform)) entity (nameof TerrainFacet) world
+        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Friction)) entity (nameof TerrainFacet) world
+        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Restitution)) entity (nameof TerrainFacet) world
+        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity (nameof TerrainFacet) world
+        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity (nameof TerrainFacet) world
+        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.HeightMap)) entity (nameof TerrainFacet) world
+        let world = entity.SetAwakeTimeStamp world.UpdateTime world
+        world
+
+    override this.RegisterPhysics (entity, world) =
+        match entity.TryGetTerrainResolution world with
+        | Some resolution ->
+            let mutable transform = entity.GetTransform world
+            let terrainShape =
+                { Resolution = resolution
+                  Bounds = transform.Bounds3d
+                  HeightMap = entity.GetHeightMap world
+                  TransformOpt = None
+                  PropertiesOpt = None }
+            let bodyProperties =
+                { Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
+                  Rotation = transform.Rotation
+                  Scale = transform.Scale
+                  BodyShape = TerrainShape terrainShape
+                  BodyType = Static
+                  SleepingAllowed = true
+                  Enabled = entity.GetBodyEnabled world
+                  Friction = entity.GetFriction world
+                  Restitution = entity.GetRestitution world
+                  LinearVelocity = v3Zero
+                  LinearDamping = 0.0f
+                  AngularVelocity = v3Zero
+                  AngularDamping = 0.0f
+                  AngularFactor = v3Zero
+                  Substance = Mass 0.0f
+                  GravityOverride = None
+                  CharacterProperties = CharacterProperties.defaultProperties
+                  CollisionDetection = Discontinuous
+                  CollisionCategories = Physics.categorizeCollisionMask (entity.GetCollisionCategories world)
+                  CollisionMask = Physics.categorizeCollisionMask (entity.GetCollisionMask world)
+                  Sensor = false
+                  Observable = entity.GetObservable world
+                  Awake = entity.GetAwake world
+                  BodyIndex = (entity.GetBodyId world).BodyIndex }
+            World.createBody false (entity.GetBodyId world) bodyProperties world
+        | None -> world
+
+    override this.UnregisterPhysics (entity, world) =
+        World.destroyBody false (entity.GetBodyId world) world
+
+    override this.Render (renderPass, entity, world) =
+        let mutable transform = entity.GetTransform world
+        let terrainDescriptor =
+            { Bounds = transform.Bounds3d
+              InsetOpt = entity.GetInsetOpt world
+              MaterialProperties = entity.GetTerrainMaterialProperties world
+              Material = entity.GetTerrainMaterial world
+              TintImageOpt = entity.GetTintImageOpt world
+              NormalImageOpt = entity.GetNormalImageOpt world
+              Tiles = entity.GetTiles world
+              HeightMap1 = entity.GetHeightMap world
+              Segments = entity.GetSegments world
+              Voxel = true }
+        World.enqueueRenderMessage3d
+            (RenderVoxel
+                { Visible = transform.Visible
+                  VoxelDescriptor = terrainDescriptor
+                  RenderPass = renderPass })
+            world
+
+    override this.GetAttributesInferred (entity, world) =
+        match entity.TryGetTerrainResolution world with
+        | Some resolution -> AttributesInferred.important (v3 (single (dec resolution.X)) 128.0f (single (dec resolution.Y))) v3Zero
+        | None -> AttributesInferred.important (v3 512.0f 128.0f 512.0f) v3Zero
+
+/// Gives an entity the base behavior of a rigid 3d terrain.
+type VoxelDispatcher () =
+    inherit Entity3dDispatcher (true, false, false)
+
+    static member Facets =
+        [typeof<VoxelFacet>]
+
 
 [<RequireQualifiedAccess>]
 module ContentEx =
@@ -327,3 +487,5 @@ module ContentEx =
     let glyph entityName initializers = Content.entity<GlyphDispatcher> entityName initializers
 
     let buttonEx entityName initializers = Content.entity<ButtonExDispatcher> entityName initializers
+
+    let voxel entityName definitions = Content.entity<VoxelDispatcher> entityName definitions

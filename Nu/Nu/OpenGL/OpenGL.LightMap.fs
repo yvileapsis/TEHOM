@@ -93,7 +93,7 @@ module LightMap =
                 | _ -> Matrix4x4.Transpose eyeRotationMatrix
             render
                 false (Some (ambientColor, ambientBrightness)) origin eyeRotation
-                view viewSkyBox
+                view Matrix4x4.Identity Matrix4x4.Identity viewSkyBox
                 geometryViewport geometryProjection
                 ssaoViewport
                 rasterViewport rasterProjection

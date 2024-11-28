@@ -250,6 +250,40 @@ type TerrainDescriptor =
           HeightMap = this.HeightMap
           Segments = this.Segments }
 
+/// Describes a static 3d terrain geometry.
+type VoxelGeometryDescriptor =
+    { Bounds : Box3
+      Material : TerrainMaterial
+      TintImageOpt : Image AssetTag option
+      NormalImageOpt : Image AssetTag option
+      Tiles : Vector2
+      HeightMap1 : HeightMap
+      Segments : Vector2i
+      Voxel : bool }
+
+/// Describes a static 3d terrain.
+type VoxelDescriptor =
+    { Bounds : Box3
+      InsetOpt : Box2 option
+      MaterialProperties : TerrainMaterialProperties
+      Material : TerrainMaterial
+      TintImageOpt : Image AssetTag option
+      NormalImageOpt : Image AssetTag option
+      Tiles : Vector2
+      HeightMap1 : HeightMap
+      Segments : Vector2i
+      Voxel : bool }
+
+    member this.VoxelGeometryDescriptor =
+        { Bounds = this.Bounds
+          Material = this.Material
+          TintImageOpt = this.TintImageOpt
+          NormalImageOpt = this.NormalImageOpt
+          Tiles = this.Tiles
+          HeightMap1 = this.HeightMap1
+          Segments = this.Segments
+          Voxel = this.Voxel }
+
 /// An internally cached static model used to reduce GC promotion or pressure.
 type CachedStaticModelMessage =
     { mutable CachedStaticModelMatrix : Matrix4x4
@@ -427,6 +461,11 @@ type RenderTerrain =
       TerrainDescriptor : TerrainDescriptor
       RenderPass : RenderPass }
 
+type RenderVoxel =
+    { Visible : bool
+      VoxelDescriptor : VoxelDescriptor
+      RenderPass : RenderPass }
+
 /// Configures 3d lighting and ssao.
 type [<SymbolicExpansion>] Lighting3dConfig =
     { LightCutoffMargin : single
@@ -524,6 +563,7 @@ type RenderMessage3d =
     | RenderAnimatedModels of RenderAnimatedModels
     | RenderCachedAnimatedModel of CachedAnimatedModelMessage
     | RenderTerrain of RenderTerrain
+    | RenderVoxel of RenderVoxel
     | ConfigureLighting3d of Lighting3dConfig
     | ConfigureRenderer3d of Renderer3dConfig
     | LoadRenderPackage3d of string
@@ -713,6 +753,7 @@ type [<ReferenceEquality>] private RenderTasks =
       DeferredStatic : Dictionary<OpenGL.PhysicallyBased.PhysicallyBasedSurface, struct (Matrix4x4 * Presence * Box2 * MaterialProperties) List>
       DeferredAnimated : Dictionary<AnimatedModelSurfaceKey, struct (Matrix4x4 * Presence * Box2 * MaterialProperties) List>
       DeferredTerrains : struct (TerrainDescriptor * OpenGL.PhysicallyBased.PhysicallyBasedGeometry) List
+      DeferredVoxels : struct (VoxelDescriptor * OpenGL.PhysicallyBased.PhysicallyBasedGeometry) List
       ForwardStatic : struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) List
       ForwardStaticSorted : struct (Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) List
       DeferredStaticRemovals : OpenGL.PhysicallyBased.PhysicallyBasedSurface List
@@ -727,6 +768,7 @@ type [<ReferenceEquality>] private RenderTasks =
         this.DeferredStatic.Count > 0 ||
         this.DeferredAnimated.Count > 0 ||
         this.DeferredTerrains.Count > 0 ||
+        this.DeferredVoxels.Count > 0 ||
         this.ForwardStatic.Count > 0
 
     static member make () =
@@ -738,6 +780,7 @@ type [<ReferenceEquality>] private RenderTasks =
           DeferredStatic = dictPlus OpenGL.PhysicallyBased.PhysicallyBasedSurfaceFns.comparer []
           DeferredAnimated = dictPlus AnimatedModelSurfaceKey.comparer []
           DeferredTerrains = List ()
+          DeferredVoxels = List ()
           ForwardStatic = List ()
           ForwardStaticSorted = List ()
           DeferredStaticRemovals = List ()
@@ -769,6 +812,7 @@ type [<ReferenceEquality>] private RenderTasks =
 
         renderTasks.ForwardStaticSorted.Clear ()
         renderTasks.DeferredTerrains.Clear ()
+        renderTasks.DeferredVoxels.Clear ()
 
 /// The 3d renderer. Represents a 3d rendering subsystem in Nu generally.
 type Renderer3d =
@@ -809,9 +853,11 @@ type [<ReferenceEquality>] GlRenderer3d =
           PhysicallyBasedShadowStaticShader : OpenGL.PhysicallyBased.PhysicallyBasedShader
           PhysicallyBasedShadowAnimatedShader : OpenGL.PhysicallyBased.PhysicallyBasedShader
           PhysicallyBasedShadowTerrainShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredTerrainShader
+          PhysicallyBasedShadowVoxelShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredVoxelShader
           PhysicallyBasedDeferredStaticShader : OpenGL.PhysicallyBased.PhysicallyBasedShader
           PhysicallyBasedDeferredAnimatedShader : OpenGL.PhysicallyBased.PhysicallyBasedShader
           PhysicallyBasedDeferredTerrainShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredTerrainShader
+          PhysicallyBasedDeferredVoxelShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredVoxelShader
           PhysicallyBasedDeferredLightMappingShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredLightMappingShader
           PhysicallyBasedDeferredAmbientShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredAmbientShader
           PhysicallyBasedDeferredIrradianceShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredIrradianceShader
@@ -843,6 +889,8 @@ type [<ReferenceEquality>] GlRenderer3d =
           PhysicallyBasedQuad : OpenGL.PhysicallyBased.PhysicallyBasedGeometry
           PhysicallyBasedTerrainGeometries : Dictionary<TerrainGeometryDescriptor, OpenGL.PhysicallyBased.PhysicallyBasedGeometry>
           PhysicallyBasedTerrainGeometriesUtilized : TerrainGeometryDescriptor HashSet
+          PhysicallyBasedVoxelGeometries : Dictionary<VoxelGeometryDescriptor, OpenGL.PhysicallyBased.PhysicallyBasedGeometry>
+          PhysicallyBasedVoxelGeometriesUtilized : VoxelGeometryDescriptor HashSet
           CubeMap : OpenGL.Texture.Texture
           WhiteTexture : OpenGL.Texture.Texture
           BlackTexture : OpenGL.Texture.Texture
@@ -1360,6 +1408,28 @@ type [<ReferenceEquality>] GlRenderer3d =
                     normal
                 else v3Up|]
 
+    static member private createPhysicallyBasedVoxelNormals (resolution : Vector2i) (positionsAndTexCoordses : struct (Vector3 * Vector2) array) =
+        [|for y in 0 .. dec resolution.Y do
+            for x in 0 .. dec resolution.X do
+                if x > 0 && y > 0 && x < dec resolution.X && y < dec resolution.Y then
+                    let v  = fst' positionsAndTexCoordses.[resolution.X * y + x]
+                    let n  = fst' positionsAndTexCoordses.[resolution.X * dec y + x]
+                    let ne = fst' positionsAndTexCoordses.[resolution.X * dec y + inc x]
+                    let e  = fst' positionsAndTexCoordses.[resolution.X * y + inc x]
+                    let s  = fst' positionsAndTexCoordses.[resolution.X * inc y + x]
+                    let sw = fst' positionsAndTexCoordses.[resolution.X * inc y + dec x]
+                    let w  = fst' positionsAndTexCoordses.[resolution.X * y + dec x]
+                    let normalSum =
+                        Vector3.Cross (ne - v, n - v) +
+                        Vector3.Cross (e - v,  ne - v) +
+                        Vector3.Cross (s - v,  e - v) +
+                        Vector3.Cross (sw - v, s - v) +
+                        Vector3.Cross (w - v,  sw - v) +
+                        Vector3.Cross (n - v,  w - v)
+                    let normal = normalSum.Normalized
+                    normal
+                else v3Up|]
+
     static member private tryCreatePhysicallyBasedTerrainGeometry (geometryDescriptor : TerrainGeometryDescriptor) renderer =
 
         // attempt to compute positions and tex coords
@@ -1491,6 +1561,139 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // error
         | None -> None
+
+    static member private tryCreatePhysicallyBasedVoxelGeometry (geometryDescriptor : VoxelGeometryDescriptor) renderer =
+
+        // attempt to compute positions and tex coords
+        let heightMapMetadataOpt =
+            HeightMap.tryGetMetadata
+                (fun assetTag -> GlRenderer3d.tryGetFilePath assetTag renderer)
+                geometryDescriptor.Bounds
+                geometryDescriptor.Tiles
+                geometryDescriptor.HeightMap1
+
+        // on success, continue terrain geometry generation attempt
+        match heightMapMetadataOpt with
+        | Some heightMapMetadata ->
+
+            // compute normals
+            let resolution = heightMapMetadata.Resolution
+            let positionsAndTexCoordses = heightMapMetadata.PositionsAndTexCoordses
+            let normalsOpt =
+                match geometryDescriptor.NormalImageOpt with
+                | Some normalImage ->
+                    match GlRenderer3d.tryGetTextureData false normalImage renderer with
+                    | Some (metadata, blockCompressed, bytes) when metadata.TextureWidth * metadata.TextureHeight = positionsAndTexCoordses.Length ->
+                        if not blockCompressed then
+                            let scalar = 1.0f / single Byte.MaxValue
+                            bytes |>
+                            Array.map (fun b -> single b * scalar) |>
+                            Array.chunkBySize 4 |>
+                            Array.map (fun b ->
+                                let tangent = (v3 b.[2] b.[1] b.[0] * 2.0f - v3One).Normalized
+                                let normal = v3 tangent.X tangent.Z -tangent.Y
+                                normal) |>
+                            Some
+                        else Log.info "Block-compressed images not supported for terrain normal images."; None
+                    | _ -> Some (GlRenderer3d.createPhysicallyBasedVoxelNormals resolution positionsAndTexCoordses)
+                | None -> Some (GlRenderer3d.createPhysicallyBasedVoxelNormals resolution positionsAndTexCoordses)
+
+            // compute tint
+            let tintOpt =
+                match geometryDescriptor.TintImageOpt with
+                | Some tintImage ->
+                    match GlRenderer3d.tryGetTextureData false tintImage renderer with
+                    | Some (metadata, blockCompressed, bytes) when metadata.TextureWidth * metadata.TextureHeight = positionsAndTexCoordses.Length ->
+                        if not blockCompressed then
+                            let scalar = 1.0f / single Byte.MaxValue
+                            bytes |>
+                            Array.map (fun b -> single b * scalar) |>
+                            Array.chunkBySize 4 |>
+                            Array.map (fun b -> v3 b.[2] b.[1] b.[0]) |>
+                            Some
+                        else Log.info "Block-compressed images not supported for terrain tint images."; None
+                    | _ -> Some (Array.init positionsAndTexCoordses.Length (fun _ -> v3One))
+                | _ -> Some (Array.init positionsAndTexCoordses.Length (fun _ -> v3One))
+
+            // compute blendses, logging if more than the safe number of terrain layers is utilized
+            // NOTE: there are 8 blends, each of which we account for regardless of TerrainLayersMax.
+            let blendses = Array2D.zeroCreate<single> positionsAndTexCoordses.Length 8
+            match geometryDescriptor.Material with
+            | BlendMaterial blendMaterial ->
+                if blendMaterial.TerrainLayers.Length > Constants.Render.TerrainLayersMax then
+                    Log.infoOnce
+                        ("Terrain has more than " +
+                         string Constants.Render.TerrainLayersMax +
+                         " layers which references more than the number of supported fragment shader textures.")
+                match blendMaterial.BlendMap with
+                | RgbaMap rgbaMap ->
+                    match GlRenderer3d.tryGetTextureData false rgbaMap renderer with
+                    | Some (metadata, blockCompressed, bytes) when metadata.TextureWidth * metadata.TextureHeight = positionsAndTexCoordses.Length ->
+                        if not blockCompressed then
+                            let scalar = 1.0f / single Byte.MaxValue
+                            for i in 0 .. dec positionsAndTexCoordses.Length do
+                                // ARGB reverse byte order, from Drawing.Bitmap (windows).
+                                // TODO: confirm it is the same for SDL (linux).
+                                blendses.[i, 0] <- single bytes.[i * 4 + 2] * scalar
+                                blendses.[i, 1] <- single bytes.[i * 4 + 1] * scalar
+                                blendses.[i, 2] <- single bytes.[i * 4 + 0] * scalar
+                                blendses.[i, 3] <- single bytes.[i * 4 + 3] * scalar
+                        else Log.info "Block-compressed images not supported for terrain blend iamges."
+                    | _ -> Log.info ("Could not locate texture data for blend image '" + scstring rgbaMap + "'.")
+                | RedsMap reds ->
+                    let scalar = 1.0f / single Byte.MaxValue
+                    for i in 0 .. dec (min reds.Length 8) do
+                        let red = reds.[i]
+                        match GlRenderer3d.tryGetTextureData false red renderer with
+                        | Some (metadata, blockCompressed, bytes) when metadata.TextureWidth * metadata.TextureHeight = positionsAndTexCoordses.Length ->
+                            if not blockCompressed then
+                                for j in 0 .. dec positionsAndTexCoordses.Length do
+                                    blendses.[j, i] <- single bytes.[j * 4 + 2] * scalar
+                            else Log.info "Block-compressed images not supported for terrain blend images."
+                        | _ -> Log.info ("Could not locate texture data for blend image '" + scstring red + "'.")
+            | FlatMaterial _ ->
+                for i in 0 .. dec positionsAndTexCoordses.Length do
+                    blendses.[i,0] <- 1.0f
+
+            // ensure we've got usable input data
+            match (normalsOpt, tintOpt) with
+            | (Some normals, Some tint) ->
+
+                // compute vertices
+                let vertices =
+                    [|for i in 0 .. dec positionsAndTexCoordses.Length do
+                        let struct (p, tc) = positionsAndTexCoordses.[i]
+                        let n = normals.[i]
+                        let s = blendses
+                        let t = tint.[i]
+                        yield!
+                            [|p.X; p.Y; p.Z
+                              tc.X; tc.Y
+                              n.X; n.Y; n.Z
+                              t.X; t.Y; t.Z
+                              s.[i,0]; s.[i,1]; s.[i,2]; s.[i,3]; s.[i,4]; s.[i,5]; s.[i,6]; s.[i,7]|]|]
+
+                // compute indices, splitting quad along the standard orientation (as used by World Creator, AFAIK).
+                let indices =
+                    [|for y in 0 .. dec resolution.Y - 1 do
+                        for x in 0 .. dec resolution.X - 1 do
+                            yield resolution.X * y + x
+                            yield resolution.X * inc y + x
+                            yield resolution.X * y + inc x
+                            yield resolution.X * inc y + x
+                            yield resolution.X * inc y + inc x
+                            yield resolution.X * y + inc x|]
+
+                // create the actual geometry
+                let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelGeometry (true, OpenGL.PrimitiveType.Points, vertices.AsMemory (), indices.AsMemory (), geometryDescriptor.Bounds)
+                Some geometry
+
+            // error
+            | (_, _) -> None
+
+        // error
+        | None -> None
+
 
     static member private handleLoadRenderPackage hintPackageName renderer =
         GlRenderer3d.tryLoadRenderPackage hintPackageName renderer
@@ -1825,6 +2028,32 @@ type [<ReferenceEquality>] GlRenderer3d =
         // mark terrain geometry as utilized regardless of visibility (to keep it from being destroyed).
         renderer.PhysicallyBasedTerrainGeometriesUtilized.Add geometryDescriptor |> ignore<bool>
 
+    static member private categorizeVoxel
+        (visible : bool,
+         terrainDescriptor : VoxelDescriptor,
+         renderPass : RenderPass,
+         renderer) =
+
+        // attempt to create terrain geometry
+        let geometryDescriptor = terrainDescriptor.VoxelGeometryDescriptor
+        match renderer.PhysicallyBasedVoxelGeometries.TryGetValue geometryDescriptor with
+        | (true, _) -> ()
+        | (false, _) ->
+            match GlRenderer3d.tryCreatePhysicallyBasedVoxelGeometry geometryDescriptor renderer with
+            | Some geometry -> renderer.PhysicallyBasedVoxelGeometries.Add (geometryDescriptor, geometry)
+            | None -> ()
+
+        // attempt to add terrain to appropriate render list when visible
+        // TODO: also add found geometry to render list so it doesn't have to be looked up redundantly?
+        if visible then
+            let renderTasks = GlRenderer3d.getRenderTasks renderPass renderer
+            match renderer.PhysicallyBasedVoxelGeometries.TryGetValue geometryDescriptor with
+            | (true, terrainGeometry) -> renderTasks.DeferredVoxels.Add struct (terrainDescriptor, terrainGeometry)
+            | (false, _) -> ()
+
+        // mark terrain geometry as utilized regardless of visibility (to keep it from being destroyed).
+        renderer.PhysicallyBasedVoxelGeometriesUtilized.Add geometryDescriptor |> ignore<bool>
+
     static member private getLastSkyBoxOpt renderPass renderer =
         let renderTasks = GlRenderer3d.getRenderTasks renderPass renderer
         match Seq.tryLast renderTasks.SkyBoxes with
@@ -2074,6 +2303,115 @@ type [<ReferenceEquality>] GlRenderer3d =
              instanceFields, lightType.Enumerate, lightShadowExponent, lightShadowDensity, elementsCount, materials, geometry, shader)
         OpenGL.Hl.Assert ()
 
+    static member private renderPhysicallyBasedVoxel viewArray viewRotationArray viewTranslationArray geometryProjectionArray invViewArray invProjectionArray eyeCenter (lightType : LightType) lightShadowExponent lightShadowDensity terrainDescriptor geometry shader renderer =
+        let (resolutionX, resolutionY) = Option.defaultValue (0, 0) (GlRenderer3d.tryGetHeightMapResolution terrainDescriptor.HeightMap1 renderer)
+        let elementsCount = dec resolutionX * dec resolutionY * 6
+        let terrainMaterialProperties = terrainDescriptor.MaterialProperties
+        let materialProperties : OpenGL.PhysicallyBased.PhysicallyBasedMaterialProperties =
+            { Albedo = Option.defaultValue Constants.Render.AlbedoDefault terrainMaterialProperties.AlbedoOpt
+              Roughness = Option.defaultValue Constants.Render.RoughnessDefault terrainMaterialProperties.RoughnessOpt
+              Metallic = Constants.Render.MetallicDefault
+              AmbientOcclusion = Option.defaultValue Constants.Render.AmbientOcclusionDefault terrainMaterialProperties.AmbientOcclusionOpt
+              Emission = Constants.Render.EmissionDefault
+              Height = Option.defaultValue Constants.Render.HeightDefault terrainMaterialProperties.HeightOpt
+              IgnoreLightMaps = Option.defaultValue Constants.Render.IgnoreLightMapsDefault terrainMaterialProperties.IgnoreLightMapsOpt
+              OpaqueDistance = Constants.Render.OpaqueDistanceDefault }
+        let (texelWidth, texelHeight, materials) =
+            match terrainDescriptor.Material with
+            | BlendMaterial blendMaterial ->
+                let mutable texelWidth = Single.MaxValue
+                let mutable texelHeight = Single.MaxValue
+                let materials =
+                    [|for i in 0 .. dec blendMaterial.TerrainLayers.Length do
+                        let layer =
+                            blendMaterial.TerrainLayers.[i]
+                        let defaultMaterial =
+                            renderer.PhysicallyBasedMaterial
+                        let albedoTexture =
+                            match GlRenderer3d.tryGetRenderAsset layer.AlbedoImage renderer with
+                            | ValueSome renderAsset -> match renderAsset with TextureAsset texture -> texture | _ -> defaultMaterial.AlbedoTexture
+                            | ValueNone -> defaultMaterial.AlbedoTexture
+                        let roughnessTexture =
+                            match GlRenderer3d.tryGetRenderAsset layer.RoughnessImage renderer with
+                            | ValueSome renderAsset -> match renderAsset with TextureAsset texture -> texture | _ -> defaultMaterial.RoughnessTexture
+                            | ValueNone -> defaultMaterial.RoughnessTexture
+                        let ambientOcclusionTexture =
+                            match GlRenderer3d.tryGetRenderAsset layer.AmbientOcclusionImage renderer with
+                            | ValueSome renderAsset -> match renderAsset with TextureAsset texture -> texture | _ -> defaultMaterial.AmbientOcclusionTexture
+                            | ValueNone -> defaultMaterial.AmbientOcclusionTexture
+                        let normalTexture =
+                            match GlRenderer3d.tryGetRenderAsset layer.NormalImage renderer with
+                            | ValueSome renderAsset -> match renderAsset with TextureAsset texture -> texture | _ -> defaultMaterial.NormalTexture
+                            | ValueNone -> defaultMaterial.NormalTexture
+                        let heightTexture =
+                            match GlRenderer3d.tryGetRenderAsset layer.HeightImage renderer with
+                            | ValueSome renderAsset -> match renderAsset with TextureAsset texture -> texture | _ -> defaultMaterial.HeightTexture
+                            | ValueNone -> defaultMaterial.HeightTexture
+                        let albedoMetadata = albedoTexture.TextureMetadata
+                        texelWidth <- min texelWidth albedoMetadata.TextureTexelWidth
+                        texelHeight <- min texelHeight albedoMetadata.TextureTexelHeight
+                        { defaultMaterial with
+                            AlbedoTexture = albedoTexture
+                            RoughnessTexture = roughnessTexture
+                            AmbientOcclusionTexture = ambientOcclusionTexture
+                            NormalTexture = normalTexture
+                            HeightTexture = heightTexture }|]
+                (texelWidth, texelHeight, materials)
+            | FlatMaterial flatMaterial ->
+                let defaultMaterial =
+                    renderer.PhysicallyBasedMaterial
+                let albedoTexture =
+                    match GlRenderer3d.tryGetRenderAsset flatMaterial.AlbedoImage renderer with
+                    | ValueSome renderAsset -> match renderAsset with TextureAsset texture -> texture | _ -> defaultMaterial.AlbedoTexture
+                    | ValueNone -> defaultMaterial.AlbedoTexture
+                let roughnessTexture =
+                    match GlRenderer3d.tryGetRenderAsset flatMaterial.RoughnessImage renderer with
+                    | ValueSome renderAsset -> match renderAsset with TextureAsset texture -> texture | _ -> defaultMaterial.RoughnessTexture
+                    | ValueNone -> defaultMaterial.RoughnessTexture
+                let ambientOcclusionTexture =
+                    match GlRenderer3d.tryGetRenderAsset flatMaterial.AmbientOcclusionImage renderer with
+                    | ValueSome renderAsset -> match renderAsset with TextureAsset texture -> texture | _ -> defaultMaterial.AmbientOcclusionTexture
+                    | ValueNone -> defaultMaterial.AmbientOcclusionTexture
+                let normalTexture =
+                    match GlRenderer3d.tryGetRenderAsset flatMaterial.NormalImage renderer with
+                    | ValueSome renderAsset -> match renderAsset with TextureAsset texture -> texture | _ -> defaultMaterial.NormalTexture
+                    | ValueNone -> defaultMaterial.NormalTexture
+                let heightTexture =
+                    match GlRenderer3d.tryGetRenderAsset flatMaterial.HeightImage renderer with
+                    | ValueSome renderAsset -> match renderAsset with TextureAsset texture -> texture | _ -> defaultMaterial.HeightTexture
+                    | ValueNone -> defaultMaterial.HeightTexture
+                let material =
+                    { defaultMaterial with
+                        AlbedoTexture = albedoTexture
+                        RoughnessTexture = roughnessTexture
+                        AmbientOcclusionTexture = ambientOcclusionTexture
+                        NormalTexture = normalTexture
+                        HeightTexture = heightTexture }
+                let albedoMetadata = albedoTexture.TextureMetadata
+                (albedoMetadata.TextureTexelWidth, albedoMetadata.TextureTexelHeight, [|material|])
+        let texCoordsOffset =
+            match terrainDescriptor.InsetOpt with
+            | Some inset ->
+                let texelWidth = texelWidth
+                let texelHeight = texelHeight
+                let px = inset.Min.X * texelWidth
+                let py = (inset.Min.Y + inset.Size.Y) * texelHeight
+                let sx = inset.Size.X * texelWidth
+                let sy = -inset.Size.Y * texelHeight
+                Box2 (px, py, sx, sy)
+            | None -> box2 v2Zero v2Zero
+        let instanceFields =
+            Array.append
+                (m4Identity.ToArray ())
+                ([|texCoordsOffset.Min.X; texCoordsOffset.Min.Y; texCoordsOffset.Min.X + texCoordsOffset.Size.X; texCoordsOffset.Min.Y + texCoordsOffset.Size.Y
+                   materialProperties.Albedo.R; materialProperties.Albedo.G; materialProperties.Albedo.B; materialProperties.Albedo.A
+                   materialProperties.Roughness; materialProperties.Metallic; materialProperties.AmbientOcclusion; materialProperties.Emission
+                   texelHeight * materialProperties.Height|])
+        OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxel
+            (viewArray, viewRotationArray, viewTranslationArray, geometryProjectionArray, invViewArray, invProjectionArray, eyeCenter,
+             instanceFields, lightType.Enumerate, lightShadowExponent, lightShadowDensity, elementsCount, materials, geometry, shader)
+        OpenGL.Hl.Assert ()
+
     static member private makeBillboardMaterial (properties : MaterialProperties inref, material : Material inref, renderer) =
         let albedoTexture =
             match GlRenderer3d.tryGetRenderAsset material.AlbedoImage renderer with
@@ -2225,6 +2563,12 @@ type [<ReferenceEquality>] GlRenderer3d =
                 lightViewArray lightProjectionArray lightOrigin lightType renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
                 descriptor geometry renderer.PhysicallyBasedShadowTerrainShader renderer
 
+        // attempt to deferred render voxel shadows
+        for (descriptor, geometry) in renderTasks.DeferredVoxels do
+            GlRenderer3d.renderPhysicallyBasedVoxel
+                lightViewArray lightProjectionArray [||] [||] [||] [||] lightOrigin lightType renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
+                descriptor geometry renderer.PhysicallyBasedShadowVoxelShader renderer
+
         // forward render static surface shadows to filter buffer
         for struct (model, presence, texCoordsOffset, properties, surface) in renderTasks.ForwardStaticSorted do
             GlRenderer3d.renderPhysicallyBasedDepthSurfaces
@@ -2332,6 +2676,8 @@ type [<ReferenceEquality>] GlRenderer3d =
         (eyeCenter : Vector3)
         (eyeRotation : Quaternion)
         (view : Matrix4x4)
+        (viewRotation : Matrix4x4)
+        (viewTranslation : Matrix4x4)
         (viewSkyBox : Matrix4x4)
         (geometryViewport : Viewport)
         (geometryProjection : Matrix4x4)
@@ -2349,6 +2695,10 @@ type [<ReferenceEquality>] GlRenderer3d =
         let viewSkyBoxArray = viewSkyBox.ToArray ()
         let geometryProjectionArray = geometryProjection.ToArray ()
         let rasterProjectionArray = rasterProjection.ToArray ()
+        let viewRotationArray = viewRotation.ToArray ()
+        let viewTranslationArray = viewTranslation.ToArray ()
+        let invViewArray = view.Inverted.ToArray ()
+        let invProjectionArray = geometryProjection.Inverted.ToArray ()
 
         // get ambient lighting, sky box opt, and fallback light map
         let (lightAmbientColor, lightAmbientBrightness, skyBoxOpt) = GlRenderer3d.getLastSkyBoxOpt renderPass renderer
@@ -2505,6 +2855,12 @@ type [<ReferenceEquality>] GlRenderer3d =
             GlRenderer3d.renderPhysicallyBasedTerrain
                 viewArray geometryProjectionArray eyeCenter PointLight renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
                 descriptor geometry renderer.PhysicallyBasedDeferredTerrainShader renderer
+
+        // render terrains deferred
+        for (descriptor, geometry) in renderTasks.DeferredVoxels do
+            GlRenderer3d.renderPhysicallyBasedVoxel
+                viewArray viewRotationArray viewTranslationArray geometryProjectionArray invViewArray invProjectionArray eyeCenter PointLight renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
+                descriptor geometry renderer.PhysicallyBasedDeferredVoxelShader renderer
 
         // run light mapping pass
         let lightMappingTexture =
@@ -2844,6 +3200,8 @@ type [<ReferenceEquality>] GlRenderer3d =
                 GlRenderer3d.categorizeAnimatedModel (&camm.CachedAnimatedModelMatrix, camm.CachedAnimatedModelPresence, &camm.CachedAnimatedModelInsetOpt, &camm.CachedAnimatedModelMaterialProperties, camm.CachedAnimatedModelBoneTransforms, camm.CachedAnimatedModel, camm.CachedAnimatedModelRenderPass, renderer)
             | RenderTerrain rt ->
                 GlRenderer3d.categorizeTerrain (rt.Visible, rt.TerrainDescriptor, rt.RenderPass, renderer)
+            | RenderVoxel rt ->
+                GlRenderer3d.categorizeVoxel (rt.Visible, rt.VoxelDescriptor, rt.RenderPass, renderer)
             | ConfigureLighting3d l3c ->
                 renderer.LightingConfig <- l3c
             | ConfigureRenderer3d r3c ->
@@ -3033,9 +3391,11 @@ type [<ReferenceEquality>] GlRenderer3d =
         let view = viewport.View3d (eyeCenter, eyeRotation)
         let viewSkyBox = Matrix4x4.CreateFromQuaternion eyeRotation.Inverted
         let projection = viewport.Projection3d
+        let viewRotation = viewport.View3d (Vector3.Zero, eyeRotation)
+        let viewTranslation = viewport.View3d (eyeCenter, Quaternion.CreateFromYawPitchRoll (0f, 0f, 0f))
 
         // top-level geometry pass
-        GlRenderer3d.renderGeometry normalPass normalTasks renderer true None eyeCenter eyeRotation view viewSkyBox viewport projection ssaoViewport offsetViewport projection renderbuffer framebuffer
+        GlRenderer3d.renderGeometry normalPass normalTasks renderer true None eyeCenter eyeRotation view viewRotation viewTranslation viewSkyBox viewport projection ssaoViewport offsetViewport projection renderbuffer framebuffer
 
         // reset terrain geometry book-keeping
         renderer.PhysicallyBasedTerrainGeometriesUtilized.Clear ()
@@ -3111,6 +3471,10 @@ type [<ReferenceEquality>] GlRenderer3d =
                  Constants.Paths.PhysicallyBasedShadowAnimatedShaderFilePath,
                  Constants.Paths.PhysicallyBasedShadowTerrainShaderFilePath)
         OpenGL.Hl.Assert ()
+        let (shadowVoxelShader) =
+            OpenGL.PhysicallyBased.CreatePhysicallyBasedDepthShadersVoxel
+                (Constants.Paths.PhysicallyBasedShadowVoxelShaderFilePath)
+        OpenGL.Hl.Assert ()
 
         // create deferred shaders
         let (deferredStaticShader, deferredAnimatedShader, deferredTerrainShader, deferredLightMappingShader,
@@ -3127,6 +3491,12 @@ type [<ReferenceEquality>] GlRenderer3d =
                  Constants.Paths.PhysicallyBasedDeferredSsaoShaderFilePath,
                  Constants.Paths.PhysicallyBasedDeferredLightingShaderFilePath,
                  Constants.Paths.PhysicallyBasedDeferredCompositionShaderFilePath)
+        OpenGL.Hl.Assert ()
+
+        // create deferred shaders
+        let (deferredVoxelShader) =
+            OpenGL.PhysicallyBased.CreatePhysicallyBasedDeferredShadersVoxel
+                (Constants.Paths.PhysicallyBasedDeferredVoxelShaderFilePath)
         OpenGL.Hl.Assert ()
 
         // create forward shader
@@ -3408,9 +3778,11 @@ type [<ReferenceEquality>] GlRenderer3d =
               PhysicallyBasedShadowStaticShader = shadowStaticShader
               PhysicallyBasedShadowAnimatedShader = shadowAnimatedShader
               PhysicallyBasedShadowTerrainShader = shadowTerrainShader
+              PhysicallyBasedShadowVoxelShader = shadowVoxelShader
               PhysicallyBasedDeferredStaticShader = deferredStaticShader
               PhysicallyBasedDeferredAnimatedShader = deferredAnimatedShader
               PhysicallyBasedDeferredTerrainShader = deferredTerrainShader
+              PhysicallyBasedDeferredVoxelShader = deferredVoxelShader
               PhysicallyBasedDeferredLightMappingShader = deferredLightMappingShader
               PhysicallyBasedDeferredIrradianceShader = deferredIrradianceShader
               PhysicallyBasedDeferredEnvironmentFilterShader = deferredEnvironmentFilterShader
@@ -3442,6 +3814,8 @@ type [<ReferenceEquality>] GlRenderer3d =
               PhysicallyBasedQuad = physicallyBasedQuad
               PhysicallyBasedTerrainGeometries = Dictionary HashIdentity.Structural
               PhysicallyBasedTerrainGeometriesUtilized = HashSet HashIdentity.Structural
+              PhysicallyBasedVoxelGeometries = Dictionary HashIdentity.Structural
+              PhysicallyBasedVoxelGeometriesUtilized = HashSet HashIdentity.Structural
               CubeMap = cubeMapSurface.CubeMap
               WhiteTexture = whiteTexture
               BlackTexture = blackTexture
