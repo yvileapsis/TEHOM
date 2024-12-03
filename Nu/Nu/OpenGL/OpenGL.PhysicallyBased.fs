@@ -308,6 +308,7 @@ module PhysicallyBased =
           ViewTranslationUniform : int
           ViewRotationUniform : int
           ViewPort : int
+          ViewPortBounds : int
           EyeCenterUniform : int
           LightTypeUniform : int
           LightShadowExponentUniform : int
@@ -1724,6 +1725,7 @@ module PhysicallyBased =
         let viewTranslationUniform = Gl.GetUniformLocation (shader, "view_translate")
         let viewRotationUniform = Gl.GetUniformLocation (shader, "view_rotate")
         let viewPort = Gl.GetUniformLocation (shader, "viewPort")
+        let viewPortBounds = Gl.GetUniformLocation (shader, "viewPortBounds")
         let eyeCenterUniform = Gl.GetUniformLocation (shader, "eyeCenter")
         let lightTypeUniform = Gl.GetUniformLocation (shader, "lightType")
         let lightShadowExponentUniform = Gl.GetUniformLocation (shader, "lightShadowExponent")
@@ -1754,6 +1756,7 @@ module PhysicallyBased =
           ViewTranslationUniform = viewTranslationUniform
           ViewRotationUniform = viewRotationUniform
           ViewPort = viewPort
+          ViewPortBounds = viewPortBounds
           LightTypeUniform = lightTypeUniform
           LightShadowExponentUniform = lightShadowExponentUniform
           LightShadowDensityUniform = lightShadowDensityUniform
@@ -2933,7 +2936,8 @@ module PhysicallyBased =
          projection : single array,
          invView : single array,
          invProjection : single array,
-         viewPort : Vector4,
+         viewPort : Vector2,
+         viewPortBounds : Vector4,
          eyeCenter : Vector3,
          instanceFields : single array,
          lightType : int,
@@ -2961,7 +2965,8 @@ module PhysicallyBased =
         Gl.UniformMatrix4 (shader.InvProjectionUniform, false, invProjection)
         Gl.UniformMatrix4 (shader.ViewRotationUniform, false, viewRotation)
         Gl.UniformMatrix4 (shader.ViewTranslationUniform, false, viewTranslation)
-        Gl.Uniform4 (shader.ViewPort, viewPort.X, viewPort.Y, viewPort.Z, viewPort.W)
+        Gl.Uniform2 (shader.ViewPort, viewPort.X, viewPort.Y)
+        Gl.Uniform4 (shader.ViewPortBounds, viewPortBounds.X, viewPortBounds.Y, viewPortBounds.Z, viewPortBounds.W)
         Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
         Gl.Uniform1 (shader.LightTypeUniform, lightType)
         Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)

@@ -81,7 +81,7 @@ void main()
 
     float u_lod = 1;
 
-    positionOut = model * view_translate * (vec4(position5, 1.0) + vec4(0.5, 0.5, 0.5, 0.0)*u_lod);
+    positionOut = view_translate * model * (vec4(position5, 1.0) + vec4(0.5, 0.5, 0.5, 0.0)*u_lod);
     gl_Position = (projection * view_rotate) * positionOut;
     positionTest = gl_Position;
 
@@ -93,7 +93,7 @@ void main()
     // Following two values directly affect performance.
     reduce += 0.03; 		// Overdraw nearing edges
 
-    float size = ( 1080 * 1.1 ) / gl_Position.z * max(reduce, 1.0);
+    float size = ( 1080 * 1.5 ) / gl_Position.z * max(reduce, 1.0);
 
     gl_PointSize = size * u_lod;
 
@@ -116,7 +116,8 @@ const int TERRAIN_LAYERS_MAX = 6;
 
 uniform mat4 inv_view;
 uniform mat4 inv_projection;
-uniform vec4 viewPort;
+uniform vec2 viewPort;
+uniform vec4 viewPortBounds;
 uniform vec3 eyeCenter;
 uniform int layersCount;
 uniform sampler2D albedoTextures[TERRAIN_LAYERS_MAX];
@@ -172,7 +173,7 @@ vec2 AABBIntersect(vec3 ro, vec3 rd, vec3 minV, vec3 maxV)
 
 vec4 ss2wsVec() {
     vec4 ndcPos;
-    ndcPos.xy = ((2.0 * gl_FragCoord.xy) - (2.0 * viewPort.xy)) / (viewPort.zw) - 1;
+    ndcPos.xy = ((2.0 * gl_FragCoord.xy) - (2.0 * viewPortBounds.xy)) / (viewPortBounds.zw) - 1;
     ndcPos.z = (2.0 * gl_FragCoord.z - gl_DepthRange.near - gl_DepthRange.far) / (gl_DepthRange.far - gl_DepthRange.near);
     ndcPos.w = 1.0;
 
@@ -253,8 +254,8 @@ void main()
 
     vec2 result = AABBIntersect(
         vec3(0.0), ray,
-        vec3( vxl-0.4*u_lod),
-        vec3( vxl+0.4*u_lod)
+        vec3( vxl-0.5*u_lod),
+        vec3( vxl+0.5*u_lod)
     );
 
     if( !(result.x<=result.y) ) {
@@ -276,6 +277,13 @@ void main()
         float(hit_abs.x == max_dim),
         float(hit_abs.y == max_dim),
         float(hit_abs.z == max_dim)
-    ) * - sign(hit);
+    );
+
+    // the stupidest solution, should optimize by checking the math
+    vec4 hitPos = vec4(result.x * ray + eyeCenter, 1.0);
+    vec4 hitPos2 = projectionTest * viewTest * modelTest * hitPos;
+
+    float test = hitPos2.z / hitPos2.w;
+    gl_FragDepth = 0.5 * (gl_DepthRange.far - gl_DepthRange.near) * test + 0.5 * (gl_DepthRange.far + gl_DepthRange.near);
 
 }

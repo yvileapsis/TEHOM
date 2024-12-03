@@ -74,8 +74,8 @@ type PlayerDispatcher () =
 
         | Update ->
 
-            SDL.SDL_SetRelativeMouseMode (SDL.SDL_bool.SDL_TRUE) |> ignore
-            SDL.SDL_WarpMouseInWindow (IntPtr.Zero, 960, 540) |> ignore
+//            SDL.SDL_SetRelativeMouseMode (SDL.SDL_bool.SDL_TRUE) |> ignore
+//            SDL.SDL_WarpMouseInWindow (IntPtr.Zero, 960, 540) |> ignore
             // update character
             let time = world.UpdateTime
             let position = entity.GetPosition world
@@ -145,11 +145,11 @@ type PlayerDispatcher () =
 
         match command with
         | Register ->
-            let animatedModel = entity / Constants.Gameplay.CharacterAnimatedModelName
-            let weapon = entity / Constants.Gameplay.CharacterWeaponName
-            let world = animatedModel.SetAnimations [|Animation.loop GameTime.zero None "Armature|Idle"|] world
-            let world = animatedModel.AnimateBones world
-            let world = weapon.AutoBounds world
+            // let animatedModel = entity / Constants.Gameplay.CharacterAnimatedModelName
+            // let weapon = entity / Constants.Gameplay.CharacterWeaponName
+            // let world = animatedModel.SetAnimations [|Animation.loop GameTime.zero None "Armature|Idle"|] world
+            // let world = animatedModel.AnimateBones world
+            // let world = weapon.AutoBounds world
             withSignal SyncWeaponTransform world
 
         | UpdateTransform (position, rotation) ->
@@ -158,28 +158,29 @@ type PlayerDispatcher () =
             just world
 
         | UpdateAnimations (position, rotation, animations, invisible) ->
-            let animatedModel = entity / Constants.Gameplay.CharacterAnimatedModelName
-            let weapon = entity / Constants.Gameplay.CharacterWeaponName
-            let world = animatedModel.SetPosition (character.PositionInterp position) world
-            let world = animatedModel.SetRotation (character.RotationInterp rotation) world
-            let world = animatedModel.SetAnimations animations world
-            let world = animatedModel.SetVisible (not invisible) world
-            let world = weapon.SetVisible (not invisible) world
+            // let animatedModel = entity / Constants.Gameplay.CharacterAnimatedModelName
+            // let weapon = entity / Constants.Gameplay.CharacterWeaponName
+            // let world = animatedModel.SetPosition (character.PositionInterp position) world
+            // let world = animatedModel.SetRotation (character.RotationInterp rotation) world
+            // let world = animatedModel.SetAnimations animations world
+            // let world = animatedModel.SetVisible (not invisible) world
+            // let world = weapon.SetVisible (not invisible) world
             just world
 
         | SyncWeaponTransform ->
-            let animatedModel = entity / Constants.Gameplay.CharacterAnimatedModelName
-            let weapon = entity / Constants.Gameplay.CharacterWeaponName
-            match animatedModel.TryGetBoneTransformByName Constants.Gameplay.CharacterWeaponHandBoneName world with
-            | Some weaponHandBoneTransform ->
-                let weaponTransform =
-                    Matrix4x4.CreateTranslation (v3 -0.1f 0.0f 0.02f) *
-                    Matrix4x4.CreateFromAxisAngle (v3Forward, MathF.PI_OVER_2) *
-                    weaponHandBoneTransform
-                let world = weapon.SetPosition weaponTransform.Translation world
-                let world = weapon.SetRotation weaponTransform.Rotation world
-                just world
-            | None -> just world
+            // let animatedModel = entity / Constants.Gameplay.CharacterAnimatedModelName
+            // let weapon = entity / Constants.Gameplay.CharacterWeaponName
+            // match animatedModel.TryGetBoneTransformByName Constants.Gameplay.CharacterWeaponHandBoneName world with
+            // | Some weaponHandBoneTransform ->
+            //     let weaponTransform =
+            //        Matrix4x4.CreateTranslation (v3 -0.1f 0.0f 0.02f) *
+            //        Matrix4x4.CreateFromAxisAngle (v3Forward, MathF.PI_OVER_2) *
+            //        weaponHandBoneTransform
+            //    let world = weapon.SetPosition weaponTransform.Translation world
+            //    let world = weapon.SetRotation weaponTransform.Rotation world
+            //    just world
+            // | None ->
+            just world
 
         | PublishAttacks attackedCharacters ->
             let world =
@@ -197,21 +198,25 @@ type PlayerDispatcher () =
             let world = World.jumpBody true character.JumpSpeed bodyId world
             just world
 
-        | RotateMove moveData ->
+        | RotateMove _ ->
 
-            let position = entity.GetPosition world
-            let rotation = entity.GetRotation world
+            if entity.GetEnabled world then
 
-            let turnSpeed = 0.01f
+                let position = entity.GetPosition world
+                let rotation = entity.GetRotation world
 
-            let mousePosition = World.getMousePosition2dScreen world
+                let turnSpeed = 0.01f
 
-            let turnVelocity =
-                (- mousePosition.X) * turnSpeed * 0.1f
+                let mousePosition = World.getMousePosition2dScreen world
 
-            let rotation = if turnVelocity <> 0.0f then rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity) else rotation
+                let turnVelocity =
+                    (- mousePosition.X) * turnSpeed * 0.1f
 
-            withSignals [UpdateTransform (position, rotation)] world
+//                let rotation = if turnVelocity <> 0.0f then rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity) else rotation
+
+                withSignals [UpdateTransform (position, rotation)] world
+            else
+                just world
 
 
     override this.RayCast (ray, entity, world) =
@@ -232,28 +237,38 @@ type PlayerDispatcher () =
                 Entity.MountOpt == None
             ]
 
-        // animated model
-        Content.entity<AnimatedModelDispatcher> Constants.Gameplay.CharacterAnimatedModelName [
-            Entity.Size == v3Dup 2.0f
-            Entity.Offset == v3 0.0f 1.0f 0.0f
-            Entity.MaterialProperties == MaterialProperties.defaultProperties
-            Entity.AnimatedModel == Assets.Gameplay.JoanModel
-            Entity.Pickable == false
+        if false then
+            // animated model
+            Content.entity<AnimatedModelDispatcher> Constants.Gameplay.CharacterAnimatedModelName [
+                Entity.Visible == false
+                Entity.Size == v3Dup 2.0f
+                Entity.Offset == v3 0.0f 1.0f 0.0f
+                Entity.MaterialProperties == MaterialProperties.defaultProperties
+                Entity.AnimatedModel == Assets.Gameplay.JoanModel
+                Entity.Pickable == false
+            ]
+
+            // weapon
+            Content.entity<RigidModelDispatcher> Constants.Gameplay.CharacterWeaponName [
+                Entity.Offset == v3 0.0f 0.5f 0.0f
+                Entity.StaticModel := character.WeaponModel
+                Entity.BodyType == Static
+                Entity.BodyShape == BoxShape { Size = v3 0.3f 1.2f 0.3f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.6f 0.0f)); PropertiesOpt = None }
+                Entity.Sensor == true
+                Entity.NavShape == EmptyNavShape
+                Entity.Pickable == false
+                Entity.BodyPenetrationEvent =|> fun evt -> WeaponPenetration evt.Data
+                Entity.BodySeparationExplicitEvent =|> fun evt -> WeaponSeparationExplicit evt.Data
+                Entity.BodySeparationImplicitEvent =|> fun evt -> WeaponSeparationImplicit evt.Data
+            ]
+
+
+        Content.staticModelHierarchy "Test" [
+            Entity.PositionLocal == v3 0.1f 1.5f -0.3f
+            Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 180f, 0f, 0f)
+            Entity.StaticModel == Assets.Gameplay.MakarovModel
         ]
 
-        // weapon
-        Content.entity<RigidModelDispatcher> Constants.Gameplay.CharacterWeaponName [
-            Entity.Offset == v3 0.0f 0.5f 0.0f
-            Entity.StaticModel := character.WeaponModel
-            Entity.BodyType == Static
-            Entity.BodyShape == BoxShape { Size = v3 0.3f 1.2f 0.3f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.6f 0.0f)); PropertiesOpt = None }
-            Entity.Sensor == true
-            Entity.NavShape == EmptyNavShape
-            Entity.Pickable == false
-            Entity.BodyPenetrationEvent =|> fun evt -> WeaponPenetration evt.Data
-            Entity.BodySeparationExplicitEvent =|> fun evt -> WeaponSeparationExplicit evt.Data
-            Entity.BodySeparationImplicitEvent =|> fun evt -> WeaponSeparationImplicit evt.Data
-        ]
 
 //   let world = World.setEye3dCenter (positionInterp + v3Up * 1.75f - rotationInterp.Forward * 3.0f) world
 //   let world = World.setEye3dRotation rotationInterp world

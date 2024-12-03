@@ -2303,7 +2303,7 @@ type [<ReferenceEquality>] GlRenderer3d =
              instanceFields, lightType.Enumerate, lightShadowExponent, lightShadowDensity, elementsCount, materials, geometry, shader)
         OpenGL.Hl.Assert ()
 
-    static member private renderPhysicallyBasedVoxel viewArray viewRotationArray viewTranslationArray geometryProjectionArray invViewArray invProjectionArray viewPort eyeCenter (lightType : LightType) lightShadowExponent lightShadowDensity terrainDescriptor geometry shader renderer =
+    static member private renderPhysicallyBasedVoxel viewArray viewRotationArray viewTranslationArray geometryProjectionArray invViewArray invProjectionArray viewPort viewPortBounds eyeCenter (lightType : LightType) lightShadowExponent lightShadowDensity terrainDescriptor geometry shader renderer =
         let (resolutionX, resolutionY) = Option.defaultValue (0, 0) (GlRenderer3d.tryGetHeightMapResolution terrainDescriptor.HeightMap1 renderer)
         let elementsCount = dec resolutionX * dec resolutionY * 6
         let terrainMaterialProperties = terrainDescriptor.MaterialProperties
@@ -2408,7 +2408,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                    materialProperties.Roughness; materialProperties.Metallic; materialProperties.AmbientOcclusion; materialProperties.Emission
                    texelHeight * materialProperties.Height|])
         OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxel
-            (viewArray, viewRotationArray, viewTranslationArray, geometryProjectionArray, invViewArray, invProjectionArray, viewPort, eyeCenter,
+            (viewArray, viewRotationArray, viewTranslationArray, geometryProjectionArray, invViewArray, invProjectionArray, viewPort, viewPortBounds, eyeCenter,
              instanceFields, lightType.Enumerate, lightShadowExponent, lightShadowDensity, elementsCount, materials, geometry, shader)
         OpenGL.Hl.Assert ()
 
@@ -2566,7 +2566,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         // attempt to deferred render voxel shadows
         for (descriptor, geometry) in renderTasks.DeferredVoxels do
             GlRenderer3d.renderPhysicallyBasedVoxel
-                lightViewArray lightProjectionArray [||] [||] [||] [||] Vector4.Zero lightOrigin lightType renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
+                lightViewArray lightProjectionArray [||] [||] [||] [||] Vector2.Zero Vector4.Zero lightOrigin lightType renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
                 descriptor geometry renderer.PhysicallyBasedShadowVoxelShader renderer
 
         // forward render static surface shadows to filter buffer
@@ -2699,7 +2699,8 @@ type [<ReferenceEquality>] GlRenderer3d =
         let viewTranslationArray = viewTranslation.ToArray ()
         let invViewArray = (viewRotation).Inverted.ToArray ()
         let invProjectionArray = geometryProjection.Inverted.ToArray ()
-        let viewPort = (v4i geometryViewport.Bounds.Min.X geometryViewport.Bounds.Min.Y geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y).V4
+        let viewPort = v2 geometryViewport.NearDistance geometryViewport.FarDistance
+        let viewPortBounds = (v4i geometryViewport.Bounds.Min.X geometryViewport.Bounds.Min.Y geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y).V4
 
         // get ambient lighting, sky box opt, and fallback light map
         let (lightAmbientColor, lightAmbientBrightness, skyBoxOpt) = GlRenderer3d.getLastSkyBoxOpt renderPass renderer
@@ -2860,7 +2861,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         // render terrains deferred
         for (descriptor, geometry) in renderTasks.DeferredVoxels do
             GlRenderer3d.renderPhysicallyBasedVoxel
-                viewArray viewRotationArray viewTranslationArray geometryProjectionArray invViewArray invProjectionArray viewPort eyeCenter PointLight renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
+                viewArray viewRotationArray viewTranslationArray geometryProjectionArray invViewArray invProjectionArray viewPort viewPortBounds eyeCenter PointLight renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
                 descriptor geometry renderer.PhysicallyBasedDeferredVoxelShader renderer
 
         // run light mapping pass
