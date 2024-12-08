@@ -243,6 +243,10 @@ type GameplayDispatcher () =
                 ]
 
                 ContentEx.voxel "VoxelTest" [
+                    Entity.HeightMap == (ImageHeightMap Assets.Gameplay.Computer)
+//                    Entity.Position == v3 0f 4f 0f
+//                    Entity.Size == v3 64f 16f 64f
+//
                 ]
 
             ]
