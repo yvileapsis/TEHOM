@@ -29,7 +29,7 @@ uniform mat4 view_rotate;
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec2 texCoords;
-layout(location = 2) in vec3 normal;
+layout(location = 2) in vec3 colors;
 layout(location = 3) in vec3 tint;
 layout(location = 4) in vec4 blends[2];
 layout(location = 6) in mat4 model;
@@ -67,7 +67,7 @@ void main()
 
     albedoOut = albedo;
     materialOut = material;
-    normalOut = transpose(inverse(mat3(model))) * normal;
+    normalOut = colors; // transpose(inverse(mat3(model))) *
     heightPlusOut = heightPlus;
     blendsOut[0] = blends[0];
     blendsOut[1] = blends[1];
@@ -273,11 +273,14 @@ void main()
     vec3  hit_abs = abs(hit);
     float max_dim = max( max( hit_abs.x, hit_abs.y), hit_abs.z  );
 
-    albedo = vec3(
-        float(hit_abs.x == max_dim),
-        float(hit_abs.y == max_dim),
-        float(hit_abs.z == max_dim)
-    );
+    albedo =
+        normalOut +
+
+        vec3(
+            float(hit_abs.x == max_dim),
+            float(hit_abs.y == max_dim),
+            float(hit_abs.z == max_dim)
+        ) * 0.05;
 
     // the stupidest solution, should optimize by checking the math
     vec4 hitPos = vec4(result.x * ray + eyeCenter, 1.0);

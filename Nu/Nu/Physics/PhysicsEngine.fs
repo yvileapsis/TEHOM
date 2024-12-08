@@ -172,6 +172,104 @@ type HeightMap =
         | ImageHeightMap image -> HeightMap.tryGetImageHeightMapMetadata tryGetAssetFilePath bounds tiles image
         | RawHeightMap map -> HeightMap.tryGetRawHeightMapMetadata tryGetAssetFilePath bounds tiles map
 
+type VoxelChunkMetadata =
+    { Resolution : Vector3i
+      PositionsAndColors : struct (Vector3 * Vector4) array }
+
+/// A height map for terrain.
+type VoxelChunk =
+    | ImageVoxel of Image AssetTag // only supports 8-bit depth on Red channel
+
+    static member private tryGetTextureData tryGetAssetFilePath (assetTag : Image AssetTag) =
+        match tryGetAssetFilePath assetTag with
+        | Some filePath ->
+            match OpenGL.Texture.TryCreateTextureData (false, filePath) with
+            | Some textureData ->
+                let metadata = textureData.Metadata
+                let (blockCompressed, bytes) = textureData.Bytes
+                textureData.Dispose ()
+                Some (metadata, blockCompressed, bytes)
+            | None -> None
+        | None -> None
+
+    static member private tryGetRawAssetData tryGetAssetFilePath (assetTag : Raw AssetTag) =
+        match tryGetAssetFilePath assetTag with
+        | Some filePath ->
+            try let bytes = File.ReadAllBytes filePath
+                Some bytes
+            with exn ->
+                Log.info ("Could not load texture '" + filePath + "' due to: " + scstring exn)
+                None
+        | None -> None
+
+    static member private tryGetImageHeightMapMetadata tryGetAssetFilePath (bounds : Box3) tiles image =
+
+        // attempt to load texture data
+        match VoxelChunk.tryGetTextureData tryGetAssetFilePath image with
+        | Some (metadata, blockCompressed, bytes) ->
+
+            // currently only supporting height data from block-compressed files
+            if not blockCompressed then
+
+                // compute normalize heights
+                let resolutionX = metadata.TextureWidth
+                let resolutionY = metadata.TextureHeight
+                let scalar = 1.0f / single Byte.MaxValue
+
+                let resolutionChunkX = resolutionX / 12
+                let resolutionChunkY = resolutionY / 12
+                let resolutionChunkZ = 12 * 12
+
+                // compute positions and tex coordses
+                let quadSizeX = bounds.Size.X / single (dec resolutionChunkX)
+                let quadSizeY = bounds.Size.Z / single (dec resolutionChunkY)
+                let quadSizeZ = bounds.Size.Y / single (dec resolutionChunkZ)
+                let terrainHeight = bounds.Size.Y
+                let terrainPositionX = bounds.Min.X
+                let terrainPositionY = bounds.Min.Y
+                let terrainPositionZ = bounds.Min.Z
+                let texelWidth = 1.0f / single resolutionChunkX
+                let texelHeight = 1.0f / single resolutionChunkY
+
+
+                let voxels = [|
+                    for y in 0 .. dec resolutionX do
+                        for x in 0 .. dec resolutionY do
+
+                            let alpha = single bytes[(resolutionX * y + x) * 4 + 3] * scalar // extract a channel of pixel
+                            let red = single bytes[(resolutionX * y + x) * 4 + 2] * scalar // extract r channel of pixel
+                            let green = single bytes[(resolutionX * y + x) * 4  + 1] * scalar // extract g channel of pixel]
+                            let blue = single bytes[(resolutionX * y + x) * 4 + 0] * scalar // extract b channel of pixel
+
+                            if alpha > 0.1f then
+
+                                let z = x / resolutionChunkX + 12 * y / resolutionChunkY
+
+                                let worldX = single (x % resolutionChunkX) * quadSizeX + terrainPositionX
+                                let worldY = single (z % resolutionChunkZ) * quadSizeZ + terrainPositionY
+                                let worldZ = single (y % resolutionChunkY) * quadSizeY + terrainPositionZ
+
+                                yield struct (v3 worldX worldY worldZ, v4 red green blue alpha)
+                |]
+                let voxels =
+                    voxels
+                    |> Array.distinctBy (fun struct (v, _) -> v)
+
+                // fin
+                Some { Resolution = v3i resolutionChunkX resolutionChunkY resolutionChunkZ; PositionsAndColors = voxels }
+            else Log.info "Block-compressed image files are unsupported for use as height maps."; None
+        | None -> None
+
+    /// Attempt to compute height map metadata, loading assets as required.
+    /// NOTE: if the heightmap pixel represents a quad in the terrain geometry in the exporting program, the geometry
+    /// produced here is slightly different, with the border slightly clipped, and the terrain and quad size, slightly
+    /// larger. i.e if the original map is 32m^2 and the original quad 1m^2 and the heightmap is 32x32, the quad axes
+    /// below will be > 1.0.
+    static member tryGetMetadata (tryGetAssetFilePath : AssetTag -> string option) bounds tiles heightMap =
+        match heightMap with
+        | ImageVoxel image -> VoxelChunk.tryGetImageHeightMapMetadata tryGetAssetFilePath bounds tiles image
+
+
 /// Identifies a body that can be found in a physics engine.
 /// TODO: see if removing CustomEquality here doesn't increase GC pressure or causes other perf overhead.
 type [<CustomEquality; NoComparison>] BodyId =
