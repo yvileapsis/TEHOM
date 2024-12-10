@@ -1,8 +1,6 @@
 #shader vertex
 #version 410
 
-const int TERRAIN_LAYERS_MAX = 6;
-
 uniform mat4 view;
 uniform mat4 projection;
 uniform mat4 view_translate;
@@ -18,15 +16,13 @@ flat out mat4 modelViewProjectionOut;
 
 void main()
 {
-    gl_PointSize = 1.0;
-
     float u_lod = 1;
 
     mat4 model = mat4(1);
 
-    positionOut = view_translate * model * (vec4(position, 1.0) + vec4(0.5, 0.5, 0.5, 0.0)*u_lod);
+    positionOut = view_translate * model * (vec4(position, 1.0) );
 
-    colorsOut = colors; // transpose(inverse(mat3(model))) *
+    colorsOut = colors;
 
     modelViewProjectionOut = projection * view * model;
 
@@ -53,7 +49,7 @@ void main()
     }
     else {
         gl_Position = positionNew;
-        gl_PointSize = size * u_lod;
+        gl_PointSize = size;
     }
 }
 
