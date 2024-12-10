@@ -2972,20 +2972,6 @@ module PhysicallyBased =
             Gl.Uniform1 (shader.IrradianceMapsUniforms.[i], 4 + i)
         Hl.Assert ()
 
-        // setup textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, positionTexture.TextureId)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, normalPlusTexture.TextureId)
-        Gl.ActiveTexture TextureUnit.Texture2
-        Gl.BindTexture (TextureTarget.Texture2d, lightMappingTexture.TextureId)
-        Gl.ActiveTexture TextureUnit.Texture3
-        Gl.BindTexture (TextureTarget.TextureCubeMap, irradianceMap.TextureId)
-        for i in 0 .. dec Constants.Render.LightMapsMaxDeferred do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + 4 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.TextureCubeMap, irradianceMaps.[i].TextureId)
-        Hl.Assert ()
-
         // setup geometry
         Gl.BindVertexArray geometry.PhysicallyBasedVao
         Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.VertexBuffer)
@@ -2999,20 +2985,6 @@ module PhysicallyBased =
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown textures
-        Gl.ActiveTexture TextureUnit.Texture0
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture1
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture2
-        Gl.BindTexture (TextureTarget.Texture2d, 0u)
-        Gl.ActiveTexture TextureUnit.Texture3
-        Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
-        for i in 0 .. dec Constants.Render.LightMapsMaxDeferred do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + 4 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.TextureCubeMap, 0u)
         Hl.Assert ()
 
         // teardown shader

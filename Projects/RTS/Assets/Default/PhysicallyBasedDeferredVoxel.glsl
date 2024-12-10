@@ -20,7 +20,9 @@ void main()
 
     mat4 model = mat4(1);
 
-    positionOut = view_translate * model * (vec4(position, 1.0) );
+    vec3 positionTesting = position;
+
+    positionOut = view_translate * model * (vec4(positionTesting, 1.0) );
 
     colorsOut = colors;
 
@@ -50,6 +52,11 @@ void main()
     else {
         gl_Position = positionNew;
         gl_PointSize = size;
+    }
+
+    // temporary solution to the weird lag, apparently first vertex is broken?
+    if (gl_VertexID == 0x0000) {
+        gl_Position = vec4(-1,-1,-1,-1);
     }
 }
 
