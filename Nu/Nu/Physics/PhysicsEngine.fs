@@ -245,15 +245,40 @@ type VoxelChunk =
 
                                 let z = x / resolutionChunkX + 12 * y / resolutionChunkY
 
-                                let worldX = single (x % resolutionChunkX) * quadSizeX + terrainPositionX
-                                let worldY = single (z % resolutionChunkZ) * quadSizeZ + terrainPositionY
-                                let worldZ = single (y % resolutionChunkY) * quadSizeY + terrainPositionZ
+                                let x' = (x % resolutionChunkX)
+                                let y' = (z % resolutionChunkZ)
+                                let z' = (y % resolutionChunkY)
 
-                                yield struct (v3 worldX worldY worldZ, v4 red green blue alpha)
+                                yield ((x', y', z'), v4 red green blue alpha)
                 |]
+
+                // neightbor culling
+                let voxels =
+                    let map = voxels |> Map.ofArray
+
+                    map
+                    |> Map.filter (fun (x, y, z) value ->
+
+                        let hasNeighbors =
+                            Map.containsKey (x + 1, y, z) map && Map.containsKey (x - 1, y, z) map &&
+                            Map.containsKey (x, y + 1, z) map && Map.containsKey (x, y - 1, z) map &&
+                            Map.containsKey (x, y, z + 1) map && Map.containsKey (x, y, z - 1) map
+
+                        not hasNeighbors
+                    )
+                    |> Map.toArray
+
+
                 let voxels =
                     voxels
-                    |> Array.distinctBy (fun struct (v, _) -> v)
+                    |> Array.map (fun ((x, y, z), color) ->
+                        let x' = single x * quadSizeX + terrainPositionX
+                        let y' = single y * quadSizeZ + terrainPositionY
+                        let z' = single z * quadSizeY + terrainPositionZ
+                        let position = v3 x' y' z'
+                        struct (position, color)
+                    )
+
 
                 // fin
                 Some { Resolution = v3i resolutionChunkX resolutionChunkY resolutionChunkZ; PositionsAndColors = voxels }

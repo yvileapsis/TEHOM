@@ -1354,63 +1354,17 @@ module PhysicallyBased =
 
                 // create vertex buffer
                 let vertexBuffer = Gl.GenBuffer ()
-                let texCoordsOffset =   (3 (*position*)) * sizeof<single>
-                let normalOffset =      (3 (*position*) + 2 (*tex coords*)) * sizeof<single>
-                let tintOffset =        (3 (*position*) + 2 (*tex coords*) + 3 (*normal*)) * sizeof<single>
-                let blendsOffset =      (3 (*position*) + 2 (*tex coords*) + 3 (*normal*) + 3 (*tint*)) * sizeof<single>
-                let blends2Offset =     (3 (*position*) + 2 (*tex coords*) + 3 (*normal*) + 3 (*tint*) + 4 (*blends*)) * sizeof<single>
-                let vertexSize =        (3 (*position*) + 2 (*tex coords*) + 3 (*normal*) + 3 (*tint*) + 4 (*blends*) + 4 (*blends2*)) * sizeof<single>
+                let positionOffset =                    0 * sizeof<single>
+                let colorOffset = positionOffset +      3 * sizeof<single>
+                let vertexSize = colorOffset +          3 * sizeof<single>
                 Gl.BindBuffer (BufferTarget.ArrayBuffer, vertexBuffer)
                 use vertexDataHnd = vertexData.Pin () in
                     let vertexDataNint = vertexDataHnd.Pointer |> NativePtr.ofVoidPtr<single> |> NativePtr.toNativeInt
                     Gl.BufferData (BufferTarget.ArrayBuffer, uint (vertexData.Length * sizeof<single>), vertexDataNint, BufferUsage.StaticDraw)
                 Gl.EnableVertexAttribArray 0u
-                Gl.VertexAttribPointer (0u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint 0)
+                Gl.VertexAttribPointer (0u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint positionOffset)
                 Gl.EnableVertexAttribArray 1u
-                Gl.VertexAttribPointer (1u, 2, VertexAttribPointerType.Float, false, vertexSize, nativeint texCoordsOffset)
-                Gl.EnableVertexAttribArray 2u
-                Gl.VertexAttribPointer (2u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint normalOffset)
-                Gl.EnableVertexAttribArray 3u
-                Gl.VertexAttribPointer (3u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint tintOffset)
-                Gl.EnableVertexAttribArray 4u
-                Gl.VertexAttribPointer (4u, 4, VertexAttribPointerType.Float, false, vertexSize, nativeint blendsOffset)
-                Gl.EnableVertexAttribArray 5u
-                Gl.VertexAttribPointer (5u, 4, VertexAttribPointerType.Float, false, vertexSize, nativeint blends2Offset)
-                Hl.Assert ()
-
-                // create instance buffer
-                let instanceBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
-                let instanceData = Array.zeroCreate Constants.Render.InstanceFieldCount
-                m4Identity.ToArray (instanceData, 0)
-                let strideSize = instanceData.Length * sizeof<single>
-                let instanceDataPtr = GCHandle.Alloc (instanceData, GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally instanceDataPtr.Free ()
-                Gl.EnableVertexAttribArray 6u
-                Gl.VertexAttribPointer (6u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint 0) // model fields
-                Gl.VertexAttribDivisor (6u, 1u)
-                Gl.EnableVertexAttribArray 7u
-                Gl.VertexAttribPointer (7u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (4 * sizeof<single>))
-                Gl.VertexAttribDivisor (7u, 1u)
-                Gl.EnableVertexAttribArray 8u
-                Gl.VertexAttribPointer (8u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (8 * sizeof<single>))
-                Gl.VertexAttribDivisor (8u, 1u)
-                Gl.EnableVertexAttribArray 9u
-                Gl.VertexAttribPointer (9u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (12 * sizeof<single>))
-                Gl.VertexAttribDivisor (9u, 1u)
-                Gl.EnableVertexAttribArray 10u
-                Gl.VertexAttribPointer (10u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (16 * sizeof<single>))
-                Gl.VertexAttribDivisor (10u, 1u)
-                Gl.EnableVertexAttribArray 11u
-                Gl.VertexAttribPointer (11u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (20 * sizeof<single>))
-                Gl.VertexAttribDivisor (11u, 1u)
-                Gl.EnableVertexAttribArray 12u
-                Gl.VertexAttribPointer (12u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (24 * sizeof<single>))
-                Gl.VertexAttribDivisor (12u, 1u)
-                Gl.EnableVertexAttribArray 13u
-                Gl.VertexAttribPointer (13u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
-                Gl.VertexAttribDivisor (13u, 1u)
+                Gl.VertexAttribPointer (1u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint colorOffset)
                 Hl.Assert ()
 
                 // create index buffer
@@ -1427,7 +1381,7 @@ module PhysicallyBased =
                 Hl.Assert ()
 
                 // fin
-                ([||], [||], vertexBuffer, instanceBuffer, indexBuffer, vao)
+                ([||], [||], vertexBuffer, 0u, indexBuffer, vao)
 
             // fake buffers
             else
@@ -2971,44 +2925,7 @@ module PhysicallyBased =
         Gl.Uniform1 (shader.LightTypeUniform, lightType)
         Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)
         Gl.Uniform1 (shader.LightShadowDensityUniform, lightShadowDensity)
-        Gl.Uniform1 (shader.LayersCountUniform, layersCount)
-        for i in 0 .. dec Constants.Render.TerrainLayersMax do
-            Gl.Uniform1 (shader.AlbedoTexturesUniforms.[i], i)
-        for i in 0 .. dec Constants.Render.TerrainLayersMax do
-            Gl.Uniform1 (shader.RoughnessTexturesUniforms.[i], i + Constants.Render.TerrainLayersMax)
-        for i in 0 .. dec Constants.Render.TerrainLayersMax do
-            Gl.Uniform1 (shader.AmbientOcclusionTexturesUniforms.[i], i + Constants.Render.TerrainLayersMax * 2)
-        for i in 0 .. dec Constants.Render.TerrainLayersMax do
-            Gl.Uniform1 (shader.NormalTexturesUniforms.[i], i + Constants.Render.TerrainLayersMax * 3)
-        for i in 0 .. dec Constants.Render.TerrainLayersMax do
-            Gl.Uniform1 (shader.HeightTexturesUniforms.[i], i + Constants.Render.TerrainLayersMax * 4)
         Hl.Assert ()
-
-        // setup textures
-        for i in 0 .. dec layersCount do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials.[i].AlbedoTexture.TextureId)
-        for i in 0 .. dec layersCount do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials.[i].RoughnessTexture.TextureId)
-        for i in 0 .. dec layersCount do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax * 2 |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials.[i].AmbientOcclusionTexture.TextureId)
-        for i in 0 .. dec layersCount do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax * 3 |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials.[i].NormalTexture.TextureId)
-        for i in 0 .. dec layersCount do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i + Constants.Render.TerrainLayersMax * 4 |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, materials.[i].HeightTexture.TextureId)
-        Hl.Assert ()
-
-        // update instance buffer
-        let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-            Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-            Hl.Assert ()
-        finally instanceFieldsPtr.Free ()
 
         // setup geometry
         Gl.BindVertexArray geometry.PhysicallyBasedVao
@@ -3023,12 +2940,6 @@ module PhysicallyBased =
 
         // teardown geometry
         Gl.BindVertexArray 0u
-        Hl.Assert ()
-
-        // teardown textures
-        for i in 0 .. dec layersCount * 5 do
-            Gl.ActiveTexture (int TextureUnit.Texture0 + i |> Branchless.reinterpret)
-            Gl.BindTexture (TextureTarget.Texture2d, 0u)
         Hl.Assert ()
 
         // teardown shader
