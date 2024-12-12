@@ -174,7 +174,8 @@ type HeightMap =
 
 type VoxelChunkMetadata =
     { Resolution : Vector3i
-      PositionsAndColors : struct (Vector3 * Vector4) array }
+      PositionsAndColors : struct (Vector3 * Vector4) array
+      TexelWidth : Vector3 }
 
 /// A height map for terrain.
 type VoxelChunk =
@@ -209,16 +210,25 @@ type VoxelChunk =
         | Some (metadata, blockCompressed, bytes) ->
 
             // currently only supporting height data from block-compressed files
-            if not blockCompressed then
+//            if not blockCompressed then
 
                 // compute normalize heights
                 let resolutionX = metadata.TextureWidth
                 let resolutionY = metadata.TextureHeight
                 let scalar = 1.0f / single Byte.MaxValue
 
-                let resolutionChunkX = resolutionX / 12
-                let resolutionChunkY = resolutionY / 12
-                let resolutionChunkZ = 12 * 12
+                let modelSideLength =
+                    resolutionX * resolutionY |>
+                    float |>
+                    Math.Cbrt |>
+                    round |>
+                    int
+
+                let textureSideLength = modelSideLength |> float |> sqrt |> round |> int
+
+                let resolutionChunkX = modelSideLength
+                let resolutionChunkY = modelSideLength
+                let resolutionChunkZ = modelSideLength
 
                 // compute positions and tex coordses
                 let quadSizeX = bounds.Size.X / single (dec resolutionChunkX)
@@ -228,22 +238,28 @@ type VoxelChunk =
                 let terrainPositionX = bounds.Min.X
                 let terrainPositionY = bounds.Min.Y
                 let terrainPositionZ = bounds.Min.Z
-                let texelWidth = 1.0f / single resolutionChunkX
-                let texelHeight = 1.0f / single resolutionChunkY
 
+                let bytesProcessed =
+                    bytes
+                    |> Array.chunkBySize 4
+                    |> Array.map (fun chunk ->
+                        System.Drawing.Color.FromArgb (BitConverter.ToInt32 (chunk, 0))
+                    )
 
                 let voxels = [|
                     for y in 0 .. dec resolutionX do
                         for x in 0 .. dec resolutionY do
 
-                            let alpha = single bytes[(resolutionX * y + x) * 4 + 3] * scalar // extract a channel of pixel
-                            let red = single bytes[(resolutionX * y + x) * 4 + 2] * scalar // extract r channel of pixel
-                            let green = single bytes[(resolutionX * y + x) * 4  + 1] * scalar // extract g channel of pixel]
-                            let blue = single bytes[(resolutionX * y + x) * 4 + 0] * scalar // extract b channel of pixel
+                            let color = bytesProcessed[(resolutionX * y + x)]
+
+                            let alpha = single color.A * scalar // extract a channel of pixel
+                            let red = single color.R * scalar // extract r channel of pixel
+                            let green = single color.G * scalar // extract g channel of pixel
+                            let blue = single color.B * scalar // extract b channel of pixel
 
                             if alpha > 0.1f then
 
-                                let z = x / resolutionChunkX + 12 * y / resolutionChunkY
+                                let z = x / resolutionChunkX + (y / resolutionChunkY) * textureSideLength
 
                                 let x' = (x % resolutionChunkX)
                                 let y' = (z % resolutionChunkZ)
@@ -253,20 +269,20 @@ type VoxelChunk =
                 |]
 
                 // neightbor culling
-                let voxels =
-                    let map = voxels |> Map.ofArray
+//                let voxels =
+//                    let map = voxels |> Map.ofArray
 
-                    map
-                    |> Map.filter (fun (x, y, z) value ->
+//                    map
+//                    |> Map.filter (fun (x, y, z) value ->
 
-                        let hasNeighbors =
-                            Map.containsKey (x + 1, y, z) map && Map.containsKey (x - 1, y, z) map &&
-                            Map.containsKey (x, y + 1, z) map && Map.containsKey (x, y - 1, z) map &&
-                            Map.containsKey (x, y, z + 1) map && Map.containsKey (x, y, z - 1) map
+//                        let hasNeighbors =
+//                            Map.containsKey (x + 1, y, z) map && Map.containsKey (x - 1, y, z) map &&
+//                            Map.containsKey (x, y + 1, z) map && Map.containsKey (x, y - 1, z) map &&
+//                            Map.containsKey (x, y, z + 1) map && Map.containsKey (x, y, z - 1) map
 
-                        not hasNeighbors
-                    )
-                    |> Map.toArray
+//                        not hasNeighbors
+//                    )
+//                    |> Map.toArray
 
 
                 let voxels =
@@ -281,8 +297,8 @@ type VoxelChunk =
 
 
                 // fin
-                Some { Resolution = v3i resolutionChunkX resolutionChunkY resolutionChunkZ; PositionsAndColors = voxels }
-            else Log.info "Block-compressed image files are unsupported for use as height maps."; None
+                Some { Resolution = v3i resolutionChunkX resolutionChunkY resolutionChunkZ; PositionsAndColors = voxels; TexelWidth = v3 quadSizeX quadSizeZ quadSizeY }
+//            else Log.info "Block-compressed image files are unsupported for use as height maps."; None
         | None -> None
 
     /// Attempt to compute height map metadata, loading assets as required.

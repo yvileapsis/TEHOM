@@ -12,6 +12,8 @@
    [Assets Assets/Gui [wav ogg mp3] [] [Audio]]
    [Assets Assets/Gui [nueffect nuscript csv] [] [Symbol]]
    [Assets Assets/Gui [nuentity nugroup tsx tmx] [] []]]]
+ [Voxels
+  [[Assets Assets/Voxels [bmp png psd ttf] [PsdToPng] [Render3d]]]]
  [Gameplay
   [[Assets Assets/Gameplay [bmp png psd ttf] [PsdToPng] [Render2d]]
    [Assets Assets/Gameplay [jpg jpeg tga tif tiff dds] [ConvertToDds] [Render3d]]

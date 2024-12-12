@@ -8,23 +8,24 @@ uniform mat4 view_rotate;
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 colors;
+layout(location = 2) in vec3 sizes;
 
 out vec4 positionOut;
 out vec3 colorsOut;
+out vec3 sizesOut;
 
 flat out mat4 modelViewProjectionOut;
 
 void main()
 {
-    float u_lod = 1;
+    float u_lod = max(max(sizes.x, sizes.y), sizes.z);
 
     mat4 model = mat4(1);
 
-    vec3 positionTesting = position;
-
-    positionOut = view_translate * model * (vec4(positionTesting, 1.0) );
+    positionOut = view_translate * model * (vec4(position, 1.0) );
 
     colorsOut = colors;
+    sizesOut = sizes;
 
     modelViewProjectionOut = projection * view * model;
 
@@ -74,6 +75,7 @@ uniform vec3 eyeCenter;
 
 in vec4 positionOut;
 in vec3 colorsOut;
+in vec3 sizesOut;
 
 flat in mat4 modelViewProjectionOut;
 
@@ -199,8 +201,8 @@ void main()
 
     vec2 result = AABBIntersect(
         vec3(0.0), ray,
-        vec3( vxl-0.5*u_lod),
-        vec3( vxl+0.5*u_lod)
+        vxl - 0.5 * sizesOut,
+        vxl + 0.5 * sizesOut
     );
 
     if( !(result.x<=result.y) ) {
@@ -218,14 +220,19 @@ void main()
     vec3  hit_abs = abs(hit);
     float max_dim = max( max( hit_abs.x, hit_abs.y), hit_abs.z  );
 
-    albedo =
-        colorsOut +
+    vec3 light = normalize( vec3(-1.0, 1.25, 2)  );
 
-        vec3(
-            float(hit_abs.x == max_dim),
-            float(hit_abs.y == max_dim),
-            float(hit_abs.z == max_dim)
-        ) * 0.05;
+    vec3 normal = vec3(
+        float(hit_abs.x == max_dim),
+        float(hit_abs.y == max_dim),
+        float(hit_abs.z == max_dim)
+    ) * sign(hit);
+
+    vec3 r = -normal;
+
+    float ndotl = 0.3;
+
+    albedo = colorsOut * max( max(0.7, ndotl), sign( dot(r, light) ) );
 
     // the stupidest solution, should optimize by checking the math
     vec4 hitPos = vec4(result.x * ray + eyeCenter, 1.0);

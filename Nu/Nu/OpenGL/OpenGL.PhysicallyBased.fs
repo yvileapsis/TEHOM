@@ -1356,7 +1356,8 @@ module PhysicallyBased =
                 let vertexBuffer = Gl.GenBuffer ()
                 let positionOffset =                    0 * sizeof<single>
                 let colorOffset = positionOffset +      3 * sizeof<single>
-                let vertexSize = colorOffset +          3 * sizeof<single>
+                let sizeOffset = colorOffset +          3 * sizeof<single>
+                let vertexSize = sizeOffset +           3 * sizeof<single>
                 Gl.BindBuffer (BufferTarget.ArrayBuffer, vertexBuffer)
                 use vertexDataHnd = vertexData.Pin () in
                     let vertexDataNint = vertexDataHnd.Pointer |> NativePtr.ofVoidPtr<single> |> NativePtr.toNativeInt
@@ -1365,6 +1366,8 @@ module PhysicallyBased =
                 Gl.VertexAttribPointer (0u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint positionOffset)
                 Gl.EnableVertexAttribArray 1u
                 Gl.VertexAttribPointer (1u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint colorOffset)
+                Gl.EnableVertexAttribArray 2u
+                Gl.VertexAttribPointer (2u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint sizeOffset)
                 Hl.Assert ()
 
                 // create index buffer

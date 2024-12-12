@@ -1583,34 +1583,20 @@ type [<ReferenceEquality>] GlRenderer3d =
             // compute normals
             let resolution = heightMapMetadata.Resolution
             let positionsAndTexCoordses = heightMapMetadata.PositionsAndColors
+            let texelWidth = heightMapMetadata.TexelWidth
 
             // compute vertices
             let vertices =
                 [|for i in 0 .. dec positionsAndTexCoordses.Length do
-                    let struct (p, tc) = positionsAndTexCoordses.[i]
-//                        let n = normals.[i]
-//                        let s = blendses
-//                        let t = tint.[i]
+                    let struct (p, tc) = positionsAndTexCoordses[i]
                     yield!
-//                            [|p.X; p.Y; p.Z
-//                              tc.X; tc.Y
-//                              n.X; n.Y; n.Z
-//                              t.X; t.Y; t.Z
-//                              s.[i,0]; s.[i,1]; s.[i,2]; s.[i,3]; s.[i,4]; s.[i,5]; s.[i,6]; s.[i,7]|]|]
                         [|p.X; p.Y; p.Z
-                          tc.X; tc.Y; tc.Z|]|]
+                          tc.X; tc.Y; tc.Z
+                          texelWidth.X; texelWidth.Y; texelWidth.Z|]|]
 
             // compute indices, splitting quad along the standard orientation (as used by World Creator, AFAIK).
             let indices =
-//                    [|for y in 0 .. dec resolution.Y - 1 do
-//                        for x in 0 .. dec resolution.X - 1 do
-//                            yield resolution.X * y + x
-//                            yield resolution.X * inc y + x
-//                            yield resolution.X * y + inc x
-//                            yield resolution.X * inc y + x
-//                            yield resolution.X * inc y + inc x
-//                            yield resolution.X * y + inc x|]
-                [|for i in 0 .. dec positionsAndTexCoordses.Length do yield i|]
+                [|for i in 1 .. positionsAndTexCoordses.Length do yield i|]
 
             // create the actual geometry
             let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelGeometry (true, OpenGL.PrimitiveType.Points, vertices.AsMemory (), indices.AsMemory (), geometryDescriptor.Bounds)
