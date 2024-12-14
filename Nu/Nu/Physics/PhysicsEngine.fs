@@ -174,12 +174,13 @@ type [<StructuralEquality; NoComparison>] HeightMap =
 
 type VoxelChunkMetadata =
     { Resolution : Vector3i
-      PositionsAndColors : struct (Vector3 * Vector4) array
-      TexelWidth : Vector3 }
+      PositionsAndColors : struct (Vector3i * Color) array  }
 
 /// A height map for terrain.
 type VoxelChunk =
-    | ImageVoxel of Image AssetTag // only supports 8-bit depth on Red channel
+    | SlicesVoxel of Image AssetTag // only supports 8-bit depth on Red channel
+    // TODO: implement
+    | RawVoxel of unit
 
     static member private tryGetTextureData tryGetAssetFilePath (assetTag : Image AssetTag) =
         match tryGetAssetFilePath assetTag with
@@ -203,72 +204,58 @@ type VoxelChunk =
                 None
         | None -> None
 
-    static member private tryGetImageHeightMapMetadata tryGetAssetFilePath (bounds : Box3) tiles image =
+    static member getSliceResolution resolutionX resolutionY =
+        resolutionX * resolutionY |>
+        float |>
+        Math.Cbrt |>
+        round |>
+        int
+
+    static member private tryGetSlicesMetadata tryGetAssetFilePath image =
 
         // attempt to load texture data
         match VoxelChunk.tryGetTextureData tryGetAssetFilePath image with
         | Some (metadata, blockCompressed, bytes) ->
 
-            // currently only supporting height data from block-compressed files
-//            if not blockCompressed then
+            let resolutionX = metadata.TextureWidth
+            let resolutionY = metadata.TextureHeight
 
-                // compute normalize heights
-                let resolutionX = metadata.TextureWidth
-                let resolutionY = metadata.TextureHeight
-                let scalar = 1.0f / single Byte.MaxValue
+            let modelSideLength = VoxelChunk.getSliceResolution resolutionX resolutionY
 
-                let modelSideLength =
-                    resolutionX * resolutionY |>
-                    float |>
-                    Math.Cbrt |>
-                    round |>
-                    int
+            let textureSideLength = modelSideLength |> float |> sqrt |> round |> int
 
-                let textureSideLength = modelSideLength |> float |> sqrt |> round |> int
+            let resolutionChunkX = modelSideLength
+            let resolutionChunkY = modelSideLength
+            let resolutionChunkZ = modelSideLength
 
-                let resolutionChunkX = modelSideLength
-                let resolutionChunkY = modelSideLength
-                let resolutionChunkZ = modelSideLength
+            let colors =
+                bytes
+                |> Array.chunkBySize 4
+                |> Array.map (fun chunk ->
+                    (chunk, 0)
+                    |> BitConverter.ToInt32
+                    |> System.Drawing.Color.FromArgb
+                    |> fun color -> color8 color.R color.G color.B color.A
+                )
 
-                // compute positions and tex coordses
-                let quadSizeX = bounds.Size.X / single (dec resolutionChunkX)
-                let quadSizeY = bounds.Size.Z / single (dec resolutionChunkY)
-                let quadSizeZ = bounds.Size.Y / single (dec resolutionChunkZ)
-                let terrainHeight = bounds.Size.Y
-                let terrainPositionX = bounds.Min.X
-                let terrainPositionY = bounds.Min.Y
-                let terrainPositionZ = bounds.Min.Z
+            let voxels = [|
+                for y in 0 .. dec resolutionX do
+                    for x in 0 .. dec resolutionY do
 
-                let bytesProcessed =
-                    bytes
-                    |> Array.chunkBySize 4
-                    |> Array.map (fun chunk ->
-                        System.Drawing.Color.FromArgb (BitConverter.ToInt32 (chunk, 0))
-                    )
+                        let color = colors[(resolutionX * y + x)]
 
-                let voxels = [|
-                    for y in 0 .. dec resolutionX do
-                        for x in 0 .. dec resolutionY do
+                        if color.A > 0f then
 
-                            let color = bytesProcessed[(resolutionX * y + x)]
+                            let z = x / resolutionChunkX + (y / resolutionChunkY) * textureSideLength
 
-                            let alpha = single color.A * scalar // extract a channel of pixel
-                            let red = single color.R * scalar // extract r channel of pixel
-                            let green = single color.G * scalar // extract g channel of pixel
-                            let blue = single color.B * scalar // extract b channel of pixel
+                            let x' = (x % resolutionChunkX)
+                            let y' = (z % resolutionChunkZ)
+                            let z' = (y % resolutionChunkY)
 
-                            if alpha > 0.1f then
+                            yield struct (v3i x' y' z', color)
+            |]
 
-                                let z = x / resolutionChunkX + (y / resolutionChunkY) * textureSideLength
-
-                                let x' = (x % resolutionChunkX)
-                                let y' = (z % resolutionChunkZ)
-                                let z' = (y % resolutionChunkY)
-
-                                yield ((x', y', z'), v4 red green blue alpha)
-                |]
-
-                // neightbor culling
+            // neightbor culling
 //                let voxels =
 //                    let map = voxels |> Map.ofArray
 
@@ -284,31 +271,14 @@ type VoxelChunk =
 //                    )
 //                    |> Map.toArray
 
-
-                let voxels =
-                    voxels
-                    |> Array.map (fun ((x, y, z), color) ->
-                        let x' = single x * quadSizeX + terrainPositionX
-                        let y' = single y * quadSizeZ + terrainPositionY
-                        let z' = single z * quadSizeY + terrainPositionZ
-                        let position = v3 x' y' z'
-                        struct (position, color)
-                    )
-
-
-                // fin
-                Some { Resolution = v3i resolutionChunkX resolutionChunkY resolutionChunkZ; PositionsAndColors = voxels; TexelWidth = v3 quadSizeX quadSizeZ quadSizeY }
-//            else Log.info "Block-compressed image files are unsupported for use as height maps."; None
+            // fin
+            Some { Resolution = v3i resolutionChunkX resolutionChunkY resolutionChunkZ; PositionsAndColors = voxels; }
         | None -> None
 
-    /// Attempt to compute height map metadata, loading assets as required.
-    /// NOTE: if the heightmap pixel represents a quad in the terrain geometry in the exporting program, the geometry
-    /// produced here is slightly different, with the border slightly clipped, and the terrain and quad size, slightly
-    /// larger. i.e if the original map is 32m^2 and the original quad 1m^2 and the heightmap is 32x32, the quad axes
-    /// below will be > 1.0.
-    static member tryGetMetadata (tryGetAssetFilePath : AssetTag -> string option) bounds tiles heightMap =
+    static member tryGetMetadata (tryGetAssetFilePath : AssetTag -> string option) bounds heightMap =
         match heightMap with
-        | ImageVoxel image -> VoxelChunk.tryGetImageHeightMapMetadata tryGetAssetFilePath bounds tiles image
+        | SlicesVoxel image -> VoxelChunk.tryGetSlicesMetadata tryGetAssetFilePath image
+        | RawVoxel _ -> failwithf "todo"
 
 
 /// Identifies a body that can be found in a physics engine.

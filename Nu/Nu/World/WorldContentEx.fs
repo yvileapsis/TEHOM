@@ -332,29 +332,17 @@ module VoxelFacetExtensions =
         member this.GetVoxelMaterial world : TerrainMaterial = this.Get (nameof this.VoxelMaterial) world
         member this.SetVoxelMaterial (value : TerrainMaterial) world = this.Set (nameof this.VoxelMaterial) value world
         member this.VoxelMaterial = lens (nameof this.VoxelMaterial) this this.GetVoxelMaterial this.SetVoxelMaterial
+        member this.GetVoxelChunk world : VoxelChunk = this.Get (nameof this.VoxelChunk) world
+        member this.SetVoxelChunk (value : VoxelChunk) world = this.Set (nameof this.VoxelChunk) value world
+        member this.VoxelChunk = lens (nameof this.VoxelChunk) this this.GetVoxelChunk this.SetVoxelChunk
 
-        /// Attempt to get the resolution of the terrain.
-        member this.TryGetTerrainResolution world =
-            match this.GetHeightMap world with
-            | ImageHeightMap map ->
-                match Metadata.tryGetTextureSize map with
-                | ValueSome textureSize -> Some textureSize
-                | ValueNone -> None
-            | RawHeightMap map -> Some map.Resolution
-
-        /// Attempt to get the size of each terrain quad.
-        member this.TryGetTerrainQuadSize world =
-            let bounds = this.GetBounds world
-            match this.TryGetTerrainResolution world with
-            | Some resolution -> Some (v2 (bounds.Size.X / single (dec resolution.X)) (bounds.Size.Z / single (dec resolution.Y)))
-            | None -> None
 
 /// Augments an entity with a rigid 3d terrain.
 type VoxelFacet () =
     inherit Facet (true, false, false)
 
     static member Properties =
-        [define Entity.Size (v3 512.0f 128.0f 512.0f)
+        [define Entity.Size (v3 16.0f 16.0f 16.0f)
          define Entity.Presence Omnipresent
          define Entity.Static true
          define Entity.AlwaysRender true
@@ -384,8 +372,8 @@ type VoxelFacet () =
                           Assets.Default.TerrainLayer1Blend|]})
          define Entity.TintImageOpt None
          define Entity.NormalImageOpt None
-         define Entity.Tiles (v2 256.0f 256.0f)
-         define Entity.HeightMap (RawHeightMap { Resolution = v2i 513 513; RawFormat = RawUInt16 LittleEndian; RawAsset = Assets.Default.HeightMap })
+         // TODO: implement
+         define Entity.VoxelChunk (RawVoxel ())
          define Entity.Segments v2iOne
          define Entity.Observable false
          nonPersistent Entity.AwakeTimeStamp 0L
@@ -393,16 +381,17 @@ type VoxelFacet () =
          computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = 0 }) None]
 
     override this.Register (entity, world) =
-        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyEnabled)) entity (nameof TerrainFacet) world
-        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Transform)) entity (nameof TerrainFacet) world
-        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Friction)) entity (nameof TerrainFacet) world
-        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Restitution)) entity (nameof TerrainFacet) world
-        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity (nameof TerrainFacet) world
-        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity (nameof TerrainFacet) world
-        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.HeightMap)) entity (nameof TerrainFacet) world
+//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyEnabled)) entity (nameof VoxelFacet) world
+//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Transform)) entity (nameof VoxelFacet) world
+//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Friction)) entity (nameof VoxelFacet) world
+//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Restitution)) entity (nameof VoxelFacet) world
+//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity (nameof VoxelFacet) world
+//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity (nameof VoxelFacet) world
+//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.HeightMap)) entity (nameof VoxelFacet) world
         let world = entity.SetAwakeTimeStamp world.UpdateTime world
         world
 
+    (*
     override this.RegisterPhysics (entity, world) =
         match entity.TryGetTerrainResolution world with
         | Some resolution ->
@@ -443,6 +432,7 @@ type VoxelFacet () =
 
     override this.UnregisterPhysics (entity, world) =
         World.destroyBody false (entity.GetBodyId world) world
+        *)
 
     override this.Render (renderPass, entity, world) =
         let mutable transform = entity.GetTransform world
@@ -453,8 +443,7 @@ type VoxelFacet () =
               Material = entity.GetTerrainMaterial world
               TintImageOpt = entity.GetTintImageOpt world
               NormalImageOpt = entity.GetNormalImageOpt world
-              Tiles = entity.GetTiles world
-              HeightMap1 = entity.GetHeightMap world
+              HeightMap1 = entity.GetVoxelChunk world
               Segments = entity.GetSegments world
               Voxel = true }
         World.enqueueRenderMessage3d
@@ -463,11 +452,6 @@ type VoxelFacet () =
                   VoxelDescriptor = terrainDescriptor
                   RenderPass = renderPass })
             world
-
-    override this.GetAttributesInferred (entity, world) =
-        match entity.TryGetTerrainResolution world with
-        | Some resolution -> AttributesInferred.important (v3 (single (dec resolution.X)) 128.0f (single (dec resolution.Y))) v3Zero
-        | None -> AttributesInferred.important (v3 512.0f 128.0f 512.0f) v3Zero
 
 /// Gives an entity the base behavior of a rigid 3d terrain.
 type VoxelDispatcher () =

@@ -8,7 +8,10 @@ uniform mat4 view_rotate;
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 colors;
-layout(location = 2) in vec3 sizes;
+
+layout(location = 6) in mat4 model;
+layout(location = 10) in vec4 size;
+layout(location = 11) in vec4 offset;
 
 out vec4 positionOut;
 out vec3 colorsOut;
@@ -18,13 +21,15 @@ flat out mat4 modelViewProjectionOut;
 
 void main()
 {
+    vec3 sizes = size.xyz;
+
+    vec3 position1 = vec3(position) * sizes + offset.xyz;
+
     float u_lod = max(max(sizes.x, sizes.y), sizes.z);
 
-    mat4 model = mat4(1);
+    positionOut = view_translate * model * (vec4(position1, 1.0) );
 
-    positionOut = view_translate * model * (vec4(position, 1.0) );
-
-    colorsOut = colors;
+    colorsOut = vec3(colors);
     sizesOut = sizes;
 
     modelViewProjectionOut = projection * view * model;
@@ -55,10 +60,6 @@ void main()
         gl_PointSize = size;
     }
 
-    // temporary solution to the weird lag, apparently first vertex is broken?
-    if (gl_VertexID == 0x0000) {
-        gl_Position = vec4(-1,-1,-1,-1);
-    }
 }
 
 #shader fragment

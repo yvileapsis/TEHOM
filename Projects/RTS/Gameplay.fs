@@ -242,10 +242,10 @@ type GameplayDispatcher () =
                     Entity.DieEvent => Die Simulants.GameplayPlayer
                 ]
 
-                for i in List.init 1 id do
+                for i in List.init 16 id do
                     ContentEx.voxel $"VoxelTest{i}" [
-                        Entity.HeightMap == (ImageHeightMap Assets.Voxels.Computer)
-                        Entity.Position == v3 (single (i / 3) * 8f) 4f (single (i % 3) * 8f)
+                        Entity.VoxelChunk == (SlicesVoxel Assets.Voxels.Computer)
+                        Entity.Position == v3 (single (i / 4) * 8f) 4f (single (i % 4) * 8f)
                         Entity.Size == v3 8f 8f 8f
                     ]
 

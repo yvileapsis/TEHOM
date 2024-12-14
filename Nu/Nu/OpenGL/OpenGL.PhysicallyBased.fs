@@ -1345,7 +1345,7 @@ module PhysicallyBased =
         geometry
 
     /// Create physically-based voxel geometry from a mesh.
-    let CreatePhysicallyBasedVoxelGeometry (renderable, primitiveType, vertexData : single Memory, indexData : int Memory, bounds) =
+    let CreatePhysicallyBasedVoxelGeometry (renderable, primitiveType, count, vertexData : single Memory, bounds) =
 
         // make buffers
         let (vertices, indices, vertexBuffer, instanceBuffer, indexBuffer, vao) =
@@ -1360,29 +1360,51 @@ module PhysicallyBased =
 
                 // create vertex buffer
                 let vertexBuffer = Gl.GenBuffer ()
-                let positionOffset =                    0 * sizeof<single>
-                let colorOffset = positionOffset +      3 * sizeof<single>
-                let sizeOffset = colorOffset +          3 * sizeof<single>
-                let vertexSize = sizeOffset +           3 * sizeof<single>
+                let positionOffset =                    0 * sizeof<int>
+                let colorOffset = positionOffset +      3 * sizeof<int>
+                let vertexSize = colorOffset +          3 * sizeof<int>
                 Gl.BindBuffer (BufferTarget.ArrayBuffer, vertexBuffer)
                 use vertexDataHnd = vertexData.Pin () in
-                    let vertexDataNint = vertexDataHnd.Pointer |> NativePtr.ofVoidPtr<single> |> NativePtr.toNativeInt
-                    Gl.BufferData (BufferTarget.ArrayBuffer, uint (vertexData.Length * sizeof<single>), vertexDataNint, BufferUsage.StaticDraw)
+                    let vertexDataNint = vertexDataHnd.Pointer |> NativePtr.ofVoidPtr<int> |> NativePtr.toNativeInt
+                    Gl.BufferData (BufferTarget.ArrayBuffer, uint (vertexData.Length * sizeof<int>), vertexDataNint, BufferUsage.StaticDraw)
                 Gl.EnableVertexAttribArray 0u
                 Gl.VertexAttribPointer (0u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint positionOffset)
                 Gl.EnableVertexAttribArray 1u
                 Gl.VertexAttribPointer (1u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint colorOffset)
-                Gl.EnableVertexAttribArray 2u
-                Gl.VertexAttribPointer (2u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint sizeOffset)
                 Hl.Assert ()
 
-                // create index buffer
-                let indexBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ElementArrayBuffer, indexBuffer)
-                let indexDataSize = uint (indexData.Length * sizeof<uint>)
-                use indexDataHnd = indexData.Pin () in
-                    let indexDataNint = indexDataHnd.Pointer |> NativePtr.ofVoidPtr<uint> |> NativePtr.toNativeInt
-                    Gl.BufferData (BufferTarget.ElementArrayBuffer, indexDataSize, indexDataNint, BufferUsage.StaticDraw)
+                let instanceBuffer = Gl.GenBuffer ()
+                Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
+                let instanceData = Array.zeroCreate Constants.Render.InstanceFieldCount
+                m4Identity.ToArray (instanceData, 0)
+                let strideSize = instanceData.Length * sizeof<single>
+                let instanceDataPtr = GCHandle.Alloc (instanceData, GCHandleType.Pinned)
+                try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+                finally instanceDataPtr.Free ()
+                Gl.EnableVertexAttribArray 6u
+                Gl.VertexAttribPointer (6u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint 0) // model fields
+                Gl.VertexAttribDivisor (6u, 1u)
+                Gl.EnableVertexAttribArray 7u
+                Gl.VertexAttribPointer (7u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (4 * sizeof<single>))
+                Gl.VertexAttribDivisor (7u, 1u)
+                Gl.EnableVertexAttribArray 8u
+                Gl.VertexAttribPointer (8u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (8 * sizeof<single>))
+                Gl.VertexAttribDivisor (8u, 1u)
+                Gl.EnableVertexAttribArray 9u
+                Gl.VertexAttribPointer (9u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (12 * sizeof<single>))
+                Gl.VertexAttribDivisor (9u, 1u)
+                Gl.EnableVertexAttribArray 10u
+                Gl.VertexAttribPointer (10u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (16 * sizeof<single>))
+                Gl.VertexAttribDivisor (10u, 1u)
+                Gl.EnableVertexAttribArray 11u
+                Gl.VertexAttribPointer (11u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (20 * sizeof<single>))
+                Gl.VertexAttribDivisor (11u, 1u)
+                Gl.EnableVertexAttribArray 12u
+                Gl.VertexAttribPointer (12u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (24 * sizeof<single>))
+                Gl.VertexAttribDivisor (12u, 1u)
+                Gl.EnableVertexAttribArray 13u
+                Gl.VertexAttribPointer (13u, 4, VertexAttribPointerType.Float, false, strideSize, nativeint (28 * sizeof<single>))
+                Gl.VertexAttribDivisor (13u, 1u)
                 Hl.Assert ()
 
                 // finalize vao
@@ -1390,7 +1412,7 @@ module PhysicallyBased =
                 Hl.Assert ()
 
                 // fin
-                ([||], [||], vertexBuffer, 0u, indexBuffer, vao)
+                ([||], [||], vertexBuffer, instanceBuffer, 0u, vao)
 
             // fake buffers
             else
@@ -1400,20 +1422,17 @@ module PhysicallyBased =
                 let vertexData = vertexData.Span
                 for i in 0 .. dec vertices.Length do
                     let j = i * 19
-                    let vertex = v3 vertexData.[j] vertexData.[j+1] vertexData.[j+2]
+                    let vertex = (v3 vertexData.[j] vertexData.[j+1] vertexData.[j+2])
                     vertices.[i] <- vertex
 
-                // create indices
-                let indices = indexData.ToArray ()
-
                 // fin
-                (vertices, indices, 0u, 0u, 0u, 0u)
+                (vertices, [||], 0u, 0u, 0u, 0u)
 
         // make physically-based geometry
         let geometry =
             { Bounds = bounds
               PrimitiveType = primitiveType
-              ElementCount = indexData.Length
+              ElementCount = count
               Vertices = vertices
               Indices = indices
               VertexBuffer = vertexBuffer
@@ -2949,7 +2968,6 @@ module PhysicallyBased =
          lightType : int,
          lightShadowExponent : single,
          lightShadowDensity : single,
-         elementsCount : int,
          materials : PhysicallyBasedMaterial array,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedDeferredVoxelShader) =
@@ -2962,6 +2980,8 @@ module PhysicallyBased =
 
         // enforce layer limit
         let layersCount = min materials.Length Constants.Render.TerrainLayersMax
+
+        let elementsCount : int = geometry.ElementCount
 
         // setup shader
         Gl.UseProgram shader.PhysicallyBasedShader
@@ -2979,6 +2999,14 @@ module PhysicallyBased =
         Gl.Uniform1 (shader.LightShadowDensityUniform, lightShadowDensity)
         Hl.Assert ()
 
+        // update instance buffer
+        let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+            Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+            Hl.Assert ()
+        finally instanceFieldsPtr.Free ()
+
         // setup geometry
         Gl.BindVertexArray geometry.PhysicallyBasedVao
         Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.VertexBuffer)
@@ -2986,7 +3014,7 @@ module PhysicallyBased =
         Hl.Assert ()
 
         // draw geometry
-        Gl.DrawElements (geometry.PrimitiveType, elementsCount, DrawElementsType.UnsignedInt, nativeint 0)
+        Gl.DrawArrays (geometry.PrimitiveType, 0, elementsCount)
         Hl.ReportDrawCall 1
         Hl.Assert ()
 

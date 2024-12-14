@@ -260,8 +260,7 @@ type VoxelGeometryDescriptor =
       Material : TerrainMaterial
       TintImageOpt : Image AssetTag option
       NormalImageOpt : Image AssetTag option
-      Tiles : Vector2
-      HeightMap1 : HeightMap
+      HeightMap1 : VoxelChunk
       Segments : Vector2i
       Voxel : bool }
 
@@ -273,8 +272,7 @@ type VoxelDescriptor =
       Material : TerrainMaterial
       TintImageOpt : Image AssetTag option
       NormalImageOpt : Image AssetTag option
-      Tiles : Vector2
-      HeightMap1 : HeightMap
+      HeightMap1 : VoxelChunk
       Segments : Vector2i
       Voxel : bool }
 
@@ -283,7 +281,6 @@ type VoxelDescriptor =
           Material = this.Material
           TintImageOpt = this.TintImageOpt
           NormalImageOpt = this.NormalImageOpt
-          Tiles = this.Tiles
           HeightMap1 = this.HeightMap1
           Segments = this.Segments
           Voxel = this.Voxel }
@@ -1330,6 +1327,19 @@ type [<ReferenceEquality>] GlRenderer3d =
             | ValueNone -> None
         | RawHeightMap map -> Some (map.Resolution.X, map.Resolution.Y)
 
+    static member private tryGetVoxelResolution heightMap renderer =
+        match heightMap with
+        | SlicesVoxel image ->
+            match GlRenderer3d.tryGetRenderAsset image renderer with
+            | ValueSome renderAsset ->
+                match renderAsset with
+                | TextureAsset texture ->
+                    let metadata = texture.TextureMetadata
+                    Some (VoxelChunk.getSliceResolution metadata.TextureWidth metadata.TextureHeight)
+                | _ -> None
+            | ValueNone -> None
+        | RawVoxel map -> Some (256)
+
     static member private tryDestroyUserDefinedStaticModel assetTag renderer =
 
         // ensure target package is loaded if possible
@@ -1641,16 +1651,13 @@ type [<ReferenceEquality>] GlRenderer3d =
 
     static member private tryCreatePhysicallyBasedVoxelGeometry (geometryDescriptor : VoxelGeometryDescriptor) renderer =
 
-        let (ImageHeightMap image) = geometryDescriptor.HeightMap1
-
-        let voxelChunk = ImageVoxel image
+        let voxelChunk = geometryDescriptor.HeightMap1
 
         // attempt to compute positions and tex coords
         let heightMapMetadataOpt =
             VoxelChunk.tryGetMetadata
                 (fun assetTag -> GlRenderer3d.tryGetFilePath assetTag renderer)
                 geometryDescriptor.Bounds
-                geometryDescriptor.Tiles
                 voxelChunk
 
         // on success, continue terrain geometry generation attempt
@@ -1660,23 +1667,17 @@ type [<ReferenceEquality>] GlRenderer3d =
             // compute normals
             let resolution = heightMapMetadata.Resolution
             let positionsAndTexCoordses = heightMapMetadata.PositionsAndColors
-            let texelWidth = heightMapMetadata.TexelWidth
 
             // compute vertices
             let vertices =
                 [|for i in 0 .. dec positionsAndTexCoordses.Length do
                     let struct (p, tc) = positionsAndTexCoordses[i]
                     yield!
-                        [|p.X; p.Y; p.Z
-                          tc.X; tc.Y; tc.Z
-                          texelWidth.X; texelWidth.Y; texelWidth.Z|]|]
-
-            // compute indices, splitting quad along the standard orientation (as used by World Creator, AFAIK).
-            let indices =
-                [|for i in 1 .. positionsAndTexCoordses.Length do yield i|]
+                        [|single p.X; single p.Y; single p.Z
+                          (tc.R); (tc.G); (tc.B)|]|]
 
             // create the actual geometry
-            let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelGeometry (true, OpenGL.PrimitiveType.Points, vertices.AsMemory (), indices.AsMemory (), geometryDescriptor.Bounds)
+            let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelGeometry (true, OpenGL.PrimitiveType.Points, positionsAndTexCoordses.Length, vertices.AsMemory (), geometryDescriptor.Bounds)
             Some geometry
 
         // error
@@ -2299,8 +2300,9 @@ type [<ReferenceEquality>] GlRenderer3d =
         OpenGL.Hl.Assert ()
 
     static member private renderPhysicallyBasedVoxel viewArray viewRotationArray viewTranslationArray geometryProjectionArray invViewArray invProjectionArray viewPort viewPortBounds eyeCenter (lightType : LightType) lightShadowExponent lightShadowDensity terrainDescriptor geometry shader renderer =
-        let (resolutionX, resolutionY) = Option.defaultValue (0, 0) (GlRenderer3d.tryGetHeightMapResolution terrainDescriptor.HeightMap1 renderer)
-        let elementsCount = dec resolutionX * dec resolutionY * 6
+
+        let resolution = Option.defaultValue (0) (GlRenderer3d.tryGetVoxelResolution terrainDescriptor.HeightMap1 renderer)
+
         let terrainMaterialProperties = terrainDescriptor.MaterialProperties
         let materialProperties : OpenGL.PhysicallyBased.PhysicallyBasedMaterialProperties =
             { Albedo = Option.defaultValue Constants.Render.AlbedoDefault terrainMaterialProperties.AlbedoOpt
@@ -2311,6 +2313,7 @@ type [<ReferenceEquality>] GlRenderer3d =
               Height = Option.defaultValue Constants.Render.HeightDefault terrainMaterialProperties.HeightOpt
               IgnoreLightMaps = Option.defaultValue Constants.Render.IgnoreLightMapsDefault terrainMaterialProperties.IgnoreLightMapsOpt
               OpaqueDistance = Constants.Render.OpaqueDistanceDefault }
+
         let (texelWidth, texelHeight, materials) =
             match terrainDescriptor.Material with
             | BlendMaterial blendMaterial ->
@@ -2384,6 +2387,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                         HeightTexture = heightTexture }
                 let albedoMetadata = albedoTexture.TextureMetadata
                 (albedoMetadata.TextureTexelWidth, albedoMetadata.TextureTexelHeight, [|material|])
+
         let texCoordsOffset =
             match terrainDescriptor.InsetOpt with
             | Some inset ->
@@ -2395,16 +2399,31 @@ type [<ReferenceEquality>] GlRenderer3d =
                 let sy = -inset.Size.Y * texelHeight
                 Box2 (px, py, sx, sy)
             | None -> box2 v2Zero v2Zero
+
+        let model = m4Identity
+
+        let resolutionChunkX = resolution
+        let resolutionChunkY = resolution
+        let resolutionChunkZ = resolution
+
+        let quadSizeX = terrainDescriptor.Bounds.Size.X / single (dec resolutionChunkX)
+        let quadSizeY = terrainDescriptor.Bounds.Size.Z / single (dec resolutionChunkY)
+        let quadSizeZ = terrainDescriptor.Bounds.Size.Y / single (dec resolutionChunkZ)
+
+        let terrainPositionX = terrainDescriptor.Bounds.Min.X
+        let terrainPositionY = terrainDescriptor.Bounds.Min.Y
+        let terrainPositionZ = terrainDescriptor.Bounds.Min.Z
+
         let instanceFields =
             Array.append
-                (m4Identity.ToArray ())
-                ([|texCoordsOffset.Min.X; texCoordsOffset.Min.Y; texCoordsOffset.Min.X + texCoordsOffset.Size.X; texCoordsOffset.Min.Y + texCoordsOffset.Size.Y
+                (model.ToArray ())
+                ([|quadSizeX; quadSizeY; quadSizeZ; 0.0f
+                   terrainPositionX; terrainPositionY; terrainPositionZ; 0.0f
                    materialProperties.Albedo.R; materialProperties.Albedo.G; materialProperties.Albedo.B; materialProperties.Albedo.A
-                   materialProperties.Roughness; materialProperties.Metallic; materialProperties.AmbientOcclusion; materialProperties.Emission
-                   texelHeight * materialProperties.Height|])
+                   materialProperties.Roughness; materialProperties.Metallic; materialProperties.AmbientOcclusion; materialProperties.Emission|])
         OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxel
             (viewArray, viewRotationArray, viewTranslationArray, geometryProjectionArray, invViewArray, invProjectionArray, viewPort, viewPortBounds, eyeCenter,
-             instanceFields, lightType.Enumerate, lightShadowExponent, lightShadowDensity, elementsCount, materials, geometry, shader)
+             instanceFields, lightType.Enumerate, lightShadowExponent, lightShadowDensity, materials, geometry, shader)
         OpenGL.Hl.Assert ()
 
     static member private makeBillboardMaterial (properties : MaterialProperties inref, material : Material inref, renderer) =
