@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -10,7 +10,6 @@ open nkast.Aether.Physics2D.Dynamics
 open nkast.Aether.Physics2D.Dynamics.Contacts
 open nkast.Aether.Physics2D.Dynamics.Joints
 open Prime
-
 #nowarn "44" // ignore aether deprecation warnings
 
 /// The 2d implementation of PhysicsEngine in terms of Aether Physics.
@@ -102,8 +101,8 @@ type [<ReferenceEquality>] PhysicsEngine2d =
 
     static member private configureBodyProperties (bodyProperties : BodyProperties) (body : Body) =
         body.BodyType <- PhysicsEngine2d.toPhysicsBodyType bodyProperties.BodyType // NOTE: BodyType must be set first or other configurations may be ignored!
-        body.SleepingAllowed <- bodyProperties.SleepingAllowed
         body.Enabled <- bodyProperties.Enabled
+        body.SleepingAllowed <- bodyProperties.SleepingAllowed
         body.Position <- PhysicsEngine2d.toPhysicsV2 bodyProperties.Center
         body.Rotation <- bodyProperties.Rotation.RollPitchYaw.Z
         body.SetFriction bodyProperties.Friction
@@ -521,12 +520,6 @@ type [<ReferenceEquality>] PhysicsEngine2d =
         | ApplyBodyTorqueMessage applyBodyTorqueMessage -> PhysicsEngine2d.applyBodyTorque applyBodyTorqueMessage physicsEngine
         | JumpBodyMessage jumpBodyMessage -> PhysicsEngine2d.jumpBody jumpBodyMessage physicsEngine
         | SetGravityMessage gravity -> physicsEngine.PhysicsContext.Gravity <- PhysicsEngine2d.toPhysicsV2 gravity
-        | ClearPhysicsMessageInternal ->
-            physicsEngine.PhysicsContext.Clear ()
-            physicsEngine.Joints.Clear ()
-            physicsEngine.Bodies.Clear ()
-            physicsEngine.CreateBodyJointMessages.Clear ()
-            physicsEngine.IntegrationMessages.Clear ()
 
     static member private createIntegrationMessagesAndSleepAwakeStaticBodies physicsEngine =
         for bodyEntry in physicsEngine.Bodies do
@@ -656,6 +649,19 @@ type [<ReferenceEquality>] PhysicsEngine2d =
                 physicsEngine.IntegrationMessages.Clear ()
                 Some integrationMessages
             else None
+
+        member physicsEngine.ClearInternal () =
+            let affected =
+                physicsEngine.Joints.Count > 0 ||
+                physicsEngine.Bodies.Count > 0 ||
+                physicsEngine.CreateBodyJointMessages.Count > 0 ||
+                physicsEngine.IntegrationMessages.Count > 0
+            physicsEngine.Joints.Clear ()
+            physicsEngine.Bodies.Clear ()
+            physicsEngine.CreateBodyJointMessages.Clear ()
+            physicsEngine.IntegrationMessages.Clear ()
+            physicsEngine.PhysicsContext.Clear ()
+            affected
 
         member physicsEngine.CleanUp () =
             ()

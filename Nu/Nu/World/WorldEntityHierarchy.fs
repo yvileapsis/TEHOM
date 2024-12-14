@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -16,7 +16,7 @@ module WorldEntityHierarchy =
         /// Attempt to import a static model hierarchy below the target entity.
         static member tryImportEntityHierarchy presenceConferred staticModel surfaceMaterialsPopulated rigid (parent : Either<Group, Entity>) world =
             match Metadata.tryGetStaticModelMetadata staticModel with
-            | Some staticModelMetadata ->
+            | ValueSome staticModelMetadata ->
                 let mutable (world', i) = (world, 0) // using mutation due to imperative API
                 staticModelMetadata.PhysicallyBasedHierarchy.Traverse (fun nodes ->
                     for node in nodes do
@@ -100,14 +100,14 @@ module WorldEntityHierarchy =
                             let world = child.SetSurfaceIndex i world
                             let world = child.SetStaticModel staticModel world
                             let properties =
-                                { AlbedoOpt = Some surface.SurfaceMaterialProperties.Albedo
-                                  RoughnessOpt = Some surface.SurfaceMaterialProperties.Roughness
-                                  MetallicOpt = Some surface.SurfaceMaterialProperties.Metallic
-                                  AmbientOcclusionOpt = Some surface.SurfaceMaterialProperties.AmbientOcclusion
-                                  EmissionOpt = Some surface.SurfaceMaterialProperties.Emission
-                                  HeightOpt = Some surface.SurfaceMaterialProperties.Height
-                                  IgnoreLightMapsOpt = Some ignoreLightMaps
-                                  OpaqueDistanceOpt = Some opaqueDistance }
+                                { AlbedoOpt = ValueSome surface.SurfaceMaterialProperties.Albedo
+                                  RoughnessOpt = ValueSome surface.SurfaceMaterialProperties.Roughness
+                                  MetallicOpt = ValueSome surface.SurfaceMaterialProperties.Metallic
+                                  AmbientOcclusionOpt = ValueSome surface.SurfaceMaterialProperties.AmbientOcclusion
+                                  EmissionOpt = ValueSome surface.SurfaceMaterialProperties.Emission
+                                  HeightOpt = ValueSome surface.SurfaceMaterialProperties.Height
+                                  IgnoreLightMapsOpt = ValueSome ignoreLightMaps
+                                  OpaqueDistanceOpt = ValueSome opaqueDistance }
                             let world = child.SetMaterialProperties properties world
                             let material =
                                 if surfaceMaterialsPopulated then
@@ -126,7 +126,7 @@ module WorldEntityHierarchy =
                             world' <- world
                             i <- inc i)
                 world'
-            | None -> world
+            | ValueNone -> world
 
         /// Attempt to freeze an entity hierarchy where certain types of children's rendering functionality are baked
         /// into a manually renderable array.
@@ -139,6 +139,7 @@ module WorldEntityHierarchy =
                         not (entity.Has<Light3dFacet> world) &&
                         entity.Has<StaticModelSurfaceFacet> world then
                         let mutable transform = entity.GetTransform world
+                        let castShadow = transform.CastShadow
                         let affineMatrix = transform.AffineMatrix
                         let entityBounds = transform.Bounds3d
                         let presence = transform.Presence
@@ -148,7 +149,7 @@ module WorldEntityHierarchy =
                         let staticModel = entity.GetStaticModel world
                         let surfaceIndex = entity.GetSurfaceIndex world
                         let renderType = match entity.GetRenderStyle world with Deferred -> DeferredRenderType | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-                        let surface = { ModelMatrix = affineMatrix; Presence = presence; InsetOpt = insetOpt; MaterialProperties = properties; Material = material; SurfaceIndex = surfaceIndex; StaticModel = staticModel; RenderType = renderType }
+                        let surface = { CastShadow = castShadow; ModelMatrix = affineMatrix; Presence = presence; InsetOpt = insetOpt; MaterialProperties = properties; Material = material; SurfaceIndex = surfaceIndex; StaticModel = staticModel; RenderType = renderType }
                         let frozenSurface = StructPair.make entityBounds surface
                         boundsOpt <- match boundsOpt with Some bounds -> Some (bounds.Combine entityBounds) | None -> Some entityBounds
                         world <- entity.SetVisibleLocal false world
@@ -237,10 +238,10 @@ module FreezerFacetModule =
 
             // compute intersection function based on render pass
             let intersects =
-                let interiorOpt = Some (World.getGameEye3dFrustumInterior Game world)
+                let interiorOpt = ValueSome (World.getGameEye3dFrustumInterior Game world)
                 let exterior = World.getGameEye3dFrustumExterior Game world
                 let imposter = World.getGameEye3dFrustumImposter Game world
-                let lightBoxOpt = Some (World.getLight3dBox world)
+                let lightBoxOpt = ValueSome (World.getLight3dBox world)
                 fun probe light presence bounds ->
                     match renderPass with
                     | NormalPass -> Presence.intersects3d interiorOpt exterior imposter lightBoxOpt probe light presence bounds
@@ -257,8 +258,8 @@ module FreezerFacetModule =
                     let boundsAndSurface = &staticModelSurfaces.[i]
                     let bounds = &boundsAndSurface.Fst
                     let surface = &boundsAndSurface.Snd
-                    if intersects false false surface.Presence bounds then
-                        World.renderStaticModelSurfaceFast (&surface.ModelMatrix, surface.Presence, Option.toValueOption surface.InsetOpt, &surface.MaterialProperties, &surface.Material, surface.StaticModel, surface.SurfaceIndex, surface.RenderType, renderPass, world)
+                    if (not renderPass.IsShadowPass || surface.CastShadow) && intersects false false surface.Presence bounds then
+                        World.renderStaticModelSurfaceFast (&surface.ModelMatrix, surface.CastShadow, surface.Presence, Option.toValueOption surface.InsetOpt, &surface.MaterialProperties, &surface.Material, surface.StaticModel, surface.SurfaceIndex, surface.RenderType, renderPass, world)
 
 [<AutoOpen>]
 module StaticModelHierarchyDispatcherModule =

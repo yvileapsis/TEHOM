@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -31,11 +31,11 @@ type 'w BoxableSubscription =
 
 /// A map of event subscriptions.
 type SubscriptionEntries =
-    UMap<obj Address, OMap<uint64, SubscriptionEntry>>
+    UMap<Address, OMap<uint64, SubscriptionEntry>>
 
 /// A map of subscription keys to unsubscription data.
 type UnsubscriptionEntries =
-    UMap<uint64, obj Address * Simulant>
+    UMap<uint64, struct (Address * Simulant)>
 
 [<RequireQualifiedAccess>]
 module EventGraph =
@@ -133,7 +133,7 @@ module EventGraph =
             Array.iteri (fun i _ ->
                 let eventAddressNamesAny = Array.zeroCreate eventAddressNamesLength
                 Array.Copy (eventAddressNames, 0, eventAddressNamesAny, 0, eventAddressNamesLength)
-                eventAddressNamesAny.[i] <- Address.WildcardName
+                eventAddressNamesAny.[i] <- Constants.Address.WildcardName
                 let eventAddressAny = Address.rtoa eventAddressNamesAny
                 eventAddresses.[i] <- eventAddressAny)
                 eventAddressNames
@@ -155,7 +155,7 @@ module EventGraph =
             for i in 0 .. dec eventAddressNamesLength do
                 let eventAddressNames' = Array.zeroCreate eventAddressNamesLength
                 Array.Copy (eventAddressNames, 0, eventAddressNames', 0, eventAddressNamesLength)
-                eventAddressNames'.[i] <- Address.WildcardName
+                eventAddressNames'.[i] <- Constants.Address.WildcardName
                 let eventAddress' = Address.rtoa eventAddressNames'
                 eventAddresses.[i] <- eventAddress'
 
@@ -165,7 +165,7 @@ module EventGraph =
                 let k = eventAddressNamesLength + i
                 let eventAddressNames' = Array.zeroCreate (j + 1)
                 Array.Copy (eventAddressNames, 0, eventAddressNames', 0, j)
-                eventAddressNames'.[j] <- Address.EllipsisName
+                eventAddressNames'.[j] <- Constants.Address.EllipsisName
                 let eventAddress' = Address.rtoa eventAddressNames'
                 eventAddresses.[k] <- eventAddress'
 
@@ -192,20 +192,20 @@ module EventGraph =
             | None ->
                 failwith
                     ("The event address '" + scstring eventAddress +
-                        "' is missing the 'Event' name. All event addresses must separate the event names from the publisher names with 'Event', " +
-                        "like 'Click/Event/Button', or 'Mouse/Left/Down/Event' if there is no publisher.")
+                     "' is missing the 'Event' name. All event addresses must separate the event names from the publisher names with 'Event', " +
+                     "like 'Click/Event/Button', or 'Mouse/Left/Down/Event' if there is no publisher.")
         | (true, eventAddressesObj) -> eventAddressesObj :?> 'a Address array
 
     /// Get subscriptions for eventAddress sorted by publishSorter.
-    let getSubscriptionsSorted (publishSorter : SubscriptionSorter) eventAddress (eventGraph : EventGraph) (world : 'w) =
+    let getSubscriptionsSorted (publishSorter : SubscriptionSorter) (eventAddress : 'a Address) (eventGraph : EventGraph) (world : 'w) =
         let eventSubscriptions = getSubscriptions eventGraph
         let eventAddresses = getEventAddresses2 eventAddress eventGraph
-        let subscriptionOpts = Array.map (fun eventAddress -> UMap.tryFind eventAddress eventSubscriptions) eventAddresses
+        let subscriptionOpts = Array.map (fun eventAddress -> UMap.tryFind (eventAddress :> Address) eventSubscriptions) eventAddresses
         let subscriptions = subscriptionOpts |> Array.definitize |> Array.map OMap.toSeq |> Seq.concat
         publishSorter subscriptions world
 
     /// Log an event.
-    let logEvent (address : obj Address) (trace : EventTrace) (eventGraph : EventGraph) =
+    let logEvent (address : Address) (trace : EventTrace) (eventGraph : EventGraph) =
         match eventGraph.EventTracerOpt with
         | Some tracer ->
             let addressStr = scstring address

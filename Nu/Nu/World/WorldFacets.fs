@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -74,8 +74,8 @@ type StaticSpriteFacet () =
 
     override this.GetAttributesInferred (entity, world) =
         match Metadata.tryGetTextureSizeF (entity.GetStaticImage world) with
-        | Some size -> AttributesInferred.important size.V3 v3Zero
-        | None -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
+        | ValueSome size -> AttributesInferred.important size.V3 v3Zero
+        | ValueNone -> AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
 
 [<AutoOpen>]
 module AnimatedSpriteFacetExtensions =
@@ -498,8 +498,8 @@ type BackdroppableFacet () =
         match entity.GetBackdropImageOpt world with
         | Some backdropImage ->
             match Metadata.tryGetTextureSizeF backdropImage with
-            | Some size -> AttributesInferred.important size.V3 v3Zero
-            | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+            | ValueSome size -> AttributesInferred.important size.V3 v3Zero
+            | ValueNone -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
         | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
@@ -595,8 +595,8 @@ type ButtonFacet () =
 
     override this.GetAttributesInferred (entity, world) =
         match Metadata.tryGetTextureSizeF (entity.GetUpImage world) with
-        | Some size -> AttributesInferred.important size.V3 v3Zero
-        | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+        | ValueSome size -> AttributesInferred.important size.V3 v3Zero
+        | ValueNone -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module ToggleButtonFacetExtensions =
@@ -709,8 +709,8 @@ type ToggleButtonFacet () =
 
     override this.GetAttributesInferred (entity, world) =
         match Metadata.tryGetTextureSizeF (entity.GetUntoggledImage world) with
-        | Some size -> AttributesInferred.important size.V3 v3Zero
-        | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+        | ValueSome size -> AttributesInferred.important size.V3 v3Zero
+        | ValueNone -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module RadioButtonFacetExtensions =
@@ -818,8 +818,8 @@ type RadioButtonFacet () =
 
     override this.GetAttributesInferred (entity, world) =
         match Metadata.tryGetTextureSizeF (entity.GetUndialedImage world) with
-        | Some size -> AttributesInferred.important size.V3 v3Zero
-        | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+        | ValueSome size -> AttributesInferred.important size.V3 v3Zero
+        | ValueNone -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module FillBarFacetExtensions =
@@ -882,8 +882,8 @@ type FillBarFacet () =
 
     override this.GetAttributesInferred (entity, world) =
         match Metadata.tryGetTextureSizeF (entity.GetBorderImage world) with
-        | Some size -> AttributesInferred.important size.V3 v3Zero
-        | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+        | ValueSome size -> AttributesInferred.important size.V3 v3Zero
+        | ValueNone -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
 module FeelerFacetExtensions =
@@ -895,7 +895,8 @@ module FeelerFacetExtensions =
         member this.TouchingEvent = Events.TouchingEvent --> this
         member this.UntouchEvent = Events.UntouchEvent --> this
 
-/// Augments an entity with feeler behavior.
+/// Augments an entity with feeler behavior, acting as little invisible pane that produces touch events in response
+/// to mouse input.
 type FeelerFacet () =
     inherit Facet (false, false, false)
 
@@ -1148,9 +1149,9 @@ module EffectFacetExtensions =
         member this.GetEffectOffset world : Vector3 = this.Get (nameof this.EffectOffset) world
         member this.SetEffectOffset (value : Vector3) world = this.Set (nameof this.EffectOffset) value world
         member this.EffectOffset = lens (nameof this.EffectOffset) this this.GetEffectOffset this.SetEffectOffset
-        member this.GetEffectShadowEnabled world : bool = this.Get (nameof this.EffectShadowEnabled) world
-        member this.SetEffectShadowEnabled (value : bool) world = this.Set (nameof this.EffectShadowEnabled) value world
-        member this.EffectShadowEnabled = lens (nameof this.EffectShadowEnabled) this this.GetEffectShadowEnabled this.SetEffectShadowEnabled
+        member this.GetEffectCastShadow world : bool = this.Get (nameof this.EffectCastShadow) world
+        member this.SetEffectCastShadow (value : bool) world = this.Set (nameof this.EffectCastShadow) value world
+        member this.EffectCastShadow = lens (nameof this.EffectCastShadow) this this.GetEffectCastShadow this.SetEffectCastShadow
         member this.GetEffectShadowOffset world : single = this.Get (nameof this.EffectShadowOffset) world
         member this.SetEffectShadowOffset (value : single) world = this.Set (nameof this.EffectShadowOffset) value world
         member this.EffectShadowOffset = lens (nameof this.EffectShadowOffset) this this.GetEffectShadowOffset this.SetEffectShadowOffset
@@ -1256,7 +1257,7 @@ type EffectFacet () =
          define Entity.EffectDefinitions Map.empty
          define Entity.EffectDescriptor Effects.EffectDescriptor.empty
          define Entity.EffectOffset v3Zero
-         define Entity.EffectShadowEnabled true
+         define Entity.EffectCastShadow true
          define Entity.EffectShadowOffset Constants.Engine.ParticleShadowOffsetDefault
          define Entity.EffectRenderType (ForwardRenderType (0.0f, 0.0f))
          define Entity.EffectHistoryMax Constants.Effects.EffectHistoryMaxDefault
@@ -1277,11 +1278,8 @@ type EffectFacet () =
     override this.Render (renderPass, entity, world) =
 
         // ensure rendering is applicable for this pass
-        let shouldRender =
-            match renderPass with
-            | ShadowPass (_, _, _, _) -> entity.GetEffectShadowEnabled world
-            | _ -> true
-        if shouldRender then
+        let castShadow = entity.GetEffectCastShadow world
+        if not renderPass.IsShadowPass || castShadow then
 
             // render effect data token
             let time = world.GameTime
@@ -1304,7 +1302,8 @@ type EffectFacet () =
                 | BillboardParticlesDescriptor descriptor ->
                     let message =
                         RenderBillboardParticles
-                            { Presence = presence
+                            { CastShadow = castShadow
+                              Presence = presence
                               MaterialProperties = descriptor.MaterialProperties
                               Material = descriptor.Material
                               ShadowOffset = descriptor.ShadowOffset
@@ -1327,6 +1326,9 @@ module RigidBodyFacetExtensions =
         member this.GetBodyType world : BodyType = this.Get (nameof this.BodyType) world
         member this.SetBodyType (value : BodyType) world = this.Set (nameof this.BodyType) value world
         member this.BodyType = lens (nameof this.BodyType) this this.GetBodyType this.SetBodyType
+        member this.GetBodyShape world : BodyShape = this.Get (nameof this.BodyShape) world
+        member this.SetBodyShape (value : BodyShape) world = this.Set (nameof this.BodyShape) value world
+        member this.BodyShape = lens (nameof this.BodyShape) this this.GetBodyShape this.SetBodyShape
         member this.GetSleepingAllowed world : bool = this.Get (nameof this.SleepingAllowed) world
         member this.SetSleepingAllowed (value : bool) world = this.Set (nameof this.SleepingAllowed) value world
         member this.SleepingAllowed = lens (nameof this.SleepingAllowed) this this.GetSleepingAllowed this.SetSleepingAllowed
@@ -1369,9 +1371,6 @@ module RigidBodyFacetExtensions =
         member this.GetCollisionMask world : string = this.Get (nameof this.CollisionMask) world
         member this.SetCollisionMask (value : string) world = this.Set (nameof this.CollisionMask) value world
         member this.CollisionMask = lens (nameof this.CollisionMask) this this.GetCollisionMask this.SetCollisionMask
-        member this.GetBodyShape world : BodyShape = this.Get (nameof this.BodyShape) world
-        member this.SetBodyShape (value : BodyShape) world = this.Set (nameof this.BodyShape) value world
-        member this.BodyShape = lens (nameof this.BodyShape) this this.GetBodyShape this.SetBodyShape
         member this.GetPhysicsMotion world : PhysicsMotion = this.Get (nameof this.PhysicsMotion) world
         member this.SetPhysicsMotion (value : PhysicsMotion) world = this.Set (nameof this.PhysicsMotion) value world
         member this.PhysicsMotion = lens (nameof this.PhysicsMotion) this this.GetPhysicsMotion this.SetPhysicsMotion
@@ -1411,13 +1410,6 @@ type RigidBodyFacet () =
             (Cascade, World.setBodyCenter center bodyId world)
         else (Cascade, world)
 
-    static let propagatePhysicsPosition (entity : Entity) (evt : Event<ChangeData, Entity>) world =
-        if entity.GetPhysicsMotion world <> ManualMotion then
-            let bodyId = entity.GetBodyId world
-            let center = evt.Data.Value :?> Vector3
-            (Cascade, World.setBodyCenter center bodyId world)
-        else (Cascade, world)
-
     static let propagatePhysicsRotation (entity : Entity) (evt : Event<ChangeData, Entity>) world =
         if entity.GetPhysicsMotion world <> ManualMotion then
             let bodyId = entity.GetBodyId world
@@ -1447,11 +1439,12 @@ type RigidBodyFacet () =
         [define Entity.Static true
          define Entity.BodyEnabled true
          define Entity.BodyType Static
+         define Entity.BodyShape (BoxShape { Size = v3One; TransformOpt = None; PropertiesOpt = None })
          define Entity.SleepingAllowed true
          define Entity.Friction 0.5f
          define Entity.Restitution 0.0f
          define Entity.LinearVelocity v3Zero
-         define Entity.LinearDamping 0.0f // leave this up to friction by default
+         define Entity.LinearDamping 0.0f
          define Entity.AngularVelocity v3Zero
          define Entity.AngularDamping 0.2f
          define Entity.AngularFactor v3One
@@ -1461,7 +1454,6 @@ type RigidBodyFacet () =
          define Entity.CollisionDetection Discontinuous
          define Entity.CollisionCategories "1"
          define Entity.CollisionMask Constants.Physics.CollisionWildcard
-         define Entity.BodyShape (BoxShape { Size = v3One; TransformOpt = None; PropertiesOpt = None })
          define Entity.PhysicsMotion SynchronizedMotion
          define Entity.Sensor false
          define Entity.Observable false
@@ -1473,31 +1465,13 @@ type RigidBodyFacet () =
 
         // OPTIMIZATION: using manual unsubscription in order to use less live objects for subscriptions.
         // OPTIMIZATION: share lambdas to reduce live object count.
-        let subIds = Array.init 24 (fun _ -> Gen.id64)
-        let world = World.subscribePlus subIds.[0] (propagatePhysicsCenter entity) (entity.ChangeEvent (nameof entity.Position)) entity world |> snd
+        // OPTIMIZATION: using special BodyPropertiesAffecting change event to reduce subscription count.
+        let subIds = Array.init 5 (fun _ -> Gen.id64)
+        let world = World.subscribePlus subIds.[0] (propagatePhysicsCenter entity) (entity.ChangeEvent (nameof entity.Transform)) entity world |> snd
         let world = World.subscribePlus subIds.[1] (propagatePhysicsRotation entity) (entity.ChangeEvent (nameof entity.Rotation)) entity world |> snd
         let world = World.subscribePlus subIds.[2] (propagatePhysicsLinearVelocity entity) (entity.ChangeEvent (nameof entity.LinearVelocity)) entity world |> snd
         let world = World.subscribePlus subIds.[3] (propagatePhysicsAngularVelocity entity) (entity.ChangeEvent (nameof entity.AngularVelocity)) entity world |> snd
-        let world = World.subscribePlus subIds.[4] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Scale)) entity world |> snd
-        let world = World.subscribePlus subIds.[5] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Offset)) entity world |> snd
-        let world = World.subscribePlus subIds.[6] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Size)) entity world |> snd
-        let world = World.subscribePlus subIds.[7] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.BodyEnabled)) entity world |> snd
-        let world = World.subscribePlus subIds.[8] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.BodyType)) entity world |> snd
-        let world = World.subscribePlus subIds.[9] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.SleepingAllowed)) entity world |> snd
-        let world = World.subscribePlus subIds.[10] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Friction)) entity world |> snd
-        let world = World.subscribePlus subIds.[11] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Restitution)) entity world |> snd
-        let world = World.subscribePlus subIds.[12] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.LinearDamping)) entity world |> snd
-        let world = World.subscribePlus subIds.[13] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.AngularDamping)) entity world |> snd
-        let world = World.subscribePlus subIds.[14] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.AngularFactor)) entity world |> snd
-        let world = World.subscribePlus subIds.[15] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Substance)) entity world |> snd
-        let world = World.subscribePlus subIds.[16] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.GravityOverride)) entity world |> snd
-        let world = World.subscribePlus subIds.[17] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.CharacterProperties)) entity world |> snd
-        let world = World.subscribePlus subIds.[18] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.CollisionDetection)) entity world |> snd
-        let world = World.subscribePlus subIds.[19] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity world |> snd
-        let world = World.subscribePlus subIds.[20] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.CollisionMask)) entity world |> snd
-        let world = World.subscribePlus subIds.[21] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.BodyShape)) entity world |> snd
-        let world = World.subscribePlus subIds.[22] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Sensor)) entity world |> snd
-        let world = World.subscribePlus subIds.[23] (propagatePhysics entity) (entity.ChangeEvent (nameof entity.Observable)) entity world |> snd
+        let world = World.subscribePlus subIds.[4] (propagatePhysics entity) (entity.ChangeEvent "BodyPropertiesAffecting") entity world |> snd
         let unsubscribe = fun world ->
             Array.fold (fun world subId -> World.unsubscribe subId world) world subIds
         let callback = fun evt world ->
@@ -1515,13 +1489,13 @@ type RigidBodyFacet () =
     override this.RegisterPhysics (entity, world) =
         let mutable transform = entity.GetTransform world
         let bodyProperties =
-            { Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
+            { Enabled = entity.GetBodyEnabled world
+              Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
               Rotation = transform.Rotation
               Scale = transform.Scale
               BodyShape = getBodyShape entity world
               BodyType = entity.GetBodyType world
               SleepingAllowed = entity.GetSleepingAllowed world
-              Enabled = entity.GetBodyEnabled world
               Friction = entity.GetFriction world
               Restitution = entity.GetRestitution world
               LinearVelocity = entity.GetLinearVelocity world
@@ -2022,7 +1996,7 @@ type LayoutFacet () =
         | layout ->
             let children =
                 World.getEntityMounters entity world |>
-                Array.ofSeq |>
+                Array.ofSeq |> // array for sorting
                 Array.map (fun child ->
                     let layoutOrder =
                         if child.Has<LayoutFacet> world
@@ -2108,8 +2082,7 @@ type SkyBoxFacet () =
     inherit Facet (false, false, false)
 
     static member Properties =
-        [define Entity.Absolute true
-         define Entity.Presence Omnipresent
+        [define Entity.Presence Omnipresent
          define Entity.Static true
          define Entity.AmbientColor Color.White
          define Entity.AmbientBrightness 0.5f
@@ -2158,6 +2131,14 @@ module LightProbe3dFacetExtensions =
 type LightProbe3dFacet () =
     inherit Facet (false, true, false)
 
+    static let handleProbeVisibleChange (evt : Event<ChangeData, Entity>) world =
+        let entity = evt.Subscriber
+        let world =
+            if evt.Data.Value :?> bool && entity.Group.GetVisible world
+            then entity.SetProbeStale true world
+            else world
+        (Cascade, world)
+
     static let handleProbeStaleChange (evt : Event<ChangeData, Entity>) world =
         let world =
             if evt.Data.Value :?> bool
@@ -2176,6 +2157,8 @@ type LightProbe3dFacet () =
          nonPersistent Entity.ProbeStale false]
 
     override this.Register (entity, world) =
+        let world = World.sense handleProbeVisibleChange entity.Group.Visible.ChangeEvent entity (nameof LightProbe3dFacet) world
+        let world = World.sense handleProbeVisibleChange entity.Visible.ChangeEvent entity (nameof LightProbe3dFacet) world
         let world = World.sense handleProbeStaleChange entity.ProbeStale.ChangeEvent entity (nameof LightProbe3dFacet) world
         entity.SetProbeStale true world
 
@@ -2314,9 +2297,6 @@ module StaticBillboardFacetExtensions =
         member this.GetRenderStyle world : RenderStyle = this.Get (nameof this.RenderStyle) world
         member this.SetRenderStyle (value : RenderStyle) world = this.Set (nameof this.RenderStyle) value world
         member this.RenderStyle = lens (nameof this.RenderStyle) this this.GetRenderStyle this.SetRenderStyle
-        member this.GetShadowEnabled world : bool = this.Get (nameof this.ShadowEnabled) world
-        member this.SetShadowEnabled (value : bool) world = this.Set (nameof this.ShadowEnabled) value world
-        member this.ShadowEnabled = lens (nameof this.ShadowEnabled) this this.GetShadowEnabled this.SetShadowEnabled
         member this.GetShadowOffset world : single = this.Get (nameof this.ShadowOffset) world
         member this.SetShadowOffset (value : single) world = this.Set (nameof this.ShadowOffset) value world
         member this.ShadowOffset = lens (nameof this.ShadowOffset) this this.GetShadowOffset this.SetShadowOffset
@@ -2330,26 +2310,27 @@ type StaticBillboardFacet () =
          define Entity.MaterialProperties MaterialProperties.defaultProperties
          define Entity.Material Material.defaultMaterial
          define Entity.RenderStyle Deferred
-         define Entity.ShadowEnabled true
          define Entity.ShadowOffset Constants.Engine.BillboardShadowOffsetDefault]
 
     override this.Render (renderPass, entity, world) =
         let mutable transform = entity.GetTransform world
-        let affineMatrix = transform.AffineMatrix
-        let presence = transform.Presence
-        let insetOpt = entity.GetInsetOpt world
-        let properties = entity.GetMaterialProperties world
-        let material = entity.GetMaterial world
-        let shadowOffset = entity.GetShadowOffset world
-        let renderType =
-            match entity.GetRenderStyle world with
-            | Deferred -> DeferredRenderType
-            | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-        World.enqueueRenderMessage3d
-            (RenderBillboard
-                { Presence = presence; ModelMatrix = affineMatrix; InsetOpt = insetOpt
-                  MaterialProperties = properties; Material = material; ShadowOffset = shadowOffset; RenderType = renderType; RenderPass = renderPass })
-            world
+        let castShadow = transform.CastShadow
+        if not renderPass.IsShadowPass || castShadow then
+            let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
+            let insetOpt = entity.GetInsetOpt world
+            let properties = entity.GetMaterialProperties world
+            let material = entity.GetMaterial world
+            let shadowOffset = entity.GetShadowOffset world
+            let renderType =
+                match entity.GetRenderStyle world with
+                | Deferred -> DeferredRenderType
+                | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
+            World.enqueueRenderMessage3d
+                (RenderBillboard
+                    { CastShadow = castShadow; Presence = presence; ModelMatrix = affineMatrix; InsetOpt = insetOpt
+                      MaterialProperties = properties; Material = material; ShadowOffset = shadowOffset; RenderType = renderType; RenderPass = renderPass })
+                world
 
     override this.RayCast (ray, entity, world) =
         // TODO: P1: intersect against oriented quad rather than bounds.
@@ -2367,9 +2348,9 @@ module BasicStaticBillboardEmitterFacetExtensions =
         member this.GetEmitterMaterial world : Material = this.Get (nameof this.EmitterMaterial) world
         member this.SetEmitterMaterial (value : Material) world = this.Set (nameof this.EmitterMaterial) value world
         member this.EmitterMaterial = lens (nameof this.EmitterMaterial) this this.GetEmitterMaterial this.SetEmitterMaterial
-        member this.GetEmitterShadowEnabled world : bool = this.Get (nameof this.EmitterShadowEnabled) world
-        member this.SetEmitterShadowEnabled (value : bool) world = this.Set (nameof this.EmitterShadowEnabled) value world
-        member this.EmitterShadowEnabled = lens (nameof this.EmitterShadowEnabled) this this.GetEmitterShadowEnabled this.SetEmitterShadowEnabled
+        member this.GetEmitterCastShadow world : bool = this.Get (nameof this.EmitterCastShadow) world
+        member this.SetEmitterCastShadow (value : bool) world = this.Set (nameof this.EmitterCastShadow) value world
+        member this.EmitterCastShadow = lens (nameof this.EmitterCastShadow) this this.GetEmitterCastShadow this.SetEmitterCastShadow
         member this.GetEmitterShadowOffset world : single = this.Get (nameof this.EmitterShadowOffset) world
         member this.SetEmitterShadowOffset (value : single) world = this.Set (nameof this.EmitterShadowOffset) value world
         member this.EmitterShadowOffset = lens (nameof this.EmitterShadowOffset) this this.GetEmitterShadowOffset this.SetEmitterShadowOffset
@@ -2539,7 +2520,7 @@ type BasicStaticBillboardEmitterFacet () =
          define Entity.EmitterConstraint Particles.Constraint.empty
          define Entity.EmitterStyle "BasicStaticBillboardEmitter"
          define Entity.EmitterRenderStyle Deferred
-         define Entity.EmitterShadowEnabled true
+         define Entity.EmitterCastShadow true
          define Entity.EmitterShadowOffset Constants.Engine.ParticleShadowOffsetDefault
          nonPersistent Entity.ParticleSystem Particles.ParticleSystem.empty]
 
@@ -2579,11 +2560,8 @@ type BasicStaticBillboardEmitterFacet () =
         else world
 
     override this.Render (renderPass, entity, world) =
-        let shouldRender =
-            match renderPass with
-            | ShadowPass (_, _, _, _) -> entity.GetEmitterShadowEnabled world 
-            | _ -> true
-        if shouldRender then
+        let castShadow = entity.GetEmitterCastShadow world
+        if not renderPass.IsShadowPass || castShadow then
             let time = world.GameTime
             let presence = entity.GetPresence world
             let particleSystem = entity.GetParticleSystem world
@@ -2595,27 +2573,28 @@ type BasicStaticBillboardEmitterFacet () =
                     | Particles.BillboardParticlesDescriptor descriptor ->
                         let emitterProperties = entity.GetEmitterMaterialProperties world
                         let properties =
-                            { AlbedoOpt = match emitterProperties.AlbedoOpt with Some albedo -> Some albedo | None -> descriptor.MaterialProperties.AlbedoOpt
-                              RoughnessOpt = match emitterProperties.RoughnessOpt with Some roughness -> Some roughness | None -> descriptor.MaterialProperties.RoughnessOpt
-                              MetallicOpt = match emitterProperties.MetallicOpt with Some metallic -> Some metallic | None -> descriptor.MaterialProperties.MetallicOpt
-                              AmbientOcclusionOpt = match emitterProperties.AmbientOcclusionOpt with Some ambientOcclusion -> Some ambientOcclusion | None -> descriptor.MaterialProperties.AmbientOcclusionOpt
-                              EmissionOpt = match emitterProperties.EmissionOpt with Some emission -> Some emission | None -> descriptor.MaterialProperties.EmissionOpt
-                              HeightOpt = match emitterProperties.HeightOpt with Some height -> Some height | None -> descriptor.MaterialProperties.HeightOpt
-                              IgnoreLightMapsOpt = match emitterProperties.IgnoreLightMapsOpt with Some ignoreLightMaps -> Some ignoreLightMaps | None -> descriptor.MaterialProperties.IgnoreLightMapsOpt
-                              OpaqueDistanceOpt = None }
+                            { AlbedoOpt = match emitterProperties.AlbedoOpt with ValueSome albedo -> ValueSome albedo | ValueNone -> descriptor.MaterialProperties.AlbedoOpt
+                              RoughnessOpt = match emitterProperties.RoughnessOpt with ValueSome roughness -> ValueSome roughness | ValueNone -> descriptor.MaterialProperties.RoughnessOpt
+                              MetallicOpt = match emitterProperties.MetallicOpt with ValueSome metallic -> ValueSome metallic | ValueNone -> descriptor.MaterialProperties.MetallicOpt
+                              AmbientOcclusionOpt = match emitterProperties.AmbientOcclusionOpt with ValueSome ambientOcclusion -> ValueSome ambientOcclusion | ValueNone -> descriptor.MaterialProperties.AmbientOcclusionOpt
+                              EmissionOpt = match emitterProperties.EmissionOpt with ValueSome emission -> ValueSome emission | ValueNone -> descriptor.MaterialProperties.EmissionOpt
+                              HeightOpt = match emitterProperties.HeightOpt with ValueSome height -> ValueSome height | ValueNone -> descriptor.MaterialProperties.HeightOpt
+                              IgnoreLightMapsOpt = match emitterProperties.IgnoreLightMapsOpt with ValueSome ignoreLightMaps -> ValueSome ignoreLightMaps | ValueNone -> descriptor.MaterialProperties.IgnoreLightMapsOpt
+                              OpaqueDistanceOpt = ValueNone }
                         let emitterMaterial = entity.GetEmitterMaterial world
                         let material =
-                            { AlbedoImageOpt = match emitterMaterial.AlbedoImageOpt with Some albedoImage -> Some albedoImage | None -> descriptor.Material.AlbedoImageOpt
-                              RoughnessImageOpt = match emitterMaterial.RoughnessImageOpt with Some roughnessImage -> Some roughnessImage | None -> descriptor.Material.RoughnessImageOpt
-                              MetallicImageOpt = match emitterMaterial.MetallicImageOpt with Some metallicImage -> Some metallicImage | None -> descriptor.Material.MetallicImageOpt
-                              AmbientOcclusionImageOpt = match emitterMaterial.AmbientOcclusionImageOpt with Some ambientOcclusionImage -> Some ambientOcclusionImage | None -> descriptor.Material.AmbientOcclusionImageOpt
-                              EmissionImageOpt = match emitterMaterial.EmissionImageOpt with Some emissionImage -> Some emissionImage | None -> descriptor.Material.EmissionImageOpt
-                              NormalImageOpt = match emitterMaterial.NormalImageOpt with Some normalImage -> Some normalImage | None -> descriptor.Material.NormalImageOpt
-                              HeightImageOpt = match emitterMaterial.HeightImageOpt with Some heightImage -> Some heightImage | None -> descriptor.Material.HeightImageOpt
-                              TwoSidedOpt = match emitterMaterial.TwoSidedOpt with Some twoSided -> Some twoSided | None -> descriptor.Material.TwoSidedOpt }
+                            { AlbedoImageOpt = match emitterMaterial.AlbedoImageOpt with ValueSome albedoImage -> ValueSome albedoImage | ValueNone -> descriptor.Material.AlbedoImageOpt
+                              RoughnessImageOpt = match emitterMaterial.RoughnessImageOpt with ValueSome roughnessImage -> ValueSome roughnessImage | ValueNone -> descriptor.Material.RoughnessImageOpt
+                              MetallicImageOpt = match emitterMaterial.MetallicImageOpt with ValueSome metallicImage -> ValueSome metallicImage | ValueNone -> descriptor.Material.MetallicImageOpt
+                              AmbientOcclusionImageOpt = match emitterMaterial.AmbientOcclusionImageOpt with ValueSome ambientOcclusionImage -> ValueSome ambientOcclusionImage | ValueNone -> descriptor.Material.AmbientOcclusionImageOpt
+                              EmissionImageOpt = match emitterMaterial.EmissionImageOpt with ValueSome emissionImage -> ValueSome emissionImage | ValueNone -> descriptor.Material.EmissionImageOpt
+                              NormalImageOpt = match emitterMaterial.NormalImageOpt with ValueSome normalImage -> ValueSome normalImage | ValueNone -> descriptor.Material.NormalImageOpt
+                              HeightImageOpt = match emitterMaterial.HeightImageOpt with ValueSome heightImage -> ValueSome heightImage | ValueNone -> descriptor.Material.HeightImageOpt
+                              TwoSidedOpt = match emitterMaterial.TwoSidedOpt with ValueSome twoSided -> ValueSome twoSided | ValueNone -> descriptor.Material.TwoSidedOpt }
                         Some
                             (RenderBillboardParticles
-                                { Presence = presence
+                                { CastShadow = castShadow
+                                  Presence = presence
                                   MaterialProperties = properties
                                   Material = material
                                   ShadowOffset = descriptor.ShadowOffset
@@ -2650,31 +2629,33 @@ type StaticModelFacet () =
 
     override this.Render (renderPass, entity, world) =
         let mutable transform = entity.GetTransform world
-        let affineMatrix = transform.AffineMatrix
-        let presence = transform.Presence
-        let insetOpt = ValueOption.ofOption (entity.GetInsetOpt world)
-        let properties = entity.GetMaterialProperties world
-        let staticModel = entity.GetStaticModel world
-        let renderType =
-            match entity.GetRenderStyle world with
-            | Deferred -> DeferredRenderType
-            | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-        World.renderStaticModelFast (&affineMatrix, presence, insetOpt, &properties, staticModel, renderType, renderPass, world)
+        let castShadow = transform.CastShadow
+        if not renderPass.IsShadowPass || castShadow then
+            let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
+            let insetOpt = ValueOption.ofOption (entity.GetInsetOpt world)
+            let properties = entity.GetMaterialProperties world
+            let staticModel = entity.GetStaticModel world
+            let renderType =
+                match entity.GetRenderStyle world with
+                | Deferred -> DeferredRenderType
+                | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
+            World.renderStaticModelFast (&affineMatrix, castShadow, presence, insetOpt, &properties, staticModel, renderType, renderPass, world)
 
     override this.GetAttributesInferred (entity, world) =
         let staticModel = entity.GetStaticModel world
         match Metadata.tryGetStaticModelMetadata staticModel with
-        | Some staticModelMetadata ->
+        | ValueSome staticModelMetadata ->
             let bounds = staticModelMetadata.Bounds
             AttributesInferred.important bounds.Size bounds.Center
-        | None -> base.GetAttributesInferred (entity, world)
+        | ValueNone -> base.GetAttributesInferred (entity, world)
 
     override this.RayCast (ray, entity, world) =
         let affineMatrix = entity.GetAffineMatrix world
         let inverseMatrix = Matrix4x4.Invert affineMatrix |> snd
         let rayEntity = ray.Transform inverseMatrix
         match Metadata.tryGetStaticModelMetadata (entity.GetStaticModel world) with
-        | Some staticModelMetadata ->
+        | ValueSome staticModelMetadata ->
             let intersectionses =
                 Array.map (fun (surface : OpenGL.PhysicallyBased.PhysicallyBasedSurface) ->
                     let geometry = surface.PhysicallyBasedGeometry
@@ -2691,7 +2672,7 @@ type StaticModelFacet () =
                     else [||])
                     staticModelMetadata.Surfaces
             Array.concat intersectionses
-        | None -> [||]
+        | ValueNone -> [||]
 
 [<AutoOpen>]
 module StaticModelSurfaceFacetExtensions =
@@ -2714,33 +2695,35 @@ type StaticModelSurfaceFacet () =
 
     override this.Render (renderPass, entity, world) =
         let mutable transform = entity.GetTransform world
-        let affineMatrix = transform.AffineMatrix
-        let presence = transform.Presence
-        let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
-        let properties = entity.GetMaterialProperties world
-        let material = entity.GetMaterial world
-        let staticModel = entity.GetStaticModel world
-        let surfaceIndex = entity.GetSurfaceIndex world
-        let renderType =
-            match entity.GetRenderStyle world with
-            | Deferred -> DeferredRenderType
-            | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-        World.renderStaticModelSurfaceFast (&affineMatrix, presence, insetOpt, &properties, &material, staticModel, surfaceIndex, renderType, renderPass, world)
+        let castShadow = transform.CastShadow
+        if not renderPass.IsShadowPass || castShadow then
+            let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
+            let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
+            let properties = entity.GetMaterialProperties world
+            let material = entity.GetMaterial world
+            let staticModel = entity.GetStaticModel world
+            let surfaceIndex = entity.GetSurfaceIndex world
+            let renderType =
+                match entity.GetRenderStyle world with
+                | Deferred -> DeferredRenderType
+                | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
+            World.renderStaticModelSurfaceFast (&affineMatrix, castShadow, presence, insetOpt, &properties, &material, staticModel, surfaceIndex, renderType, renderPass, world)
 
     override this.GetAttributesInferred (entity, world) =
         match Metadata.tryGetStaticModelMetadata (entity.GetStaticModel world) with
-        | Some staticModelMetadata ->
+        | ValueSome staticModelMetadata ->
             let surfaceIndex = entity.GetSurfaceIndex world
             if surfaceIndex > -1 && surfaceIndex < staticModelMetadata.Surfaces.Length then
                 let bounds = staticModelMetadata.Surfaces.[surfaceIndex].SurfaceBounds
                 AttributesInferred.important bounds.Size bounds.Center
             else base.GetAttributesInferred (entity, world)
-        | None -> base.GetAttributesInferred (entity, world)
+        | ValueNone -> base.GetAttributesInferred (entity, world)
 
     override this.RayCast (ray, entity, world) =
         let rayEntity = ray.Transform (Matrix4x4.Invert (entity.GetAffineMatrix world) |> snd)
         match Metadata.tryGetStaticModelMetadata (entity.GetStaticModel world) with
-        | Some staticModelMetadata ->
+        | ValueSome staticModelMetadata ->
             let surfaceIndex = entity.GetSurfaceIndex world
             if surfaceIndex < staticModelMetadata.Surfaces.Length then
                 let surface = staticModelMetadata.Surfaces.[surfaceIndex]
@@ -2751,7 +2734,7 @@ type StaticModelSurfaceFacet () =
                     intersections |> Seq.map snd' |> Seq.toArray
                 else [||]
             else [||]
-        | None -> [||]
+        | ValueNone -> [||]
 
 [<AutoOpen>]
 module AnimatedModelFacetExtensions =
@@ -2804,7 +2787,7 @@ module AnimatedModelFacetExtensions =
             let time = world.GameTime
             let animations = this.GetAnimations world
             let animatedModel = this.GetAnimatedModel world
-            let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with Some model -> model.SceneOpt | None -> None
+            let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with ValueSome model -> model.SceneOpt | ValueNone -> None
             match this.TryComputeBoneTransforms time animations sceneOpt with
             | Some (boneIds, boneOffsets, boneTransforms) ->
                 let world = this.SetBoneIdsOpt (Some boneIds) world
@@ -2851,7 +2834,7 @@ type AnimatedModelFacet () =
         let time = world.GameTime
         let animations = entity.GetAnimations world
         let animatedModel = entity.GetAnimatedModel world
-        let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with Some model -> model.SceneOpt | None -> None
+        let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with ValueSome model -> model.SceneOpt | ValueNone -> None
         let resultOpt =
             match World.tryAwaitJob (world.DateTime + TimeSpan.FromSeconds 0.001) (entity, nameof AnimatedModelFacet) world with
             | Some (JobCompletion (_, _, (:? ((Dictionary<string, int> * Matrix4x4 array * Matrix4x4 array) option) as boneOffsetsAndTransformsOpt))) -> boneOffsetsAndTransformsOpt
@@ -2870,29 +2853,31 @@ type AnimatedModelFacet () =
 
     override this.Render (renderPass, entity, world) =
         let mutable transform = entity.GetTransform world
-        let affineMatrix = transform.AffineMatrix
-        let presence = transform.Presence
-        let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
-        let properties = entity.GetMaterialProperties world
-        let animatedModel = entity.GetAnimatedModel world
-        match entity.GetBoneTransformsOpt world with
-        | Some boneTransforms -> World.renderAnimatedModelFast (&affineMatrix, presence, insetOpt, &properties, boneTransforms, animatedModel, renderPass, world)
-        | None -> ()
+        let castShadow = transform.CastShadow
+        if not renderPass.IsShadowPass || castShadow then
+            let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
+            let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
+            let properties = entity.GetMaterialProperties world
+            let animatedModel = entity.GetAnimatedModel world
+            match entity.GetBoneTransformsOpt world with
+            | Some boneTransforms -> World.renderAnimatedModelFast (&affineMatrix, castShadow, presence, insetOpt, &properties, boneTransforms, animatedModel, renderPass, world)
+            | None -> ()
 
     override this.GetAttributesInferred (entity, world) =
         let animatedModel = entity.GetAnimatedModel world
         match Metadata.tryGetAnimatedModelMetadata animatedModel with
-        | Some animatedModelMetadata ->
+        | ValueSome animatedModelMetadata ->
             let bounds = animatedModelMetadata.Bounds
             AttributesInferred.important bounds.Size bounds.Center
-        | None -> base.GetAttributesInferred (entity, world)
+        | ValueNone -> base.GetAttributesInferred (entity, world)
 
     override this.RayCast (ray, entity, world) =
         let affineMatrix = entity.GetAffineMatrix world
         let inverseMatrix = Matrix4x4.Invert affineMatrix |> snd
         let rayEntity = ray.Transform inverseMatrix
         match Metadata.tryGetAnimatedModelMetadata (entity.GetAnimatedModel world) with
-        | Some animatedModelMetadata ->
+        | ValueSome animatedModelMetadata ->
             let intersectionses =
                 Array.map (fun (surface : OpenGL.PhysicallyBased.PhysicallyBasedSurface) ->
                     let geometry = surface.PhysicallyBasedGeometry
@@ -2909,7 +2894,7 @@ type AnimatedModelFacet () =
                     else [||])
                     animatedModelMetadata.Surfaces
             Array.concat intersectionses
-        | None -> [||]
+        | ValueNone -> [||]
 
     override this.Edit (op, entity, world) =
         match op with
@@ -2956,8 +2941,8 @@ module TerrainFacetExtensions =
             match this.GetHeightMap world with
             | ImageHeightMap map ->
                 match Metadata.tryGetTextureSize map with
-                | Some textureSize -> Some textureSize
-                | None -> None
+                | ValueSome textureSize -> Some textureSize
+                | ValueNone -> None
             | RawHeightMap map -> Some map.Resolution
 
         /// Attempt to get the size of each terrain quad.
@@ -3032,13 +3017,13 @@ type TerrainFacet () =
                   TransformOpt = None
                   PropertiesOpt = None }
             let bodyProperties =
-                { Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
+                { Enabled = entity.GetBodyEnabled world
+                  Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
                   Rotation = transform.Rotation
                   Scale = transform.Scale
                   BodyShape = TerrainShape terrainShape
                   BodyType = Static
                   SleepingAllowed = true
-                  Enabled = entity.GetBodyEnabled world
                   Friction = entity.GetFriction world
                   Restitution = entity.GetRestitution world
                   LinearVelocity = v3Zero
@@ -3064,22 +3049,25 @@ type TerrainFacet () =
 
     override this.Render (renderPass, entity, world) =
         let mutable transform = entity.GetTransform world
-        let terrainDescriptor =
-            { Bounds = transform.Bounds3d
-              InsetOpt = entity.GetInsetOpt world
-              MaterialProperties = entity.GetTerrainMaterialProperties world
-              Material = entity.GetTerrainMaterial world
-              TintImageOpt = entity.GetTintImageOpt world
-              NormalImageOpt = entity.GetNormalImageOpt world
-              Tiles = entity.GetTiles world
-              HeightMap = entity.GetHeightMap world
-              Segments = entity.GetSegments world }
-        World.enqueueRenderMessage3d
-            (RenderTerrain
-                { Visible = transform.Visible
-                  TerrainDescriptor = terrainDescriptor
-                  RenderPass = renderPass })
-            world
+        let castShadow = transform.CastShadow
+        if not renderPass.IsShadowPass || castShadow then
+            let terrainDescriptor =
+                { Bounds = transform.Bounds3d
+                  CastShadow = castShadow
+                  InsetOpt = entity.GetInsetOpt world
+                  MaterialProperties = entity.GetTerrainMaterialProperties world
+                  Material = entity.GetTerrainMaterial world
+                  TintImageOpt = entity.GetTintImageOpt world
+                  NormalImageOpt = entity.GetNormalImageOpt world
+                  Tiles = entity.GetTiles world
+                  HeightMap = entity.GetHeightMap world
+                  Segments = entity.GetSegments world }
+            World.enqueueRenderMessage3d
+                (RenderTerrain
+                    { Visible = transform.Visible
+                      TerrainDescriptor = terrainDescriptor
+                      RenderPass = renderPass })
+                world
 
     override this.GetAttributesInferred (entity, world) =
         match entity.TryGetTerrainResolution world with
@@ -3146,8 +3134,9 @@ type NavBodyFacet () =
         let world = World.sense callback3 entity.UnregisteringEvent entity (nameof NavBodyFacet) world
 
         // unconditional registration behavior
-        let world = World.sense (fun _ world -> (Cascade, propagateNavBody entity world)) (entity.ChangeEvent (nameof entity.StaticModel)) entity (nameof NavBodyFacet) world
-        let world = World.sense (fun _ world -> (Cascade, propagateNavBody entity world)) (entity.ChangeEvent (nameof entity.SurfaceIndex)) entity (nameof NavBodyFacet) world
+        let callbackPnb evt world = (Cascade, propagateNavBody evt.Subscriber world)
+        let world = World.sense callbackPnb (entity.ChangeEvent (nameof entity.StaticModel)) entity (nameof NavBodyFacet) world
+        let world = World.sense callbackPnb (entity.ChangeEvent (nameof entity.SurfaceIndex)) entity (nameof NavBodyFacet) world
         propagateNavBody entity world
 
     override this.Unregister (entity, world) =

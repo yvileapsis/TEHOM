@@ -26,3 +26,5 @@ module Assets =
         let HeartEmpty = asset<Image> PackageName "HeartEmpty"
         let JoanModel = asset<AnimatedModel> PackageName "Joan"
         let GreatSwordModel = asset<StaticModel> PackageName "GreatSword"
+        let MakarovModel = asset<StaticModel> PackageName "makarov"
+        let MakarovMagModel = asset<StaticModel> PackageName "makarov_std_cap_mag"

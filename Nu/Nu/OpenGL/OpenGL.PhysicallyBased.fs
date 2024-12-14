@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace OpenGL
 open System
@@ -86,53 +86,53 @@ module PhysicallyBased =
 
         static member extractPresence presenceDefault (sceneOpt : Assimp.Scene option) surface =
             match surface.SurfaceNode.PresenceOpt with
-            | None ->
+            | ValueNone ->
                 match sceneOpt with
                 | Some scene when surface.SurfaceMaterialIndex < scene.Materials.Count ->
                     let material = scene.Materials.[surface.SurfaceMaterialIndex]
-                    Option.defaultValue presenceDefault material.PresenceOpt
+                    ValueOption.defaultValue presenceDefault material.PresenceOpt
                 | Some _ | None -> presenceDefault
-            | Some presence -> presence
+            | ValueSome presence -> presence
 
         static member extractRenderStyle renderStyleDefault (sceneOpt : Assimp.Scene option) surface =
             match surface.SurfaceNode.RenderStyleOpt with
-            | None ->
+            | ValueNone ->
                 match sceneOpt with
                 | Some scene when surface.SurfaceMaterialIndex < scene.Materials.Count ->
                     let material = scene.Materials.[surface.SurfaceMaterialIndex]
-                    Option.defaultValue renderStyleDefault material.RenderStyleOpt
+                    ValueOption.defaultValue renderStyleDefault material.RenderStyleOpt
                 | Some _ | None -> renderStyleDefault
-            | Some renderStyle -> renderStyle
+            | ValueSome renderStyle -> renderStyle
 
         static member extractIgnoreLightMaps ignoreLightMapsDefault (sceneOpt : Assimp.Scene option) surface =
             match surface.SurfaceNode.IgnoreLightMapsOpt with
-            | None ->
+            | ValueNone ->
                 match sceneOpt with
                 | Some scene when surface.SurfaceMaterialIndex < scene.Materials.Count ->
                     let material = scene.Materials.[surface.SurfaceMaterialIndex]
-                    Option.defaultValue ignoreLightMapsDefault material.IgnoreLightMapsOpt
+                    ValueOption.defaultValue ignoreLightMapsDefault material.IgnoreLightMapsOpt
                 | Some _ | None -> ignoreLightMapsDefault
-            | Some ignoreLightMaps -> ignoreLightMaps
+            | ValueSome ignoreLightMaps -> ignoreLightMaps
 
         static member extractOpaqueDistance opaqueDistanceDefault (sceneOpt : Assimp.Scene option) surface =
             match surface.SurfaceNode.OpaqueDistanceOpt with
-            | None ->
+            | ValueNone ->
                 match sceneOpt with
                 | Some scene when surface.SurfaceMaterialIndex < scene.Materials.Count ->
                     let material = scene.Materials.[surface.SurfaceMaterialIndex]
-                    Option.defaultValue opaqueDistanceDefault material.OpaqueDistanceOpt
+                    ValueOption.defaultValue opaqueDistanceDefault material.OpaqueDistanceOpt
                 | Some _ | None -> opaqueDistanceDefault
-            | Some opaqueDistance -> opaqueDistance
+            | ValueSome opaqueDistance -> opaqueDistance
 
         static member extractNavShape shapeDefault (sceneOpt : Assimp.Scene option) surface =
             match surface.SurfaceNode.NavShapeOpt with
-            | None ->
+            | ValueNone ->
                 match sceneOpt with
                 | Some scene when surface.SurfaceMaterialIndex < scene.Materials.Count ->
                     let material = scene.Materials.[surface.SurfaceMaterialIndex]
-                    Option.defaultValue shapeDefault material.NavShapeOpt
+                    ValueOption.defaultValue shapeDefault material.NavShapeOpt
                 | Some _ | None -> shapeDefault
-            | Some shape -> shape
+            | ValueSome shape -> shape
 
         static member inline hash surface =
             surface.HashCode
@@ -241,7 +241,9 @@ module PhysicallyBased =
           LightCutoffMarginUniform : int
           LightAmbientColorUniform : int
           LightAmbientBrightnessUniform : int
-          LightTypeUniform : int
+          LightShadowSamplesUniform : int
+          LightShadowBiasUniform : int
+          LightShadowSampleScalarUniform : int
           LightShadowExponentUniform : int
           LightShadowDensityUniform : int
           SsvfEnabledUniform : int
@@ -288,7 +290,9 @@ module PhysicallyBased =
         { ViewUniform : int
           ProjectionUniform : int
           EyeCenterUniform : int
-          LightTypeUniform : int
+          LightShadowSamplesUniform : int
+          LightShadowBiasUniform : int
+          LightShadowSampleScalarUniform : int
           LightShadowExponentUniform : int
           LightShadowDensityUniform : int
           LayersCountUniform : int
@@ -386,7 +390,9 @@ module PhysicallyBased =
           LightCutoffMarginUniform : int
           LightAmbientColorUniform : int
           LightAmbientBrightnessUniform : int
-          LightTypeUniform : int
+          LightShadowSamplesUniform : int
+          LightShadowBiasUniform : int
+          LightShadowSampleScalarUniform : int
           LightShadowExponentUniform : int
           LightShadowDensityUniform : int
           SsvfEnabledUniform : int
@@ -673,20 +679,20 @@ module PhysicallyBased =
         // compute ignore light maps
         let ignoreLightMaps =
             match material.IgnoreLightMapsOpt with
-            | Some ignoreLightMaps -> ignoreLightMaps
-            | None -> Constants.Render.IgnoreLightMapsDefault
+            | ValueSome ignoreLightMaps -> ignoreLightMaps
+            | ValueNone -> Constants.Render.IgnoreLightMapsDefault
 
         // compute opaque distance
         let opaqueDistance =
             match material.OpaqueDistanceOpt with
-            | Some opqaqueDistance -> opqaqueDistance
-            | None -> Constants.Render.OpaqueDistanceDefault
+            | ValueSome opqaqueDistance -> opqaqueDistance
+            | ValueNone -> Constants.Render.OpaqueDistanceDefault
 
         // compute two-sidedness
         let twoSided =
             match material.TwoSidedOpt with
-            | Some twoSided -> twoSided
-            | None -> material.IsTwoSided
+            | ValueSome twoSided -> twoSided
+            | ValueNone -> material.IsTwoSided
 
         // make properties
         let properties =
@@ -1520,7 +1526,9 @@ module PhysicallyBased =
         let lightCutoffMarginUniform = Gl.GetUniformLocation (shader, "lightCutoffMargin")
         let lightAmbientColorUniform = Gl.GetUniformLocation (shader, "lightAmbientColor")
         let lightAmbientBrightnessUniform = Gl.GetUniformLocation (shader, "lightAmbientBrightness")
-        let lightTypeUniform = Gl.GetUniformLocation (shader, "lightType")
+        let lightShadowSamplesUniform = Gl.GetUniformLocation (shader, "lightShadowSamples")
+        let lightShadowBiasUniform = Gl.GetUniformLocation (shader, "lightShadowBias")
+        let lightShadowSampleScalarUniform = Gl.GetUniformLocation (shader, "lightShadowSampleScalar")
         let lightShadowExponentUniform = Gl.GetUniformLocation (shader, "lightShadowExponent")
         let lightShadowDensityUniform = Gl.GetUniformLocation (shader, "lightShadowDensity")
         let ssvfEnabledUniform = Gl.GetUniformLocation (shader, "ssvfEnabled")
@@ -1579,7 +1587,9 @@ module PhysicallyBased =
           LightCutoffMarginUniform = lightCutoffMarginUniform
           LightAmbientColorUniform = lightAmbientColorUniform
           LightAmbientBrightnessUniform = lightAmbientBrightnessUniform
-          LightTypeUniform = lightTypeUniform
+          LightShadowSamplesUniform = lightShadowSamplesUniform
+          LightShadowBiasUniform = lightShadowBiasUniform
+          LightShadowSampleScalarUniform = lightShadowSampleScalarUniform
           LightShadowExponentUniform = lightShadowExponentUniform
           LightShadowDensityUniform = lightShadowDensityUniform
           SsvfEnabledUniform = ssvfEnabledUniform
@@ -1632,7 +1642,9 @@ module PhysicallyBased =
         let viewUniform = Gl.GetUniformLocation (shader, "view")
         let projectionUniform = Gl.GetUniformLocation (shader, "projection")
         let eyeCenterUniform = Gl.GetUniformLocation (shader, "eyeCenter")
-        let lightTypeUniform = Gl.GetUniformLocation (shader, "lightType")
+        let lightShadowSamplesUniform = Gl.GetUniformLocation (shader, "lightShadowSamples")
+        let lightShadowBiasUniform = Gl.GetUniformLocation (shader, "lightShadowBias")
+        let lightShadowSampleScalarUniform = Gl.GetUniformLocation (shader, "lightShadowSampleScalar")
         let lightShadowExponentUniform = Gl.GetUniformLocation (shader, "lightShadowExponent")
         let lightShadowDensityUniform = Gl.GetUniformLocation (shader, "lightShadowDensity")
         let layersCountUniform = Gl.GetUniformLocation (shader, "layersCount")
@@ -1656,7 +1668,9 @@ module PhysicallyBased =
         { ViewUniform = viewUniform
           ProjectionUniform = projectionUniform
           EyeCenterUniform = eyeCenterUniform
-          LightTypeUniform = lightTypeUniform
+          LightShadowSamplesUniform = lightShadowSamplesUniform
+          LightShadowBiasUniform = lightShadowBiasUniform
+          LightShadowSampleScalarUniform = lightShadowSampleScalarUniform
           LightShadowExponentUniform = lightShadowExponentUniform
           LightShadowDensityUniform = lightShadowDensityUniform
           LayersCountUniform = layersCountUniform
@@ -1877,7 +1891,9 @@ module PhysicallyBased =
         let lightCutoffMarginUniform = Gl.GetUniformLocation (shader, "lightCutoffMargin")
         let lightAmbientColorUniform = Gl.GetUniformLocation (shader, "lightAmbientColor")
         let lightAmbientBrightnessUniform = Gl.GetUniformLocation (shader, "lightAmbientBrightness")
-        let lightTypeUniform = Gl.GetUniformLocation (shader, "lightType")
+        let lightShadowSamplesUniform = Gl.GetUniformLocation (shader, "lightShadowSamples")
+        let lightShadowBiasUniform = Gl.GetUniformLocation (shader, "lightShadowBias")
+        let lightShadowSampleScalarUniform = Gl.GetUniformLocation (shader, "lightShadowSampleScalar")
         let lightShadowExponentUniform = Gl.GetUniformLocation (shader, "lightShadowExponent")
         let lightShadowDensityUniform = Gl.GetUniformLocation (shader, "lightShadowDensity")
         let ssvfEnabledUniform = Gl.GetUniformLocation (shader, "ssvfEnabled")
@@ -1939,7 +1955,9 @@ module PhysicallyBased =
           LightCutoffMarginUniform = lightCutoffMarginUniform
           LightAmbientColorUniform = lightAmbientColorUniform
           LightAmbientBrightnessUniform = lightAmbientBrightnessUniform
-          LightTypeUniform = lightTypeUniform
+          LightShadowSamplesUniform = lightShadowSamplesUniform
+          LightShadowBiasUniform = lightShadowBiasUniform
+          LightShadowSampleScalarUniform = lightShadowSampleScalarUniform
           LightShadowExponentUniform = lightShadowExponentUniform
           LightShadowDensityUniform = lightShadowDensityUniform
           SsvfEnabledUniform = ssvfEnabledUniform
@@ -2035,14 +2053,35 @@ module PhysicallyBased =
         let shaderVoxel = CreatePhysicallyBasedVoxelShader voxelShaderFilePath in Hl.Assert ()
         (shaderVoxel)
 
-    /// Create the shaders for physically-based depth rendering (such as for occlusion or shadow rendering).
-    let CreatePhysicallyBasedDepthShaders (shaderStaticDepthFilePath, shaderAnimatedDepthFilePath, shaderTerrainDepthFilePath) =
-        let shaderStaticShadow = CreatePhysicallyBasedShader shaderStaticDepthFilePath
-        Hl.Assert ()
-        let shaderAnimatedShadow = CreatePhysicallyBasedShader shaderAnimatedDepthFilePath
-        Hl.Assert ()
-        let shaderTerrainShadow = CreatePhysicallyBasedTerrainShader shaderTerrainDepthFilePath
-        (shaderStaticShadow, shaderAnimatedShadow, shaderTerrainShadow)
+    /// Create the shaders for physically-based shadow rendering.
+    let CreatePhysicallyBasedShadowShaders
+        (shaderStaticShadowPointFilePath,
+         shaderStaticShadowSpotFilePath,
+         shaderStaticShadowDirectionalFilePath,
+         shaderAnimatedShadowPointFilePath,
+         shaderAnimatedShadowSpotFilePath,
+         shaderAnimatedShadowDirectionalFilePath,
+         shaderTerrainShadowPointFilePath,
+         shaderTerrainShadowSpotFilePath,
+         shaderTerrainShadowDirectionalFilePath) =
+        let shaderStaticShadowPoint = CreatePhysicallyBasedShader shaderStaticShadowPointFilePath in Hl.Assert ()
+        let shaderStaticShadowSpot = CreatePhysicallyBasedShader shaderStaticShadowSpotFilePath in Hl.Assert ()
+        let shaderStaticShadowDirectional = CreatePhysicallyBasedShader shaderStaticShadowDirectionalFilePath in Hl.Assert ()
+        let shaderAnimatedShadowPoint = CreatePhysicallyBasedShader shaderAnimatedShadowPointFilePath in Hl.Assert ()
+        let shaderAnimatedShadowSpot = CreatePhysicallyBasedShader shaderAnimatedShadowSpotFilePath in Hl.Assert ()
+        let shaderAnimatedShadowDirectional = CreatePhysicallyBasedShader shaderAnimatedShadowDirectionalFilePath in Hl.Assert ()
+        let shaderTerrainShadowPoint = CreatePhysicallyBasedTerrainShader shaderTerrainShadowPointFilePath in Hl.Assert ()
+        let shaderTerrainShadowSpot = CreatePhysicallyBasedTerrainShader shaderTerrainShadowSpotFilePath in Hl.Assert ()
+        let shaderTerrainShadowDirectional = CreatePhysicallyBasedTerrainShader shaderTerrainShadowDirectionalFilePath in Hl.Assert ()
+        (shaderStaticShadowPoint,
+         shaderStaticShadowSpot,
+         shaderStaticShadowDirectional,
+         shaderAnimatedShadowPoint,
+         shaderAnimatedShadowSpot,
+         shaderAnimatedShadowDirectional,
+         shaderTerrainShadowPoint,
+         shaderTerrainShadowSpot,
+         shaderTerrainShadowDirectional)
 
     /// Create the shaders for physically-based depth rendering (such as for occlusion or shadow rendering).
     let CreatePhysicallyBasedDepthShadersVoxel (shaderVoxelDepthFilePath) =
@@ -2263,7 +2302,6 @@ module PhysicallyBased =
          bones : single array array,
          surfacesCount : int,
          instanceFields : single array,
-         lightType : int,
          lightShadowExponent : single,
          material : PhysicallyBasedMaterial,
          geometry : PhysicallyBasedGeometry,
@@ -2288,7 +2326,6 @@ module PhysicallyBased =
             Gl.UniformMatrix4 (shader.ProjectionUniform, false, projection)
             for i in 0 .. dec (min Constants.Render.BonesMax bones.Length) do
                 Gl.UniformMatrix4 (shader.BonesUniforms.[i], false, bones.[i])
-            Gl.Uniform1 (shader.LightTypeUniform, lightType)
             Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)
             Hl.Assert ()
 
@@ -2342,7 +2379,9 @@ module PhysicallyBased =
          eyeCenter : Vector3,
          surfacesCount : int,
          instanceFields : single array,
-         lightType : int,
+         lightShadowSamples : int,
+         lightShadowBias : single,
+         lightShadowSampleScalar : single,
          lightShadowExponent : single,
          lightShadowDensity : single,
          material : PhysicallyBasedMaterial,
@@ -2368,7 +2407,9 @@ module PhysicallyBased =
             for i in 0 .. dec (min Constants.Render.BonesMax bones.Length) do
                 Gl.UniformMatrix4 (shader.BonesUniforms.[i], false, bones.[i])
             Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
-            Gl.Uniform1 (shader.LightTypeUniform, lightType)
+            Gl.Uniform1 (shader.LightShadowSamplesUniform, lightShadowSamples)
+            Gl.Uniform1 (shader.LightShadowBiasUniform, lightShadowBias)
+            Gl.Uniform1 (shader.LightShadowSampleScalarUniform, lightShadowSampleScalar)
             Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)
             Gl.Uniform1 (shader.LightShadowDensityUniform, lightShadowDensity)
             Gl.Uniform1 (shader.AlbedoTextureUniform, 0)
@@ -2466,7 +2507,9 @@ module PhysicallyBased =
          lightCutoffMargin : single,
          lightAmbientColor : single array,
          lightAmbientBrightness : single,
-         lightType : int,
+         lightShadowSamples : int,
+         lightShadowBias : single,
+         lightShadowSampleScalar : single,
          lightShadowExponent : single,
          lightShadowDensity : single,
          ssvfEnabled : int,
@@ -2527,7 +2570,9 @@ module PhysicallyBased =
             if lightAmbientColor.Length = 3 then
                 Gl.Uniform3 (shader.LightAmbientColorUniform, lightAmbientColor)
             Gl.Uniform1 (shader.LightAmbientBrightnessUniform, lightAmbientBrightness)
-            Gl.Uniform1 (shader.LightTypeUniform, lightType)
+            Gl.Uniform1 (shader.LightShadowSamplesUniform, lightShadowSamples)
+            Gl.Uniform1 (shader.LightShadowBiasUniform, lightShadowBias)
+            Gl.Uniform1 (shader.LightShadowSampleScalarUniform, lightShadowSampleScalar)
             Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)
             Gl.Uniform1 (shader.LightShadowDensityUniform, lightShadowDensity)
             Gl.Uniform1 (shader.SsvfEnabledUniform, ssvfEnabled)
@@ -2685,7 +2730,9 @@ module PhysicallyBased =
          projection : single array,
          eyeCenter : Vector3,
          instanceFields : single array,
-         lightType : int,
+         lightShadowSamples : int,
+         lightShadowBias : single,
+         lightShadowSampleScalar : single,
          lightShadowExponent : single,
          lightShadowDensity : single,
          elementsCount : int,
@@ -2707,7 +2754,9 @@ module PhysicallyBased =
         Gl.UniformMatrix4 (shader.ViewUniform, false, view)
         Gl.UniformMatrix4 (shader.ProjectionUniform, false, projection)
         Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
-        Gl.Uniform1 (shader.LightTypeUniform, lightType)
+        Gl.Uniform1 (shader.LightShadowSamplesUniform, lightShadowSamples)
+        Gl.Uniform1 (shader.LightShadowBiasUniform, lightShadowBias)
+        Gl.Uniform1 (shader.LightShadowSampleScalarUniform, lightShadowSampleScalar)
         Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)
         Gl.Uniform1 (shader.LightShadowDensityUniform, lightShadowDensity)
         Gl.Uniform1 (shader.LayersCountUniform, layersCount)
@@ -3140,6 +3189,9 @@ module PhysicallyBased =
          view : single array,
          projection : single array,
          lightCutoffMargin : single,
+         lightShadowSamples : int,
+         lightShadowBias : single,
+         lightShadowSampleScalar : single,
          lightShadowExponent : single,
          lightShadowDensity : single,
          ssvfEnabled : int,
@@ -3196,6 +3248,9 @@ module PhysicallyBased =
         Gl.UniformMatrix4 (shader.ViewUniform, false, view)
         Gl.UniformMatrix4 (shader.ProjectionUniform, false, projection)
         Gl.Uniform1 (shader.LightCutoffMarginUniform, lightCutoffMargin)
+        Gl.Uniform1 (shader.LightShadowSamplesUniform, lightShadowSamples)
+        Gl.Uniform1 (shader.LightShadowBiasUniform, lightShadowBias)
+        Gl.Uniform1 (shader.LightShadowSampleScalarUniform, lightShadowSampleScalar)
         Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)
         Gl.Uniform1 (shader.LightShadowDensityUniform, lightShadowDensity)
         Gl.Uniform1 (shader.SsvfEnabledUniform, ssvfEnabled)
@@ -3435,7 +3490,7 @@ module PhysicallyBased =
                                 yield (light, node)|]
 
                         // construct bounds and hierarchy
-                        // TODO: sanitize incoming names. Corrupted or incompatible names cause subtle hierarchy bugs.
+                        // TODO: P1: consider sanitizing incoming names. Corrupted or incompatible names cause subtle hierarchy bugs.
                         let lightProbes = SList.make ()
                         let lights = SList.make ()
                         let surfaces = SList.make ()

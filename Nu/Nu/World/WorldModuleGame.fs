@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -11,6 +11,7 @@ open Prime
 module WorldModuleGame =
 
     /// Dynamic property getters / setters.
+    /// TODO: make these FrozenDictionaries.
     let private GameGetters = Dictionary<string, Game -> World -> Property> StringComparer.Ordinal
     let private GameSetters = Dictionary<string, Property -> Game -> World -> struct (bool * World)> StringComparer.Ordinal
 
@@ -412,10 +413,10 @@ module WorldModuleGame =
         /// Check that the given bounds is within the 3d eye's sight (or a light probe / light in the light box that may be lighting something within it).
         static member boundsInView3d lightProbe light presence (bounds : Box3) world =
             Presence.intersects3d
-                (Some (World.getGameEye3dFrustumInterior Game.Handle world))
+                (ValueSome (World.getGameEye3dFrustumInterior Game.Handle world))
                 (World.getGameEye3dFrustumExterior Game.Handle world)
                 (World.getGameEye3dFrustumImposter Game.Handle world)
-                (Some (World.getLight3dBox world))
+                (ValueSome (World.getLight3dBox world))
                 lightProbe light presence bounds
 
         /// Check that the given bounds is within the 3d eye's play bounds.
@@ -448,14 +449,33 @@ module WorldModuleGame =
             | true -> property
             | false -> failwithf "Could not find property '%s'." propertyName
 
+        static member internal tryGetGameProperty (propertyName, game, world, property : _ outref) =
+            match GameGetters.TryGetValue propertyName with
+            | (true, getter) ->
+                property <- getter game world
+                true
+            | (false, _) ->
+                let gameState = World.getGameState game world
+                if GameState.tryGetProperty (propertyName, gameState, &property) then
+                    match property.PropertyValue with
+                    | :? DesignerProperty as dp -> property <- { PropertyType = dp.DesignerType; PropertyValue = dp.DesignerValue }; true
+                    | :? ComputedProperty as cp -> property <- { PropertyType = cp.ComputedType; PropertyValue = cp.ComputedGet (game :> obj) (world :> obj) }; true
+                    | _ -> true
+                else false
+
         static member internal getGameXtensionValue<'a> propertyName game world =
             let gameState = World.getGameState game world
             let mutable property = Unchecked.defaultof<_>
             if GameState.tryGetProperty (propertyName, gameState, &property) then
-                match property.PropertyValue with
+                let valueObj =
+                    match property.PropertyValue with
+                    | :? DesignerProperty as dp -> dp.DesignerValue
+                    | :? ComputedProperty as cp -> cp.ComputedGet game world
+                    | _ -> property.PropertyValue
+                match valueObj with
                 | :? 'a as value -> value
                 | null -> null :> obj :?> 'a
-                | valueObj -> valueObj |> valueToSymbol |> symbolToValue
+                | value -> value |> valueToSymbol |> symbolToValue
             else
                 let definitions = Reflection.getPropertyDefinitions (getType gameState.Dispatcher)
                 let value =
@@ -463,49 +483,103 @@ module WorldModuleGame =
                     | Some definition ->
                         match definition.PropertyExpr with
                         | DefineExpr value -> value :?> 'a
-                        | VariableExpr _ -> failwith "GameDispatchers do not support variable properties."
-                        | ComputedExpr _ -> failwith "GameDispatchers do not support computed properties."
+                        | VariableExpr eval -> eval world :?> 'a
+                        | ComputedExpr property -> property.ComputedGet game world :?> 'a
                     | None -> failwithumf ()
                 let property = { PropertyType = typeof<'a>; PropertyValue = value }
                 gameState.Xtension <- Xtension.attachProperty propertyName property gameState.Xtension
                 value
-
-        static member internal tryGetGameProperty (propertyName, game, world, property : _ outref) =
-            match GameGetters.TryGetValue propertyName with
-            | (true, getter) ->
-                property <- getter game world
-                true
-            | (false, _) ->
-                World.tryGetGameXtensionProperty (propertyName, game, world, &property)
 
         static member internal getGameProperty propertyName game world =
             match GameGetters.TryGetValue propertyName with
             | (true, getter) -> getter game world
             | (false, _) -> World.getGameXtensionProperty propertyName game world
 
+        static member internal trySetGameXtensionPropertyWithoutEvent propertyName (property : Property) gameState game world =
+            let mutable propertyOld = Unchecked.defaultof<_>
+            match GameState.tryGetProperty (propertyName, gameState, &propertyOld) with
+            | true ->
+                match propertyOld.PropertyValue with
+                | :? DesignerProperty as dp ->
+                    let previous = dp.DesignerValue
+                    if property.PropertyValue =/= previous then
+                        let property = { property with PropertyValue = { dp with DesignerValue = property.PropertyValue }}
+                        match GameState.trySetProperty propertyName property gameState with
+                        | struct (true, gameState) -> struct (true, true, previous, World.setGameState gameState game world)
+                        | struct (false, _) -> struct (false, false, previous, world)
+                    else (true, false, previous, world)
+                | :? ComputedProperty as cp ->
+                    match cp.ComputedSetOpt with
+                    | Some computedSet ->
+                        let previous = cp.ComputedGet (box game) (box world)
+                        if property.PropertyValue =/= previous
+                        then struct (true, true, previous, computedSet property.PropertyValue game world :?> World)
+                        else struct (true, false, previous, world)
+                    | None -> struct (false, false, Unchecked.defaultof<_>, world)
+                | _ ->
+                    let previous = propertyOld.PropertyValue
+                    if property.PropertyValue =/= previous then
+                        match GameState.trySetProperty propertyName property gameState with
+                        | struct (true, gameState) -> (true, true, previous, World.setGameState gameState game world)
+                        | struct (false, _) -> struct (false, false, previous, world)
+                    else struct (true, false, previous, world)
+            | false -> struct (false, false, Unchecked.defaultof<_>, world)
+
         static member internal trySetGameXtensionPropertyFast propertyName (property : Property) game world =
             let gameState = World.getGameState game world
-            match GameState.tryGetProperty (propertyName, gameState) with
-            | (true, propertyOld) ->
-                if property.PropertyValue =/= propertyOld.PropertyValue then
-                    let struct (success, gameState) = GameState.trySetProperty propertyName property gameState
-                    let world = World.setGameState gameState game world
-                    if success then World.publishGameChange propertyName propertyOld.PropertyValue property.PropertyValue game world else world
+            match World.trySetGameXtensionPropertyWithoutEvent propertyName property gameState game world with
+            | struct (true, changed, previous, world) ->
+                if changed
+                then World.publishGameChange propertyName previous property.PropertyValue game world
                 else world
-            | (false, _) -> world
+            | struct (false, _, _, world) -> world
 
         static member internal trySetGameXtensionProperty propertyName (property : Property) game world =
             let gameState = World.getGameState game world
-            match GameState.tryGetProperty (propertyName, gameState) with
-            | (true, propertyOld) ->
-                if property.PropertyValue =/= propertyOld.PropertyValue then
-                    let struct (success, gameState) = GameState.trySetProperty propertyName property gameState
-                    let world = World.setGameState gameState game world
-                    if success
-                    then struct (success, true, World.publishGameChange propertyName propertyOld.PropertyValue property.PropertyValue game world)
-                    else struct (false, true, world)
-                else struct (false, false, world)
-            | (false, _) -> struct (false, false, world)
+            match World.trySetGameXtensionPropertyWithoutEvent propertyName property gameState game world with
+            | struct (true, changed, previous, world) ->
+                let world =
+                    if changed
+                    then World.publishGameChange propertyName previous property.PropertyValue game world
+                    else world
+                struct (true, changed, world)
+            | struct (false, changed, _, world) -> struct (false, changed, world)
+
+        static member internal setGameXtensionValue<'a> propertyName (value : 'a) game world =
+            let gameState = World.getGameState game world
+            let propertyOld = GameState.getProperty propertyName gameState
+            let mutable previous = Unchecked.defaultof<obj> // OPTIMIZATION: avoid passing around structs.
+            let mutable changed = false // OPTIMIZATION: avoid passing around structs.
+            let world =
+                match propertyOld.PropertyValue with
+                | :? DesignerProperty as dp ->
+                    previous <- dp.DesignerValue
+                    if value =/= previous then
+                        changed <- true
+                        let property = { propertyOld with PropertyValue = { dp with DesignerValue = value }}
+                        let gameState = GameState.setProperty propertyName property gameState
+                        World.setGameState gameState game world
+                    else world
+                | :? ComputedProperty as cp ->
+                    match cp.ComputedSetOpt with
+                    | Some computedSet ->
+                        previous <- cp.ComputedGet (box game) (box world)
+                        if value =/= previous then
+                            changed <- true
+                            computedSet propertyOld.PropertyValue game world :?> World
+                        else world
+                    | None -> world
+                | _ ->
+                    previous <- propertyOld.PropertyValue
+                    if value =/= previous then
+                        changed <- true
+                        let property = { propertyOld with PropertyValue = value }
+                        let gameState = GameState.setProperty propertyName property gameState
+                        World.setGameState gameState game world
+                    else world
+            if changed
+            then World.publishGameChange propertyName previous value game world
+            else world
 
         static member internal setGameXtensionProperty propertyName (property : Property) game world =
             let gameState = World.getGameState game world
