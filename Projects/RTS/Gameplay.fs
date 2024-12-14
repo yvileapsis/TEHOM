@@ -256,7 +256,7 @@ type GameplayDispatcher () =
             Content.staticModel Simulants.GameplayMarker.Name [
                 Entity.Position := match gameplay.SelectedPosition with | Some pos -> pos | None -> v3 0f 10f 0f
                 Entity.Scale == v3 0.5f 0.5f 0.5f
-                Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = Some Color.Red }
+                Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = ValueSome Color.Red }
                 Entity.BodyShape == (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
                 Entity.StaticModel == Assets.Default.BallModel
             ]

@@ -249,7 +249,7 @@ type CharacterDispatcher (character : Character) =
             Content.staticModel "SelectionMarker" [
                 Entity.PositionLocal == v3 0f 0.1f 0f
                 Entity.ScaleLocal == v3 1f 0.1f 1f
-                Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = Some Color.Cyan }
+                Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = ValueSome Color.Cyan }
                 Entity.BodyShape == (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
                 Entity.StaticModel == Assets.Default.BallModel
             ]

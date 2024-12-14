@@ -304,8 +304,8 @@ type HoverFacet () =
 
     override this.GetAttributesInferred (entity, world) =
         match Metadata.tryGetTextureSizeF (entity.GetUpImage world) with
-        | Some size -> AttributesInferred.important size.V3 v3Zero
-        | None -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+        | ValueSome size -> AttributesInferred.important size.V3 v3Zero
+        | ValueNone -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 /// Gives an entity the base behavior of a gui button.
 type ButtonExDispatcher () =
