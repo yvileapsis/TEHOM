@@ -338,8 +338,8 @@ module VoxelFacetExtensions =
             match this.GetHeightMap world with
             | ImageHeightMap map ->
                 match Metadata.tryGetTextureSize map with
-                | Some textureSize -> Some textureSize
-                | None -> None
+                | ValueSome textureSize -> Some textureSize
+                | ValueNone -> None
             | RawHeightMap map -> Some map.Resolution
 
         /// Attempt to get the size of each terrain quad.
