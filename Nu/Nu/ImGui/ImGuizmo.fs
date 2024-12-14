@@ -1,5 +1,5 @@
 // Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -41,13 +41,10 @@ module ImGuizmo =
               (corners.[3], corners.[7])|]
         for (a, b) in segments do
             match Math.TryUnionSegmentAndFrustum a b eyeFrustum with
-            | Some (a, b) ->
-                let aWindow = ImGui.Position3dToWindow (windowPosition, windowSize, viewProjection, a)
-                let bWindow = ImGui.Position3dToWindow (windowPosition, windowSize, viewProjection, b)
-                let xWindow = box2 v2Zero Constants.Render.Resolution.V2
-                if  xWindow.Contains aWindow <> ContainmentType.Disjoint &&
-                    xWindow.Contains bWindow <> ContainmentType.Disjoint then
-                    drawList.AddLine (aWindow, bWindow, uint 0xFF00CFCF)
+            | Some (a', b') ->
+                let aWindow = ImGui.Position3dToWindow (windowPosition, windowSize, viewProjection, a')
+                let bWindow = ImGui.Position3dToWindow (windowPosition, windowSize, viewProjection, b')
+                drawList.AddLine (aWindow, bWindow, uint 0xFF00CFCF)
             | None -> ()
 
         // manipulate centers

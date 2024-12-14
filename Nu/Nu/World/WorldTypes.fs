@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -34,7 +34,7 @@ module internal WorldTypes =
     // EventGraph F# reach-arounds.
     let mutable internal getSelectedScreenIdling : obj -> bool = Unchecked.defaultof<_>
     let mutable internal getSelectedScreenTransitioning : obj -> bool = Unchecked.defaultof<_>
-    let mutable internal handleSubscribeAndUnsubscribeEvent : bool -> obj Address -> Simulant -> obj -> obj = Unchecked.defaultof<_>
+    let mutable internal handleSubscribeAndUnsubscribeEvent : bool -> Address -> Simulant -> obj -> obj = Unchecked.defaultof<_>
 
     // Simulant F# reach-arounds.
     let mutable internal createDefaultGroup : obj -> obj -> obj * obj = Unchecked.defaultof<_>
@@ -278,46 +278,46 @@ and [<ReferenceEquality>] Lens<'a, 's when 's :> Simulant> =
 
     /// Adds the specified value to the lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    static member inline ( += ) (lens : Lens<_, _>, value) =  lens.Map (flip (+) value)
+    static member inline ( += ) (lens : Lens<_, _>, value) = lens.Map (flip (+) value)
 
     /// Subtracts the specified value from the lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    static member inline ( -= ) (lens : Lens<_, _>, value) =  lens.Map (flip (-) value)
+    static member inline ( -= ) (lens : Lens<_, _>, value) = lens.Map (flip (-) value)
 
     /// Multiplies the lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    static member inline ( *= ) (lens : Lens<_, _>, value) =  lens.Map (flip (*) value)
+    static member inline ( *= ) (lens : Lens<_, _>, value) = lens.Map (flip (*) value)
 
     /// Divides the lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    static member inline ( /= ) (lens : Lens<_, _>, value) =  lens.Map (flip (/) value)
+    static member inline ( /= ) (lens : Lens<_, _>, value) = lens.Map (flip (/) value)
 
     /// Computes the modulus of the lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    static member inline ( %= ) (lens : Lens<_, _>, value) =  lens.Map (flip (%) value)
+    static member inline ( %= ) (lens : Lens<_, _>, value) = lens.Map (flip (%) value)
 
     /// Negates the lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    static member inline ( ~+ ) (lens : Lens<_, _>) =  lens.Map (~+)
+    static member inline ( ~+ ) (lens : Lens<_, _>) = lens.Map (~+)
 
     /// Negates the lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    static member inline ( ~- ) (lens : Lens<_, _>) =  lens.Map (~-)
+    static member inline ( ~- ) (lens : Lens<_, _>) = lens.Map (~-)
 
     /// Increments the lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    static member inline ( !+ ) (lens : Lens<_, _>) =  lens.Map inc
+    static member inline ( !+ ) (lens : Lens<_, _>) = lens.Map inc
 
     /// Decrements the lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    static member inline ( !- ) (lens : Lens<_, _>) =  lens.Map dec
+    static member inline ( !- ) (lens : Lens<_, _>) = lens.Map dec
 
     /// Set a lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    static member inline (<--) (lens : Lens<_, _>, value) = lens.Set value
+    static member inline ( <-- ) (lens : Lens<_, _>, value) = lens.Set value
 
     /// Get a lensed property's value.
-    static member inline (!.) (lens : Lens<_, _>) = fun world -> lens.Get world
+    static member inline ( !. ) (lens : Lens<_, _>) = fun world -> lens.Get world
 
     interface Lens with
         member this.Name = this.Name
@@ -442,9 +442,9 @@ and GameDispatcher () =
     abstract Unregister : Game * World -> World
     default this.Unregister (_, world) = world
 
-    /// ImNui process a game.
-    abstract Process : Game * World -> World
-    default this.Process (_, world) = world
+    /// Attempt to ImNui process a game.
+    abstract TryProcess : Game * World -> World
+    default this.TryProcess (_, world) = world
 
     /// Pre-update a game.
     abstract PreUpdate : Game * World -> World
@@ -498,9 +498,9 @@ and ScreenDispatcher () =
     abstract Unregister : Screen * World -> World
     default this.Unregister (_, world) = world
 
-    /// ImNui process a screen.
-    abstract Process : Screen * World -> World
-    default this.Process (_, world) = world
+    /// Attempt to ImNui process a screen.
+    abstract TryProcess : Screen * World -> World
+    default this.TryProcess (_, world) = world
 
     /// Pre-update a screen.
     abstract PreUpdate : Screen * World -> World
@@ -560,9 +560,9 @@ and GroupDispatcher () =
     abstract Unregister : Group * World -> World
     default this.Unregister (_, world) = world
 
-    /// ImNui process a group.
-    abstract Process : Group * World -> World
-    default this.Process (_, world) = world
+    /// Attempt to ImNui process a group.
+    abstract TryProcess : Group * World -> World
+    default this.TryProcess (_, world) = world
 
     /// Pre-update a group.
     abstract PreUpdate : Group * World -> World
@@ -634,6 +634,7 @@ and EntityDispatcher (is2d, physical, lightProbe, light) =
          Define? EnabledLocal true
          Define? Visible true
          Define? VisibleLocal true
+         Define? CastShadow true
          Define? Pickable true
          Define? Static false
          Define? AlwaysUpdate false
@@ -652,9 +653,9 @@ and EntityDispatcher (is2d, physical, lightProbe, light) =
     abstract Unregister : Entity * World -> World
     default this.Unregister (_, world) = world
 
-    /// ImNui process an entity.
-    abstract Process : Entity * World -> World
-    default this.Process (_, world) = world
+    /// Attempt to ImNui process an entity.
+    abstract TryProcess : Entity * World -> World
+    default this.TryProcess (_, world) = world
 
     /// Update an entity.
     abstract Update : Entity * World -> World
@@ -736,10 +737,6 @@ and Facet (physical, lightProbe, light) =
     /// Participate in the unregistration of an entity's physics from the physics subsystem.
     abstract UnregisterPhysics : Entity * World -> World
     default this.UnregisterPhysics (_, world) = world
-
-    /// ImNui process a facet.
-    abstract Process : Entity * World -> World
-    default this.Process (_, world) = world
 
     /// Update a facet.
     abstract Update : Entity * World -> World
@@ -1184,6 +1181,7 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     member this.EnabledLocal with get () = this.Transform.EnabledLocal and set value = this.Transform.EnabledLocal <- value
     member this.Visible with get () = this.Transform.Visible and set value = this.Transform.Visible <- value
     member this.VisibleLocal with get () = this.Transform.VisibleLocal and set value = this.Transform.VisibleLocal <- value
+    member this.CastShadow with get () = this.Transform.CastShadow and set value = this.Transform.CastShadow <- value
     member this.Pickable with get () = this.Transform.Pickable and internal set value = this.Transform.Pickable <- value
     member this.AlwaysUpdate with get () = this.Transform.AlwaysUpdate and set value = this.Transform.AlwaysUpdate <- value
     member this.AlwaysRender with get () = this.Transform.AlwaysRender and set value = this.Transform.AlwaysRender <- value

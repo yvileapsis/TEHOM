@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace OpenGL
 open System
@@ -38,7 +38,7 @@ module Framebuffer =
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
             let texture = Texture.EagerTexture { TextureMetadata = Texture.TextureMetadata.empty; TextureId = textureId }
             Right (texture, framebuffer)
-        else Left ("Could not create complete texture 2d framebuffer.")
+        else Left "Could not create complete texture 2d framebuffer."
 
     /// Destroy texture buffers.
     let DestroyTextureBuffers (position : Texture.Texture, framebuffer) =
@@ -266,7 +266,7 @@ module Framebuffer =
         if Gl.CheckFramebufferStatus FramebufferTarget.Framebuffer = FramebufferStatus.FramebufferComplete then
             let color = Texture.EagerTexture { TextureMetadata = Texture.TextureMetadata.empty; TextureId = colorId }
             Right (color, framebuffer, renderbuffer)
-        else Left ("Could not create complete post-lighting framebuffer.")
+        else Left "Could not create complete post-lighting framebuffer."
 
     /// Destroy HDR buffers.
     let DestroyHdrBuffers (color : Texture.Texture, framebuffer, renderbuffer) =
@@ -340,7 +340,7 @@ module Framebuffer =
         // setup shadow map textures
         for i in 0 .. dec 6 do
             let target = LanguagePrimitives.EnumOfValue (int TextureTarget.TextureCubeMapPositiveX + i)
-            Gl.TexImage2D (target, 0, InternalFormat.Rg32f, shadowResolutionX, shadowResolutionY, 0, PixelFormat.Rg, PixelType.Float, nativeint 0)
+            Gl.TexImage2D (target, 0, InternalFormat.R32f, shadowResolutionX, shadowResolutionY, 0, PixelFormat.Red, PixelType.Float, nativeint 0)
             Gl.FramebufferTexture2D (FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, target, shadowMapId, 0)
             Hl.Assert ()
         Gl.TexParameter (TextureTarget.TextureCubeMap, TextureParameterName.TextureMinFilter, int TextureMinFilter.Linear)
@@ -691,7 +691,7 @@ module Framebuffer =
             let fogAccum = Texture.EagerTexture { TextureMetadata = Texture.TextureMetadata.empty; TextureId = fogAccumId }
             let depth = Texture.EagerTexture { TextureMetadata = Texture.TextureMetadata.empty; TextureId = depthId }
             Right (color, fogAccum, depth, framebuffer, renderbuffer)
-        else Left ("Could not create complete lighting framebuffer.")
+        else Left "Could not create complete lighting framebuffer."
 
     /// Destroy lighting buffers.
     let DestroyLightingBuffers (color : Texture.Texture, fogAccum : Texture.Texture, depth : Texture.Texture, framebuffer, renderbuffer) =

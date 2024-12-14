@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -68,8 +68,7 @@ module WorldGroupModule =
 
         /// Set an xtension property value.
         member this.Set<'a> propertyName (value : 'a) world =
-            let property = { PropertyType = typeof<'a>; PropertyValue = value }
-            World.setGroupXtensionProperty propertyName property this world |> snd'
+            World.setGroupXtensionValue<'a> propertyName value this world
 
         /// Check that a group is selected.
         member this.GetSelected world =
@@ -151,7 +150,7 @@ module WorldGroupModule =
             match simulants.TryGetValue (screen :> Simulant) with
             | (true, groupsOpt) ->
                 match groupsOpt with
-                | Some groups -> groups |> Seq.map cast<Group>
+                | Some groups -> Seq.map cast<Group> groups
                 | None -> Seq.empty
             | (false, _) -> Seq.empty
 
@@ -172,7 +171,7 @@ module WorldGroupModule =
                     else failwith ("Group '" + scstring group + "' already exists and cannot be created."); world
                 else world
             let world = World.addGroup false groupState group world
-            let world = if WorldModule.UpdatingSimulants then WorldModule.processGroup group world else world
+            let world = if WorldModule.UpdatingSimulants then WorldModule.tryProcessGroup group world else world
             (group, world)
 
         /// Create a group from a simulant descriptor.
@@ -246,7 +245,7 @@ module WorldGroupModule =
                         World.renameEntityImmediate child destination world)
                         world children
                 let world = World.destroyGroupImmediate source world
-                let world = if WorldModule.UpdatingSimulants then WorldModule.processGroup destination world else world
+                let world = if WorldModule.UpdatingSimulants then WorldModule.tryProcessGroup destination world else world
                 world
             | None -> world
 
@@ -314,7 +313,7 @@ module WorldGroupModule =
             let world = World.readEntities groupDescriptor.EntityDescriptors group world |> snd
 
             // try to process ImNui group first time if in the middle of simulant update phase
-            let world = if WorldModule.UpdatingSimulants then WorldModule.processGroup group world else world
+            let world = if WorldModule.UpdatingSimulants then WorldModule.tryProcessGroup group world else world
             (group, world)
 
         /// Read multiple groups from a screen descriptor.

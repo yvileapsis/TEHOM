@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -138,8 +138,8 @@ module TmxMap =
 
     let tryGetTileMap (tileMapAsset : TileMap AssetTag) =
         match Metadata.tryGetTileMapMetadata tileMapAsset with
-        | Some tileMapMetadata -> Some tileMapMetadata.TileMap
-        | None -> None
+        | ValueSome tileMapMetadata -> Some tileMapMetadata.TileMap
+        | ValueNone -> None
 
     let tryGetTileDescriptor tileIndex (tl : TmxLayer) tmd (tileDescriptor : TileDescriptor outref) =
         let tileMapRun = tmd.TileMapSizeM.X
@@ -296,13 +296,13 @@ module TmxMap =
 
     let getBodyProperties enabled friction restitution collisionCategories collisionMask observable bodyIndex tileMapDescriptor =
         let bodyProperties =
-            { Center = v3Zero
+            { Enabled = enabled
+              Center = v3Zero
               Rotation = quatIdentity
               Scale = v3One
               BodyShape = BodyShapes (getBodyShapes tileMapDescriptor)
               BodyType = BodyType.Static
               SleepingAllowed = true
-              Enabled = enabled
               Friction = friction
               Restitution = restitution
               LinearVelocity = v3Zero
@@ -362,7 +362,7 @@ module TmxMap =
                 let descriptors = List ()
                 let mutable yC = 0
                 let mutable yO = r.Y + single yC * tileSize.Y
-                yO <- yO + 0.0001f |> floor // NOTE: fixes #766 and seems to provide more horizontal tile alignement stability. Alternatively, we could instead do + 0.5f |> floor on yI.
+                yO <- yO + 0.0001f |> floor // NOTE: fixes #766 and seems to provide more horizontal tile alignment stability.
                 while r.Y + single yC * tileSize.Y < r2.Y + tileSize.Y do
 
                     // compute y index and ensure it's in bounds
@@ -373,7 +373,7 @@ module TmxMap =
                         let tiles = SList.make ()
                         let mutable xS = 0.0f
                         let mutable xO = r.X
-                        xO <- xO + 0.0001f |> floor // NOTE: attempts to fix #832. Alternatively, we could instead do + 0.5f |> floor on xI.
+                        //xO <- xO + 0.0001f |> floor // NOTE: attempted to fix #832, but caused more issues near the origin in Blaze Vector.
                         while xO < r2.X + tileSize.X do
                             let xI = int (xO / tileSize.X)
                             if xO >= 0.0f && xI >= 0 then

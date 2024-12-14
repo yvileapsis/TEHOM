@@ -23,15 +23,6 @@ const int SHADOW_TEXTURES_MAX = 16;
 const int SHADOW_MAPS_MAX = 8;
 const float SHADOW_FOV_MAX = 2.1;
 const float SHADOW_SEAM_INSET = 0.001;
-const float SHADOW_SAMPLE_SCALAR = 0.0025;
-const int SHADOW_SAMPLE_OFFSETS_COUNT = 20;
-const vec3 SHADOW_SAMPLE_OFFSETS[SHADOW_SAMPLE_OFFSETS_COUNT] =
-    vec3[](
-        vec3(1, 1, 1),      vec3(1, -1, 1),     vec3(-1, -1, 1),    vec3(-1, 1, 1),
-        vec3(1, 1, -1),     vec3(1, -1, -1),    vec3(-1, -1, -1),   vec3(-1, 1, -1),
-        vec3(1, 1, 0),      vec3(1, -1, 0),     vec3(-1, -1, 0),    vec3(-1, 1, 0),
-        vec3(1, 0, 1),      vec3(-1, 0, 1),     vec3(1, 0, -1),     vec3(-1, 0, -1),
-        vec3(0, 1, 1),      vec3(0, -1, 1),     vec3(0, -1, -1),    vec3(0, 1, -1));
 
 const vec4 SSVF_DITHERING[4] =
     vec4[](
@@ -44,10 +35,11 @@ uniform vec3 eyeCenter;
 uniform mat4 view;
 uniform mat4 projection;
 uniform float lightCutoffMargin;
+uniform int lightShadowSamples;
+uniform float lightShadowBias;
+uniform float lightShadowSampleScalar;
 uniform float lightShadowExponent;
 uniform float lightShadowDensity;
-uniform float lightShadowBleedFilter;
-uniform float lightShadowVarianceMin;
 uniform int ssvfEnabled;
 uniform int ssvfSteps;
 uniform float ssvfAsymmetry;
@@ -196,15 +188,19 @@ float computeShadowMapScalar(vec4 position, vec3 lightOrigin, samplerCube shadow
 {
     vec3 positionShadow = position.xyz - lightOrigin;
     float shadowZ = length(positionShadow);
-    float shadowZExp = exp(-lightShadowExponent * 0.1 * shadowZ);
-    float shadowDepthExp = 0.0;
-    for (int i = 0; i < SHADOW_SAMPLE_OFFSETS_COUNT; ++i)
+    float shadowHits = 0.0;
+    for (int i = 0; i < lightShadowSamples; ++i)
     {
-        // NOTE: we divide at each step to avoid overflow with an already large number.
-        shadowDepthExp += texture(shadowMap, positionShadow / shadowZ + SHADOW_SAMPLE_OFFSETS[i] * SHADOW_SAMPLE_SCALAR).y / SHADOW_SAMPLE_OFFSETS_COUNT;
+        for (int j = 0; j < lightShadowSamples; ++j)
+        {
+            for (int k = 0; k < lightShadowSamples; ++k)
+            {
+                vec3 offset = (vec3(i, j, k) - vec3(lightShadowSamples / 2.0)) * (lightShadowSampleScalar / lightShadowSamples);
+                shadowHits += shadowZ - lightShadowBias > texture(shadowMap, positionShadow + offset).x ? 1.0 : 0.0;
+            }
+        }
     }
-    float shadowScalar = clamp(shadowZExp * shadowDepthExp, 0.0, 1.0);
-    return pow(shadowScalar, lightShadowDensity);
+    return 1.0 - shadowHits / (lightShadowSamples * lightShadowSamples * lightShadowSamples);
 }
 
 vec3 computeFogAccumDirectional(vec4 position, int lightIndex)

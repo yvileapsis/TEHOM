@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 #I __SOURCE_DIRECTORY__
 #r "nuget: Aether.Physics2D, 2.1.0"
@@ -9,16 +9,16 @@
 #r "nuget: Twizzle.ImGuizmo.NET, 1.89.4.1"
 #r "nuget: Magick.NET-Q8-AnyCpu, 13.5.0"
 #r "nuget: Pfim, 0.11.3"
-#r "nuget: Prime, 9.32.0"
-#r "nuget: System.Configuration.ConfigurationManager, 8.0.0"
-#r "nuget: System.Drawing.Common, 8.0.0"
+#r "nuget: Prime, 10.0.0"
+#r "nuget: System.Configuration.ConfigurationManager, 9.0.0"
+#r "nuget: System.Drawing.Common, 9.0.0"
 #r "../../../Nu/Nu.Dependencies/AssimpNet/netstandard2.1/AssimpNet.dll"
 #r "../../../Nu/Nu.Dependencies/BulletSharpPInvoke/netstandard2.1/BulletSharp.dll"
 #r "../../../Nu/Nu.Dependencies/OpenGL.NET/lib/netcoreapp2.2/OpenGL.Net.dll"
 #r "../../../Nu/Nu.Dependencies/SDL2-CS/netstandard2.0/SDL2-CS.dll"
 #r "../../../Nu/Nu.Dependencies/TiledSharp/lib/netstandard2.0/TiledSharp.dll"
 #r "../../../Nu/Nu.Math/bin/Debug/netstandard2.1/Nu.Math.dll"
-#r "../../../Nu/Nu/bin/Debug/net8.0/Nu.dll"
+#r "../../../Nu/Nu/bin/Debug/net9.0/Nu.dll"
 
 open System
 open System.Text.RegularExpressions
@@ -74,7 +74,7 @@ let enumEntriesToCode entries =
 
 let generateBindingsCode codesStr =
     "// Nu Game Engine.\n" +
-    "// Copyright (C) Bryan Edds, 2013-2023.\n" +
+    "// Copyright (C) Bryan Edds.\n" +
     "\n" +
     "//*********************************************************************************************//\n" +
     "//                                                                                             //\n" +

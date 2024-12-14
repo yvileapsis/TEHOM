@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -14,11 +14,11 @@ type [<Struct>] Endianness =
     | BigEndian
 
 /// The format of a raw asset.
-type RawFormat =
+type [<Struct>] RawFormat =
     | RawUInt8
-    | RawUInt16 of Endianness
-    | RawUInt32 of Endianness
-    | RawSingle of Endianness
+    | RawUInt16 of Endianness : Endianness
+    | RawUInt32 of Endianness : Endianness
+    | RawSingle of Endianness : Endianness
 
 /// A height map for 3d terrain constructed from a raw asset.
 type [<Struct>] RawHeightMap =
@@ -32,7 +32,7 @@ type HeightMapMetadata =
       PositionsAndTexCoordses : struct (Vector3 * Vector2) array }
 
 /// A height map for terrain.
-type HeightMap =
+type [<StructuralEquality; NoComparison>] HeightMap =
     | ImageHeightMap of Image AssetTag // only supports 8-bit depth on Red channel
     | RawHeightMap of RawHeightMap
 
@@ -44,25 +44,25 @@ type HeightMap =
                 let metadata = textureData.Metadata
                 let (blockCompressed, bytes) = textureData.Bytes
                 textureData.Dispose ()
-                Some (metadata, blockCompressed, bytes)
-            | None -> None
-        | None -> None
+                ValueSome (metadata, blockCompressed, bytes)
+            | None -> ValueNone
+        | None -> ValueNone
 
     static member private tryGetRawAssetData tryGetAssetFilePath (assetTag : Raw AssetTag) =
         match tryGetAssetFilePath assetTag with
         | Some filePath ->
             try let bytes = File.ReadAllBytes filePath
-                Some bytes
+                ValueSome bytes
             with exn ->
                 Log.info ("Could not load texture '" + filePath + "' due to: " + scstring exn)
-                None
-        | None -> None
+                ValueNone
+        | None -> ValueNone
 
     static member private tryGetImageHeightMapMetadata tryGetAssetFilePath (bounds : Box3) tiles image =
 
         // attempt to load texture data
         match HeightMap.tryGetTextureData tryGetAssetFilePath image with
-        | Some (metadata, blockCompressed, bytes) ->
+        | ValueSome (metadata, blockCompressed, bytes) ->
 
             // currently only supporting height data from block-compressed files
             if not blockCompressed then
@@ -95,15 +95,15 @@ type HeightMap =
                             struct (position, texCoords)|]
 
                 // fin
-                Some { Resolution = v2i resolutionX resolutionY; HeightsNormalized = heightsNormalized; PositionsAndTexCoordses = positionsAndTexCoordses }
-            else Log.info "Block-compressed image files are unsupported for use as height maps."; None
-        | None -> None
+                ValueSome { Resolution = v2i resolutionX resolutionY; HeightsNormalized = heightsNormalized; PositionsAndTexCoordses = positionsAndTexCoordses }
+            else Log.info "Block-compressed image files are unsupported for use as height maps."; ValueNone
+        | ValueNone -> ValueNone
 
     static member private tryGetRawHeightMapMetadata tryGetAssetFilePath (bounds : Box3) tiles map =
 
         // ensure raw asset exists
         match HeightMap.tryGetRawAssetData tryGetAssetFilePath map.RawAsset with
-        | Some rawAsset ->
+        | ValueSome rawAsset ->
 
             try // read normalized heights
                 let resolutionX = map.Resolution.X
@@ -158,9 +158,9 @@ type HeightMap =
                             struct (position, texCoords)|]
 
                 // fin
-                Some { Resolution = v2i resolutionX resolutionY; HeightsNormalized = heightsNormalized; PositionsAndTexCoordses = positionsAndTexCoordses }
-            with exn -> Log.infoOnce ("Attempt to read raw height map failed with the following exception: " + exn.Message); None
-        | None -> None
+                ValueSome { Resolution = v2i resolutionX resolutionY; HeightsNormalized = heightsNormalized; PositionsAndTexCoordses = positionsAndTexCoordses }
+            with exn -> Log.infoOnce ("Attempt to read raw height map failed with the following exception: " + exn.Message); ValueNone
+        | ValueNone -> ValueNone
 
     /// Attempt to compute height map metadata, loading assets as required.
     /// NOTE: if the heightmap pixel represents a quad in the terrain geometry in the exporting program, the geometry
@@ -424,13 +424,13 @@ type [<SymbolicExpansion>] CharacterProperties =
 
 /// The properties needed to describe the physical part of a body.
 type BodyProperties =
-    { Center : Vector3
+    { Enabled : bool
+      Center : Vector3
       Rotation : Quaternion
       Scale : Vector3
       BodyType : BodyType
       BodyShape : BodyShape
       SleepingAllowed : bool
-      Enabled : bool
       Friction : single
       Restitution : single
       LinearVelocity : Vector3
@@ -724,7 +724,6 @@ type PhysicsMessage =
     | ApplyBodyTorqueMessage of ApplyBodyTorqueMessage
     | JumpBodyMessage of JumpBodyMessage
     | SetGravityMessage of Vector3
-    | ClearPhysicsMessageInternal
 
 /// Represents a physics engine in Nu.
 /// TODO: investigate if we'll ever have to handle enough physics or integration messages to necessitate the use of
@@ -752,6 +751,8 @@ type PhysicsEngine =
     abstract HandleMessage : PhysicsMessage -> unit
     /// Attempt to integrate the physics system one step.
     abstract TryIntegrate : GameTime -> IntegrationMessage SArray option
+    /// Clear the physics simulation, returning false if no physics objects existed to begin with. For internal use only.
+    abstract ClearInternal : unit -> bool
     /// Handle physics clean up by freeing all created resources.
     abstract CleanUp : unit -> unit
 
@@ -771,6 +772,7 @@ type [<ReferenceEquality>] StubPhysicsEngine =
         member physicsEngine.RayCast (_, _, _, _, _) = failwith "No bodies in StubPhysicsEngine"
         member physicsEngine.HandleMessage _ = ()
         member physicsEngine.TryIntegrate _ = None
+        member physicsEngine.ClearInternal () = false
         member physicsEngine.CleanUp () = ()
 
 [<RequireQualifiedAccess>]

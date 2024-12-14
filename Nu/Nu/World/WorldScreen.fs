@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2023.
+// Copyright (C) Bryan Edds.
 
 namespace Nu
 open System
@@ -96,8 +96,7 @@ module WorldScreenModule =
 
         /// Set an xtension property value.
         member this.Set<'a> propertyName (value : 'a) world =
-            let property = { PropertyType = typeof<'a>; PropertyValue = value }
-            World.setScreenXtensionProperty propertyName property this world |> snd'
+            World.setScreenXtensionValue<'a> propertyName value this world
 
         /// Check that a screen is in an idling state (not transitioning in nor out).
         member this.GetIdling world =
@@ -185,7 +184,7 @@ module WorldScreenModule =
             match simulants.TryGetValue (Game.Handle :> Simulant) with
             | (true, screensOpt) ->
                 match screensOpt with
-                | Some screens -> screens |> Seq.map cast<Screen>
+                | Some screens -> Seq.map cast<Screen> screens
                 | None -> Seq.empty
             | (false, _) -> Seq.empty
 
@@ -230,7 +229,7 @@ module WorldScreenModule =
                     else failwith ("Screen '" + scstring screen + "' already exists and cannot be created."); world
                 else world
             let world = World.addScreen false screenState screen world
-            let world = if WorldModule.UpdatingSimulants then WorldModule.processScreen screen world else world
+            let world = if WorldModule.UpdatingSimulants then WorldModule.tryProcessScreen screen world else world
             (screen, world)
 
         /// Create a screen from a simulant descriptor.
@@ -326,7 +325,7 @@ module WorldScreenModule =
             let world = World.readGroups screenDescriptor.GroupDescriptors screen world |> snd
 
             // attempt to process ImNui screen first time if in the middle of simulant update phase
-            let world = if WorldModule.UpdatingSimulants then WorldModule.processScreen screen world else world
+            let world = if WorldModule.UpdatingSimulants then WorldModule.tryProcessScreen screen world else world
             (screen, world)
 
         /// Read multiple screens from a game descriptor.
@@ -365,16 +364,16 @@ module WorldScreenModule =
                 | NavShape.BoundsNavShape -> Left bounds
                 | NavShape.StaticModelSurfaceNavShape ->
                     match Metadata.tryGetStaticModelMetadata staticModel with
-                    | Some physicallyBasedModel ->
+                    | ValueSome physicallyBasedModel ->
                         if surfaceIndex >= 0 && surfaceIndex < physicallyBasedModel.Surfaces.Length then
                             Right (bounds, affineMatrix, physicallyBasedModel.Surfaces.[surfaceIndex])
-                    | None -> ()
+                    | ValueNone -> ()
                 | NavShape.StaticModelNavShape ->
                     match Metadata.tryGetStaticModelMetadata staticModel with
-                    | Some physicallyBasedModel ->
+                    | ValueSome physicallyBasedModel ->
                         for surface in physicallyBasedModel.Surfaces do
                             Right (bounds, affineMatrix, surface)
-                    | None -> ()]
+                    | ValueNone -> ()]
 
         static member internal tryBuildNav3dMesh contents config =
 
