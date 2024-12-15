@@ -174,7 +174,7 @@ type [<StructuralEquality; NoComparison>] HeightMap =
 
 type VoxelChunkMetadata =
     { Resolution : Vector3i
-      PositionsAndColors : struct (Vector3i * Color) array  }
+      PositionsAndColors : struct (Vector3i * Color * Vector3) array  }
 
 /// A height map for terrain.
 type VoxelChunk =
@@ -255,6 +255,26 @@ type VoxelChunk =
                             yield struct (v3i x' y' z', color)
             |]
 
+            let voxels =
+                let mutable dict = System.Collections.Generic.Dictionary<Vector3i, Color>()
+
+                Array.iter (fun struct (key : Vector3i, value) -> dict.Add(key, value)) voxels
+
+                [|
+                    for x in 0 .. dec resolutionChunkX do
+                    for y in 0 .. dec resolutionChunkY do
+                    for z in 0 .. dec resolutionChunkZ do
+                        if dict.ContainsKey (v3i x y z) then
+                            let color = dict[v3i x y z]
+                            let dx = (if dict.ContainsKey(v3i (x + 1) y z) then 1 else 0) - (if dict.ContainsKey(v3i (x - 1) y z) then 1 else 0)
+                            let dy = (if dict.ContainsKey(v3i x (y + 1) z) then 1 else 0) - (if dict.ContainsKey(v3i x (y - 1) z) then 1 else 0)
+                            let dz = (if dict.ContainsKey(v3i x y (z + 1)) then 1 else 0) - (if dict.ContainsKey(v3i x y (z - 1)) then 1 else 0)
+                            if dx <> 0 || dy <> 0 || dz <> 0 then
+                                let normal = (- v3i dx dy dz).V3.Normalized
+                                yield struct (v3i x y z, color, normal)
+                |]
+
+
             // neightbor culling
 //                let voxels =
 //                    let map = voxels |> Map.ofArray
@@ -275,7 +295,7 @@ type VoxelChunk =
             Some { Resolution = v3i resolutionChunkX resolutionChunkY resolutionChunkZ; PositionsAndColors = voxels; }
         | None -> None
 
-    static member tryGetMetadata (tryGetAssetFilePath : AssetTag -> string option) bounds heightMap =
+    static member tryGetMetadata (tryGetAssetFilePath : AssetTag -> string option) heightMap =
         match heightMap with
         | SlicesVoxel image -> VoxelChunk.tryGetSlicesMetadata tryGetAssetFilePath image
         | RawVoxel _ -> failwithf "todo"

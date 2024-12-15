@@ -5,9 +5,11 @@ uniform mat4 view;
 uniform mat4 projection;
 uniform mat4 view_translate;
 uniform mat4 view_rotate;
+uniform vec3 eyeCenter;
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 colors;
+layout(location = 2) in vec3 normals;
 
 layout(location = 6) in mat4 model;
 layout(location = 10) in vec4 size;
@@ -15,9 +17,12 @@ layout(location = 11) in vec4 offset;
 
 out vec4 positionOut;
 out vec3 colorsOut;
+out vec3 normalsOut;
+
 out vec3 sizesOut;
 
 flat out mat4 modelViewProjectionOut;
+flat out vec3 eyeCenterOut;
 
 void main()
 {
@@ -29,10 +34,14 @@ void main()
 
     positionOut = view_translate * model * (vec4(position1, 1.0) );
 
+    vec3 viewDir = normalize(position1 - eyeCenter);
+
     colorsOut = vec3(colors);
     sizesOut = sizes;
+    normalsOut = normals;
 
     modelViewProjectionOut = projection * view * model;
+    eyeCenterOut = eyeCenter;
 
     vec4 positionNew = (projection * view_rotate) * positionOut;
 
@@ -49,9 +58,12 @@ void main()
 
     float stochasticCoverage = size * size;
 
-    if ((stochasticCoverage < 0.8) && ((gl_VertexID & 0xffff) > stochasticCoverage * (0xffff / 0.8))) {
-        // "Cull" small voxels in a stable, stochastic way by moving past the z = 0 plane.
-        // Assumes voxels are in randomized order.
+    // "Cull" small voxels in a stable, stochastic way by moving past the z = 0 plane.
+    // Assumes voxels are in randomized order.
+    bool stochasticCull = (stochasticCoverage < 0.8) && ((gl_VertexID & 0xffff) > stochasticCoverage * (0xffff / 0.8));
+    bool backfaceCull = dot(normalize(normals), viewDir) > 0.3;
+
+    if (stochasticCull || backfaceCull) {
         gl_Position = vec4(-1,-1,-1,-1);
         gl_PointSize = 1.0;
     }
@@ -72,13 +84,15 @@ uniform mat4 inv_view;
 uniform mat4 inv_projection;
 uniform vec2 viewPort;
 uniform vec4 viewPortBounds;
-uniform vec3 eyeCenter;
 
 in vec4 positionOut;
 in vec3 colorsOut;
+in vec3 normalsOut;
+
 in vec3 sizesOut;
 
 flat in mat4 modelViewProjectionOut;
+flat in vec3 eyeCenterOut;
 
 layout(location = 0) out vec4 position;
 layout(location = 1) out vec3 albedo;
@@ -130,6 +144,14 @@ void main()
     // forward position, marking w for written
     position.xyz = positionOut.xyz;
     position.w = 1.0;
+
+    vec3 normal = normalize(normalsOut);
+    vec3 arbitrary = abs(normal.x) < 0.999 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+    vec3 tangent = normalize(cross(arbitrary, normal));
+    vec3 binormal = -normalize(cross(normal, tangent));
+    mat3 toWorld = mat3(tangent, binormal, normal);
+    mat3 toTangent = transpose(toWorld);
+
 
     /*
     vec2 texCoordsOut = vec2(1.0);
@@ -188,7 +210,6 @@ void main()
     normalPlus.w = heightPlusOut.y;
 */
 
-    normalPlus = vec4(1.0);
     material = vec4(1.0);
 // gl_FragCoord, gl_PointCoord and coordinates of the point
 
@@ -207,13 +228,10 @@ void main()
     );
 
     if( !(result.x<=result.y) ) {
-
         //gl_FragDepth = 0.99;
         //out_Color = vec4(1);
-
         discard;
         return;
-
     }
 
     vec3 hit = vxl - result.x * ray;
@@ -221,22 +239,21 @@ void main()
     vec3  hit_abs = abs(hit);
     float max_dim = max( max( hit_abs.x, hit_abs.y), hit_abs.z  );
 
-    vec3 light = normalize( vec3(-1.0, 1.25, 2)  );
+    vec3 light = normalize( vec3(1.0, 1.0, 1.0)  );
 
-    vec3 normal = vec3(
+    vec3 normal1 = vec3(
         float(hit_abs.x == max_dim),
         float(hit_abs.y == max_dim),
         float(hit_abs.z == max_dim)
     ) * sign(hit);
 
-    vec3 r = -normal;
+    vec3 r = -normalsOut;
 
-    float ndotl = 0.3;
-
-    albedo = colorsOut * max( max(0.7, ndotl), sign( dot(r, light) ) );
+    albedo = colorsOut; //normal1 * sign(hit);// * max( 0.5, sign( dot(r, light) ) );
+    normalPlus = vec4(normalize(normalsOut), 1.0);
 
     // the stupidest solution, should optimize by checking the math
-    vec4 hitPos = vec4(result.x * ray + eyeCenter, 1.0);
+    vec4 hitPos = vec4(result.x * ray + eyeCenterOut, 1.0);
     vec4 hitPos2 = modelViewProjectionOut * hitPos;
 
     float test = hitPos2.z / hitPos2.w;

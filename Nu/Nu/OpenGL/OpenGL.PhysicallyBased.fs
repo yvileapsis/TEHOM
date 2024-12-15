@@ -1345,7 +1345,7 @@ module PhysicallyBased =
         geometry
 
     /// Create physically-based voxel geometry from a mesh.
-    let CreatePhysicallyBasedVoxelGeometry (renderable, primitiveType, count, vertexData : single Memory, bounds) =
+    let CreatePhysicallyBasedVoxelGeometry (renderable, primitiveType, count, vertexData : single Memory) =
 
         // make buffers
         let (vertices, indices, vertexBuffer, instanceBuffer, indexBuffer, vao) =
@@ -1362,7 +1362,8 @@ module PhysicallyBased =
                 let vertexBuffer = Gl.GenBuffer ()
                 let positionOffset =                    0 * sizeof<int>
                 let colorOffset = positionOffset +      3 * sizeof<int>
-                let vertexSize = colorOffset +          3 * sizeof<int>
+                let normalOffset = colorOffset +        3 * sizeof<int>
+                let vertexSize = normalOffset +         3 * sizeof<int>
                 Gl.BindBuffer (BufferTarget.ArrayBuffer, vertexBuffer)
                 use vertexDataHnd = vertexData.Pin () in
                     let vertexDataNint = vertexDataHnd.Pointer |> NativePtr.ofVoidPtr<int> |> NativePtr.toNativeInt
@@ -1371,6 +1372,8 @@ module PhysicallyBased =
                 Gl.VertexAttribPointer (0u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint positionOffset)
                 Gl.EnableVertexAttribArray 1u
                 Gl.VertexAttribPointer (1u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint colorOffset)
+                Gl.EnableVertexAttribArray 2u
+                Gl.VertexAttribPointer (2u, 3, VertexAttribPointerType.Float, false, vertexSize, nativeint normalOffset)
                 Hl.Assert ()
 
                 let instanceBuffer = Gl.GenBuffer ()
@@ -1430,7 +1433,7 @@ module PhysicallyBased =
 
         // make physically-based geometry
         let geometry =
-            { Bounds = bounds
+            { Bounds = Box3.Zero
               PrimitiveType = primitiveType
               ElementCount = count
               Vertices = vertices

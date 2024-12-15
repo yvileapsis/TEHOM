@@ -257,12 +257,9 @@ type TerrainDescriptor =
 /// Describes a static 3d terrain geometry.
 type VoxelGeometryDescriptor =
     { Bounds : Box3
-      Material : TerrainMaterial
-      TintImageOpt : Image AssetTag option
-      NormalImageOpt : Image AssetTag option
-      HeightMap1 : VoxelChunk
-      Segments : Vector2i
+      VoxelChunk : VoxelChunk
       Voxel : bool }
+    member this.NoBounds = { this with Bounds = Box3.Zero }
 
 /// Describes a static 3d terrain.
 type VoxelDescriptor =
@@ -278,11 +275,7 @@ type VoxelDescriptor =
 
     member this.VoxelGeometryDescriptor =
         { Bounds = this.Bounds
-          Material = this.Material
-          TintImageOpt = this.TintImageOpt
-          NormalImageOpt = this.NormalImageOpt
-          HeightMap1 = this.HeightMap1
-          Segments = this.Segments
+          VoxelChunk = this.HeightMap1
           Voxel = this.Voxel }
 
 /// An internally cached static model used to reduce GC promotion or pressure.
@@ -1651,13 +1644,12 @@ type [<ReferenceEquality>] GlRenderer3d =
 
     static member private tryCreatePhysicallyBasedVoxelGeometry (geometryDescriptor : VoxelGeometryDescriptor) renderer =
 
-        let voxelChunk = geometryDescriptor.HeightMap1
+        let voxelChunk = geometryDescriptor.VoxelChunk
 
         // attempt to compute positions and tex coords
         let heightMapMetadataOpt =
             VoxelChunk.tryGetMetadata
                 (fun assetTag -> GlRenderer3d.tryGetFilePath assetTag renderer)
-                geometryDescriptor.Bounds
                 voxelChunk
 
         // on success, continue terrain geometry generation attempt
@@ -1671,13 +1663,14 @@ type [<ReferenceEquality>] GlRenderer3d =
             // compute vertices
             let vertices =
                 [|for i in 0 .. dec positionsAndTexCoordses.Length do
-                    let struct (p, tc) = positionsAndTexCoordses[i]
+                    let struct (p, tc, normals) = positionsAndTexCoordses[i]
                     yield!
                         [|single p.X; single p.Y; single p.Z
-                          (tc.R); (tc.G); (tc.B)|]|]
+                          (tc.R); (tc.G); (tc.B)
+                          normals.X; normals.Y; normals.Z|]|]
 
             // create the actual geometry
-            let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelGeometry (true, OpenGL.PrimitiveType.Points, positionsAndTexCoordses.Length, vertices.AsMemory (), geometryDescriptor.Bounds)
+            let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelGeometry (true, OpenGL.PrimitiveType.Points, positionsAndTexCoordses.Length, vertices.AsMemory ())
             Some geometry
 
         // error
@@ -2028,8 +2021,10 @@ type [<ReferenceEquality>] GlRenderer3d =
          renderPass : RenderPass,
          renderer) =
 
-        // attempt to create terrain geometry
-        let geometryDescriptor = terrainDescriptor.VoxelGeometryDescriptor
+        // separating out bounds from geomtry since those aren't really tied now
+        let bounds = terrainDescriptor.VoxelGeometryDescriptor.Bounds
+        let geometryDescriptor = terrainDescriptor.VoxelGeometryDescriptor.NoBounds
+
         match renderer.PhysicallyBasedVoxelGeometries.TryGetValue geometryDescriptor with
         | (true, _) -> ()
         | (false, _) ->
@@ -2042,7 +2037,9 @@ type [<ReferenceEquality>] GlRenderer3d =
         if visible then
             let renderTasks = GlRenderer3d.getRenderTasks renderPass renderer
             match renderer.PhysicallyBasedVoxelGeometries.TryGetValue geometryDescriptor with
-            | (true, terrainGeometry) -> renderTasks.DeferredVoxels.Add struct (terrainDescriptor, terrainGeometry)
+            | (true, terrainGeometry) ->
+                let terrainGeometry = { terrainGeometry with Bounds = bounds }
+                renderTasks.DeferredVoxels.Add struct (terrainDescriptor, terrainGeometry)
             | (false, _) -> ()
 
         // mark terrain geometry as utilized regardless of visibility (to keep it from being destroyed).
