@@ -210,7 +210,6 @@ void main()
     normalPlus.w = heightPlusOut.y;
 */
 
-    material = vec4(1.0);
 // gl_FragCoord, gl_PointCoord and coordinates of the point
 
     // trying to make a ray from eye to fragment's 3d position, like screen2world
@@ -251,6 +250,7 @@ void main()
 
     albedo = colorsOut; //normal1 * sign(hit);// * max( 0.5, sign( dot(r, light) ) );
     normalPlus = vec4(normalize(normalsOut), 1.0);
+    material = vec4(0.25, 0.0, 0.0, 0.25);
 
     // the stupidest solution, should optimize by checking the math
     vec4 hitPos = vec4(result.x * ray + eyeCenterOut, 1.0);

@@ -33,3 +33,5 @@ module Assets =
     module Voxels =
         let PackageName = "Voxels"
         let Computer = asset<Image> PackageName "computer_u"
+        let Minecraft = asset<Image> PackageName "minecraft"
+        let Cars = asset<Image> PackageName "cars"

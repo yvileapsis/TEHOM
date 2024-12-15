@@ -230,58 +230,52 @@ type GameplayDispatcher () =
     override this.Content (gameplay, screen) = [
         // the scene group while playing
 
-        Content.group Simulants.GameplayScene.Name [] [
 
-            for i in List.init 625 id do
-                ContentEx.voxel $"VoxelTest{i}" [
-                    Entity.VoxelChunk == (SlicesVoxel Assets.Voxels.Computer)
-                    Entity.Position == v3 (single (i / 25) * 8f) 4f (single (i % 25) * 8f)
-                    Entity.Size == v3 8f 8f 8f
+        if gameplay.GameplayState = Playing then
+            Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] [
+                Content.staticModel "StaticModel" [
+                    Entity.Position == v3 0.0f 3.0f -2.0f
+                    Entity.Rotation :=
+                        Quaternion.CreateFromAxisAngle ((v3 1.0f 0.75f 0.5f).Normalized, gameplay.GameplayTime % 360L |> single |> Math.DegreesToRadians)
                 ]
+
+                Content.entity<PlayerDispatcher> Simulants.GameplayPlayer.Name [
+                    Entity.Persistent == false
+                    Entity.DieEvent => Die Simulants.GameplayPlayer
+                ]
+
+                for i in List.init 1 id do
+                    ContentEx.voxel $"VoxelTest{i}" [
+                        Entity.VoxelChunk == (SlicesVoxel Assets.Voxels.Cars)
+                        Entity.Position == v3 (single (i / 25) * 8f) 4f (single (i % 25) * 8f)
+                        Entity.Size == v3 8f 8f 8f
+                    ]
+            ]
+
+         // the gui group
+        Content.group Simulants.GameplayGui.Name [] [
+            // quit
+            Content.button Simulants.GameplayQuit.Name [
+                Entity.Position == v3 232.0f -144.0f 0.0f
+                Entity.Text == "Quit"
+                Entity.ClickEvent => StartQuitting
+            ]
+
+            Content.staticModel Simulants.GameplayMarker.Name [
+                Entity.Position := match gameplay.SelectedPosition with | Some pos -> pos | None -> v3 0f 10f 0f
+                Entity.Scale == v3 0.5f 0.5f 0.5f
+                Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = ValueSome Color.Red }
+                Entity.BodyShape == (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
+                Entity.StaticModel == Assets.Default.BallModel
+            ]
+
         ]
 
-        if false then
+        Content.group Simulants.GameplayManagers.Name [] [
 
-            if gameplay.GameplayState = Playing then
-                Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] [
-                    Content.staticModel "StaticModel" [
-                        Entity.Position == v3 0.0f 3.0f -2.0f
-                        Entity.Rotation :=
-                            Quaternion.CreateFromAxisAngle ((v3 1.0f 0.75f 0.5f).Normalized, gameplay.GameplayTime % 360L |> single |> Math.DegreesToRadians)
-                    ]
-
-                    Content.entity<PlayerDispatcher> Simulants.GameplayPlayer.Name [
-                        Entity.Persistent == false
-                        Entity.DieEvent => Die Simulants.GameplayPlayer
-                    ]
-
-
-                ]
-
-             // the gui group
-            Content.group Simulants.GameplayGui.Name [] [
-                // quit
-                Content.button Simulants.GameplayQuit.Name [
-                    Entity.Position == v3 232.0f -144.0f 0.0f
-                    Entity.Text == "Quit"
-                    Entity.ClickEvent => StartQuitting
-                ]
-
-                Content.staticModel Simulants.GameplayMarker.Name [
-                    Entity.Position := match gameplay.SelectedPosition with | Some pos -> pos | None -> v3 0f 10f 0f
-                    Entity.Scale == v3 0.5f 0.5f 0.5f
-                    Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = ValueSome Color.Red }
-                    Entity.BodyShape == (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
-                    Entity.StaticModel == Assets.Default.BallModel
-                ]
-
-            ]
-
-            Content.group Simulants.GameplayManagers.Name [] [
-
-                Content.entity<CameraManagerDispatcher> Simulants.GameplayCameraManager.Name []
-                Content.entity<SelectionManagerDispatcher> Simulants.GameplaySelectionManager.Name []
-                Content.entity<CursorManagerDispatcher> Simulants.GameplayCursorManager.Name  []
-            ]
+            Content.entity<CameraManagerDispatcher> Simulants.GameplayCameraManager.Name []
+            Content.entity<SelectionManagerDispatcher> Simulants.GameplaySelectionManager.Name []
+            Content.entity<CursorManagerDispatcher> Simulants.GameplayCursorManager.Name  []
+        ]
 
     ]
