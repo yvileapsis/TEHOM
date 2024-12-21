@@ -3861,6 +3861,8 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         member renderer.Render frustumInterior frustumExterior frustumImposter lightBox eyeCenter eyeRotation windowSize renderMessages =
             OpenGL.Hl.ResetDrawCalls ()
+            OpenGL.Hl.ResetDrawVoxel ()
+
             if renderMessages.Count > 0 then
                 GlRenderer3d.render frustumInterior frustumExterior frustumImposter lightBox eyeCenter eyeRotation windowSize 0u 0u renderMessages renderer
 

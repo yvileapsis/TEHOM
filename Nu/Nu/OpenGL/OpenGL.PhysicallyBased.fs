@@ -3015,6 +3015,8 @@ module PhysicallyBased =
         // draw geometry
         Gl.DrawArrays (geometry.PrimitiveType, 0, elementsCount)
         Hl.ReportDrawCall 1
+        Hl.ReportDrawVoxel elementsCount
+
         Hl.Assert ()
 
         // teardown geometry

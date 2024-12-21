@@ -435,23 +435,41 @@ type VoxelFacet () =
         *)
 
     override this.Render (renderPass, entity, world) =
-        let mutable transform = entity.GetTransform world
-        let terrainDescriptor =
-            { Bounds = transform.Bounds3d
-              InsetOpt = entity.GetInsetOpt world
-              MaterialProperties = entity.GetTerrainMaterialProperties world
-              Material = entity.GetTerrainMaterial world
-              TintImageOpt = entity.GetTintImageOpt world
-              NormalImageOpt = entity.GetNormalImageOpt world
-              VoxelChunk = entity.GetVoxelChunk world
-              Segments = entity.GetSegments world
-              Voxel = true }
-        World.enqueueRenderMessage3d
-            (RenderVoxel
-                { Visible = transform.Visible
-                  VoxelDescriptor = terrainDescriptor
-                  RenderPass = renderPass })
-            world
+
+        // compute intersection function based on render pass
+        let intersects =
+            let interiorOpt = ValueSome (World.getGameEye3dFrustumInterior Game world)
+            let exterior = World.getGameEye3dFrustumExterior Game world
+            let imposter = World.getGameEye3dFrustumImposter Game world
+            let lightBoxOpt = ValueSome (World.getLight3dBox world)
+            fun probe light presence bounds ->
+                match renderPass with
+                | NormalPass -> Presence.intersects3d interiorOpt exterior imposter lightBoxOpt probe light presence bounds
+                | LightMapPass (_, lightMapBounds) -> not probe && not light && lightMapBounds.Intersects bounds
+                | ShadowPass (_, _, _, frustum) -> not probe && not light && frustum.Intersects bounds
+                | ReflectionPass (_, _) -> false
+
+        // render unculled surfaces
+        let bounds = entity.GetBounds world
+        if intersects false false Exterior bounds then
+
+            let mutable transform = entity.GetTransform world
+            let terrainDescriptor =
+                { Bounds = transform.Bounds3d
+                  InsetOpt = entity.GetInsetOpt world
+                  MaterialProperties = entity.GetTerrainMaterialProperties world
+                  Material = entity.GetTerrainMaterial world
+                  TintImageOpt = entity.GetTintImageOpt world
+                  NormalImageOpt = entity.GetNormalImageOpt world
+                  VoxelChunk = entity.GetVoxelChunk world
+                  Segments = entity.GetSegments world
+                  Voxel = true }
+            World.enqueueRenderMessage3d
+                (RenderVoxel
+                    { Visible = transform.Visible
+                      VoxelDescriptor = terrainDescriptor
+                      RenderPass = renderPass })
+                world
 
 /// Gives an entity the base behavior of a rigid 3d terrain.
 type VoxelDispatcher () =

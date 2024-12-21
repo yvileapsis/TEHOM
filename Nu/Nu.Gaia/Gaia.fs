@@ -3059,6 +3059,11 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 ImGui.SameLine ()
                 ImGui.Text (string (OpenGL.Hl.GetDrawInstanceCount ()))
 
+                // draw voxel count
+                ImGui.Text "Voxel Count:"
+                ImGui.SameLine ()
+                ImGui.Text (string (OpenGL.Hl.GetDrawVoxelCount ()))
+
                 // frame timing plot
                 GcTimings.Enqueue (single world.Timers.GcFrameTime.TotalMilliseconds)
                 GcTimings.Dequeue () |> ignore<single>

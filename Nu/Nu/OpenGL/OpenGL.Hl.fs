@@ -23,6 +23,7 @@ module Hl =
     let mutable private DrawReportLock = obj ()
     let mutable private DrawCallCount = 0
     let mutable private DrawInstanceCount = 0
+    let mutable private DrawVoxelCount = 0
 
     /// Initialize OpenGL assertion mechanism.
     let InitAssert enabled =
@@ -206,3 +207,17 @@ module Hl =
     /// Get the running number of draw calls.
     let GetDrawInstanceCount () =
         lock DrawReportLock (fun () -> DrawInstanceCount)
+
+    /// Report the fact that a call to draw voxels has just been made with the given number of voxels.
+    let ReportDrawVoxel voxelCount =
+        lock DrawReportLock (fun () ->
+            DrawVoxelCount <- DrawVoxelCount + voxelCount)
+
+    /// Reset the running number of drawn voxels.
+    let ResetDrawVoxel () =
+        lock DrawReportLock (fun () ->
+            DrawVoxelCount <- 0)
+
+    /// Get the running number of drawn voxels.
+    let GetDrawVoxelCount () =
+        lock DrawReportLock (fun () -> DrawVoxelCount)

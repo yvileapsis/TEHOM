@@ -244,7 +244,7 @@ type GameplayDispatcher () =
                     Entity.DieEvent => Die Simulants.GameplayPlayer
                 ]
 
-                for i in List.init 1 id do
+                for i in List.init 625 id do
                     ContentEx.voxel $"VoxelTest{i}" [
                         Entity.VoxelChunk == (SlicesVoxel Assets.Voxels.Minecraft)
                         Entity.Position == v3 (single (i / 25) * 8f) 4f (single (i % 25) * 8f)
