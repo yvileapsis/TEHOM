@@ -1,0 +1,304 @@
+[GroupDispatcher
+ [[Model ["Microsoft.FSharp.Core.Unit, FSharp.Core, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" []]]
+  [Name Scene]
+  [Persistent True]
+  [Visible True]]
+ [[SkyBoxDispatcher
+   [[Absolute True] [Name SkyBox] [Presence Omnipresent] [Static True]]
+   []]
+  [Light3dDispatcher
+   [[LightCutoff 8]
+    [LightType DirectionalLight]
+    [Name Light3d]
+    [Position [0 2.5 0]]
+    [Presence Omnipresent]
+    [Size [0.25 0.25 0.25]]
+    [Static True]]
+   []]
+  [Nav3dConfigDispatcher
+   [[Name Nav3dConfig]
+    [Size [0 0 0]]]
+   []]
+  [Entity3dDispatcher
+   [[Name Platform]]
+   [[Block3dDispatcher
+     [[MountOpt [Some ^]]
+      [Name Block3d]
+      [NavShape StaticModelNavShape]
+      [PropagatedDescriptorOpt
+       [Some
+        [Block3dDispatcher
+         [[MountOpt [Some ^]]
+          [Name Block3d]
+          [NavShape StaticModelNavShape]
+          [Scale [4 0.1 4]]
+          [ScaleLocal [4 0.1 4]]
+          [Static True]]
+         []]]]
+      [Scale [4 0.1 4]]
+      [ScaleLocal [4 0.1 4]]
+      [Static True]]
+     []]
+    [Block3dDispatcher
+     [[MountOpt [Some ^]]
+      [Name Block3d-0005]
+      [NavShape StaticModelNavShape]
+      [Position [4 0 0]]
+      [PositionLocal [4 0 0]]
+      [PropagationSourceOpt [Some Game/Gameplay/Scene/Platform/Block3d]]
+      [Scale [4 0.1 4]]
+      [ScaleLocal [4 0.1 4]]
+      [Static True]]
+     []]
+    [Block3dDispatcher
+     [[MountOpt [Some ^]]
+      [Name Block3d-0006]
+      [NavShape StaticModelNavShape]
+      [Position [4 0 4]]
+      [PositionLocal [4 0 4]]
+      [PropagationSourceOpt [Some Game/Gameplay/Scene/Platform/Block3d]]
+      [Scale [4 0.1 4]]
+      [ScaleLocal [4 0.1 4]]
+      [Static True]]
+     []]
+    [Block3dDispatcher
+     [[MountOpt [Some ^]]
+      [Name Block3d-0009]
+      [NavShape StaticModelNavShape]
+      [Position [0 0 4]]
+      [PositionLocal [0 0 4]]
+      [PropagationSourceOpt [Some Game/Gameplay/Scene/Platform/Block3d]]
+      [Scale [4 0.1 4]]
+      [ScaleLocal [4 0.1 4]]
+      [Static True]]
+     []]
+    [Block3dDispatcher
+     [[MountOpt [Some ^]]
+      [Name Block3d-0010]
+      [NavShape StaticModelNavShape]
+      [Position [-4 0 4]]
+      [PositionLocal [-4 0 4]]
+      [PropagationSourceOpt [Some Game/Gameplay/Scene/Platform/Block3d]]
+      [Scale [4 0.1 4]]
+      [ScaleLocal [4 0.1 4]]
+      [Static True]]
+     []]
+    [Block3dDispatcher
+     [[MountOpt [Some ^]]
+      [Name Block3d-0011]
+      [NavShape StaticModelNavShape]
+      [Position [-4 0 0]]
+      [PositionLocal [-4 0 0]]
+      [PropagationSourceOpt [Some Game/Gameplay/Scene/Platform/Block3d]]
+      [Scale [4 0.1 4]]
+      [ScaleLocal [4 0.1 4]]
+      [Static True]]
+     []]
+    [Block3dDispatcher
+     [[MountOpt [Some ^]]
+      [Name Block3d-0012]
+      [NavShape StaticModelNavShape]
+      [Position [-4 0 -4]]
+      [PositionLocal [-4 0 -4]]
+      [PropagationSourceOpt [Some Game/Gameplay/Scene/Platform/Block3d]]
+      [Scale [4 0.1 4]]
+      [ScaleLocal [4 0.1 4]]
+      [Static True]]
+     []]
+    [Block3dDispatcher
+     [[MountOpt [Some ^]]
+      [Name Block3d-0013]
+      [NavShape StaticModelNavShape]
+      [Position [0 0 -4]]
+      [PositionLocal [0 0 -4]]
+      [PropagationSourceOpt [Some Game/Gameplay/Scene/Platform/Block3d]]
+      [Scale [4 0.1 4]]
+      [ScaleLocal [4 0.1 4]]
+      [Static True]]
+     []]
+    [Block3dDispatcher
+     [[MountOpt [Some ^]]
+      [Name Block3d-0014]
+      [NavShape StaticModelNavShape]
+      [Position [4 0 -4]]
+      [PositionLocal [4 0 -4]]
+      [PropagationSourceOpt [Some Game/Gameplay/Scene/Platform/Block3d]]
+      [Scale [4 0.1 4]]
+      [ScaleLocal [4 0.1 4]]
+      [Static True]]
+     []]]]
+  [EnemyDispatcher
+   [[BodyShape
+     [CapsuleShape
+      [1
+       0.35
+       [Some
+        [[0 0.85 0] [0 0 0 1] [1 1 1]]]
+       None]]]
+    [BodyType KinematicCharacter]
+    [CharacterProperties
+     [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
+    [Model
+     ["MyGame.Character, RTS, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+      [[CharacterType Enemy]
+       [PositionPrevious []]
+       [RotationPrevious []]
+       [LinearVelocityPrevious []]
+       [AngularVelocityPrevious []]
+       [HitPoints 3]
+       [ActionState NormalState]
+       [JumpState [0 0]]
+       [CharacterCollisions []]
+       [WeaponCollisions []]
+       [WalkSpeed 0.05]
+       [TurnSpeed 0.05]
+       [JumpSpeed 5]
+       [WeaponModel [Gameplay GreatSword]]
+       [Selected False]]]]
+    [Name Enemy-0001]
+    [Observable True]
+    [Offset [0 1 0]]
+    [Position [-4 0 0]]
+    [PropagatedDescriptorOpt
+     [Some
+      [EnemyDispatcher
+       [[BodyShape
+         [CapsuleShape
+          [1
+           0.35
+           [Some
+            [[0 0.85 0] [0 0 0 1] [1 1 1]]]
+           None]]]
+        [BodyType KinematicCharacter]
+        [CharacterProperties
+         [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
+        [Model
+         ["MyGame.Character, RTS, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+          [[CharacterType Enemy]
+           [PositionPrevious []]
+           [RotationPrevious []]
+           [LinearVelocityPrevious []]
+           [AngularVelocityPrevious []]
+           [HitPoints 3]
+           [ActionState NormalState]
+           [JumpState [0 0]]
+           [CharacterCollisions []]
+           [WeaponCollisions []]
+           [WalkSpeed 0.05]
+           [TurnSpeed 0.05]
+           [JumpSpeed 5]
+           [WeaponModel [Gameplay GreatSword]]
+           [Selected False]]]]
+        [Name Enemy-0001]
+        [Observable True]
+        [Offset [0 1 0]]
+        [Position [-4 0 0]]
+        [Size [2 2 2]]]
+       []]]]
+    [Size [2 2 2]]]
+   []]
+  [EnemyDispatcher
+   [[BodyShape
+     [CapsuleShape
+      [1
+       0.35
+       [Some
+        [[0 0.85 0] [0 0 0 1] [1 1 1]]]
+       None]]]
+    [BodyType KinematicCharacter]
+    [CharacterProperties
+     [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
+    [Model
+     ["MyGame.Character, RTS, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+      [[CharacterType Enemy]
+       [PositionPrevious []]
+       [RotationPrevious []]
+       [LinearVelocityPrevious []]
+       [AngularVelocityPrevious []]
+       [HitPoints 3]
+       [ActionState NormalState]
+       [JumpState [0 0]]
+       [CharacterCollisions []]
+       [WeaponCollisions []]
+       [WalkSpeed 0.05]
+       [TurnSpeed 0.05]
+       [JumpSpeed 5]
+       [WeaponModel [Gameplay GreatSword]]
+       [Selected False]]]]
+    [Name Enemy-0002]
+    [Observable True]
+    [Offset [0 1 0]]
+    [Position [-4.93 0 0]]
+    [PropagationSourceOpt [Some Game/Gameplay/Scene/Enemy-0001]]
+    [Size [2 2 2]]]
+   []]
+  [EnemyDispatcher
+   [[BodyShape
+     [CapsuleShape
+      [1
+       0.35
+       [Some
+        [[0 0.85 0] [0 0 0 1] [1 1 1]]]
+       None]]]
+    [BodyType KinematicCharacter]
+    [CharacterProperties
+     [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
+    [Model
+     ["MyGame.Character, RTS, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+      [[CharacterType Enemy]
+       [PositionPrevious []]
+       [RotationPrevious []]
+       [LinearVelocityPrevious []]
+       [AngularVelocityPrevious []]
+       [HitPoints 3]
+       [ActionState NormalState]
+       [JumpState [0 0]]
+       [CharacterCollisions []]
+       [WeaponCollisions []]
+       [WalkSpeed 0.05]
+       [TurnSpeed 0.05]
+       [JumpSpeed 5]
+       [WeaponModel [Gameplay GreatSword]]
+       [Selected False]]]]
+    [Name Enemy-0003]
+    [Observable True]
+    [Offset [0 1 0]]
+    [Position [-4.93 0 0.94]]
+    [PropagationSourceOpt [Some Game/Gameplay/Scene/Enemy-0001]]
+    [Size [2 2 2]]]
+   []]
+  [EnemyDispatcher
+   [[BodyShape
+     [CapsuleShape
+      [1
+       0.35
+       [Some
+        [[0 0.85 0] [0 0 0 1] [1 1 1]]]
+       None]]]
+    [BodyType KinematicCharacter]
+    [CharacterProperties
+     [[StepHeight 0.3] [SlopeMax 0.7853982] [PenetrationDepthMax 0.1]]]
+    [Model
+     ["MyGame.Character, RTS, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+      [[CharacterType Enemy]
+       [PositionPrevious []]
+       [RotationPrevious []]
+       [LinearVelocityPrevious []]
+       [AngularVelocityPrevious []]
+       [HitPoints 3]
+       [ActionState NormalState]
+       [JumpState [0 0]]
+       [CharacterCollisions []]
+       [WeaponCollisions []]
+       [WalkSpeed 0.05]
+       [TurnSpeed 0.05]
+       [JumpSpeed 5]
+       [WeaponModel [Gameplay GreatSword]]
+       [Selected False]]]]
+    [Name Enemy-0004]
+    [Observable True]
+    [Offset [0 1 0]]
+    [Position [-3.91 0 0.94]]
+    [PropagationSourceOpt [Some Game/Gameplay/Scene/Enemy-0001]]
+    [Size [2 2 2]]]
+   []]]]
