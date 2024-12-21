@@ -229,6 +229,8 @@ type GameplayDispatcher () =
     // here we describe the content of the game including the hud, the scene, and the player
     override this.Content (gameplay, screen) = [
         // the scene group while playing
+
+
         if gameplay.GameplayState = Playing then
             Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] [
                 Content.staticModel "StaticModel" [
@@ -241,7 +243,6 @@ type GameplayDispatcher () =
                     Entity.Persistent == false
                     Entity.DieEvent => Die Simulants.GameplayPlayer
                 ]
-
             ]
 
          // the gui group

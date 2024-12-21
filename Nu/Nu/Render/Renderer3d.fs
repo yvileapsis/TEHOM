@@ -254,6 +254,25 @@ type TerrainDescriptor =
           HeightMap = this.HeightMap
           Segments = this.Segments }
 
+/// Describes a static 3d terrain geometry.
+type VoxelGeometryDescriptor =
+    { VoxelChunk : VoxelChunk }
+
+/// Describes a static 3d terrain.
+type VoxelDescriptor =
+    { Bounds : Box3
+      InsetOpt : Box2 option
+      MaterialProperties : TerrainMaterialProperties
+      Material : TerrainMaterial
+      TintImageOpt : Image AssetTag option
+      NormalImageOpt : Image AssetTag option
+      VoxelChunk : VoxelChunk
+      Segments : Vector2i
+      Voxel : bool }
+
+    member this.VoxelGeometryDescriptor =
+        { VoxelChunk = this.VoxelChunk }
+
 /// An internally cached static model used to reduce GC promotion or pressure.
 type CachedStaticModelMessage =
     { mutable CachedStaticModelMatrix : Matrix4x4
@@ -440,6 +459,11 @@ type RenderTerrain =
       TerrainDescriptor : TerrainDescriptor
       RenderPass : RenderPass }
 
+type RenderVoxel =
+    { Visible : bool
+      VoxelDescriptor : VoxelDescriptor
+      RenderPass : RenderPass }
+
 /// Configures 3d lighting and ssao.
 type [<SymbolicExpansion>] Lighting3dConfig =
     { LightCutoffMargin : single
@@ -543,6 +567,7 @@ type RenderMessage3d =
     | RenderAnimatedModels of RenderAnimatedModels
     | RenderCachedAnimatedModel of CachedAnimatedModelMessage
     | RenderTerrain of RenderTerrain
+    | RenderVoxel of RenderVoxel
     | ConfigureLighting3d of Lighting3dConfig
     | ConfigureRenderer3d of Renderer3dConfig
     | LoadRenderPackage3d of string
@@ -744,6 +769,7 @@ type [<ReferenceEquality>] private RenderTasks =
       DeferredStatic : Dictionary<OpenGL.PhysicallyBased.PhysicallyBasedSurface, struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties) List>
       DeferredAnimated : Dictionary<AnimatedModelSurfaceKey, struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties) List>
       DeferredTerrains : struct (TerrainDescriptor * OpenGL.PhysicallyBased.PhysicallyBasedGeometry) List
+      DeferredVoxels : struct (VoxelDescriptor * OpenGL.PhysicallyBased.PhysicallyBasedGeometry) List
       ForwardStatic : struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) List
       ForwardStaticSorted : struct (Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface) List
       DeferredStaticRemovals : OpenGL.PhysicallyBased.PhysicallyBasedSurface List
@@ -759,6 +785,7 @@ type [<ReferenceEquality>] private RenderTasks =
         this.DeferredStatic.Count > 0 ||
         this.DeferredAnimated.Count > 0 ||
         this.DeferredTerrains.Count > 0 ||
+        this.DeferredVoxels.Count > 0 ||
         this.ForwardStatic.Count > 0
 
     static member make () =
@@ -770,6 +797,7 @@ type [<ReferenceEquality>] private RenderTasks =
           DeferredStatic = dictPlus OpenGL.PhysicallyBased.PhysicallyBasedSurfaceFns.comparer []
           DeferredAnimated = dictPlus AnimatedModelSurfaceKey.comparer []
           DeferredTerrains = List ()
+          DeferredVoxels = List ()
           ForwardStatic = List ()
           ForwardStaticSorted = List ()
           DeferredStaticRemovals = List ()
@@ -802,6 +830,7 @@ type [<ReferenceEquality>] private RenderTasks =
 
         renderTasks.ForwardStaticSorted.Clear ()
         renderTasks.DeferredTerrains.Clear ()
+        renderTasks.DeferredVoxels.Clear ()
 
         renderTasks.ShadowBufferIndexOpt <- None
 
@@ -876,9 +905,11 @@ type [<ReferenceEquality>] GlRenderer3d =
           PhysicallyBasedShadowTerrainPointShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredTerrainShader
           PhysicallyBasedShadowTerrainSpotShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredTerrainShader
           PhysicallyBasedShadowTerrainDirectionalShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredTerrainShader
+          PhysicallyBasedShadowVoxelShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredVoxelShader
           PhysicallyBasedDeferredStaticShader : OpenGL.PhysicallyBased.PhysicallyBasedShader
           PhysicallyBasedDeferredAnimatedShader : OpenGL.PhysicallyBased.PhysicallyBasedShader
           PhysicallyBasedDeferredTerrainShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredTerrainShader
+          PhysicallyBasedDeferredVoxelShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredVoxelShader
           PhysicallyBasedDeferredLightMappingShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredLightMappingShader
           PhysicallyBasedDeferredAmbientShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredAmbientShader
           PhysicallyBasedDeferredIrradianceShader : OpenGL.PhysicallyBased.PhysicallyBasedDeferredIrradianceShader
@@ -910,6 +941,8 @@ type [<ReferenceEquality>] GlRenderer3d =
           PhysicallyBasedQuad : OpenGL.PhysicallyBased.PhysicallyBasedGeometry
           PhysicallyBasedTerrainGeometries : Dictionary<TerrainGeometryDescriptor, OpenGL.PhysicallyBased.PhysicallyBasedGeometry>
           PhysicallyBasedTerrainGeometriesUtilized : TerrainGeometryDescriptor HashSet
+          PhysicallyBasedVoxelGeometries : Dictionary<VoxelGeometryDescriptor, OpenGL.PhysicallyBased.PhysicallyBasedGeometry>
+          PhysicallyBasedVoxelGeometriesUtilized : VoxelGeometryDescriptor HashSet
           CubeMap : OpenGL.Texture.Texture
           WhiteTexture : OpenGL.Texture.Texture
           BlackTexture : OpenGL.Texture.Texture
@@ -1282,6 +1315,19 @@ type [<ReferenceEquality>] GlRenderer3d =
             | ValueNone -> None
         | RawHeightMap map -> Some (map.Resolution.X, map.Resolution.Y)
 
+    static member private tryGetVoxelResolution heightMap renderer =
+        match heightMap with
+        | SlicesVoxel image ->
+            match GlRenderer3d.tryGetRenderAsset image renderer with
+            | ValueSome renderAsset ->
+                match renderAsset with
+                | TextureAsset texture ->
+                    let metadata = texture.TextureMetadata
+                    Some (VoxelChunk.getSliceResolution metadata.TextureWidth metadata.TextureHeight)
+                | _ -> None
+            | ValueNone -> None
+        | RawVoxel map -> Some (256)
+
     static member private tryDestroyUserDefinedStaticModel assetTag renderer =
 
         // ensure target package is loaded if possible
@@ -1429,6 +1475,28 @@ type [<ReferenceEquality>] GlRenderer3d =
                     normal
                 else v3Up|]
 
+    static member private createPhysicallyBasedVoxelNormals (resolution : Vector3i) (positionsAndTexCoordses : struct (Vector3 * Vector4) array) =
+        [|for y in 0 .. dec resolution.Y do
+            for x in 0 .. dec resolution.X do
+                if x > 0 && y > 0 && x < dec resolution.X && y < dec resolution.Y then
+                    let v  = fst' positionsAndTexCoordses.[resolution.X * y + x]
+                    let n  = fst' positionsAndTexCoordses.[resolution.X * dec y + x]
+                    let ne = fst' positionsAndTexCoordses.[resolution.X * dec y + inc x]
+                    let e  = fst' positionsAndTexCoordses.[resolution.X * y + inc x]
+                    let s  = fst' positionsAndTexCoordses.[resolution.X * inc y + x]
+                    let sw = fst' positionsAndTexCoordses.[resolution.X * inc y + dec x]
+                    let w  = fst' positionsAndTexCoordses.[resolution.X * y + dec x]
+                    let normalSum =
+                        Vector3.Cross (ne - v, n - v) +
+                        Vector3.Cross (e - v,  ne - v) +
+                        Vector3.Cross (s - v,  e - v) +
+                        Vector3.Cross (sw - v, s - v) +
+                        Vector3.Cross (w - v,  sw - v) +
+                        Vector3.Cross (n - v,  w - v)
+                    let normal = normalSum.Normalized
+                    normal
+                else v3Up|]
+
     static member private tryCreatePhysicallyBasedTerrainGeometry (geometryDescriptor : TerrainGeometryDescriptor) renderer =
 
         // attempt to compute positions and tex coords
@@ -1549,7 +1617,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                               s.[i,0]; s.[i,1]; s.[i,2]; s.[i,3]; s.[i,4]; s.[i,5]; s.[i,6]; s.[i,7]|]|]
 
                 // compute indices, splitting quad along the standard orientation (as used by World Creator, AFAIK).
-                let indices = 
+                let indices =
                     [|for y in 0 .. dec resolution.Y - 1 do
                         for x in 0 .. dec resolution.X - 1 do
                             yield resolution.X * y + x
@@ -1568,6 +1636,41 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // error
         | ValueNone -> None
+
+    static member private tryCreatePhysicallyBasedVoxelGeometry (geometryDescriptor : VoxelGeometryDescriptor) renderer =
+
+        let voxelChunk = geometryDescriptor.VoxelChunk
+
+        // attempt to compute positions and tex coords
+        let voxelChunkMetadataOption =
+            VoxelChunk.tryGetMetadata
+                (fun assetTag -> GlRenderer3d.tryGetFilePath assetTag renderer)
+                voxelChunk
+
+        // on success, continue terrain geometry generation attempt
+        match voxelChunkMetadataOption with
+        | Some voxelChunkMetadata ->
+
+            // compute normals
+            let resolution = voxelChunkMetadata.Resolution
+            let positionsAndTexCoordses = voxelChunkMetadata.PositionsAndColors
+
+            // compute vertices
+            let vertices =
+                [|for i in 0 .. dec positionsAndTexCoordses.Length do
+                    let struct (p, tc, normals) = positionsAndTexCoordses[i]
+                    yield!
+                        [|single p.X; single p.Y; single p.Z
+                          tc.R; tc.G; tc.B
+                          normals.X; normals.Y; normals.Z|]|]
+
+            // create the actual geometry
+            let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelGeometry (true, OpenGL.PrimitiveType.Points, positionsAndTexCoordses.Length, vertices.AsMemory ())
+            Some geometry
+
+        // error
+        | None -> None
+
 
     static member private handleLoadRenderPackage hintPackageName renderer =
         GlRenderer3d.tryLoadRenderPackage hintPackageName renderer
@@ -1907,6 +2010,36 @@ type [<ReferenceEquality>] GlRenderer3d =
         // mark terrain geometry as utilized regardless of visibility (to keep it from being destroyed).
         renderer.PhysicallyBasedTerrainGeometriesUtilized.Add geometryDescriptor |> ignore<bool>
 
+    static member private categorizeVoxel
+        (visible : bool,
+         terrainDescriptor : VoxelDescriptor,
+         renderPass : RenderPass,
+         renderer) =
+
+        // separating out bounds from geomtry since those aren't really tied now
+        let bounds = terrainDescriptor.Bounds
+        let geometryDescriptor = terrainDescriptor.VoxelGeometryDescriptor
+
+        match renderer.PhysicallyBasedVoxelGeometries.TryGetValue geometryDescriptor with
+        | (true, _) -> ()
+        | (false, _) ->
+            match GlRenderer3d.tryCreatePhysicallyBasedVoxelGeometry geometryDescriptor renderer with
+            | Some geometry -> renderer.PhysicallyBasedVoxelGeometries.Add (geometryDescriptor, geometry)
+            | None -> ()
+
+        // attempt to add terrain to appropriate render list when visible
+        // TODO: also add found geometry to render list so it doesn't have to be looked up redundantly?
+        if visible then
+            let renderTasks = GlRenderer3d.getRenderTasks renderPass renderer
+            match renderer.PhysicallyBasedVoxelGeometries.TryGetValue geometryDescriptor with
+            | (true, terrainGeometry) ->
+                let terrainGeometry = { terrainGeometry with Bounds = bounds }
+                renderTasks.DeferredVoxels.Add struct (terrainDescriptor, terrainGeometry)
+            | (false, _) -> ()
+
+        // mark terrain geometry as utilized regardless of visibility (to keep it from being destroyed).
+        renderer.PhysicallyBasedVoxelGeometriesUtilized.Add geometryDescriptor |> ignore<bool>
+
     static member private getLastSkyBoxOpt renderPass renderer =
         let renderTasks = GlRenderer3d.getRenderTasks renderPass renderer
         match Seq.tryLast renderTasks.SkyBoxes with
@@ -2158,6 +2291,47 @@ type [<ReferenceEquality>] GlRenderer3d =
              instanceFields, lightShadowSamples, lightShadowBias, lightShadowSampleScalar, lightShadowExponent, lightShadowDensity, elementsCount, materials, geometry, shader)
         OpenGL.Hl.Assert ()
 
+    static member private renderPhysicallyBasedVoxel viewArray viewRotationArray viewTranslationArray geometryProjectionArray invViewArray invProjectionArray viewPort viewPortBounds eyeCenter (lightType : LightType) lightShadowExponent lightShadowDensity terrainDescriptor geometry shader renderer =
+
+        let resolution = Option.defaultValue (0) (GlRenderer3d.tryGetVoxelResolution terrainDescriptor.VoxelChunk renderer)
+
+        let terrainMaterialProperties = terrainDescriptor.MaterialProperties
+        let materialProperties : OpenGL.PhysicallyBased.PhysicallyBasedMaterialProperties =
+            { Albedo = Option.defaultValue Constants.Render.AlbedoDefault terrainMaterialProperties.AlbedoOpt
+              Roughness = Option.defaultValue Constants.Render.RoughnessDefault terrainMaterialProperties.RoughnessOpt
+              Metallic = Constants.Render.MetallicDefault
+              AmbientOcclusion = Option.defaultValue Constants.Render.AmbientOcclusionDefault terrainMaterialProperties.AmbientOcclusionOpt
+              Emission = Constants.Render.EmissionDefault
+              Height = Option.defaultValue Constants.Render.HeightDefault terrainMaterialProperties.HeightOpt
+              IgnoreLightMaps = Option.defaultValue Constants.Render.IgnoreLightMapsDefault terrainMaterialProperties.IgnoreLightMapsOpt
+              OpaqueDistance = Constants.Render.OpaqueDistanceDefault }
+
+        let model = m4Identity
+
+        let resolutionChunkX = resolution
+        let resolutionChunkY = resolution
+        let resolutionChunkZ = resolution
+
+        let quadSizeX = terrainDescriptor.Bounds.Size.X / single (dec resolutionChunkX)
+        let quadSizeY = terrainDescriptor.Bounds.Size.Z / single (dec resolutionChunkY)
+        let quadSizeZ = terrainDescriptor.Bounds.Size.Y / single (dec resolutionChunkZ)
+
+        let terrainPositionX = terrainDescriptor.Bounds.Min.X
+        let terrainPositionY = terrainDescriptor.Bounds.Min.Y
+        let terrainPositionZ = terrainDescriptor.Bounds.Min.Z
+
+        let instanceFields =
+            Array.append
+                (model.ToArray ())
+                [|quadSizeX; quadSizeY; quadSizeZ; 0.0f
+                  terrainPositionX; terrainPositionY; terrainPositionZ; 0.0f
+                  materialProperties.Albedo.R; materialProperties.Albedo.G; materialProperties.Albedo.B; materialProperties.Albedo.A
+                  materialProperties.Roughness; materialProperties.Metallic; materialProperties.AmbientOcclusion; materialProperties.Emission|]
+        OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxel
+            (viewArray, viewRotationArray, viewTranslationArray, geometryProjectionArray, invViewArray, invProjectionArray, viewPort, viewPortBounds, eyeCenter,
+             instanceFields, lightType.Enumerate, lightShadowExponent, lightShadowDensity, geometry, shader)
+        OpenGL.Hl.Assert ()
+
     static member private makeBillboardMaterial (properties : MaterialProperties inref, material : Material inref, renderer) =
         let albedoTexture =
             match GlRenderer3d.tryGetRenderAsset material.AlbedoImage renderer with
@@ -2332,6 +2506,12 @@ type [<ReferenceEquality>] GlRenderer3d =
                 renderer.LightingConfig.LightShadowSamples renderer.LightingConfig.LightShadowBias renderer.LightingConfig.LightShadowSampleScalar renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
                 descriptor geometry shadowShader renderer
 
+        // attempt to deferred render voxel shadows
+        for (descriptor, geometry) in renderTasks.DeferredVoxels do
+            GlRenderer3d.renderPhysicallyBasedVoxel
+                lightViewArray lightProjectionArray [||] [||] [||] [||] Vector2.Zero Vector4.Zero lightOrigin lightType renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
+                descriptor geometry renderer.PhysicallyBasedShadowVoxelShader renderer
+
         // forward render static surface shadows to filter buffer
         for struct (model, presence, texCoordsOffset, properties, surface) in renderTasks.ForwardStaticSorted do
             let shadowShader =
@@ -2436,6 +2616,8 @@ type [<ReferenceEquality>] GlRenderer3d =
         (eyeCenter : Vector3)
         (eyeRotation : Quaternion)
         (view : Matrix4x4)
+        (viewRotation : Matrix4x4)
+        (viewTranslation : Matrix4x4)
         (viewSkyBox : Matrix4x4)
         (geometryViewport : Viewport)
         (geometryProjection : Matrix4x4)
@@ -2453,6 +2635,12 @@ type [<ReferenceEquality>] GlRenderer3d =
         let viewSkyBoxArray = viewSkyBox.ToArray ()
         let geometryProjectionArray = geometryProjection.ToArray ()
         let rasterProjectionArray = rasterProjection.ToArray ()
+        let viewRotationArray = viewRotation.ToArray ()
+        let viewTranslationArray = viewTranslation.ToArray ()
+        let invViewArray = (viewRotation).Inverted.ToArray ()
+        let invProjectionArray = geometryProjection.Inverted.ToArray ()
+        let viewPort = v2 geometryViewport.NearDistance geometryViewport.FarDistance
+        let viewPortBounds = (v4i geometryViewport.Bounds.Min.X geometryViewport.Bounds.Min.Y geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y).V4
 
         // get ambient lighting, sky box opt, and fallback light map
         let (lightAmbientColor, lightAmbientBrightness, skyBoxOpt) = GlRenderer3d.getLastSkyBoxOpt renderPass renderer
@@ -2617,6 +2805,12 @@ type [<ReferenceEquality>] GlRenderer3d =
                 viewArray geometryProjectionArray eyeCenter
                 renderer.LightingConfig.LightShadowSamples renderer.LightingConfig.LightShadowBias renderer.LightingConfig.LightShadowSampleScalar renderer.LightingConfig.LightShadowSampleScalar renderer.LightingConfig.LightShadowDensity
                 descriptor geometry renderer.PhysicallyBasedDeferredTerrainShader renderer
+
+        // render terrains deferred
+        for (descriptor, geometry) in renderTasks.DeferredVoxels do
+            GlRenderer3d.renderPhysicallyBasedVoxel
+                viewArray viewRotationArray viewTranslationArray geometryProjectionArray invViewArray invProjectionArray viewPort viewPortBounds eyeCenter PointLight renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
+                descriptor geometry renderer.PhysicallyBasedDeferredVoxelShader renderer
 
         // run light mapping pass
         let lightMappingTexture =
@@ -2958,6 +3152,8 @@ type [<ReferenceEquality>] GlRenderer3d =
                 GlRenderer3d.categorizeAnimatedModel (&camm.CachedAnimatedModelMatrix, camm.CachedAnimatedModelCastShadow, camm.CachedAnimatedModelPresence, &camm.CachedAnimatedModelInsetOpt, &camm.CachedAnimatedModelMaterialProperties, camm.CachedAnimatedModelBoneTransforms, camm.CachedAnimatedModel, camm.CachedAnimatedModelRenderPass, renderer)
             | RenderTerrain rt ->
                 GlRenderer3d.categorizeTerrain (rt.Visible, rt.TerrainDescriptor, rt.RenderPass, renderer)
+            | RenderVoxel rt ->
+                GlRenderer3d.categorizeVoxel (rt.Visible, rt.VoxelDescriptor, rt.RenderPass, renderer)
             | ConfigureLighting3d l3c ->
                 renderer.LightingConfig <- l3c
             | ConfigureRenderer3d r3c ->
@@ -3192,9 +3388,11 @@ type [<ReferenceEquality>] GlRenderer3d =
         let view = viewport.View3d (eyeCenter, eyeRotation)
         let viewSkyBox = Matrix4x4.CreateFromQuaternion eyeRotation.Inverted
         let projection = viewport.Projection3d
+        let viewRotation = viewport.View3d (Vector3.Zero, eyeRotation)
+        let viewTranslation = viewport.View3d (eyeCenter, Quaternion.CreateFromYawPitchRoll (0f, 0f, 0f))
 
         // top-level geometry pass
-        GlRenderer3d.renderGeometry normalPass normalTasks renderer true None eyeCenter eyeRotation view viewSkyBox viewport projection ssaoViewport offsetViewport projection renderbuffer framebuffer
+        GlRenderer3d.renderGeometry normalPass normalTasks renderer true None eyeCenter eyeRotation view viewRotation viewTranslation viewSkyBox viewport projection ssaoViewport offsetViewport projection renderbuffer framebuffer
 
         // reset terrain geometry book-keeping
         renderer.PhysicallyBasedTerrainGeometriesUtilized.Clear ()
@@ -3286,6 +3484,10 @@ type [<ReferenceEquality>] GlRenderer3d =
                  Constants.Paths.PhysicallyBasedShadowTerrainSpotShaderFilePath,
                  Constants.Paths.PhysicallyBasedShadowTerrainDirectionalShaderFilePath)
         OpenGL.Hl.Assert ()
+        let (shadowVoxelShader) =
+            OpenGL.PhysicallyBased.CreatePhysicallyBasedDepthShadersVoxel
+                (Constants.Paths.PhysicallyBasedShadowVoxelShaderFilePath)
+        OpenGL.Hl.Assert ()
 
         // create deferred shaders
         let (deferredStaticShader, deferredAnimatedShader, deferredTerrainShader, deferredLightMappingShader,
@@ -3302,6 +3504,12 @@ type [<ReferenceEquality>] GlRenderer3d =
                  Constants.Paths.PhysicallyBasedDeferredSsaoShaderFilePath,
                  Constants.Paths.PhysicallyBasedDeferredLightingShaderFilePath,
                  Constants.Paths.PhysicallyBasedDeferredCompositionShaderFilePath)
+        OpenGL.Hl.Assert ()
+
+        // create deferred shaders
+        let (deferredVoxelShader) =
+            OpenGL.PhysicallyBased.CreatePhysicallyBasedDeferredShadersVoxel
+                (Constants.Paths.PhysicallyBasedDeferredVoxelShaderFilePath)
         OpenGL.Hl.Assert ()
 
         // create forward shader
@@ -3582,9 +3790,11 @@ type [<ReferenceEquality>] GlRenderer3d =
               PhysicallyBasedShadowTerrainPointShader = shadowTerrainPointShader
               PhysicallyBasedShadowTerrainSpotShader = shadowTerrainSpotShader
               PhysicallyBasedShadowTerrainDirectionalShader = shadowTerrainDirectionalShader
+              PhysicallyBasedShadowVoxelShader = shadowVoxelShader
               PhysicallyBasedDeferredStaticShader = deferredStaticShader
               PhysicallyBasedDeferredAnimatedShader = deferredAnimatedShader
               PhysicallyBasedDeferredTerrainShader = deferredTerrainShader
+              PhysicallyBasedDeferredVoxelShader = deferredVoxelShader
               PhysicallyBasedDeferredLightMappingShader = deferredLightMappingShader
               PhysicallyBasedDeferredIrradianceShader = deferredIrradianceShader
               PhysicallyBasedDeferredEnvironmentFilterShader = deferredEnvironmentFilterShader
@@ -3616,6 +3826,8 @@ type [<ReferenceEquality>] GlRenderer3d =
               PhysicallyBasedQuad = physicallyBasedQuad
               PhysicallyBasedTerrainGeometries = Dictionary HashIdentity.Structural
               PhysicallyBasedTerrainGeometriesUtilized = HashSet HashIdentity.Structural
+              PhysicallyBasedVoxelGeometries = Dictionary HashIdentity.Structural
+              PhysicallyBasedVoxelGeometriesUtilized = HashSet HashIdentity.Structural
               CubeMap = cubeMapSurface.CubeMap
               WhiteTexture = whiteTexture
               BlackTexture = blackTexture

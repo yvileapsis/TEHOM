@@ -28,3 +28,10 @@ module Assets =
         let CursorDownSprite = asset<Image> PackageName "Scroll_DOWN"
         let CursorLeftSprite = asset<Image> PackageName "Scroll_LEFT"
         let CursorRightSprite = asset<Image> PackageName "Scroll_RIGHT"
+
+    [<RequireQualifiedAccess>]
+    module Voxels =
+        let PackageName = "Voxels"
+        let Computer = asset<Image> PackageName "computer_u"
+        let Minecraft = asset<Image> PackageName "minecraft"
+        let Cars = asset<Image> PackageName "cars"

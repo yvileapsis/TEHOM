@@ -172,6 +172,145 @@ type [<StructuralEquality; NoComparison>] HeightMap =
         | ImageHeightMap image -> HeightMap.tryGetImageHeightMapMetadata tryGetAssetFilePath bounds tiles image
         | RawHeightMap map -> HeightMap.tryGetRawHeightMapMetadata tryGetAssetFilePath bounds tiles map
 
+type VoxelChunkMetadata =
+    { Resolution : Vector3i
+      PositionsAndColors : struct (Vector3i * Color * Vector3) array  }
+
+/// A height map for terrain.
+type VoxelChunk =
+    | SlicesVoxel of Image AssetTag // only supports 8-bit depth on Red channel
+    // TODO: implement
+    | RawVoxel of unit
+
+    static member private tryGetTextureData tryGetAssetFilePath (assetTag : Image AssetTag) =
+        match tryGetAssetFilePath assetTag with
+        | Some filePath ->
+            match OpenGL.Texture.TryCreateTextureData (false, filePath) with
+            | Some textureData ->
+                let metadata = textureData.Metadata
+                let (blockCompressed, bytes) = textureData.Bytes
+                textureData.Dispose ()
+                Some (metadata, blockCompressed, bytes)
+            | None -> None
+        | None -> None
+
+    static member private tryGetRawAssetData tryGetAssetFilePath (assetTag : Raw AssetTag) =
+        match tryGetAssetFilePath assetTag with
+        | Some filePath ->
+            try let bytes = File.ReadAllBytes filePath
+                Some bytes
+            with exn ->
+                Log.info ("Could not load texture '" + filePath + "' due to: " + scstring exn)
+                None
+        | None -> None
+
+    static member getSliceResolution resolutionX resolutionY =
+        resolutionX * resolutionY |>
+        float |>
+        Math.Cbrt |>
+        round |>
+        int
+
+    static member private tryGetSlicesMetadata tryGetAssetFilePath image =
+
+        // attempt to load texture data
+        match VoxelChunk.tryGetTextureData tryGetAssetFilePath image with
+        | Some (metadata, blockCompressed, bytes) ->
+
+            let resolutionX = metadata.TextureWidth
+            let resolutionY = metadata.TextureHeight
+
+            let modelSideLength = VoxelChunk.getSliceResolution resolutionX resolutionY
+
+            let textureSideLength = modelSideLength |> float |> sqrt |> round |> int
+
+            let resolutionChunkX = modelSideLength
+            let resolutionChunkY = modelSideLength
+            let resolutionChunkZ = modelSideLength
+
+            let colors =
+                bytes
+                |> Array.chunkBySize 4
+                |> Array.map (fun chunk ->
+                    (chunk, 0)
+                    |> BitConverter.ToInt32
+                    |> System.Drawing.Color.FromArgb
+                    |> fun color -> color8 color.R color.G color.B color.A
+                )
+
+            let voxels = [|
+                for y in 0 .. dec resolutionX do
+                for x in 0 .. dec resolutionY do
+
+                    let color = colors[(resolutionX * y + x)]
+
+                    // cull empty
+                    if color.A > 0f then
+
+                        let z = x / resolutionChunkX + (y / resolutionChunkY) * textureSideLength
+
+                        let x' = (x % resolutionChunkX)
+                        let y' = (z % resolutionChunkZ)
+                        let z' = (y % resolutionChunkY)
+
+                        yield struct (v3i x' y' z', color)
+            |]
+
+            let voxels =
+                let mutable dict = System.Collections.Generic.Dictionary<Vector3i, Color>()
+
+                Array.iter (fun struct (key : Vector3i, value) -> dict.Add(key, value)) voxels
+
+                [|
+                    for x in 0 .. dec resolutionChunkX do
+                    for y in 0 .. dec resolutionChunkY do
+                    for z in 0 .. dec resolutionChunkZ do
+                        if dict.ContainsKey (v3i x y z) then
+                            let color = dict[v3i x y z]
+
+                            let nx1 = dict.ContainsKey(v3i (x + 1) y z)
+                            let nx2 = dict.ContainsKey(v3i (x - 1) y z)
+                            let ny1 = dict.ContainsKey(v3i x (y + 1) z)
+                            let ny2 = dict.ContainsKey(v3i x (y - 1) z)
+                            let nz1 = dict.ContainsKey(v3i x y (z + 1))
+                            let nz2 = dict.ContainsKey(v3i x y (z - 1))
+
+                            if not nx1 || not nx2 || not ny1 || not ny2 || not nz1 || not nz2 then
+                                let d n1 n2 = if n1 && n2 then 0f elif n1 then 1f elif n2 then -1f else 0f
+                                let normal = v3 (d nx1 nx2) (d ny1 ny2) (d nz1 nz2)
+                                yield struct (v3i x y z, color, - normal.Normalized)
+                            else
+                                // internal cull
+                                ()
+                |]
+
+
+            // neightbor culling
+//                let voxels =
+//                    let map = voxels |> Map.ofArray
+
+//                    map
+//                    |> Map.filter (fun (x, y, z) value ->
+
+//                        let hasNeighbors =
+//                            Map.containsKey (x + 1, y, z) map && Map.containsKey (x - 1, y, z) map &&
+//                            Map.containsKey (x, y + 1, z) map && Map.containsKey (x, y - 1, z) map &&
+//                            Map.containsKey (x, y, z + 1) map && Map.containsKey (x, y, z - 1) map
+
+//                        not hasNeighbors
+//                    )
+//                    |> Map.toArray
+
+            // fin
+            Some { Resolution = v3i resolutionChunkX resolutionChunkY resolutionChunkZ; PositionsAndColors = voxels; }
+        | None -> None
+
+    static member tryGetMetadata (tryGetAssetFilePath : AssetTag -> string option) heightMap =
+        match heightMap with
+        | SlicesVoxel image -> VoxelChunk.tryGetSlicesMetadata tryGetAssetFilePath image
+        | RawVoxel _ -> failwithf "todo"
+
+
 /// Identifies a body that can be found in a physics engine.
 /// TODO: see if removing CustomEquality here doesn't increase GC pressure or causes other perf overhead.
 type [<CustomEquality; NoComparison>] BodyId =
