@@ -2971,7 +2971,6 @@ module PhysicallyBased =
          lightType : int,
          lightShadowExponent : single,
          lightShadowDensity : single,
-         materials : PhysicallyBasedMaterial array,
          geometry : PhysicallyBasedGeometry,
          shader : PhysicallyBasedDeferredVoxelShader) =
 
@@ -2980,9 +2979,6 @@ module PhysicallyBased =
         Gl.Enable EnableCap.DepthTest
         Gl.Enable EnableCap.VertexProgramPointSize
         Hl.Assert ()
-
-        // enforce layer limit
-        let layersCount = min materials.Length Constants.Render.TerrainLayersMax
 
         let elementsCount : int = geometry.ElementCount
 

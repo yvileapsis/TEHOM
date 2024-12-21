@@ -443,7 +443,7 @@ type VoxelFacet () =
               Material = entity.GetTerrainMaterial world
               TintImageOpt = entity.GetTintImageOpt world
               NormalImageOpt = entity.GetNormalImageOpt world
-              HeightMap1 = entity.GetVoxelChunk world
+              VoxelChunk = entity.GetVoxelChunk world
               Segments = entity.GetSegments world
               Voxel = true }
         World.enqueueRenderMessage3d

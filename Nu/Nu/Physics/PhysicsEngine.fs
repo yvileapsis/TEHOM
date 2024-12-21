@@ -240,19 +240,20 @@ type VoxelChunk =
 
             let voxels = [|
                 for y in 0 .. dec resolutionX do
-                    for x in 0 .. dec resolutionY do
+                for x in 0 .. dec resolutionY do
 
-                        let color = colors[(resolutionX * y + x)]
+                    let color = colors[(resolutionX * y + x)]
 
-                        if color.A > 0f then
+                    // cull empty
+                    if color.A > 0f then
 
-                            let z = x / resolutionChunkX + (y / resolutionChunkY) * textureSideLength
+                        let z = x / resolutionChunkX + (y / resolutionChunkY) * textureSideLength
 
-                            let x' = (x % resolutionChunkX)
-                            let y' = (z % resolutionChunkZ)
-                            let z' = (y % resolutionChunkY)
+                        let x' = (x % resolutionChunkX)
+                        let y' = (z % resolutionChunkZ)
+                        let z' = (y % resolutionChunkY)
 
-                            yield struct (v3i x' y' z', color)
+                        yield struct (v3i x' y' z', color)
             |]
 
             let voxels =
@@ -266,12 +267,21 @@ type VoxelChunk =
                     for z in 0 .. dec resolutionChunkZ do
                         if dict.ContainsKey (v3i x y z) then
                             let color = dict[v3i x y z]
-                            let dx = (if dict.ContainsKey(v3i (x + 1) y z) then 1 else 0) - (if dict.ContainsKey(v3i (x - 1) y z) then 1 else 0)
-                            let dy = (if dict.ContainsKey(v3i x (y + 1) z) then 1 else 0) - (if dict.ContainsKey(v3i x (y - 1) z) then 1 else 0)
-                            let dz = (if dict.ContainsKey(v3i x y (z + 1)) then 1 else 0) - (if dict.ContainsKey(v3i x y (z - 1)) then 1 else 0)
-                            if dx <> 0 || dy <> 0 || dz <> 0 then
-                                let normal = (- v3i dx dy dz).V3.Normalized
-                                yield struct (v3i x y z, color, normal)
+
+                            let nx1 = dict.ContainsKey(v3i (x + 1) y z)
+                            let nx2 = dict.ContainsKey(v3i (x - 1) y z)
+                            let ny1 = dict.ContainsKey(v3i x (y + 1) z)
+                            let ny2 = dict.ContainsKey(v3i x (y - 1) z)
+                            let nz1 = dict.ContainsKey(v3i x y (z + 1))
+                            let nz2 = dict.ContainsKey(v3i x y (z - 1))
+
+                            if not nx1 || not nx2 || not ny1 || not ny2 || not nz1 || not nz2 then
+                                let d n1 n2 = if n1 && n2 then 0f elif n1 then 1f elif n2 then -1f else 0f
+                                let normal = v3 (d nx1 nx2) (d ny1 ny2) (d nz1 nz2)
+                                yield struct (v3i x y z, color, - normal.Normalized)
+                            else
+                                // internal cull
+                                ()
                 |]
 
 
