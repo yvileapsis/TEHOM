@@ -15,8 +15,9 @@ open Prime
 type CameraFacet () =
     inherit Facet (false, false, false)
 
-    static let synchronize (entity : Entity) world =
-        if entity.GetEnabled world then
+    static let postUpdate evt (world : World) =
+        let entity = evt.Subscriber : Entity
+        if world.Advancing && entity.GetEnabled world then
 
             let position = entity.GetPosition world
             let rotation = entity.GetRotation world
@@ -24,21 +25,53 @@ type CameraFacet () =
             let world = World.setEye3dCenter position world
             let world = World.setEye3dRotation rotation world
 
-            world
+            Cascade, world
         else
-            world
+            Cascade, world
 
     override this.Register (entity, world) =
+        let world = World.sense postUpdate Nu.Game.Handle.PostUpdateEvent entity (nameof CameraFacet) world
         world
-        |> synchronize entity
-        |> World.sense (fun evt world ->
-            let entity = evt.Subscriber : Entity
-            Cascade, synchronize entity world
-        ) Nu.Game.Handle.PreUpdateEvent entity (nameof CameraFacet)
 
     override this.Render (_, _, _) =
         // TODO: add guizmos for display
         ()
+
+    static member Properties =
+        [define Entity.AlwaysUpdate true]
+
+/// Augments an entity with rich text.
+type MouseRelativeModeFacet () =
+    inherit Facet (false, false, false)
+
+    static let synchronize evt (world : World) =
+        let entity = evt.Subscriber : Entity
+
+        if world.Advancing && entity.GetEnabled world then
+
+            SDL.SDL_WarpMouseInWindow (IntPtr.Zero, 960, 540) |> ignore
+
+            Cascade, world
+        else
+            Cascade, world
+
+    override this.Register (entity, world) =
+        world
+        |> World.sense synchronize Nu.Game.Handle.MouseMoveEvent entity (nameof MouseRelativeModeFacet)
+
+    override this.Update (entity, world) =
+        if world.Advancing && entity.GetEnabled world then
+            SDL.SDL_SetRelativeMouseMode (SDL.SDL_bool.SDL_TRUE) |> ignore
+        else
+            SDL.SDL_SetRelativeMouseMode (SDL.SDL_bool.SDL_FALSE) |> ignore
+        world
+
+    override this.Render (_, _, _) =
+        // TODO: add guizmos for display
+        ()
+
+    static member Properties =
+        [define Entity.AlwaysUpdate true]
 
 /// Gives an entity the base behavior of a gui text control.
 type CameraDispatcher () =
@@ -48,46 +81,35 @@ type CameraDispatcher () =
         typeof<CameraFacet>
     ]
 
+/// Gives an entity the base behavior of a gui text control.
+type CameraFirstPersonDispatcher () =
+    inherit Entity3dDispatcher (false, false, false)
+
+    static member Facets = [
+        typeof<CameraFacet>
+        typeof<MouseRelativeModeFacet>
+    ]
+
 /// Augments an entity with rich text.
 type CursorFacet () =
     inherit Facet (false, false, false)
 
-    static let register evt world =
+    static let mouseMove evt (world : World) =
         let entity = evt.Subscriber : Entity
 
-        if entity.GetEnabled world then
-
-            SDL.SDL_ShowCursor 0 |> ignore
-
-            Cascade, world
-
-        else
-            SDL.SDL_ShowCursor 1 |> ignore
-
-            Cascade, world
-
-    static let unregister evt world =
-        let entity = evt.Subscriber : Entity
-        SDL.SDL_ShowCursor 1 |> ignore
-        Cascade, world
-
-    static let synchronize evt world =
-        let entity = evt.Subscriber : Entity
-
-        if entity.GetEnabled world then
+        if world.Advancing && entity.GetEnabled world then
 
             let position = World.getMousePosition2dScreen world
 
             let world = entity.SetPosition position.V3 world
 
             Cascade, world
-
         else
-
             Cascade, world
 
     static member Properties =
-        [define Entity.InsetOpt None
+        [define Entity.AlwaysUpdate true
+         define Entity.InsetOpt None
          // TODO: add default cursor
          define Entity.StaticImage Assets.Default.StaticSprite
          define Entity.Color Color.One
@@ -98,9 +120,16 @@ type CursorFacet () =
 
     override this.Register (entity, world) =
         world
-        |> World.sense register Nu.Game.Handle.RegisterEvent entity (nameof CameraFacet)
-        |> World.sense unregister Nu.Game.Handle.UnregisteringEvent entity (nameof CameraFacet)
-        |> World.sense synchronize Nu.Game.Handle.MouseMoveEvent entity (nameof CameraFacet)
+        |> World.sense mouseMove Nu.Game.Handle.MouseMoveEvent entity (nameof CursorFacet)
+
+    override this.Update (entity, world) =
+
+        if world.Advancing && entity.GetEnabled world then
+            SDL.SDL_ShowCursor 0 |> ignore
+        else
+            SDL.SDL_ShowCursor 1 |> ignore
+
+        world
 
     override this.Render (_, entity, world) =
         let mutable transform = entity.GetTransform world
@@ -483,6 +512,7 @@ type VoxelDispatcher () =
 module ContentEx =
 
     let camera entityName initializers = Content.entity<CameraDispatcher> entityName initializers
+    let cameraFirstPerson entityName initializers = Content.entity<CameraFirstPersonDispatcher> entityName initializers
 
     let cursor entityName initializers = Content.entity<CursorDispatcher> entityName initializers
 

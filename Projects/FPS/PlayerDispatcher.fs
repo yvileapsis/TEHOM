@@ -21,13 +21,15 @@ type PlayerMessage =
 
 type PlayerCommand =
     | Register
-    | UpdateTransform of Vector3 * Quaternion
+    | UpdateTransform of Vector3 * Quaternion * Quaternion
+    | UpdateEyeTransform of Quaternion
     | UpdateAnimations of Vector3 * Quaternion * Animation array * bool
     | SyncWeaponTransform
     | PublishAttacks of Entity Set
     | PublishDie
     | Jump
     | RotateMove of MouseMoveData
+    | Shoot
     interface Command
 
 [<AutoOpen>]
@@ -41,6 +43,8 @@ module PlayerExtensions =
 
 type PlayerDispatcher () =
     inherit Entity3dDispatcher<Player, PlayerMessage, PlayerCommand> (true, false, false, Player.initial)
+
+    static let [<Literal>] BulletForce = 25.0f
 
     static member Facets =
         [typeof<RigidBodyFacet>]
@@ -74,8 +78,7 @@ type PlayerDispatcher () =
 
         | Update ->
 
-//            SDL.SDL_SetRelativeMouseMode (SDL.SDL_bool.SDL_TRUE) |> ignore
-//            SDL.SDL_WarpMouseInWindow (IntPtr.Zero, 960, 540) |> ignore
+
             // update character
             let time = world.UpdateTime
             let position = entity.GetPosition world
@@ -85,11 +88,52 @@ type PlayerDispatcher () =
             let bodyId = entity.GetBodyId world
             let grounded = World.getBodyGrounded bodyId world
             let playerPosition = Simulants.GameplayPlayer.GetPosition world
-            let (animations, invisible, attackedCharacters, position, rotation, character) =
-                Player.update time position rotation linearVelocity angularVelocity grounded playerPosition character world
+
+            let character = Player.updateInterps position rotation linearVelocity angularVelocity character
+
+
+            // compute new rotation
+            let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
+            let turnVelocity =
+                (if World.isKeyboardKeyDown KeyboardKey.Right world then -turnSpeed else 0.0f) +
+                (if World.isKeyboardKeyDown KeyboardKey.Left world then turnSpeed else 0.0f)
+
+            let rotation =
+                if turnVelocity <> 0.0f then
+                    rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity)
+                else
+                    rotation
+
+            let head = entity / "Head"
+
+            // compute new rotation
+            let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
+            let turnVelocity =
+                (if World.isKeyboardKeyDown KeyboardKey.Down world then -turnSpeed else 0.0f) +
+                (if World.isKeyboardKeyDown KeyboardKey.Up world then turnSpeed else 0.0f)
+
+            let rotationHead = head.GetRotationLocal world
+            let rotationHead =
+                if turnVelocity <> 0.0f then
+                    rotationHead * Quaternion.CreateFromYawPitchRoll (0f, turnVelocity, 0f)
+                else
+                    rotationHead
+
+            let (position, rotation, linearVelocity, character) = Player.updateMotion time position rotation grounded playerPosition character world
+
+            let angularVelocity = v3 0f 0f 0f
+
+            let character = Player.updateAction time position rotation playerPosition character
+            let character = Player.updateState time character
+            let (attackedCharacters, character) = Player.updateAttackedCharacters time character
+            let (animations, invisible) = Player.updateAnimations time position rotation linearVelocity angularVelocity character world
 
             // deploy signals from update
-            let signals = [UpdateTransform (position, rotation) :> Signal; UpdateAnimations (position, rotation, Array.ofList animations, invisible)]
+            let signals = [
+                UpdateTransform (position, rotation, rotationHead) :> Signal
+                UpdateAnimations (position, rotation, Array.ofList animations, invisible)
+                if World.isMouseButtonDown MouseLeft world then Shoot
+            ]
             let signals = match character.ActionState with WoundState wound when wound.WoundTime = world.UpdateTime - 60L -> PublishDie :> Signal :: signals | _ -> signals
             let signals = if attackedCharacters.Count > 0 then PublishAttacks attackedCharacters :> Signal :: signals else signals
             withSignals signals character
@@ -152,9 +196,11 @@ type PlayerDispatcher () =
             // let world = weapon.AutoBounds world
             withSignal SyncWeaponTransform world
 
-        | UpdateTransform (position, rotation) ->
+        | UpdateTransform (position, rotationBody, rotationHead) ->
             let world = entity.SetPosition position world
-            let world = entity.SetRotation rotation world
+            let world = entity.SetRotation rotationBody world
+            let head = entity / "Head"
+            let world = head.SetRotationLocal rotationHead world
             just world
 
         | UpdateAnimations (position, rotation, animations, invisible) ->
@@ -200,24 +246,66 @@ type PlayerDispatcher () =
 
         | RotateMove _ ->
 
-            if entity.GetEnabled world then
+            if world.Advancing && entity.GetEnabled world then
 
                 let position = entity.GetPosition world
                 let rotation = entity.GetRotation world
+                let linearVelocity = entity.GetLinearVelocity world
+                let angularVelocity = entity.GetAngularVelocity world
+                let bodyId = entity.GetBodyId world
+                let grounded = World.getBodyGrounded bodyId world
 
-                let turnSpeed = 0.01f
+                let character = Player.updateInterps position rotation linearVelocity angularVelocity character
+
+                // compute new rotation
+                let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
 
                 let mousePosition = World.getMousePosition2dScreen world
 
                 let turnVelocity =
                     (- mousePosition.X) * turnSpeed * 0.1f
 
+                let rotation =
+                    if turnVelocity <> 0.0f then
+                        rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity)
+                    else
+                        rotation
+
+                let head = entity / "Head"
+
+                // compute new rotation
+                let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
+                let turnVelocity =
+                    (mousePosition.Y) * turnSpeed * 0.1f
+
+                let rotationHead = head.GetRotationLocal world
+                let rotationHead =
+                    if turnVelocity <> 0.0f then
+                        rotationHead * Quaternion.CreateFromYawPitchRoll (0f, turnVelocity, 0f)
+                    else
+                        rotationHead
+
 //                let rotation = if turnVelocity <> 0.0f then rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity) else rotation
 
-                withSignals [UpdateTransform (position, rotation)] world
+                withSignals [UpdateTransform (position, rotation, rotationHead)] world
             else
+
                 just world
 
+        | Shoot ->
+
+            let (bullet, world) = World.createEntity<BulletDispatcher> NoOverlay None entity.Group world // OPTIMIZATION: NoOverlay to avoid reflection.
+
+            let barrel = entity / "Head" / "Barrel"
+            let position = barrel.GetPosition world
+            let rotation = barrel.GetRotation world
+            let forward = rotation.Forward
+
+            let world = bullet.SetPosition position world
+            let world = World.applyBodyLinearImpulse (2f * forward) None (bullet.GetBodyId world) world
+
+            World.playSound Constants.Audio.SoundVolumeDefault Assets.Gameplay.ShotSound world
+            just world
 
     override this.RayCast (ray, entity, world) =
         let animatedModel = entity / Constants.Gameplay.CharacterAnimatedModelName
@@ -262,19 +350,27 @@ type PlayerDispatcher () =
                 Entity.BodySeparationImplicitEvent =|> fun evt -> WeaponSeparationImplicit evt.Data
             ]
 
-
-        Content.staticModelHierarchy "Test" [
-            Entity.PositionLocal == v3 0.1f 1.5f -0.3f
-            Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 180f, 0f, 0f)
-            Entity.StaticModel == Assets.Gameplay.MakarovModel
-        ]
-
-
-//   let world = World.setEye3dCenter (positionInterp + v3Up * 1.75f - rotationInterp.Forward * 3.0f) world
-//   let world = World.setEye3dRotation rotationInterp world
-
-        ContentEx.camera "Camera" [
+        Content.composite "Head" [
             Entity.PositionLocal == v3 0.0f 1.65f 0.0f
             Entity.RotationLocal ==  Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -10f, 0f)
+        ] [
+            Content.staticModelHierarchy "Pistol" [
+                //Entity.PositionLocal == v3 0.1f -0.1f -0.3f
+
+                Entity.PositionLocal == v3 0.15f -0.15f -0.25f
+                Entity.ScaleLocal == v3 0.1f 0.1f 0.2f
+//                Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 180f, 0f, 0f)
+                Entity.StaticModel == Assets.Default.StaticModel
+            ]
+
+            Content.entity "Barrel" [
+//                Entity.PositionLocal == v3 0.1f -0.1f -0.3f
+                Entity.PositionLocal == v3 0.15f -0.15f -0.25f
+            ]
+
+            let followPlayer = true
+
+            if followPlayer then
+                ContentEx.cameraFirstPerson "Camera" []
         ]
     ]

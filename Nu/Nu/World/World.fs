@@ -179,6 +179,7 @@ module WorldModule3 =
                  RigidModelHierarchyDispatcher ()
                  // Extensions
                  CameraDispatcher ()
+                 CameraFirstPersonDispatcher ()
                  CursorDispatcher ()
                  GlyphDispatcher ()
                  ButtonExDispatcher ()
@@ -220,6 +221,7 @@ module WorldModule3 =
                  FreezerFacet ()
                  // Extensions
                  CameraFacet ()
+                 MouseRelativeModeFacet ()
                  CursorFacet ()
                  GlyphFacet ()
                  HoverFacet ()

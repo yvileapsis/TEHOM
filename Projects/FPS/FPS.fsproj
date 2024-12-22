@@ -42,6 +42,7 @@
 		<Compile Include="Events.fs" />
 		<Compile Include="Character.fs" />
 		<Compile Include="CharacterDispatcher.fs" />
+		<Compile Include="Bullet.fs" />
 		<Compile Include="Player.fs" />
 		<Compile Include="PlayerDispatcher.fs" />
 		<Compile Include="Gameplay.fs" />

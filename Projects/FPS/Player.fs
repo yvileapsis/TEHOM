@@ -1,6 +1,7 @@
 namespace MyGame
 open System
 open System.Numerics
+open FParsec
 open Prime
 open Nu
 
@@ -42,6 +43,8 @@ module Player =
 
     type [<ReferenceEquality; SymbolicExpansion>] Player =
         {
+          Position : Vector3
+          Rotation : Quaternion
           PositionPrevious : Vector3 FQueue
           RotationPrevious : Quaternion FQueue
           LinearVelocityPrevious : Vector3 FQueue
@@ -87,7 +90,7 @@ module Player =
             CharacterProperties.defaultProperties
 
 
-        static member private computeTraversalAnimations rotation linearVelocity angularVelocity character =
+        static member computeTraversalAnimations rotation linearVelocity angularVelocity character =
             match character.ActionState with
             | NormalState ->
                 let rotationInterp = character.RotationInterp rotation
@@ -116,7 +119,7 @@ module Player =
                 animations
             | _ -> []
 
-        static member private tryUpdateActionAnimation time character world =
+        static member tryUpdateActionAnimation time character world =
             match character.ActionState with
             | NormalState -> None
             | ObstructedState obstructed ->
@@ -143,7 +146,7 @@ module Player =
                 let invisible = localTime / 5L % 2L = 0L
                 Some (animation, invisible)
 
-        static member private updateInterps position rotation linearVelocity angularVelocity character =
+        static member updateInterps position rotation linearVelocity angularVelocity character =
 
             // update interps
             let character =
@@ -163,7 +166,7 @@ module Player =
             // fin
             character
 
-        static member private updateMotion time position (rotation : Quaternion) grounded (playerPosition : Vector3) character world =
+        static member updateMotion time position (rotation : Quaternion) grounded (playerPosition : Vector3) character world =
 
             // update jump state
             let lastTimeOnGround = if grounded then time else character.JumpState.LastTimeOnGround
@@ -178,28 +181,31 @@ module Player =
                 let forward = rotation.Forward
                 let right = rotation.Right
                 let walkSpeed = character.WalkSpeed * if grounded then 1.0f else 0.75f
+
                 let walkVelocity =
-                    (if World.isKeyboardKeyDown KeyboardKey.W world || World.isKeyboardKeyDown KeyboardKey.Up world then forward * walkSpeed else v3Zero) +
-                    (if World.isKeyboardKeyDown KeyboardKey.S world || World.isKeyboardKeyDown KeyboardKey.Down world then -forward * walkSpeed else v3Zero) +
-                    (if World.isKeyboardKeyDown KeyboardKey.A world then -right * walkSpeed else v3Zero) +
-                    (if World.isKeyboardKeyDown KeyboardKey.D world then right * walkSpeed else v3Zero)
-                let position = if walkVelocity <> v3Zero then position + walkVelocity else position
+                    (if World.isKeyboardKeyDown KeyboardKey.W world then forward else v3Zero) +
+                    (if World.isKeyboardKeyDown KeyboardKey.S world then -forward else v3Zero) +
+                    (if World.isKeyboardKeyDown KeyboardKey.A world then -right else v3Zero) +
+                    (if World.isKeyboardKeyDown KeyboardKey.D world then right else v3Zero)
 
-                // compute new rotation
-                let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
-                let turnVelocity =
-                    (if World.isKeyboardKeyDown KeyboardKey.Right world then -turnSpeed else 0.0f) +
-                    (if World.isKeyboardKeyDown KeyboardKey.Left world then turnSpeed else 0.0f)
-                let rotation = if turnVelocity <> 0.0f then rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity) else rotation
-                (position, rotation, walkVelocity, v3 0.0f turnVelocity 0.0f, character)
+                let walkSpeed =
+                    if World.isKeyboardKeyDown KeyboardKey.LShift world then 2f * walkSpeed else walkSpeed
 
-            else (position, rotation, v3Zero, v3Zero, character)
+                let position =
+                    if walkVelocity <> v3Zero then
+                        position + walkVelocity.Normalized * walkSpeed
+                    else
+                        position
+
+                (position, rotation, walkVelocity, character)
+
+            else (position, rotation, v3Zero, character)
 
 
-        static member private updateAction time (position : Vector3) (rotation : Quaternion) (playerPosition : Vector3) character =
+        static member updateAction time (position : Vector3) (rotation : Quaternion) (playerPosition : Vector3) character =
             character
 
-        static member private updateState time character =
+        static member updateState time character =
             match character.ActionState with
             | NormalState -> character
             | ObstructedState _ -> character
@@ -220,7 +226,7 @@ module Player =
                 { character with ActionState = actionState }
             | WoundState _ -> character
 
-        static member private updateAnimations time position rotation linearVelocity angularVelocity character world =
+        static member updateAnimations time position rotation linearVelocity angularVelocity character world =
             ignore<Vector3> position
             let traversalAnimations = Player.computeTraversalAnimations rotation linearVelocity angularVelocity character
             let (animations, invisible) =
@@ -229,7 +235,7 @@ module Player =
                 | None -> (traversalAnimations, false)
             (animations, invisible)
 
-        static member private updateAttackedCharacters time character =
+        static member updateAttackedCharacters time character =
             match character.ActionState with
             | AttackState attack ->
                 let localTime = time - attack.AttackTime
@@ -271,18 +277,10 @@ module Player =
                 (false, character)
             else (false, character)
 
-
-        static member update time position rotation linearVelocity angularVelocity grounded playerPosition character world =
-            let character = Player.updateInterps position rotation linearVelocity angularVelocity character
-            let (position, rotation, linearVelocity, angularVelocity, character) = Player.updateMotion time position rotation grounded playerPosition character world
-            let character = Player.updateAction time position rotation playerPosition character
-            let character = Player.updateState time character
-            let (attackedCharacters, character) = Player.updateAttackedCharacters time character
-            let (animations, invisible) = Player.updateAnimations time position rotation linearVelocity angularVelocity character world
-            (animations, invisible, attackedCharacters, position, rotation, character)
-
-        static member initial characterType =
+        static member initial =
             {
+              Position = Vector3.Zero
+              Rotation = Quaternion.Identity
               PositionPrevious = FQueue.empty
               RotationPrevious = FQueue.empty
               LinearVelocityPrevious = FQueue.empty
@@ -292,7 +290,7 @@ module Player =
               JumpState = JumpState.initial
               CharacterCollisions = Set.empty
               WeaponCollisions = Set.empty
-              WalkSpeed = 0.06f
-              TurnSpeed = 0.05f
+              WalkSpeed = 0.08f
+              TurnSpeed = 0.07f
               JumpSpeed = 5.0f
               WeaponModel = Assets.Gameplay.GreatSwordModel }
