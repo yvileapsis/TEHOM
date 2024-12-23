@@ -25,7 +25,7 @@ with
         [ CursorUp, 0; CursorDown, 0; CursorLeft, 0; CursorRight, 0; ]
 
     static member direction (positionDelta : Vector2) =
-        let size = Constants.Render.VirtualResolution.V2
+        let size = v2 540f 270f
         if positionDelta.Y > positionDelta.X * size.Y / size.X && positionDelta.Y > - positionDelta.X * size.Y / size.X then
             [ CursorUp, 20; CursorDown, 0; CursorLeft, 0; CursorRight, 0; ]
         elif positionDelta.Y < positionDelta.X * size.Y / size.X && positionDelta.Y < - positionDelta.X * size.Y / size.X then

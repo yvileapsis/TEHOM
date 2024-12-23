@@ -333,10 +333,8 @@ type RendererThread () =
                     | _ -> ()
                 | _ -> ())
 
-    member private this.Run fonts window geometryViewport rasterViewport outerViewport =
+    member private this.Run glFinishRequired glContext fonts window geometryViewport rasterViewport outerViewport =
 
-        // create gl context
-        let (glFinishRequired, glContext) = match window with SglWindow window -> OpenGL.Hl.CreateSglContextInitial window.SglWindow
         OpenGL.Hl.Assert ()
 
         // initialize gl context
@@ -426,8 +424,11 @@ type RendererThread () =
             match windowOpt with
             | Some window ->
 
+                // create gl context
+                let (glFinishRequired, glContext) = match window with SglWindow window -> OpenGL.Hl.CreateSglContextInitial window.SglWindow
+
                 // start real thread
-                let thread = Thread (ThreadStart (fun () -> this.Run fonts window geometryViewport rasterViewport outerViewport))
+                let thread = Thread (ThreadStart (fun () -> this.Run glFinishRequired glContext fonts window geometryViewport rasterViewport outerViewport))
                 threadOpt <- Some thread
                 thread.IsBackground <- true
                 thread.Start ()

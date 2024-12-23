@@ -145,6 +145,7 @@ module SdlDeps =
                     SDL.SDL_GL_SetAttribute (SDL.SDL_GLattr.SDL_GL_DOUBLEBUFFER, 1) |> ignore<int>
                     SDL.SDL_GL_SetAttribute (SDL.SDL_GLattr.SDL_GL_DEPTH_SIZE, 24) |> ignore<int>
                     SDL.SDL_GL_SetAttribute (SDL.SDL_GLattr.SDL_GL_STENCIL_SIZE, 8) |> ignore<int>
+                    SDL.SDL_SetHint("SDL_MAC_OPENGL_ASYNC_DISPATCH", "1") |> ignore
                     SDL.SDL_CreateWindow (windowConfig.WindowTitle, windowConfig.WindowX, windowConfig.WindowY, windowSize.X, windowSize.Y, windowConfig.WindowFlags))
                 (fun window -> SDL.SDL_DestroyWindow window; destroy ()) with
             | Left error -> Left error

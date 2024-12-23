@@ -11,6 +11,7 @@ namespace OpenGL
 open System
 open System.Runtime.InteropServices
 open System.Text
+open Khronos
 open SDL2
 open Prime
 open Nu
@@ -76,11 +77,18 @@ module Hl =
     /// Create an SDL OpenGL context with the given window.
     let CreateSglContextInitial window =
         Gl.Initialize ()
+        let error = Gl.GetError ();
+
         let glContext = SDL.SDL_GL_CreateContext window
+
+        Log.fail $"GL context creation failed: {SDL.SDL_GetError()}"
+
         let swapInterval = if Constants.Render.Vsync then 1 else 0
         SDL.SDL_GL_SetSwapInterval swapInterval |> ignore<int>
         SDL.SDL_GL_MakeCurrent (window, glContext) |> ignore<int>
-        Gl.BindAPI ()
+
+        //Gl.BindAPI(Khronos.KhronosVersion.Parse("4.1", KhronosVersion.ApiGlsl), Gl.CurrentExtensions);
+
         Assert ()
         let versionStr = Gl.GetString StringName.Version
         Log.info ("Initialized OpenGL " + versionStr + ".")
@@ -93,6 +101,7 @@ module Hl =
             not (versionStr.StartsWith "5.0") (* heaven forbid... *) then
             Log.fail "Failed to create OpenGL version 4.1 or higher. Install your system's latest graphics drivers and try again."
         let vendorName = Gl.GetString StringName.Vendor
+
         let glFinishRequired =
             Constants.Render.VendorNamesExceptedFromSwapGlFinishRequirement |>
             List.notExists (fun vendorName2 -> String.Equals (vendorName, vendorName2, StringComparison.InvariantCultureIgnoreCase))

@@ -132,7 +132,7 @@ type SelectionManagerDispatcher () =
                 |> List.filter (fun entity ->
                     let v3 = entity.GetPosition world
                     let position =
-                        (World.position3dToPosition2d v3 world).V2 / (single Constants.Render.VirtualScalar)
+                        (World.position3dToPosition2d v3 world).V2 / 1f // (single Constants.Render.VirtualScalar)
                     perimeter.Intersects position
                 )
             let world = World.publish entities entity.SelectionEvent entity world

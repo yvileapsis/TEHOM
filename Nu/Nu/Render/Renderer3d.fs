@@ -2616,8 +2616,8 @@ type [<ReferenceEquality>] GlRenderer3d =
         let viewTranslationArray = viewTranslation.ToArray ()
         let invViewArray = (viewRotation).Inverted.ToArray ()
         let invProjectionArray = geometryProjection.Inverted.ToArray ()
-        let viewPort = v2 geometryViewport.NearDistance geometryViewport.FarDistance
-        let viewPortBounds = (v4i geometryViewport.Bounds.Min.X geometryViewport.Bounds.Min.Y geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y).V4
+        let viewPort = v2 renderer.GeometryViewport.DistanceNear renderer.GeometryViewport.DistanceFar
+        let viewPortBounds = (v4i renderer.GeometryViewport.Bounds.Min.X renderer.GeometryViewport.Bounds.Min.Y renderer.GeometryViewport.Bounds.Size.X renderer.GeometryViewport.Bounds.Size.Y).V4
 
         // get ambient lighting, sky box opt, and fallback light map
         let (lightAmbientColor, lightAmbientBrightness, skyBoxOpt) = GlRenderer3d.getLastSkyBoxOpt renderPass renderer
@@ -3364,25 +3364,18 @@ type [<ReferenceEquality>] GlRenderer3d =
                             | SpotLight (_, _) | DirectionalLight -> failwithumf ()
                         | _ -> ()
 
-        // compute the viewports for the given window size
-        let viewport = Constants.Render.Viewport
-        let ssaoViewport = Constants.Render.SsaoViewport
-        let offsetViewport = Constants.Render.OffsetViewport windowSize
-
         // compute view and projection
-        let view = viewport.View3d (eyeCenter, eyeRotation)
-        let viewSkyBox = Matrix4x4.CreateFromQuaternion eyeRotation.Inverted
-        let projection = viewport.Projection3d
-        let viewRotation = viewport.View3d (Vector3.Zero, eyeRotation)
-        let viewTranslation = viewport.View3d (eyeCenter, Quaternion.CreateFromYawPitchRoll (0f, 0f, 0f))
+        let view = Viewport.getView3d eyeCenter eyeRotation
+        let viewRotation = Viewport.getView3d Vector3.Zero eyeRotation
+        let viewTranslation = Viewport.getView3d eyeCenter (Quaternion.CreateFromYawPitchRoll (0f, 0f, 0f))
 
-        // top-level geometry pass
-        GlRenderer3d.renderGeometry normalPass normalTasks renderer true None eyeCenter eyeRotation view viewRotation viewTranslation viewSkyBox viewport projection ssaoViewport offsetViewport projection renderbuffer framebuffer
         // top-level geometry pass
         GlRenderer3d.renderGeometry
             normalPass normalTasks renderer
             true None eyeCenter
             (Viewport.getView3d eyeCenter eyeRotation)
+            viewRotation
+            viewTranslation
             (Matrix4x4.CreateFromQuaternion eyeRotation.Inverted)
             (Viewport.getFrustum eyeCenter eyeRotation eyeFieldOfView geometryViewport)
             (Viewport.getProjection3d eyeFieldOfView geometryViewport)
@@ -3390,6 +3383,7 @@ type [<ReferenceEquality>] GlRenderer3d =
             (Viewport.getProjection3d eyeFieldOfView rasterViewport)
             renderbuffer
             framebuffer
+
 
         // reset terrain geometry book-keeping
         renderer.PhysicallyBasedTerrainGeometriesUtilized.Clear ()
