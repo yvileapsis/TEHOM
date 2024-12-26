@@ -18,4 +18,11 @@
    [Assets Assets/Gameplay [cbm fbx dae obj mtl glsl raw] [] [Render3d]]
    [Assets Assets/Gameplay [wav ogg mp3] [] [Audio]]
    [Assets Assets/Gameplay [nueffect nuscript csv] [] [Symbol]]
-   [Assets Assets/Gameplay [nuentity nugroup tsx tmx] [] []]]]]
+   [Assets Assets/Gameplay [nuentity nugroup tsx tmx] [] []]]]
+ [Room
+  [[Assets Assets/Room [bmp png psd ttf] [PsdToPng] [Render2d]]
+   [Assets Assets/Room [jpg jpeg tga tif tiff dds] [ConvertToDds] [Render3d]]
+   [Assets Assets/Room [cbm fbx dae obj mtl glsl raw] [] [Render3d]]
+   [Assets Assets/Room [wav ogg mp3] [] [Audio]]
+   [Assets Assets/Room [nueffect nuscript csv] [] [Symbol]]
+   [Assets Assets/Room [nuentity nugroup tsx tmx] [] []]]]]

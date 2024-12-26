@@ -21,6 +21,7 @@ type CombatMessage =
 
 // this is our gameplay MMCC command type.
 type CombatCommand =
+    | SetupScene
     | RollInitiative
     | GameEffect of GameEffect
     | StartQuitting
@@ -55,7 +56,8 @@ type CombatDispatcher () =
 
     // here we handle the above messages
     override this.Message (model, message, screen, world) =
-        let startPlaying =
+        match message with
+        | StartPlaying ->
             let gameplay =
                 Combat.initial
 
@@ -71,11 +73,10 @@ type CombatDispatcher () =
 
             let gameplay = { gameplay with Combatants = combatants; History = history }
 
-            withSignal RollInitiative gameplay
+            withSignals [
+                RollInitiative
+            ] gameplay
 
-        match message with
-        | StartPlaying ->
-            startPlaying
 
         | FinishQuitting ->
             let gameplay = Combat.empty
@@ -83,10 +84,10 @@ type CombatDispatcher () =
 
         | Update ->
             if model.Combatants = Combat.initial.Combatants then
-                startPlaying
+                failwith "didn't set it"
             else
                 let gameplay = Combat.update model world
-                just gameplay
+                [SetupScene], gameplay
 
         | TurnBegin ->
             match model.Combatants with
@@ -184,11 +185,17 @@ type CombatDispatcher () =
     override this.Command (model, command, screen, world) =
 
         match command with
+        | SetupScene ->
+            let world = World.setEye3dCenter (v3 0f 2f 3f) world
+            let world = World.setEye3dRotation (Numerics.Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -20f, 0f)) world
+            just world
+
         | StartQuitting ->
             let world = World.publish () screen.QuitEvent screen world
             just world
 
         | RollInitiative ->
+
             let combatants, world =
                 model.Combatants
                 |> List.foldMap (fun (entity : Entity) (world : World)  ->
@@ -448,6 +455,8 @@ type CombatDispatcher () =
             | _ -> ()
 
         ]
+
+        Content.groupFromFile Simulants.GameplayScene.Name "Assets/Room/Scene.nugroup" [] []
 
         // the scene group while playing
         match gameplay.GameplayState with
