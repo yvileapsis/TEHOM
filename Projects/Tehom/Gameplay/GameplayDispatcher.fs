@@ -1,29 +1,47 @@
 namespace Tehom
 
 open System
-open System.Numerics
 open Prime
 open Nu
 
-// this is our gameplay MMCC message type.
+type GameplayState =
+    | Playing
+    | Quit
+
+type [<SymbolicExpansion>] Gameplay = {
+    GameplayTime : int64
+    GameplayState : GameplayState
+}
+with
+    static member empty = {
+        GameplayTime = 0L
+        GameplayState = Quit
+    }
+
+    // this represents the gameplay model in its initial state, such as when gameplay starts.
+    static member initial = {
+        Gameplay.empty with
+            GameplayState = Playing
+    }
+
 type GameplayMessage =
     | StartPlaying
     | FinishQuitting
+    | Update
     | TimeUpdate
     interface Message
 
-// this is our gameplay MMCC command type.
 type GameplayCommand =
+    | SetupScene
     | StartQuitting
     interface Command
 
-// this extends the Screen API to expose the Gameplay model as well as the Quit event.
 [<AutoOpen>]
 module GameplayExtensions =
     type Screen with
-        member this.GetGameplay world = this.GetModelGeneric<Gameplay> world
-        member this.SetGameplay value world = this.SetModelGeneric<Gameplay> value world
-        member this.Gameplay = this.ModelGeneric<Gameplay> ()
+        member this.GetGameplay world = this.GetModelGeneric<Combat> world
+        member this.SetGameplay value world = this.SetModelGeneric<Combat> value world
+        member this.Gameplay = this.ModelGeneric<Combat> ()
         member this.QuitEvent = Events.QuitEvent --> this
 
 // this is the dispatcher that defines the behavior of the screen where gameplay takes place.
@@ -40,66 +58,59 @@ type GameplayDispatcher () =
     override this.Definitions (_, _) = [
         Screen.SelectEvent => StartPlaying
         Screen.DeselectingEvent => FinishQuitting
+        Screen.UpdateEvent => Update
         Screen.TimeUpdateEvent => TimeUpdate
     ]
 
     // here we handle the above messages
-    override this.Message (gameplay, message, _, world) =
-
+    override this.Message (model, message, screen, world) =
         match message with
         | StartPlaying ->
-            let gameplay = Gameplay.initial
-            just gameplay
+            just model
 
         | FinishQuitting ->
-            let gameplay = Gameplay.empty
-            just gameplay
+            let model = Gameplay.empty
+            just model
+
+        | Update ->
+            just model
 
         | TimeUpdate ->
             let gameDelta = world.GameDelta
-            let gameplay = { gameplay with GameplayTime = gameplay.GameplayTime + gameDelta.Updates }
-            just gameplay
+            let model = { model with GameplayTime = model.GameplayTime + gameDelta.Updates }
+            just model
 
     // here we handle the above commands
-    override this.Command (_, command, screen, world) =
+    override this.Command (model, command, screen, world) =
 
         match command with
+        | SetupScene ->
+            let world = World.setEye3dCenter (v3 0f 2f 3f) world
+            let world = World.setEye3dRotation (Numerics.Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -20f, 0f)) world
+            just world
+
         | StartQuitting ->
             let world = World.publish () screen.QuitEvent screen world
             just world
 
+
     // here we describe the content of the game including the hud, the scene, and the player
-    override this.Content (gameplay, _) = [
+    override this.Content (gameplay, screen) = [
         // the gui group
+
         Content.group Simulants.GameplayGui.Name [] [
-            // quit
-            Content.button Simulants.GameplayQuit.Name [
-                Entity.Position == v3 232.0f -144.0f 0.0f
-                Entity.Elevation == 10.0f
-                Entity.Text == "Quit"
-                Entity.ClickEvent => StartQuitting
-            ]
+            Content.entity<CombatDispatcher> Simulants.GameplayCombat.Name []
         ]
+
+        Content.groupFromFile Simulants.GameplayScene.Name "Assets/Room/Scene.nugroup" [] []
 
         // the scene group while playing
         match gameplay.GameplayState with
         | Playing ->
-
-            GameplayGroups.background
-            GameplayGroups.sceneName gameplay
-            GameplayGroups.scenes gameplay
-            GameplayGroups.actionInput gameplay
-
-            (*
-            Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] [
-                Content.staticModel "StaticModel" [
-                    Entity.Position == v3 0.0f 1.0f 0.0f
-                    Entity.Rotation :=
-                        Quaternion.CreateFromAxisAngle ((v3 1.0f 0.75f 0.5f).Normalized,
-                        gameplay.GameplayTime % 360L |> single |> Math.DegreesToRadians)
-                ]
-            ]*)
-
+            Content.group Simulants.GameplayCharacters.Name [] [
+                character CharacterContent.player
+                character CharacterContent.rat
+            ]
         // no scene group otherwise
         | Quit -> ()
     ]

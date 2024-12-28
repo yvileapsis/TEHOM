@@ -23,11 +23,6 @@ module Simulants =
     let CreditsGui = Credits / "Gui"
     let CreditsBack = CreditsGui / "Back"
 
-    // combat screen
-    let Combat = Game / "Combat"
-    let CombatCharacters = Combat / "Characters"
-    let CombatGui = Combat / "Gui"
-
     let Rogue = Game / "Rogue"
 
     // gameplay screen
@@ -36,3 +31,5 @@ module Simulants =
     let GameplayGuiAdvanceTurn = GameplayGui / "Advance Turn"
     let GameplayQuit = GameplayGui / "Quit"
     let GameplayScene = Gameplay / "Scene"
+    let GameplayCharacters = Gameplay / "Characters"
+    let GameplayCombat = Gameplay / "Combat"

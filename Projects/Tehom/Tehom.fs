@@ -11,7 +11,6 @@ type Tehom =
     | Title
     | Credits
     | Gameplay
-    | Combat
     | Rogue
 
 // this is our top-level MMCC message type.
@@ -19,7 +18,6 @@ type TehomMessage =
     | ShowTitle
     | ShowCredits
     | ShowGameplay
-    | ShowCombat
     interface Message
 
 // this is our top-level MMCC command type. Commands are used instead of messages when the world is to be transformed.
@@ -48,7 +46,6 @@ type TehomDispatcher () =
             | Title -> Desire Simulants.Title
             | Credits -> Desire Simulants.Credits
             | Gameplay -> Desire Simulants.Gameplay
-            | Combat -> Desire Simulants.Combat
             | Rogue -> Desire Simulants.Rogue
         if myGame = Splash then Simulants.Splash.DeselectingEvent => ShowTitle
         Simulants.TitleCredits.ClickEvent => ShowCredits
@@ -64,7 +61,6 @@ type TehomDispatcher () =
         | ShowTitle -> just Title
         | ShowCredits -> just Credits
         | ShowGameplay -> just Gameplay
-        | ShowCombat -> just Combat
 
     // here we handle the above commands
     override this.Command (_, command, _, world) =
@@ -80,6 +76,5 @@ type TehomDispatcher () =
         Content.screenWithGroupFromFile Simulants.Title.Name (Dissolve (Constants.Dissolve.Default, None)) "Assets/Gui/Title.nugroup" [] []
         Content.screenWithGroupFromFile Simulants.Credits.Name (Dissolve (Constants.Dissolve.Default, None)) "Assets/Gui/Credits.nugroup" [] []
         Content.screen<GameplayDispatcher> Simulants.Gameplay.Name (Dissolve (Constants.Dissolve.Default, None)) [] []
-        Content.screen<CombatDispatcher> Simulants.Combat.Name (Dissolve (Constants.Dissolve.Default, None)) [] []
         Content.screen<RogueDispatcher> Simulants.Rogue.Name (Dissolve (Constants.Dissolve.Default, None)) [] []
     ]

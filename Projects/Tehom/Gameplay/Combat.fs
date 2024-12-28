@@ -360,7 +360,7 @@ with
             let left = gameplay.DisplayLeft.ID
             let right = gameplay.DisplayRight.ID
 
-            let actors = World.getEntities Simulants.CombatCharacters world
+            let actors = World.getEntities Simulants.GameplayCharacters world
 
             let leftCharacter =
                 actors
