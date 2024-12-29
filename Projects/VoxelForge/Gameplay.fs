@@ -233,22 +233,30 @@ type GameplayDispatcher () =
 
         if gameplay.GameplayState = Playing then
             Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] [
-                Content.staticModel "StaticModel" [
-                    Entity.Position == v3 0.0f 3.0f -2.0f
-                    Entity.Rotation :=
-                        Quaternion.CreateFromAxisAngle ((v3 1.0f 0.75f 0.5f).Normalized, gameplay.GameplayTime % 360L |> single |> Math.DegreesToRadians)
-                ]
 
-                Content.entity<PlayerDispatcher> Simulants.GameplayPlayer.Name [
-                    Entity.Persistent == false
-                    Entity.DieEvent => Die Simulants.GameplayPlayer
-                ]
+                let size = 1f
 
-                for i in List.init 625 id do
+                //let voxel = SlicesVoxel Assets.Voxels.Grass
+
+                //let (Some voxel) = VoxelChunk.tryGetMetadata Metadata.tryGetFilePath voxel
+
+                let voxel = RecursiveVoxels {
+                    Subvoxels = [|SlicesVoxel Assets.Voxels.Grass|]
+                    SubvoxelSize = v3i 16 16 16
+                    Field = Map.ofList [
+                        for i in 0 .. dec 64 do
+                        for j in 0 .. dec 64 do
+                            yield (v3i i 0 j, 0)
+
+                    ]
+                    FieldSize = v3i 64 64 64
+                }
+
+                for i in List.init 1 id do
                     ContentEx.voxel $"VoxelTest{i}" [
-                        Entity.VoxelChunk == (SlicesVoxel Assets.Voxels.Minecraft)
-                        Entity.Position == v3 (single (i / 25) * 8f) 4f (single (i % 25) * 8f)
-                        Entity.Size == v3 8f 8f 8f
+                        Entity.VoxelChunk == voxel
+                        Entity.Position == v3 (single (12 - i / 25) * size) 0f (single (12 - i % 25) * size)
+                        Entity.Size == v3 64f 64f 64f
                     ]
             ]
 

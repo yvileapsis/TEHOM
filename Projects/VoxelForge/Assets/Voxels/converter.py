@@ -1,8 +1,8 @@
 from PIL import Image
 
 # Load the tall image
-input_file = "input_texture.png"
-output_file = "output_texture.png"
+input_file = input()
+output_file = input()
 
 # Open the image
 image = Image.open(input_file)
