@@ -512,7 +512,7 @@ type Text3dFacet () =
     inherit Facet (false, false, false)
 
     static member Properties = [
-        define Entity.Text "Testing"
+        define Entity.Text ""
         define Entity.Font Assets.Default.Font
         define Entity.FontSizing (Some 40)
         define Entity.FontStyling Set.empty

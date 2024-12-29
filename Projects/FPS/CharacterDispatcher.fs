@@ -212,12 +212,21 @@ type CharacterDispatcher (character : Character) =
                      Entity.MountOpt == None]
 
          // animated model
-         Content.entity<AnimatedModelDispatcher> Constants.Gameplay.CharacterAnimatedModelName
+         Content.composite<AnimatedModelDispatcher> Constants.Gameplay.CharacterAnimatedModelName
             [Entity.Size == v3Dup 2.0f
              Entity.Offset == v3 0.0f 1.0f 0.0f
              Entity.MaterialProperties == MaterialProperties.defaultProperties
              Entity.AnimatedModel == Assets.Gameplay.JoanModel
-             Entity.Pickable == false]
+             Entity.Pickable == false] [
+                ContentEx.text3d "HP" [
+                    Entity.PositionLocal == v3 0f 2f 0f
+                    Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 90f, 0f, 0f)
+                    Entity.Size == v3 5f 1f 1f
+                    Entity.ScaleLocal == v3 0.5f -0.5f 0.5f
+                    Entity.Text := string character.ActionState
+                    Entity.FontSizing == Some 40
+                ]
+            ]
 
          // weapon
          Content.entity<RigidModelDispatcher> Constants.Gameplay.CharacterWeaponName
