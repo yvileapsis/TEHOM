@@ -11,7 +11,7 @@ open SDL2
 open ImGuiNET
 open Prime
 
-/// Augments an entity with rich text.
+/// Augments an entity with a camera facet, synchronizing world's 3d eye position and rotation with that of the entity.
 type CameraFacet () =
     inherit Facet (false, false, false)
 
@@ -40,7 +40,7 @@ type CameraFacet () =
     static member Properties =
         [define Entity.AlwaysUpdate true]
 
-/// Augments an entity with rich text.
+/// Augments an entity with a wrapper for SDL relative mouse mode, convenient for FPS games.
 type MouseRelativeModeFacet () =
     inherit Facet (false, false, false)
 
@@ -66,31 +66,10 @@ type MouseRelativeModeFacet () =
             SDL.SDL_SetRelativeMouseMode (SDL.SDL_bool.SDL_FALSE) |> ignore
         world
 
-    override this.Render (_, _, _) =
-        // TODO: add guizmos for display
-        ()
-
     static member Properties =
         [define Entity.AlwaysUpdate true]
 
-/// Gives an entity the base behavior of a gui text control.
-type CameraDispatcher () =
-    inherit Entity3dDispatcher (false, false, false)
-
-    static member Facets = [
-        typeof<CameraFacet>
-    ]
-
-/// Gives an entity the base behavior of a gui text control.
-type CameraFirstPersonDispatcher () =
-    inherit Entity3dDispatcher (false, false, false)
-
-    static member Facets = [
-        typeof<CameraFacet>
-        typeof<MouseRelativeModeFacet>
-    ]
-
-/// Augments an entity with rich text.
+/// Augments an entity with a custom cursor.
 type CursorFacet () =
     inherit Facet (false, false, false)
 
@@ -145,87 +124,6 @@ type CursorFacet () =
         transform.Position <- perimeter.BottomRight
         World.renderLayeredSpriteFast (transform.Elevation, transform.Horizon, staticImage, &transform, &insetOpt, &clipOpt, staticImage, &color, blend, &emission, flip, world)
 
-/// Gives an entity the base behavior of a gui text control.
-type CursorDispatcher () =
-    inherit Entity2dDispatcher (false, false, false)
-
-    static member Facets = [
-        typeof<CursorFacet>
-    ]
-
-type GlyphFacet () =
-    inherit Facet (false, false, false)
-
-    static member Properties =
-        [define Entity.Text ""
-         define Entity.Font Assets.Default.Font
-         define Entity.FontSizing None
-         define Entity.FontStyling Set.empty
-         define Entity.Justification (Justified (JustifyCenter, JustifyMiddle))
-         define Entity.TextMargin v2Zero
-         define Entity.TextColor Color.White
-         define Entity.TextColorDisabled (Color (0.75f, 0.75f, 0.75f, 0.75f))
-         define Entity.TextOffset v2Zero
-         define Entity.TextShift 0.5f]
-
-    override this.Render (_, entity, world) =
-        let text = entity.GetText world
-        if not (String.IsNullOrWhiteSpace text) then
-
-            let text = text |> Seq.filter (fun c -> c <> '\n' && c <> '\r')
-
-            World.enqueueLayeredOperations2d (Seq.indexed text
-            |> Seq.map (fun (i, c) ->
-
-                let localPos = v3 ((float32 (i % 36)) * 10.0f - 350.0f) (- (float32 (i / 36)) * 10.0f + 110.0f) 0.0f
-                let mutable transform = entity.GetTransform world
-
-                let perimeter = transform.Perimeter // gui currently ignores rotation and scale
-                let horizon = transform.Horizon
-                let mutable textTransform = Transform.makeDefault ()
-                let margin = (entity.GetTextMargin world).V3
-                let offset = (entity.GetTextOffset world).V3
-                let shift = entity.GetTextShift world
-                textTransform.Position <- perimeter.Center + margin + offset + localPos
-                textTransform.Size <- perimeter.Size - margin * 2.0f
-                textTransform.Elevation <- transform.Elevation + shift
-                textTransform.Absolute <- transform.Absolute
-                let font = entity.GetFont world
-                let fontSizing = entity.GetFontSizing world
-                let fontStyling = entity.GetFontStyling world
-
-
-                { Elevation = textTransform.Elevation
-                  Horizon = horizon
-                  AssetTag = font
-                  RenderOperation2d =
-                    RenderText
-                        { Transform = textTransform
-                          ClipOpt = ValueSome textTransform.Bounds2d.Box2
-                          Text = string c
-                          Font = font
-                          FontSizing = fontSizing
-                          FontStyling = fontStyling
-                          Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
-                          Justification = entity.GetJustification world
-                          CursorOpt = None }}
-
-            )) world
-
-    override this.GetAttributesInferred (_, _) =
-        AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
-
-/// Gives an entity the base behavior of a gui text control.
-type GlyphDispatcher () =
-    inherit GuiDispatcher ()
-
-    static member Facets =
-        [typeof<BackdroppableFacet>
-         typeof<GlyphFacet>]
-
-    static member Properties =
-        [define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))]
-
 [<AutoOpen>]
 module HoverFacetExtensions =
     type Entity with
@@ -248,7 +146,7 @@ module HoverFacetExtensions =
         member this.HoveredEvent = stoa<unit> "Hovered/Event"  --> this
         member this.UnhoveredEvent = stoa<unit> "Unhovered/Event" --> this
 
-/// Augments an entity with button behavior.
+/// Augments an entity with a hoverable button behavior.
 type HoverFacet () =
     inherit Facet (false, false, false)
 
@@ -342,14 +240,448 @@ type HoverFacet () =
         | ValueSome size -> AttributesInferred.important size.V3 v3Zero
         | ValueNone -> AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
-/// Gives an entity the base behavior of a gui button.
-type ButtonExDispatcher () =
-    inherit GuiDispatcher ()
+/// Augments an entity with a static billboard.
+type Text3dFacet () =
+    inherit Facet (false, false, false)
 
-    static member Facets =
-        [typeof<TextFacet>
-         typeof<ButtonFacet>
-         typeof<HoverFacet>]
+    static member Properties = [
+        define Entity.Text ""
+        define Entity.Font Assets.Default.Font
+        define Entity.FontSizing (Some 40)
+        define Entity.FontStyling Set.empty
+        define Entity.Justification (Justified (JustifyCenter, JustifyMiddle))
+        define Entity.TextMargin v2Zero
+        define Entity.TextColor Color.White
+        define Entity.TextColorDisabled Constants.Gui.ColorDisabledDefault
+        define Entity.InsetOpt None
+        define Entity.MaterialProperties MaterialProperties.empty
+        define Entity.Material Material.empty
+        define Entity.RenderStyle Deferred
+        define Entity.ShadowOffset Constants.Engine.BillboardShadowOffsetDefault
+    ]
+
+    override this.Render (renderPass, entity, world) =
+        let mutable transform = entity.GetTransform world
+        let castShadow = transform.CastShadow
+        if not renderPass.IsShadowPass || castShadow then
+            let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
+            let insetOpt = entity.GetInsetOpt world
+            let properties = entity.GetMaterialProperties world
+            let material = entity.GetMaterial world
+            let shadowOffset = entity.GetShadowOffset world
+            let renderType =
+                match entity.GetRenderStyle world with
+                | Deferred -> DeferredRenderType
+                | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
+
+            let margin = (entity.GetTextMargin world).V3
+            let color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
+            let font = entity.GetFont world
+            let fontSizing = entity.GetFontSizing world
+            let fontStyling = entity.GetFontStyling world
+            let text = entity.GetText world
+
+            let typeset = {
+                Text = text
+                Font = font
+                FontSizing = fontSizing
+                FontStyling = fontStyling
+                Color = color
+            }
+
+            World.enqueueRenderMessage3d
+                (RenderText3d
+                    { CastShadow = castShadow
+                      Presence = presence
+                      ModelMatrix = affineMatrix
+                      InsetOpt = insetOpt
+                      MaterialProperties = properties
+                      Material = material
+                      ShadowOffset = shadowOffset
+                      RenderType = renderType
+                      RenderPass = renderPass
+                      Typeset = typeset
+                   })
+                world
+
+///
+type GlyphMatrixFacet () =
+    inherit Facet (false, false, false)
+
+    static member Properties =
+        [define Entity.Text ""
+         define Entity.Font Assets.Default.Font
+         define Entity.FontSizing None
+         define Entity.FontStyling Set.empty
+         define Entity.Justification (Justified (JustifyCenter, JustifyMiddle))
+         define Entity.TextMargin v2Zero
+         define Entity.TextColor Color.White
+         define Entity.TextColorDisabled (Color (0.75f, 0.75f, 0.75f, 0.75f))
+         define Entity.TextOffset v2Zero
+         define Entity.TextShift 0.5f]
+
+    override this.Render (_, entity, world) =
+        let text = entity.GetText world
+        if not (String.IsNullOrWhiteSpace text) then
+
+            let text = text |> Seq.filter (fun c -> c <> '\n' && c <> '\r')
+
+            World.enqueueLayeredOperations2d (Seq.indexed text
+            |> Seq.map (fun (i, c) ->
+
+                let localPos = v3 ((float32 (i % 36)) * 10.0f - 350.0f) (- (float32 (i / 36)) * 10.0f + 110.0f) 0.0f
+                let mutable transform = entity.GetTransform world
+
+                let perimeter = transform.Perimeter // gui currently ignores rotation and scale
+                let horizon = transform.Horizon
+                let mutable textTransform = Transform.makeDefault ()
+                let margin = (entity.GetTextMargin world).V3
+                let offset = (entity.GetTextOffset world).V3
+                let shift = entity.GetTextShift world
+                textTransform.Position <- perimeter.Center + margin + offset + localPos
+                textTransform.Size <- perimeter.Size - margin * 2.0f
+                textTransform.Elevation <- transform.Elevation + shift
+                textTransform.Absolute <- transform.Absolute
+                let font = entity.GetFont world
+                let fontSizing = entity.GetFontSizing world
+                let fontStyling = entity.GetFontStyling world
+
+
+                { Elevation = textTransform.Elevation
+                  Horizon = horizon
+                  AssetTag = font
+                  RenderOperation2d =
+                    RenderText
+                        { Transform = textTransform
+                          ClipOpt = ValueSome textTransform.Bounds2d.Box2
+                          Text = string c
+                          Font = font
+                          FontSizing = fontSizing
+                          FontStyling = fontStyling
+                          Color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
+                          Justification = entity.GetJustification world
+                          CursorOpt = None }}
+
+            )) world
+
+    override this.GetAttributesInferred (_, _) =
+        AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+
+module NuMark =
+
+    #r "nuget: FParsec"
+    open FParsec
+
+    type Justification =
+        | Left
+        | Center
+        | Right
+        | Full
+        | Unjustified
+
+    type Style =
+        | Bold
+        | Italics
+        | Strikethrough
+        | Underlined
+        | Subscript
+        | Superscript
+
+    type Block = {
+        Text: string
+        Size: string
+        Color: string
+        Style: Set<Style>
+    }
+    with
+        static member empty = {
+            Text = ""
+            Size = ""
+            Color = ""
+            Style = Set.empty
+        }
+
+    type Line = Block list
+
+    type UserState = {
+        Stack: string list
+    }
+    with
+       static member Default = {
+           Stack = List.empty
+       }
+
+
+    let parseLine till : Parser<Line, UserState> =
+
+        let specialChars = ['~'; '^'; '*'; '_'; '{'; '}'; '\\'; '\n'; '\r']
+
+        let many1CharsTillOptional chars till =
+            attempt (many1CharsTill chars till)
+            <|> many1Chars chars
+
+        let text =
+            let escaped = choice [
+                pstring @"\n" >>% ' '
+                pstring @"\r" >>% ' '
+                pstring @"\*" >>% '*'
+                pstring @"\_" >>% '_'
+                pstring @"\~" >>% '~'
+                pstring @"\\" >>% '\\'
+            ]
+
+            choice [
+                many1CharsTillOptional escaped till <?> "escaped"
+                many1CharsTillOptional (noneOf specialChars) till <?> "text"
+                many1CharsTillOptional (newline >>% ' ') till <?> "singular newline"
+                many1CharsTillOptional (anyOf specialChars) till <?> "special symbol"
+            ]
+            |>> fun x -> [{ Block.empty with Text = x }]
+
+        let styles, stylesRef = createParserForwardedToRef()
+
+        let block =
+            choice [
+                attempt styles
+                text
+            ]
+
+        let insides till =
+            many1Till block till
+            |>> List.concat
+
+        let style styleType symbol =
+            pstring symbol
+            >>? insides (followedByString symbol)
+            |>> List.map (fun x -> { x with Style = Set.add styleType x.Style })
+            .>>? pstring symbol
+            <?> $"style {symbol}"
+
+        stylesRef.Value <- choice [
+            style Bold "**"
+            style Italics "*"
+            style Strikethrough "~~"
+            style Superscript "~"
+            style Underlined "__"
+            style Subscript "_"
+        ]
+
+        insides till
+        |>> List.fold (fun (x : Line) y ->
+            match x with
+            | [] -> [y]
+            | head::tail ->
+                if head.Style = y.Style then
+                    { head with Text = head.Text + y.Text }::tail
+                else
+                    y::x
+        ) List.empty
+        |>> List.rev
+
+    type Node =
+        | Paragraph of Justification * Line
+        | Header of int * Node
+        | Quote of int * Node
+        | Indent of int * Node
+        | List of int * Node
+        | Code
+        | Codeblock
+        | Table
+        | Image
+        | HorizontalLine
+
+    type Text = Node list
+
+    let parseText : Parser<Text, _> =
+        let node, nodeRef = createParserForwardedToRef()
+
+        let line =
+            let endings = choice [
+                followedBy (pstring " ||" .>>? (newline .>> newline))
+                followedBy (pstring " ||" .>>? eof)
+                followedBy (pstring "||" .>>? (newline .>> newline))
+                followedBy (pstring "||" .>>? eof)
+                followedBy (newline >>. newline)
+                followedBy eof
+            ]
+
+            let line = parseLine endings //(followedByString " ||" <|> followedByString "||" <|> followedByNewline <|> (followedBy eof))
+
+            let full =
+                pstring "||"
+                >>? optional (pstring " ")
+                >>? line
+                .>>? optional (pstring " ")
+                .>>? pstring "||"
+                |>> fun x -> Center, x
+
+            let left =
+                pstring "||"
+                >>? optional (pstring " ")
+                >>? line
+                |>> fun x -> Left, x
+
+            let right =
+                line
+                .>>? optional (pstring " ")
+                .>>? pstring "||"
+                |>> fun x -> Right, x
+
+            let center =
+                line
+                |>> fun x -> Unjustified, x
+
+            optional spaces
+            >>. choice [
+                full
+                left
+                right
+                center
+            ]
+            |>> Paragraph
+
+        nodeRef.Value <- choice [
+            line
+        ]
+
+        sepEndBy1 (node) (newline)
+
+    let parseNuMark string =
+        match runParserOnString parseText UserState.Default "" string with
+        | Success (x, _, _) -> Result.Ok x
+        | Failure (x, y, _) -> Result.Error (x, y)
+
+open NuMark
+
+/// Augments an entity with rich text.
+type RichTextFacet () =
+    inherit Facet (false, false, false)
+
+    static member Properties = [
+        define Entity.Text ""
+        define Entity.Font Assets.Default.Font
+        define Entity.FontSizing None
+        define Entity.FontStyling Set.empty
+        define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))
+        define Entity.TextMargin v2Zero
+        define Entity.TextColor Color.Black
+        define Entity.TextColorDisabled (Color (0.25f, 0.25f, 0.25f, 0.75f))
+        define Entity.TextOffset v2Zero
+        define Entity.TextShift 0.5f
+    ]
+
+    override this.Render (_, entity, world) =
+        let text = entity.GetText world
+        if not (String.IsNullOrWhiteSpace text) then
+            let mutable transform = entity.GetTransform world
+            let perimeter = transform.Perimeter // gui currently ignores rotation and scale
+            let horizon = transform.Horizon
+
+            let mutable textTransform = Transform.makeDefault ()  // centered-ness and offset are already baked into perimeter
+            let margin = (entity.GetTextMargin world).V3
+            let offset = (entity.GetTextOffset world).V3
+
+            let shift = entity.GetTextShift world
+            textTransform.Position <- perimeter.Min + margin + offset
+            textTransform.Size <- perimeter.Size - margin * 2.0f
+            textTransform.Elevation <- transform.Elevation + shift
+            textTransform.Absolute <- transform.Absolute
+
+            let font = entity.GetFont world
+            let fontSizing = entity.GetFontSizing world
+            let fontStyling = entity.GetFontStyling world
+            let color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
+            let justification = entity.GetJustification world
+
+            let parsingResult = parseNuMark text
+
+            let alterStyling blockStyle =
+                Set.fold (fun set x ->
+                    match x with
+                    | Bold -> Set.add FontStyle.Bold set
+                    | Italics -> Set.add FontStyle.Italic set
+                    | Underlined -> Set.add FontStyle.Underline set
+                    | Strikethrough -> Set.add FontStyle.Strikethrough set
+                    | _ -> set
+                ) fontStyling blockStyle
+
+            let defaultJustify =
+                match justification with
+                | Justified (JustifyLeft, _) -> JustifyLeft
+                | Justified (JustifyRight, _) -> JustifyRight
+                | Justified (JustifyCenter, _) -> JustifyCenter
+                | Justified (JustifyFull, _) -> JustifyFull
+                | _ -> JustifyLeft
+
+            let alterJustify entityJustification =
+                match entityJustification with
+                | Left -> JustifyLeft
+                | Right -> JustifyRight
+                | Center -> JustifyCenter
+                | Full -> JustifyFull
+                | Unjustified -> defaultJustify
+
+            let paragraphList =
+                match parsingResult with
+                | Ok text ->
+                    text
+                    |> List.map (function
+                        | Paragraph (justify, paragraph) ->
+                            {
+                                Blocks =
+                                    List.map (fun block -> {
+                                        Text = block.Text
+                                        Color = color
+                                        Font = font
+                                        FontSizing = fontSizing
+                                        FontStyling = alterStyling block.Style
+                                    }) paragraph
+                                Justification = alterJustify justify
+                            }
+                        | _ ->
+                            {
+                                Blocks = List.empty
+                                Justification = defaultJustify
+                            }
+                    )
+                | Error (text, error) -> [
+                    {
+                        Blocks = [{
+                            Text = text
+                            Color = color
+                            Font = font
+                            FontSizing = fontSizing
+                            FontStyling = fontStyling
+                        }]
+                        Justification = defaultJustify
+                    }
+                    {
+                        Blocks = [{
+                            Text = $"{error}"
+                            Color = color
+                            Font = font
+                            FontSizing = fontSizing
+                            FontStyling = fontStyling
+                        }]
+                        Justification = defaultJustify
+                    }
+                ]
+
+            World.enqueueLayeredOperation2d {
+                Elevation = textTransform.Elevation
+                Horizon = horizon
+                AssetTag = font
+                RenderOperation2d = RenderRichText {
+                    Transform = textTransform
+                    ClipOpt = ValueNone
+                    Entries = paragraphList
+                }
+            } world
+
+    override this.GetAttributesInferred (_, _) =
+        AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+
 
 [<AutoOpen>]
 module VoxelFacetExtensions =
@@ -365,8 +697,7 @@ module VoxelFacetExtensions =
         member this.SetVoxelChunk (value : VoxelChunk) world = this.Set (nameof this.VoxelChunk) value world
         member this.VoxelChunk = lens (nameof this.VoxelChunk) this this.GetVoxelChunk this.SetVoxelChunk
 
-
-/// Augments an entity with a rigid 3d terrain.
+/// Augments an entity with voxel model and physics.
 type VoxelFacet () =
     inherit Facet (true, false, false)
 
@@ -500,77 +831,50 @@ type VoxelFacet () =
                       RenderPass = renderPass })
                 world
 
-/// Gives an entity the base behavior of a rigid 3d terrain.
-type VoxelDispatcher () =
-    inherit Entity3dDispatcher (true, false, false)
+/// Gives an entity the base behavior of a camera, synchronizing world's 3d eye position and rotation with itself.
+type CameraDispatcher () =
+    inherit Entity3dDispatcher (false, false, false)
 
-    static member Facets =
-        [typeof<VoxelFacet>]
-
-/// Augments an entity with a static billboard.
-type Text3dFacet () =
-    inherit Facet (false, false, false)
-
-    static member Properties = [
-        define Entity.Text ""
-        define Entity.Font Assets.Default.Font
-        define Entity.FontSizing (Some 40)
-        define Entity.FontStyling Set.empty
-        define Entity.Justification (Justified (JustifyCenter, JustifyMiddle))
-        define Entity.TextMargin v2Zero
-        define Entity.TextColor Color.White
-        define Entity.TextColorDisabled Constants.Gui.ColorDisabledDefault
-        define Entity.InsetOpt None
-        define Entity.MaterialProperties MaterialProperties.empty
-        define Entity.Material Material.empty
-        define Entity.RenderStyle Deferred
-        define Entity.ShadowOffset Constants.Engine.BillboardShadowOffsetDefault
+    static member Facets = [
+        typeof<CameraFacet>
     ]
 
-    override this.Render (renderPass, entity, world) =
-        let mutable transform = entity.GetTransform world
-        let castShadow = transform.CastShadow
-        if not renderPass.IsShadowPass || castShadow then
-            let affineMatrix = transform.AffineMatrix
-            let presence = transform.Presence
-            let insetOpt = entity.GetInsetOpt world
-            let properties = entity.GetMaterialProperties world
-            let material = entity.GetMaterial world
-            let shadowOffset = entity.GetShadowOffset world
-            let renderType =
-                match entity.GetRenderStyle world with
-                | Deferred -> DeferredRenderType
-                | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
+/// Gives an entity the base behavior of a first-person camera.
+type CameraFirstPersonDispatcher () =
+    inherit Entity3dDispatcher (false, false, false)
 
-            let margin = (entity.GetTextMargin world).V3
-            let color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
-            let font = entity.GetFont world
-            let fontSizing = entity.GetFontSizing world
-            let fontStyling = entity.GetFontStyling world
-            let text = entity.GetText world
+    static member Facets = [
+        typeof<CameraFacet>
+        typeof<MouseRelativeModeFacet>
+    ]
 
-            let typeset = {
-                Text = text
-                Font = font
-                FontSizing = fontSizing
-                FontStyling = fontStyling
-                Color = color
-            }
+/// Gives an entity the base behavior of a cursor.
+type CursorDispatcher () =
+    inherit Entity2dDispatcher (false, false, false)
 
-            World.enqueueRenderMessage3d
-                (RenderText3d
-                    { CastShadow = castShadow
-                      Presence = presence
-                      ModelMatrix = affineMatrix
-                      InsetOpt = insetOpt
-                      MaterialProperties = properties
-                      Material = material
-                      ShadowOffset = shadowOffset
-                      RenderType = renderType
-                      RenderPass = renderPass
-                      Typeset = typeset
-                   })
-                world
+    static member Facets = [
+        typeof<CursorFacet>
+    ]
+
+/// Gives an entity the base behavior of a gui text control.
+type RichTextDispatcher () =
+    inherit GuiDispatcher ()
+
+    static member Facets =
+        [typeof<BackdroppableFacet>
+         typeof<RichTextFacet>]
+
+    static member Properties =
+        [define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))]
+
+/// Gives an entity the base behavior of a gui button.
+type ButtonExDispatcher () =
+    inherit GuiDispatcher ()
+
+    static member Facets =
+        [typeof<TextFacet>
+         typeof<ButtonFacet>
+         typeof<HoverFacet>]
 
 /// Gives an entity the base behavior of a static billboard.
 type Text3dDispatcher () =
@@ -579,17 +883,31 @@ type Text3dDispatcher () =
     static member Facets =
         [typeof<Text3dFacet>]
 
+/// Gives an entity the base behavior of a gui text control.
+type GlyphMatrixDispatcher () =
+    inherit GuiDispatcher ()
+
+    static member Facets =
+        [typeof<BackdroppableFacet>
+         typeof<GlyphMatrixFacet>]
+
+    static member Properties =
+        [define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))]
+
+/// Gives an entity the base behavior of a voxel model.
+type VoxelDispatcher () =
+    inherit Entity3dDispatcher (true, false, false)
+
+    static member Facets =
+        [typeof<VoxelFacet>]
+
 [<RequireQualifiedAccess>]
 module ContentEx =
-
     let camera entityName initializers = Content.entity<CameraDispatcher> entityName initializers
     let cameraFirstPerson entityName initializers = Content.entity<CameraFirstPersonDispatcher> entityName initializers
-
     let cursor entityName initializers = Content.entity<CursorDispatcher> entityName initializers
-
-    let glyph entityName initializers = Content.entity<GlyphDispatcher> entityName initializers
-
+    let richText entityName initializers = Content.entity<RichTextDispatcher> entityName initializers
     let buttonEx entityName initializers = Content.entity<ButtonExDispatcher> entityName initializers
-
-    let voxel entityName definitions = Content.entity<VoxelDispatcher> entityName definitions
     let text3d entityName definitions = Content.entity<Text3dDispatcher> entityName definitions
+    let glyph entityName initializers = Content.entity<GlyphMatrixDispatcher> entityName initializers
+    let voxel entityName definitions = Content.entity<VoxelDispatcher> entityName definitions

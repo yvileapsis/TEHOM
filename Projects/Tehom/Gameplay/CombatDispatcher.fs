@@ -357,7 +357,7 @@ type CombatDispatcher () =
                     ""
 
 
-            richText "CombatSummary" [
+            ContentEx.richText "CombatSummary" [
                 Entity.Absolute == false
                 Entity.PositionLocal == v3 0.0f 40.0f 0.0f
                 Entity.Size == v3 120.0f 20.0f 0.0f
@@ -419,7 +419,7 @@ type CombatDispatcher () =
                     ]
             ]
 
-            richText "CombatLocations" [
+            ContentEx.richText "CombatLocations" [
                 Entity.Absolute == false
                 Entity.PositionLocal == v3 0.0f -80.0f 0.0f
                 Entity.Size == v3 180.0f 20.0f 0.0f
