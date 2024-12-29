@@ -34,7 +34,7 @@ type CombatDispatcher () =
     inherit Entity2dDispatcher<Combat, CombatMessage,CombatCommand> (false, false, false, Combat.initial)
 
     override this.Definitions (_, _) = [
-        Entity.Size == Constants.Render.VirtualResolution.V3
+        Entity.Size == Constants.Render.VirtualResolution.V3 / 2f
         Screen.DeselectingEvent => FinishQuitting
         Screen.UpdateEvent => Update
         Screen.TimeUpdateEvent => TimeUpdate
@@ -233,13 +233,14 @@ type CombatDispatcher () =
     override this.Content (model, _) = [
 
         Content.button Simulants.GameplayGuiAdvanceTurn.Name [
-            Entity.PositionLocal == v3 0.0f 150.0f 0.0f
-            Entity.Size == v3 80.0f 20.0f 0.0f
+            Entity.Absolute == false
+            Entity.PositionLocal == v3 0.0f 75.0f 0.0f
+            Entity.Size == v3 40.0f 10.0f 0.0f
             Entity.Elevation == 10.0f
             Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
             Entity.Text == "Advance Turn"
             Entity.Font == Assets.Gui.ClearSansFont
-            Entity.FontSizing == Some 10
+            Entity.FontSizing == Some 5
             Entity.ClickEvent => TurnBegin
         ]
 
@@ -266,10 +267,11 @@ type CombatDispatcher () =
             let majorWounds = character.MajorWounds
 
             let stat name text = Content.text name [
-                Entity.Size == v3 80.0f 10.0f 0.0f
+                Entity.Absolute == false
+                Entity.Size == v3 40.0f 5.0f 0.0f
                 Entity.Text := text
                 Entity.Font == Assets.Gui.ClearSansFont
-                Entity.FontSizing == Some 10
+                Entity.FontSizing == Some 5
                 Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
             ]
 
@@ -284,16 +286,18 @@ type CombatDispatcher () =
         ]
 
         Content.association "StatsBoxPlayer" [
-            Entity.PositionLocal == v3 -160.0f 0.0f 0.0f
-            Entity.Size == v3 80.0f 80.0f 0.0f
+            Entity.Absolute == false
+            Entity.PositionLocal == v3 -80.0f 0.0f 0.0f
+            Entity.Size == v3 40.0f 40.0f 0.0f
             Entity.Elevation == 10.0f
             Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
             Entity.Layout == Flow (FlowDownward, FlowUnlimited)
         ] (statsBox player)
 
         Content.association "StatsBoxEnemy" [
-            Entity.PositionLocal == v3 200.0f 0.0f 0.0f
-            Entity.Size == v3 80.0f 80.0f 0.0f
+            Entity.Absolute == false
+            Entity.PositionLocal == v3 100.0f 0.0f 0.0f
+            Entity.Size == v3 40.0f 40.0f 0.0f
             Entity.Elevation == 10.0f
             Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
             Entity.Layout == Flow (FlowDownward, FlowUnlimited)
@@ -354,8 +358,9 @@ type CombatDispatcher () =
 
 
             richText "CombatSummary" [
-                Entity.PositionLocal == v3 0.0f 80.0f 0.0f
-                Entity.Size == v3 240.0f 40.0f 0.0f
+                Entity.Absolute == false
+                Entity.PositionLocal == v3 0.0f 40.0f 0.0f
+                Entity.Size == v3 120.0f 20.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                 Entity.Text := $" {playerSuccesses} - {enemySuccesses} - {turnWinner}
@@ -363,22 +368,24 @@ type CombatDispatcher () =
                 Turn: {model.Turn} {combatWinner}"
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.ClearSansFont
-                Entity.FontSizing == Some 10
+                Entity.FontSizing == Some 5
             ]
 
             Content.association "MovesPlayer" [
-                Entity.PositionLocal == v3 -80.0f 0.0f 0.0f
-                Entity.Size == v3 80.0f 80.0f 0.0f
+                Entity.Absolute == false
+                Entity.PositionLocal == v3 -40.0f 0.0f 0.0f
+                Entity.Size == v3 40.0f 40.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                 Entity.Layout == Flow (FlowDownward, FlowUnlimited)
             ] [
                 for i, move in List.indexed playerMoves ->
                     Content.text $"Move{i}" [
-                        Entity.Size == v3 80.0f 10.0f 0.0f
+                        Entity.Absolute == false
+                        Entity.Size == v3 40.0f 5.0f 0.0f
                         Entity.Text := $"{Move.getName move}"
                         Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
+                        Entity.FontSizing == Some 5
                         Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                         Entity.TextColor :=
                             if i < playerSuccesses then
@@ -389,18 +396,20 @@ type CombatDispatcher () =
             ]
 
             Content.association "MovesEnemy" [
-                Entity.PositionLocal == v3 80.0f 0.0f 0.0f
-                Entity.Size == v3 80.0f 80.0f 0.0f
+                Entity.Absolute == false
+                Entity.PositionLocal == v3 40.0f 0.0f 0.0f
+                Entity.Size == v3 40.0f 40.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                 Entity.Layout == Flow (FlowDownward, FlowUnlimited)
             ] [
                 for i, move in List.indexed enemyMoves ->
                     Content.text $"Move{i}" [
-                        Entity.Size == v3 80.0f 10.0f 0.0f
+                        Entity.Absolute == false
+                        Entity.Size == v3 40.0f 5.0f 0.0f
                         Entity.Text := $"{Move.getName move}"
                         Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 10
+                        Entity.FontSizing == Some 5
                         Entity.Justification == Justified (JustifyRight, JustifyMiddle)
                         Entity.TextColor :=
                             if i < enemySuccesses then
@@ -411,14 +420,15 @@ type CombatDispatcher () =
             ]
 
             richText "CombatLocations" [
-                Entity.PositionLocal == v3 0.0f -160.0f 0.0f
-                Entity.Size == v3 360.0f 40.0f 0.0f
+                Entity.Absolute == false
+                Entity.PositionLocal == v3 0.0f -80.0f 0.0f
+                Entity.Size == v3 180.0f 20.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                 Entity.Text := $"{Area.getConnections player.ID model.Area} -- {Area.getConnections enemy.ID model.Area}"
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.ClearSansFont
-                Entity.FontSizing == Some 10
+                Entity.FontSizing == Some 5
             ]
 
         | _ -> ()

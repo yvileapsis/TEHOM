@@ -381,6 +381,18 @@ type RenderBillboard =
       RenderType : RenderType
       RenderPass : RenderPass }
 
+type RenderText3d =
+    { ModelMatrix : Matrix4x4
+      CastShadow : bool
+      Presence : Presence
+      InsetOpt : Box2 option
+      MaterialProperties : MaterialProperties
+      Material : Material
+      ShadowOffset : single
+      RenderType : RenderType
+      RenderPass : RenderPass
+      Typeset : TextTypeset }
+
 type RenderBillboards =
     { Billboards : (Matrix4x4 * bool * Presence * Box2 option) SList
       MaterialProperties : MaterialProperties
@@ -557,6 +569,7 @@ type RenderMessage3d =
     | RenderBillboard of RenderBillboard
     | RenderBillboards of RenderBillboards
     | RenderBillboardParticles of RenderBillboardParticles
+    | RenderText3d of RenderText3d
     | RenderStaticModelSurface of RenderStaticModelSurface
     | RenderStaticModel of RenderStaticModel
     | RenderStaticModels of RenderStaticModels
@@ -943,6 +956,7 @@ type [<ReferenceEquality>] GlRenderer3d =
           PhysicallyBasedTerrainGeometriesUtilized : TerrainGeometryDescriptor HashSet
           PhysicallyBasedVoxelGeometries : Dictionary<VoxelGeometryDescriptor, OpenGL.PhysicallyBased.PhysicallyBasedGeometry>
           PhysicallyBasedVoxelGeometriesUtilized : VoxelGeometryDescriptor HashSet
+          TypesetTextures : Dictionary<TextTypeset, OpenGL.Texture.Texture>
           CubeMap : OpenGL.Texture.Texture
           WhiteTexture : OpenGL.Texture.Texture
           BlackTexture : OpenGL.Texture.Texture
@@ -1103,6 +1117,21 @@ type [<ReferenceEquality>] GlRenderer3d =
                 then Some (AnimatedModelAsset model)
                 else Some (StaticModelAsset (false, model))
             | None -> None
+        | FontExtension _ ->
+            let fileFirstName = PathF.GetFileNameWithoutExtension asset.FilePath
+            let fileFirstNameLength = String.length fileFirstName
+            let fontSizeDefault =
+                if fileFirstNameLength >= 3 then
+                    let fontSizeText = fileFirstName.Substring (fileFirstNameLength - 3, 3)
+                    match Int32.TryParse fontSizeText with
+                    | (true, fontSize) -> fontSize
+                    | (false, _) -> Constants.Render.FontSizeDefault
+                else Constants.Render.FontSizeDefault
+            let fontSize = fontSizeDefault * Constants.Render.VirtualScalar
+            let fontOpt = SDL_ttf.TTF_OpenFont (asset.FilePath, fontSize)
+            if fontOpt <> IntPtr.Zero
+            then Some (FontAsset (fontSizeDefault, fontOpt))
+            else Log.info ("Could not load font due to '" + SDL_ttf.TTF_GetError () + "'."); None
         | _ -> None
 
     static member private freeRenderAsset renderAsset renderer =
@@ -1326,7 +1355,8 @@ type [<ReferenceEquality>] GlRenderer3d =
                     Some (VoxelChunk.getSliceResolution metadata.TextureWidth metadata.TextureHeight)
                 | _ -> None
             | ValueNone -> None
-        | RawVoxel map -> Some (256)
+        | RawVoxel map -> Some map.Resolution.X
+        | RecursiveVoxels voxelField -> Some (voxelField.FieldSize.X * voxelField.SubvoxelSize.X)
 
     static member private tryDestroyUserDefinedStaticModel assetTag renderer =
 
@@ -1454,28 +1484,6 @@ type [<ReferenceEquality>] GlRenderer3d =
         else Log.info ("Cannot replace a loaded asset '" + scstring assetTag + "' with a user-created static model.")
 
     static member private createPhysicallyBasedTerrainNormals (resolution : Vector2i) (positionsAndTexCoordses : struct (Vector3 * Vector2) array) =
-        [|for y in 0 .. dec resolution.Y do
-            for x in 0 .. dec resolution.X do
-                if x > 0 && y > 0 && x < dec resolution.X && y < dec resolution.Y then
-                    let v  = fst' positionsAndTexCoordses.[resolution.X * y + x]
-                    let n  = fst' positionsAndTexCoordses.[resolution.X * dec y + x]
-                    let ne = fst' positionsAndTexCoordses.[resolution.X * dec y + inc x]
-                    let e  = fst' positionsAndTexCoordses.[resolution.X * y + inc x]
-                    let s  = fst' positionsAndTexCoordses.[resolution.X * inc y + x]
-                    let sw = fst' positionsAndTexCoordses.[resolution.X * inc y + dec x]
-                    let w  = fst' positionsAndTexCoordses.[resolution.X * y + dec x]
-                    let normalSum =
-                        Vector3.Cross (ne - v, n - v) +
-                        Vector3.Cross (e - v,  ne - v) +
-                        Vector3.Cross (s - v,  e - v) +
-                        Vector3.Cross (sw - v, s - v) +
-                        Vector3.Cross (w - v,  sw - v) +
-                        Vector3.Cross (n - v,  w - v)
-                    let normal = normalSum.Normalized
-                    normal
-                else v3Up|]
-
-    static member private createPhysicallyBasedVoxelNormals (resolution : Vector3i) (positionsAndTexCoordses : struct (Vector3 * Vector4) array) =
         [|for y in 0 .. dec resolution.Y do
             for x in 0 .. dec resolution.X do
                 if x > 0 && y > 0 && x < dec resolution.X && y < dec resolution.Y then
@@ -2381,6 +2389,183 @@ type [<ReferenceEquality>] GlRenderer3d =
               TwoSided = true }
         struct (properties, material)
 
+
+    static member private tryMakeTypesetTexture (typeset : TextTypeset inref, renderer) =
+
+        // TODO: figure out what to do with sizes
+        let size = v2 128f 128f
+        let justification = Justified (JustifyCenter, JustifyMiddle)
+
+        let text = typeset.Text
+        let font = typeset.Font
+        let fontSizing = typeset.FontSizing
+        let fontStyling = typeset.FontStyling
+        let color = typeset.Color
+
+        if text <> String.empty then
+
+            match GlRenderer3d.tryGetRenderAsset font renderer with
+            | ValueSome renderAsset ->
+                match renderAsset with
+                | FontAsset (fontSizeDefault, font) ->
+
+                    // gather rendering resources
+                    // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
+                    // surface and texture one or more times a frame must be understood!
+                    let (offset, textSurface, textSurfacePtr) =
+
+                        // create sdl color
+                        let mutable colorSdl = SDL.SDL_Color ()
+                        colorSdl.r <- color.R8
+                        colorSdl.g <- color.G8
+                        colorSdl.b <- color.B8
+                        colorSdl.a <- color.A8
+
+                        // attempt to configure sdl font size
+                        let fontSize =
+                            match fontSizing with
+                            | Some fontSize -> fontSize * Constants.Render.VirtualScalar
+                            | None -> fontSizeDefault * Constants.Render.VirtualScalar
+                        let errorCode = SDL_ttf.TTF_SetFontSize (font, fontSize)
+                        if errorCode <> 0 then
+                            let error = SDL_ttf.TTF_GetError ()
+                            Log.infoOnce ("Failed to set font size for font '" + scstring font + "' due to: " + error)
+                            SDL_ttf.TTF_SetFontSize (font, fontSizeDefault * Constants.Render.VirtualScalar) |> ignore<int>
+
+                        // configure sdl font style
+                        let styleSdl =
+                            if fontStyling.Count > 0 then // OPTIMIZATION: avoid set queries where possible.
+                                (if fontStyling.Contains Bold then SDL_ttf.TTF_STYLE_BOLD else 0) |||
+                                (if fontStyling.Contains Italic then SDL_ttf.TTF_STYLE_ITALIC else 0) |||
+                                (if fontStyling.Contains Underline then SDL_ttf.TTF_STYLE_UNDERLINE else 0) |||
+                                (if fontStyling.Contains Strikethrough then SDL_ttf.TTF_STYLE_STRIKETHROUGH else 0)
+                            else 0
+                        SDL_ttf.TTF_SetFontStyle (font, styleSdl)
+
+                        // render text to surface
+                        match justification with
+                        | Unjustified wrapped ->
+                            let textSurfacePtr =
+                                if wrapped
+                                then SDL_ttf.TTF_RenderUNICODE_Blended_Wrapped (font, text, colorSdl, uint32 size.X)
+                                else SDL_ttf.TTF_RenderUNICODE_Blended (font, text, colorSdl)
+                            let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface> textSurfacePtr
+                            let textSurfaceHeight = single textSurface.h
+                            let offsetY = size.Y - textSurfaceHeight
+                            (v2 0.0f offsetY, textSurface, textSurfacePtr)
+                        | Justified (h, v) ->
+                            let mutable width = 0
+                            let mutable height = 0
+                            SDL_ttf.TTF_SizeUNICODE (font, text, &width, &height) |> ignore
+                            let textSurfacePtr = SDL_ttf.TTF_RenderUNICODE_Blended (font, text, colorSdl)
+                            let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface> textSurfacePtr
+                            let offsetX =
+                                match h with
+                                | JustifyLeft -> 0.0f
+                                | JustifyCenter -> floor ((size.X - single width) * 0.5f)
+                                | JustifyRight -> size.X - single width
+                            let offsetY =
+                                match v with
+                                | JustifyTop -> size.Y - single height
+                                | JustifyMiddle -> floor ((size.Y - single height) * 0.5f)
+                                | JustifyBottom -> 0.0f
+                            let offset = v2 offsetX offsetY
+                            (offset, textSurface, textSurfacePtr)
+
+                    // render only when a valid surface was created
+                    if textSurfacePtr <> IntPtr.Zero then
+
+                        // construct mvp matrix
+                        let textSurfaceWidth = textSurface.pitch / 4 // NOTE: textSurface.w may be an innacurate representation of texture width in SDL2_ttf versions beyond v2.0.15 because... I don't know why.
+                        let textSurfaceHeight = textSurface.h
+
+                        // upload texture data
+                        let textTextureId = OpenGL.Gl.GenTexture ()
+                        OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, textTextureId)
+                        OpenGL.Gl.TexImage2D (OpenGL.TextureTarget.Texture2d, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, textSurface.pixels)
+                        OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMinFilter, int OpenGL.TextureMinFilter.Nearest)
+                        OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2d, OpenGL.TextureParameterName.TextureMagFilter, int OpenGL.TextureMagFilter.Nearest)
+                        OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, 0u)
+                        OpenGL.Hl.Assert ()
+
+                        // make texture drawable
+                        let textTextureMetadata = OpenGL.Texture.TextureMetadata.make textSurfaceWidth textSurfaceHeight
+                        let textTexture = OpenGL.Texture.EagerTexture { TextureMetadata = textTextureMetadata; TextureId = textTextureId }
+                        OpenGL.Hl.Assert ()
+
+                        // destroy texture
+                        SDL.SDL_FreeSurface textSurfacePtr
+                        OpenGL.Hl.Assert ()
+
+                        Some textTexture
+                    else
+                        None
+                | _ ->
+                    None
+            | _ ->
+                None
+        else
+            None
+
+
+    static member private makeTypesetMaterial (typeset : TextTypeset inref, properties : MaterialProperties inref, material : Material inref, renderer) =
+
+        let albedoTexture =
+            match renderer.TypesetTextures.TryGetValue typeset with
+            | (true, textTexture) ->
+                textTexture
+            | (false, _) ->
+                match GlRenderer3d.tryMakeTypesetTexture (&typeset, renderer) with
+                | Some textTexture ->
+                    renderer.TypesetTextures.Add (typeset, textTexture)
+                    textTexture
+                | None ->
+                    renderer.PhysicallyBasedMaterial.AlbedoTexture
+
+        let roughnessTexture =
+            match GlRenderer3d.tryGetRenderAsset material.RoughnessImage renderer with
+            | ValueSome (TextureAsset texture) -> texture
+            | _ -> renderer.PhysicallyBasedMaterial.RoughnessTexture
+        let metallicTexture =
+            match GlRenderer3d.tryGetRenderAsset material.MetallicImage renderer with
+            | ValueSome (TextureAsset texture) -> texture
+            | _ -> renderer.PhysicallyBasedMaterial.MetallicTexture
+        let ambientOcclusionTexture =
+            match GlRenderer3d.tryGetRenderAsset material.AmbientOcclusionImage renderer with
+            | ValueSome (TextureAsset texture) -> texture
+            | _ -> renderer.PhysicallyBasedMaterial.AmbientOcclusionTexture
+        let emissionTexture =
+            match GlRenderer3d.tryGetRenderAsset material.EmissionImage renderer with
+            | ValueSome (TextureAsset texture) -> texture
+            | _ -> renderer.PhysicallyBasedMaterial.EmissionTexture
+        let normalTexture =
+            match GlRenderer3d.tryGetRenderAsset material.NormalImage renderer with
+            | ValueSome (TextureAsset texture) -> texture
+            | _ -> renderer.PhysicallyBasedMaterial.NormalTexture
+        let heightTexture =
+            match GlRenderer3d.tryGetRenderAsset material.HeightImage renderer with
+            | ValueSome (TextureAsset texture) -> texture
+            | _ -> renderer.PhysicallyBasedMaterial.HeightTexture
+        let properties : OpenGL.PhysicallyBased.PhysicallyBasedMaterialProperties =
+            { Albedo = properties.Albedo
+              Roughness = properties.Roughness
+              Metallic = properties.Metallic
+              AmbientOcclusion = properties.AmbientOcclusion
+              Emission = properties.Emission
+              Height = properties.Height
+              IgnoreLightMaps = properties.IgnoreLightMaps
+              OpaqueDistance = properties.OpaqueDistance }
+        let material : OpenGL.PhysicallyBased.PhysicallyBasedMaterial =
+            { AlbedoTexture = albedoTexture
+              RoughnessTexture = roughnessTexture
+              MetallicTexture = metallicTexture
+              AmbientOcclusionTexture = ambientOcclusionTexture
+              EmissionTexture = emissionTexture
+              NormalTexture = normalTexture
+              HeightTexture = heightTexture
+              TwoSided = true }
+        struct (properties, material)
+
     static member private applySurfaceMaterial (material : Material inref, surfaceMaterial : OpenGL.PhysicallyBased.PhysicallyBasedMaterial inref, renderer) =
         let albedoTexture =
             match material.AlbedoImageOpt with
@@ -3123,6 +3308,10 @@ type [<ReferenceEquality>] GlRenderer3d =
                     let billboardProperties = { billboardProperties with Albedo = billboardProperties.Albedo * particle.Color; Emission = particle.Emission.R }
                     let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, m4Identity, box3Zero, billboardProperties, billboardMaterial, -1, Assimp.Node.Empty, renderer.BillboardGeometry)
                     GlRenderer3d.categorizeBillboardSurface (eyeRotation, billboardMatrix, rbps.CastShadow, rbps.Presence, Option.ofValueOption particle.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rbps.MaterialProperties, false, rbps.ShadowOffset, billboardSurface, rbps.RenderType, rbps.RenderPass, renderer)
+            | RenderText3d rt ->
+                let struct (billboardProperties, billboardMaterial) = GlRenderer3d.makeTypesetMaterial (&rt.Typeset, &rt.MaterialProperties, &rt.Material, renderer)
+                let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, m4Identity, box3 (v3 -0.5f 0.5f -0.5f) v3One, billboardProperties, billboardMaterial, -1, Assimp.Node.Empty, renderer.BillboardGeometry)
+                GlRenderer3d.categorizeBillboardSurface (eyeRotation, rt.ModelMatrix, rt.CastShadow, rt.Presence, rt.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rt.MaterialProperties, true, rt.ShadowOffset, billboardSurface, rt.RenderType, rt.RenderPass, renderer)
             | RenderStaticModelSurface rsms ->
                 let insetOpt = Option.toValueOption rsms.InsetOpt
                 GlRenderer3d.categorizeStaticModelSurfaceByIndex (&rsms.ModelMatrix, rsms.CastShadow, rsms.Presence, &insetOpt, &rsms.MaterialProperties, &rsms.Material, rsms.StaticModel, rsms.SurfaceIndex, rsms.RenderType, rsms.RenderPass, renderer)
@@ -3413,6 +3602,10 @@ type [<ReferenceEquality>] GlRenderer3d =
         // destroy user-defined static models
         for staticModel in userDefinedStaticModelsToDestroy do
             GlRenderer3d.tryDestroyUserDefinedStaticModel staticModel renderer
+
+        for keyValue in renderer.TypesetTextures do
+            keyValue.Value.Destroy ()
+        renderer.TypesetTextures.Clear ()
 
         // reload render assets upon request
         if renderer.ReloadAssetsRequested then
@@ -3828,6 +4021,7 @@ type [<ReferenceEquality>] GlRenderer3d =
               PhysicallyBasedTerrainGeometriesUtilized = HashSet HashIdentity.Structural
               PhysicallyBasedVoxelGeometries = Dictionary HashIdentity.Structural
               PhysicallyBasedVoxelGeometriesUtilized = HashSet HashIdentity.Structural
+              TypesetTextures = Dictionary HashIdentity.Structural
               CubeMap = cubeMapSurface.CubeMap
               WhiteTexture = whiteTexture
               BlackTexture = blackTexture

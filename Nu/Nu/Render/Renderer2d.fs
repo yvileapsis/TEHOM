@@ -91,15 +91,8 @@ type TextDescriptor =
       Justification : Justification
       CursorOpt : int option }
 
-type [<Struct>] RichTextBlock =
-    { Text : string
-      Font : Font AssetTag
-      FontSizing : int option
-      FontStyling : FontStyle Set
-      Color : Color }
-
 type [<Struct>] RichTextParagraph =
-    { Blocks : RichTextBlock list
+    { Blocks : TextTypeset list
       Justification : JustificationH }
 
 /// Describes how to render rich text to a rendering subsystem.
@@ -994,7 +987,7 @@ type [<ReferenceEquality>] GlRenderer2d =
 
                     list, currentOffset + currentWidth
 
-                let reflowBlock (block: RichTextBlock) offset =
+                let reflowBlock (block: TextTypeset) offset =
 
                     let font =
                         let font = getFont block.Font block.FontSizing block.FontStyling

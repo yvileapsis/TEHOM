@@ -176,11 +176,18 @@ type VoxelChunkMetadata =
     { Resolution : Vector3i
       PositionsAndColors : struct (Vector3i * Color * Vector3) array  }
 
+type VoxelField = {
+    Subvoxels : VoxelChunk array
+    SubvoxelSize : Vector3i
+    Field : Map<Vector3i, int>
+    FieldSize : Vector3i
+}
+
 /// A height map for terrain.
-type VoxelChunk =
-    | SlicesVoxel of Image AssetTag // only supports 8-bit depth on Red channel
-    // TODO: implement
-    | RawVoxel of unit
+and VoxelChunk =
+    | SlicesVoxel of Image AssetTag
+    | RecursiveVoxels of VoxelField
+    | RawVoxel of VoxelChunkMetadata
 
     static member private tryGetTextureData tryGetAssetFilePath (assetTag : Image AssetTag) =
         match tryGetAssetFilePath assetTag with
@@ -284,31 +291,48 @@ type VoxelChunk =
                                 ()
                 |]
 
-
-            // neightbor culling
-//                let voxels =
-//                    let map = voxels |> Map.ofArray
-
-//                    map
-//                    |> Map.filter (fun (x, y, z) value ->
-
-//                        let hasNeighbors =
-//                            Map.containsKey (x + 1, y, z) map && Map.containsKey (x - 1, y, z) map &&
-//                            Map.containsKey (x, y + 1, z) map && Map.containsKey (x, y - 1, z) map &&
-//                            Map.containsKey (x, y, z + 1) map && Map.containsKey (x, y, z - 1) map
-
-//                        not hasNeighbors
-//                    )
-//                    |> Map.toArray
-
-            // fin
             Some { Resolution = v3i resolutionChunkX resolutionChunkY resolutionChunkZ; PositionsAndColors = voxels; }
         | None -> None
+
+    static member private tryGetRecursiveMetadata tryGetAssetFilePath field =
+        let resolution = field.FieldSize * field.SubvoxelSize
+
+        let palette =
+            field.Subvoxels
+            |> Array.map (fun (SlicesVoxel image) ->
+                VoxelChunk.tryGetSlicesMetadata tryGetAssetFilePath image
+            )
+            |> Array.definitize
+
+
+        let voxels =
+            field.Field
+            |> Map.toArray
+            |> Array.map (fun (coordinate, voxel) ->
+
+                let voxel = palette[voxel]
+
+                let poscolors = voxel.PositionsAndColors
+
+                let poscolors =
+                    poscolors
+                    |> Array.map (fun tuple ->
+                        let struct (pos, color, normal) = tuple
+
+                        struct (pos + field.SubvoxelSize * coordinate, color, normal)
+                    )
+
+                poscolors
+            )
+            |> Array.concat
+
+        Some { Resolution = resolution; PositionsAndColors = voxels }
 
     static member tryGetMetadata (tryGetAssetFilePath : AssetTag -> string option) heightMap =
         match heightMap with
         | SlicesVoxel image -> VoxelChunk.tryGetSlicesMetadata tryGetAssetFilePath image
-        | RawVoxel _ -> failwithf "todo"
+        | RecursiveVoxels field -> VoxelChunk.tryGetRecursiveMetadata tryGetAssetFilePath field
+        | RawVoxel data -> Some data
 
 
 /// Identifies a body that can be found in a physics engine.

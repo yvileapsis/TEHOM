@@ -19,6 +19,14 @@ type [<Struct>] FontStyle =
     | Underline
     | Strikethrough
 
+type [<Struct>] TextTypeset = {
+    Text : string
+    Font : Font AssetTag
+    FontSizing : int option
+    FontStyling : FontStyle Set
+    Color : Color
+}
+
 /// Horizontal justification.
 type [<Struct>] JustificationH =
     | JustifyLeft

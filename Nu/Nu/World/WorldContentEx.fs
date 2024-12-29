@@ -402,7 +402,7 @@ type VoxelFacet () =
          define Entity.TintImageOpt None
          define Entity.NormalImageOpt None
          // TODO: implement
-         define Entity.VoxelChunk (RawVoxel ())
+         define Entity.VoxelChunk (SlicesVoxel Assets.Default.Black)
          define Entity.Segments v2iOne
          define Entity.Observable false
          nonPersistent Entity.AwakeTimeStamp 0L
@@ -507,6 +507,77 @@ type VoxelDispatcher () =
     static member Facets =
         [typeof<VoxelFacet>]
 
+/// Augments an entity with a static billboard.
+type Text3dFacet () =
+    inherit Facet (false, false, false)
+
+    static member Properties = [
+        define Entity.Text "Testing"
+        define Entity.Font Assets.Default.Font
+        define Entity.FontSizing (Some 40)
+        define Entity.FontStyling Set.empty
+        define Entity.Justification (Justified (JustifyCenter, JustifyMiddle))
+        define Entity.TextMargin v2Zero
+        define Entity.TextColor Color.White
+        define Entity.TextColorDisabled Constants.Gui.ColorDisabledDefault
+        define Entity.InsetOpt None
+        define Entity.MaterialProperties MaterialProperties.empty
+        define Entity.Material Material.empty
+        define Entity.RenderStyle Deferred
+        define Entity.ShadowOffset Constants.Engine.BillboardShadowOffsetDefault
+    ]
+
+    override this.Render (renderPass, entity, world) =
+        let mutable transform = entity.GetTransform world
+        let castShadow = transform.CastShadow
+        if not renderPass.IsShadowPass || castShadow then
+            let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
+            let insetOpt = entity.GetInsetOpt world
+            let properties = entity.GetMaterialProperties world
+            let material = entity.GetMaterial world
+            let shadowOffset = entity.GetShadowOffset world
+            let renderType =
+                match entity.GetRenderStyle world with
+                | Deferred -> DeferredRenderType
+                | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
+
+            let margin = (entity.GetTextMargin world).V3
+            let color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
+            let font = entity.GetFont world
+            let fontSizing = entity.GetFontSizing world
+            let fontStyling = entity.GetFontStyling world
+            let text = entity.GetText world
+
+            let typeset = {
+                Text = text
+                Font = font
+                FontSizing = fontSizing
+                FontStyling = fontStyling
+                Color = color
+            }
+
+            World.enqueueRenderMessage3d
+                (RenderText3d
+                    { CastShadow = castShadow
+                      Presence = presence
+                      ModelMatrix = affineMatrix
+                      InsetOpt = insetOpt
+                      MaterialProperties = properties
+                      Material = material
+                      ShadowOffset = shadowOffset
+                      RenderType = renderType
+                      RenderPass = renderPass
+                      Typeset = typeset
+                   })
+                world
+
+/// Gives an entity the base behavior of a static billboard.
+type Text3dDispatcher () =
+    inherit VuiDispatcher ()
+
+    static member Facets =
+        [typeof<Text3dFacet>]
 
 [<RequireQualifiedAccess>]
 module ContentEx =
@@ -521,3 +592,4 @@ module ContentEx =
     let buttonEx entityName initializers = Content.entity<ButtonExDispatcher> entityName initializers
 
     let voxel entityName definitions = Content.entity<VoxelDispatcher> entityName definitions
+    let text3d entityName definitions = Content.entity<Text3dDispatcher> entityName definitions
