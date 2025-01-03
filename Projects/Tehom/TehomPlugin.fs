@@ -13,7 +13,7 @@ type TehomPlugin () =
             "Title", Game.SetMyGame Title
             "Credits", Game.SetMyGame Credits
             "Gameplay", fun world ->
-                let world = Simulants.Gameplay.SetGameplay Combat.initial world
+                let world = Simulants.Gameplay.SetGameplay Gameplay.initial world
                 let world = Game.SetMyGame Gameplay world
                 world
             "Rogue", fun world ->

@@ -10,11 +10,9 @@ open Action
 type CombatMessage =
     | StartPlaying
     | Update
-    | TurnBegin
-    | TurnAttack of Attacker : Entity
-    | TurnDefence of Attacker : Entity * Attack : Turn
-    | TurnEnd of Attacker : Entity * Attack : Turn * Defender : Entity * Defence : Turn
+    | TurnProcess
     | ProcessCharacterTurn of Entity * Turn
+    | SelectNext of int
     | TimeUpdate
     interface Message
 
@@ -38,6 +36,7 @@ type CombatDispatcher () =
         Screen.DeselectingEvent => FinishQuitting
         Screen.UpdateEvent => Update
         Screen.TimeUpdateEvent => TimeUpdate
+        Entity.AlwaysUpdate == true
     ]
 
     override this.Message (model, message, entity, world) =
@@ -70,85 +69,95 @@ type CombatDispatcher () =
                 let model = Combat.update model world
                 just model
 
-        | TurnBegin ->
-            match model.Combatants with
-            | attacker::combatants ->
-
-                let model = {
-                    model with
-                        Combatants = combatants @ [attacker]
-                        Turn = model.Turn + 1
-                }
-
-                let signals : Signal list = [
-                    GameEffect (CharacterReset attacker)
-                    TurnAttack attacker
-                ]
-
-                withSignals signals model
-
-            | _ ->
-                just model
-
-        | TurnAttack attacker ->
-            match AttackerAI.tryPlan attacker model.Area model world with
-            | Some attackerAction ->
-                let signal : Signal =
-                    TurnDefence (attacker, attackerAction)
-
-                withSignal signal model
-            | None ->
-                just model
-
-        // TODO: assumed one target
-        | TurnDefence (attacker, attackerAction) ->
-            attackerAction.Checks
-            |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
-            |> function
-                | Some { OpposedBy = [defender] } as Some action ->
-                    match DefenderAI.tryPlan attacker action defender model.Area model world with
-                    | Some defenderAction ->
-                        let signal : Signal =
-                            TurnEnd (attacker, attackerAction, defender, defenderAction)
-
-                        withSignal signal model
-                    | None ->
-                        just model
+        | TurnProcess ->
+            match model.CombatState with
+            | TurnNone ->
+                match model.Combatants with
+                | attacker::_ ->
+                    let signals : Signal list = [ GameEffect (CharacterReset attacker) ]
+                    let model = { model with CombatState = TurnAttacker attacker }
+                    withSignals signals model
                 | _ ->
                     just model
 
-        | TurnEnd (attacker, attackerAction, defender, defenderAction) ->
-            let attackerTurn =
-                let character = attacker.GetCharacter world
-                Turn.applyStance character attackerAction
-
-            let defenderTurn =
-                let character = defender.GetCharacter world
-                Turn.applyStance character defenderAction
-
-            // TODO: add karma betting
-
-            let attackerTurn, defenderTurn = Turn.opposedTurns attackerTurn defenderTurn
-
-            let history =
-                model.History
-                |> Map.map (fun entity turns ->
-                    if entity = attacker then
-                        attackerTurn::turns
-                    elif entity = defender then
-                        defenderTurn::turns
+            | TurnAttacker attacker ->
+                let model =
+                    if Combat.isCharacterControlled attacker then
+                        let model = { model with Selections = AttackerAI.getMovesMatrix attacker world }
+                        model
                     else
-                        turns
-                )
+                        model
+                let model = { model with CombatState = TurnAttackPlan attacker }
+                just model
 
-            let model = { model with History = history }
+            | TurnAttackPlan attacker ->
+                let plan =
+                    if Combat.isCharacterControlled attacker then
+                        AttackerAI.customPlan attacker model.Area model world |> Some
+                    else
+                        AttackerAI.tryPlan attacker model.Area model world
 
-            let signals : Signal list = [
-                ProcessCharacterTurn (attacker, attackerTurn)
-                ProcessCharacterTurn (defender, defenderTurn)
-            ]
+                let model = { model with Selections = List.empty }
 
-            withSignals signals model
+                match plan with
+                | Some attackerAction ->
+                    let model = { model with CombatState = TurnDefender (attacker, attackerAction) }
+                    just model
+                | None ->
+                    just model
+
+            | TurnDefender (attacker, attackPlan) ->
+                attackPlan.Checks
+                |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
+                |> function
+                    | Some { OpposedBy = [defender] } ->
+                        let model = { model with CombatState = TurnDefencePlan (attacker, attackPlan, defender) }
+                        just model
+                    | _ ->
+                        just model
+
+            | TurnDefencePlan (attacker, attackPlan, defender) ->
+                let action =
+                    attackPlan.Checks
+                    |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
+                    |> _.Value
+
+                match DefenderAI.tryPlan attacker action defender model.Area model world with
+                | Some defencePlan ->
+                    let model = { model with CombatState = TurnExecute (attacker, attackPlan, defender, defencePlan) }
+                    just model
+                | None ->
+                    just model
+
+            | TurnAttackKarmaBid ->
+                failwith "todo"
+
+            | TurnDefenceKarmaBid ->
+                failwith "todo"
+
+            | TurnExecute (attacker, attackPlan, defender, defencePlan)->
+                let attackerTurn =
+                    let character = attacker.GetCharacter world
+                    Turn.applyStance character attackPlan
+
+                let defenderTurn =
+                    let character = defender.GetCharacter world
+                    Turn.applyStance character defencePlan
+
+                // TODO: add karma betting
+
+                let attackerTurn, defenderTurn = Turn.opposedTurns attackerTurn defenderTurn
+
+                let model = Combat.advanceTurn attacker defender attackerTurn defenderTurn model
+
+                let model = { model with CombatState = TurnNone }
+
+                let signals : Signal list = [
+                    ProcessCharacterTurn (attacker, attackerTurn)
+                    ProcessCharacterTurn (defender, defenderTurn)
+                ]
+
+                withSignals signals model
 
         | ProcessCharacterTurn (actor, turn) ->
             let signals : Signal list =
@@ -157,9 +166,24 @@ type CombatDispatcher () =
 
             withSignals signals model
 
+        | SelectNext i ->
+            match List.tryItem i model.Selections with
+            | Some (head::tail) ->
+                let list = tail @ [head]
+
+                let selections =
+                    model.Selections
+                    |> List.indexed
+                    |> List.map (fun (j, list') -> if i = j then list else list')
+
+                let model = { model with Selections = selections }
+                just model
+            | _ ->
+                just model
+
         | TimeUpdate ->
             let gameDelta = world.GameDelta
-            let gameplay = { model with GameplayTime = model.GameplayTime + gameDelta.Updates }
+            let gameplay = { model with CombatTime = model.CombatTime + gameDelta.Updates }
             just gameplay
 
     override this.Command (model, command, entity, world) =
@@ -229,10 +253,21 @@ type CombatDispatcher () =
             let world = entity.SetCombat model world
             just world
 
+    override this.TruncateModel model = {
+        model with
+            DisplayLeftModel = None
+            DisplayRightModel = None
+    }
+    override this.UntruncateModel (model, model') = {
+        model with
+            DisplayLeftModel = model'.DisplayLeftModel
+            DisplayRightModel = model'.DisplayRightModel
+    }
 
     override this.Content (model, _) = [
 
-        Content.button Simulants.GameplayGuiAdvanceTurn.Name [
+        // Constant
+        Content.button "AdvanceTurn" [
             Entity.Absolute == false
             Entity.PositionLocal == v3 0.0f 75.0f 0.0f
             Entity.Size == v3 40.0f 10.0f 0.0f
@@ -241,121 +276,220 @@ type CombatDispatcher () =
             Entity.Text == "Advance Turn"
             Entity.Font == Assets.Gui.ClearSansFont
             Entity.FontSizing == Some 5
-            Entity.ClickEvent => TurnBegin
+            Entity.ClickEvent => TurnProcess
         ]
 
-        let player = model.DisplayLeft
-        let enemy = model.DisplayRight
+        let left = model.DisplayLeftModel
+        let right = model.DisplayRightModel
 
-        let playerHistory =
-            model.History
-            |> Map.toList
-            |> List.tryFind (fun (entity, _) -> player.ID = entity.Name)
+        let findHistory entity =
+            Map.tryFind entity model.History
 
-        let enemyHistory =
-            model.History
-            |> Map.toList
-            |> List.tryFind (fun (entity, _) -> enemy.ID = entity.Name)
+        let leftHistory =
+            Option.bind findHistory model.DisplayLeftEntity
 
-        let statsBox character = [
-            let (gall, lymph, oil, plasma) = Character.getStats character
+        let rightHistory =
+            Option.bind findHistory model.DisplayRightEntity
+
+        let statsBox (character : Character) boxProperties textProperties =
+
+            let stat text = Content.text "Name" (textProperties @ [
+                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                Entity.Text := text
+            ])
+
+            let value text = Content.text "Value" (textProperties @ [
+                Entity.Justification == Justified (JustifyRight, JustifyMiddle)
+                Entity.Text := text
+            ])
+
+            let stat name statName statValue = Content.composite name textProperties [
+                stat statName
+                value statValue
+            ]
+
+            let coords name text = ContentEx.richText name (textProperties @ [
+                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                Entity.Text := text
+            ])
+
+            let (gall, lymph, oil, plasma) =
+                Character.getStats character
+
             let (gallStance, lymphStance, oilStance, plasmaStance) =
                 character
                 |> Character.getStance
                 |> Stance.getStats
+
             let minorWounds = character.MinorWounds
             let majorWounds = character.MajorWounds
 
-            let stat name text = Content.text name [
-                Entity.Absolute == false
-                Entity.Size == v3 40.0f 5.0f 0.0f
-                Entity.Text := text
-                Entity.Font == Assets.Gui.ClearSansFont
-                Entity.FontSizing == Some 5
-                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+            Content.association "StatsBox" boxProperties [
+
+                stat "MinorWounds" "Minor Wounds" $"{minorWounds}"
+                stat "MajorWounds" "Major Wounds" $"{majorWounds}"
+                stat "Gall" "Gall" $"{gall} {gallStance}"
+                stat "Lymph" "Lymph" $"{lymph} {lymphStance}"
+                stat "Oil" "Oil" $"{oil} {oilStance}"
+                stat "Plasma" "Plasma" $"{plasma} {plasmaStance}"
+                stat "Stances" "Stances" $"{character.StancesLeft}"
+                stat "Initiative" "Initiative" $"{character.Initiative}"
+
+                let connections = Area.getConnections character.ID model.Area
+                coords "CombatLocation" $"Location {connections}"
             ]
 
-            stat "Minor Wounds" $"Wounds {minorWounds}"
-            stat "Major Wounds" $"{majorWounds}"
-            stat "Gall" $"{gall} {gallStance}"
-            stat "Lymph" $"{lymph} {lymphStance}"
-            stat "Oil" $"{oil} {oilStance}"
-            stat "Plasma" $"{plasma} {plasmaStance}"
-            stat "Stances" $"Stances {character.StancesLeft}"
-            stat "Initiative" $"Initiative {character.Initiative}"
-        ]
-
-        Content.association "StatsBoxPlayer" [
-            Entity.Absolute == false
-            Entity.PositionLocal == v3 -80.0f 0.0f 0.0f
-            Entity.Size == v3 40.0f 40.0f 0.0f
-            Entity.Elevation == 10.0f
-            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-            Entity.Layout == Flow (FlowDownward, FlowUnlimited)
-        ] (statsBox player)
-
-        Content.association "StatsBoxEnemy" [
-            Entity.Absolute == false
-            Entity.PositionLocal == v3 100.0f 0.0f 0.0f
-            Entity.Size == v3 40.0f 40.0f 0.0f
-            Entity.Elevation == 10.0f
-            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-            Entity.Layout == Flow (FlowDownward, FlowUnlimited)
-        ] (statsBox enemy)
 
 
-        match playerHistory, enemyHistory with
-        | Some (_, playerLastTurn::_), Some (_, enemyLastTurn::_) ->
+        match left with
+        | Some entity ->
+            Content.composite "Left" [] [
 
-            let playerMoves =
-                playerLastTurn.Checks
-                |> List.tryFind (fun x -> match x.Action with | PhysicalSequence _ -> true | _ -> false)
-                |> function
-                    | Some { Action = PhysicalSequence moves } -> moves
+                statsBox entity [
+                    Entity.Absolute == false
+                    Entity.Elevation == 10.0f
+                    Entity.PositionLocal == v3 -100.0f 0.0f 0.0f
+                    Entity.Size == v3 60.0f 40.0f 0.0f
+                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+                ] [
+                    Entity.Absolute == false
+                    Entity.Size == v3 60.0f 5.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.TextColor == Color.FloralWhite
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 5
+                ]
+
+                let actions =
+
+                    match model.CombatState, leftHistory with
+                    | TurnAttackPlan attacker, _ when Combat.isCharacterControlled attacker ->
+
+                        let action (i, action) = Content.button $"ActionSelectable{i}" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 40.0f 5.0f 0.0f
+                            Entity.Text := $"{action}"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                            Entity.TextColor == Color.FloralWhite
+                            Entity.ClickEvent => SelectNext i
+                        ]
+
+                        model.Selections
+                        |> List.map (List.head >> Move.getName)
+                        |> List.indexed
+                        |> List.map action
+
+                    | _, Some (lastTurn::_) ->
+
+                        let action (i, (action, success)) = Content.text $"Action{i}" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 40.0f 5.0f 0.0f
+                            Entity.Text := $"{action}"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                            Entity.TextColor := if success then Color.FloralWhite else Color.Gray
+                        ]
+
+                        lastTurn
+                        |> Turn.describe
+                        |> List.indexed
+                        |> List.map action
+
                     | _ -> []
 
-            let enemyMoves =
-                enemyLastTurn.Checks
-                |> List.tryFind (fun x -> match x.Action with | PhysicalSequence _ -> true | _ -> false)
-                |> function
-                    | Some { Action = PhysicalSequence moves } -> moves
+                Content.association "Actions" [
+                    Entity.Absolute == false
+                    Entity.PositionLocal == v3 -40.0f 0.0f 0.0f
+                    Entity.Size == v3 40.0f 40.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+                ] actions
+            ]
+        | None -> ()
+
+        match right with
+        | Some entity ->
+            Content.composite "Right" [] [
+
+                statsBox entity [
+                    Entity.Absolute == false
+                    Entity.Elevation == 10.0f
+                    Entity.PositionLocal == v3 100.0f 0.0f 0.0f
+                    Entity.Size == v3 60.0f 40.0f 0.0f
+                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+                ] [
+                    Entity.Absolute == false
+                    Entity.Size == v3 60.0f 5.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.TextColor == Color.FloralWhite
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 5
+                ]
+
+                let actions =
+                    match rightHistory with
+                    | Some (lastTurn::_) ->
+
+                        let action (i, (action, success)) = Content.text $"Action{i}" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 40.0f 5.0f 0.0f
+                            Entity.Text := $"{action}"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyRight, JustifyMiddle)
+                            Entity.TextColor := if success then Color.FloralWhite else Color.Gray
+                        ]
+
+                        lastTurn
+                        |> Turn.describe
+                        |> List.indexed
+                        |> List.map action
+
                     | _ -> []
 
-            let playerSuccesses =
-                playerLastTurn.Checks
-                |> List.tryFind (fun x -> match x.Action with | PhysicalSequence _ -> true | _ -> false)
-                |> fun check ->
-                    match check with
-                    | Some check -> check.Successes
-                    | None -> 0
+                Content.association "Actions" [
+                    Entity.Absolute == false
+                    Entity.PositionLocal == v3 40.0f 0.0f 0.0f
+                    Entity.Size == v3 40.0f 40.0f 0.0f
+                    Entity.Elevation == 10.0f
+                    Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+                ] actions
+            ]
+        | None -> ()
 
-            let enemySuccesses =
-                enemyLastTurn.Checks
-                |> List.tryFind (fun x -> match x.Action with | PhysicalSequence _ -> true | _ -> false)
-                |> fun check ->
-                    match check with
-                    | Some check -> check.Successes
-                    | None -> 0
+        match leftHistory, rightHistory with
+        | Some (leftLastTurn::_), Some (rightLastTurn::_) ->
 
+            let left = left.Value
+            let right = right.Value
 
-            let turnWinner =
-                if playerSuccesses = enemySuccesses then
+            let leftSuccesses = Turn.getSuccesses leftLastTurn
+            let rightSuccesses = Turn.getSuccesses rightLastTurn
+
+            let turnResult =
+                if leftSuccesses = rightSuccesses then
                     "Draw!"
-                else if playerSuccesses > enemySuccesses then
-                    $"{player.Name} advances!"
+                else if leftSuccesses > rightSuccesses then
+                    $"{left.Name} advances!"
                 else
-                    $"{enemy.Name} advances!"
+                    $"{right.Name} advances!"
 
-            let combatWinner =
-                if Character.isDead player && Character.isDead enemy then
+            let combatResult =
+                if Character.isDead left && Character.isDead right then
                     "Everyone died!"
-                else if Character.isDead player then
-                    $"{enemy.Name} won!"
-                else if Character.isDead enemy then
-                    $"{player.Name} won!"
+                else if Character.isDead left then
+                    $"{right.Name} won!"
+                else if Character.isDead right then
+                    $"{left.Name} won!"
                 else
                     ""
-
 
             ContentEx.richText "CombatSummary" [
                 Entity.Absolute == false
@@ -363,73 +497,14 @@ type CombatDispatcher () =
                 Entity.Size == v3 120.0f 20.0f 0.0f
                 Entity.Elevation == 10.0f
                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                Entity.Text := $" {playerSuccesses} - {enemySuccesses} - {turnWinner}
+                Entity.Text := $" {leftSuccesses} - {rightSuccesses} - {turnResult}
 
-                Turn: {model.Turn} {combatWinner}"
+                Turn: {model.Turn} {combatResult}"
                 Entity.TextColor == Color.FloralWhite
                 Entity.Font == Assets.Gui.ClearSansFont
                 Entity.FontSizing == Some 5
             ]
 
-            Content.association "MovesPlayer" [
-                Entity.Absolute == false
-                Entity.PositionLocal == v3 -40.0f 0.0f 0.0f
-                Entity.Size == v3 40.0f 40.0f 0.0f
-                Entity.Elevation == 10.0f
-                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                Entity.Layout == Flow (FlowDownward, FlowUnlimited)
-            ] [
-                for i, move in List.indexed playerMoves ->
-                    Content.text $"Move{i}" [
-                        Entity.Absolute == false
-                        Entity.Size == v3 40.0f 5.0f 0.0f
-                        Entity.Text := $"{Move.getName move}"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 5
-                        Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                        Entity.TextColor :=
-                            if i < playerSuccesses then
-                                Color.FloralWhite
-                            else
-                                Color.Gray
-                    ]
-            ]
-
-            Content.association "MovesEnemy" [
-                Entity.Absolute == false
-                Entity.PositionLocal == v3 40.0f 0.0f 0.0f
-                Entity.Size == v3 40.0f 40.0f 0.0f
-                Entity.Elevation == 10.0f
-                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                Entity.Layout == Flow (FlowDownward, FlowUnlimited)
-            ] [
-                for i, move in List.indexed enemyMoves ->
-                    Content.text $"Move{i}" [
-                        Entity.Absolute == false
-                        Entity.Size == v3 40.0f 5.0f 0.0f
-                        Entity.Text := $"{Move.getName move}"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 5
-                        Entity.Justification == Justified (JustifyRight, JustifyMiddle)
-                        Entity.TextColor :=
-                            if i < enemySuccesses then
-                                Color.FloralWhite
-                            else
-                                Color.Gray
-                    ]
-            ]
-
-            ContentEx.richText "CombatLocations" [
-                Entity.Absolute == false
-                Entity.PositionLocal == v3 0.0f -80.0f 0.0f
-                Entity.Size == v3 180.0f 20.0f 0.0f
-                Entity.Elevation == 10.0f
-                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                Entity.Text := $"{Area.getConnections player.ID model.Area} -- {Area.getConnections enemy.ID model.Area}"
-                Entity.TextColor == Color.FloralWhite
-                Entity.Font == Assets.Gui.ClearSansFont
-                Entity.FontSizing == Some 5
-            ]
 
         | _ -> ()
 

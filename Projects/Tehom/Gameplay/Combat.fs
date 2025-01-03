@@ -309,71 +309,107 @@ with
                 effects @ effects'
             ) []
 
+    // TODO: processes just the first physical sequence, should process the entire turn
+    static member getMoves turn =
+        turn.Checks
+        |> List.tryFind (fun x -> match x.Action with PhysicalSequence _ -> true | _ -> false)
+        |> function
+            | Some { Action = PhysicalSequence moves } -> moves
+            | _ -> []
+
+    static member describe turn =
+        turn.Checks
+        |> List.collect (fun check ->
+            match check.Action with
+            | PhysicalSequence moves ->
+                let describeMove (i, move) =
+                    Move.getName move, i < check.Successes
+                moves
+                |> List.indexed
+                |> List.map describeMove
+            | StanceChange stance ->
+                [ "Stance Change", true ]
+            | _ ->
+                [ "Unimplemented", false ]
+        )
+
+    // TODO: processes just the first physical sequence, should process the entire turn
+    static member getSuccesses turn =
+        turn.Checks
+        |> List.tryFind (fun x -> match x.Action with PhysicalSequence _ -> true | _ -> false)
+        |> fun check ->
+            match check with
+            | Some check -> check.Successes
+            | None -> 0
 
 type CombatState =
-    | Playing
-    | Quit
+    | TurnNone
+    | TurnAttacker of Attacker : Entity
+    | TurnAttackPlan of Attacker : Entity
+    | TurnDefender of Attacker : Entity * AttackPlan : Turn
+    | TurnDefencePlan of Attacker : Entity * AttackPlan : Turn * Defender : Entity
+    | TurnAttackKarmaBid
+    | TurnDefenceKarmaBid
+    | TurnExecute of Attacker : Entity * AttackPlan : Turn * Defender : Entity * DefencePlan : Turn
 
 // this is our MMCC model type representing gameplay.
 // this model representation uses update time, that is, time based on number of engine updates.
 type [<SymbolicExpansion>] Combat = {
-    GameplayTime : int64
-    GameplayState : CombatState
+    CombatTime : int64
+    CombatState : CombatState
 
     Turn : int
     Combatants : Entity list
     History : Map<Entity, Turn list>
     Area : Area
 
-    DisplayLeft : Character
-    DisplayRight : Character
+    DisplayLeftEntity : Entity option
+    DisplayLeftModel : Character option
+    DisplayRightEntity : Entity option
+    DisplayRightModel : Character option
+    Selections : Move list list
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
     static member empty = {
-        GameplayTime = 0L
-        GameplayState = Quit
+        CombatTime = 0L
+        CombatState = TurnNone
 
         Turn = 0
         Combatants = []
         History = Map.empty
         Area = Area.empty
 
-        DisplayLeft = Character.empty
-        DisplayRight = Character.empty
+        DisplayLeftEntity = None
+        DisplayLeftModel = None
+        DisplayRightEntity = None
+        DisplayRightModel = None
+
+        Selections = List.empty
     }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
     static member initial = {
         Combat.empty with
-            GameplayState = Playing
-            DisplayLeft = CharacterContent.player
-            DisplayRight = CharacterContent.rat
+            DisplayLeftEntity = Some (Simulants.GameplayCharacters / CharacterContent.player.ID)
+            DisplayRightEntity = Some (Simulants.GameplayCharacters / CharacterContent.rat.ID)
             Area = Area.level1
     }
 
     // this updates the gameplay model every frame that gameplay is active.
     static member update gameplay world =
-        match gameplay.GameplayState with
-        | Playing ->
 
-            let left = gameplay.DisplayLeft.ID
-            let right = gameplay.DisplayRight.ID
+        let leftCharacter =
+            match gameplay.DisplayLeftEntity with
+            | Some entity -> Some (entity.GetCharacter world)
+            | None -> None
 
-            let actors = World.getEntities Simulants.GameplayCharacters world
+        let rightCharacter =
+            match gameplay.DisplayRightEntity with
+            | Some entity -> Some (entity.GetCharacter world)
+            | None -> None
 
-            let leftCharacter =
-                actors
-                |> Seq.map (fun entity -> entity.GetCharacter world)
-                |> Seq.find (fun character-> character.ID = left)
-
-            let rightCharacter =
-                actors
-                |> Seq.map (fun entity -> entity.GetCharacter world)
-                |> Seq.find (fun character-> character.ID = right)
-
-            { gameplay with DisplayLeft = leftCharacter; DisplayRight = rightCharacter }
-        | Quit -> gameplay
+        { gameplay with DisplayLeftModel = leftCharacter; DisplayRightModel = rightCharacter }
 
 
     static member getCharacterMostWounds entities world =
@@ -383,3 +419,32 @@ with
             character.MajorWounds
         )
         |> List.last
+
+    static member isCharacterControlled entity =
+        let player = Simulants.GameplayCharacters / CharacterContent.player.ID
+        entity = player
+
+
+    static member advanceTurn attacker defender attackerTurn defenderTurn combat =
+
+        let history =
+            combat.History
+            |> Map.map (fun entity turns ->
+                if entity = attacker then
+                    attackerTurn::turns
+                elif entity = defender then
+                    defenderTurn::turns
+                else
+                    turns
+            )
+
+        let combatants = List.tail combat.Combatants
+
+        let model = {
+            combat with
+                Combatants = combatants @ [attacker]
+                Turn = combat.Turn + 1
+                History = history
+        }
+
+        model

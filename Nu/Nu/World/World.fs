@@ -185,6 +185,7 @@ module WorldModule3 =
                  ButtonExDispatcher ()
                  VoxelDispatcher ()
                  Text3dDispatcher ()
+                 RichTextDispatcher ()
                  ]
 
         static member private makeDefaultFacets () =
@@ -228,6 +229,7 @@ module WorldModule3 =
                  HoverFacet ()
                  VoxelFacet ()
                  Text3dFacet ()
+                 RichTextFacet ()
                  ]
 
         /// Update late bindings internally stored by the engine from types found in the given assemblies.

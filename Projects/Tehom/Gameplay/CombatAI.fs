@@ -9,6 +9,24 @@ open Area
 
 module AttackerAI =
 
+    let getPossibleMoves character =
+
+        let strikes =
+            character
+            |> Character.getWeapons
+            |> List.map Strike
+
+        strikes @ [ Power; Press ]
+
+    let getMovesMatrix (attacker : Entity) world =
+
+        let character = attacker.GetCharacter world
+
+        let statCombatant = Character.getStat Gall character |> int
+
+        List.init statCombatant (fun _ -> getPossibleMoves character)
+
+
     // pick target with the most wounds, excluding combatant himself
     let findTarget attacker gameplay world =
         // TODO: some sort of allegiance system
@@ -16,6 +34,28 @@ module AttackerAI =
             gameplay.Combatants
             |> List.remove (fun entity -> entity = attacker)
         Combat.getCharacterMostWounds otherCombatants world
+
+
+    let customPlan (attacker: Entity) area combat world =
+
+        let target = findTarget attacker combat world
+
+        let selections =
+            combat.Selections
+            |> List.map List.head
+
+        let checks = [
+            Check.unstoppable (StanceChange Stance.attacker)
+            Check.attack (PhysicalSequence selections) (List.length selections) target
+        ]
+
+        {
+            Turn.empty with
+                Turn = combat.Turn
+                Type = TurnType.Action
+                Checks = checks
+        }
+
 
     // attack in the case character has no programming
     let attackDefault character moves attacks target =

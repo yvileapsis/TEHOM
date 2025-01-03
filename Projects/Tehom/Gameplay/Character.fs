@@ -40,7 +40,7 @@ module Weapon =
         static member fist limb = {
             Weapon.empty with
                 Type = Small
-                Name = "Fist Strike"
+                Name = $"Fist Strike ({limb})"
                 Damage = 3
                 RequiredLimb = limb
         }
@@ -49,7 +49,7 @@ module Weapon =
         static member kick limb = {
             Weapon.empty with
                 Type = Medium
-                Name = "Kick Strike"
+                Name = $"Kick Strike ({limb})"
                 Damage = 4
                 RequiredLimb = limb
         }
