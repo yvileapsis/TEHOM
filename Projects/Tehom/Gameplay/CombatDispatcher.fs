@@ -293,22 +293,18 @@ type CombatDispatcher () =
 
         let statsBox (character : Character) boxProperties textProperties =
 
-            let stat text = Content.text "Name" (textProperties @ [
-                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                Entity.Text := text
-            ])
-
-            let value text = Content.text "Value" (textProperties @ [
-                Entity.Justification == Justified (JustifyRight, JustifyMiddle)
-                Entity.Text := text
-            ])
-
             let stat name statName statValue = Content.composite name textProperties [
-                stat statName
-                value statValue
+                Content.text "Name" (textProperties @ [
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    Entity.Text := statName
+                ])
+                Content.text "Value" (textProperties @ [
+                    Entity.Justification == Justified (JustifyRight, JustifyMiddle)
+                    Entity.Text := statValue
+                ])
             ]
 
-            let coords name text = ContentEx.richText name (textProperties @ [
+            let location name text = ContentEx.richText name (textProperties @ [
                 Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                 Entity.Text := text
             ])
@@ -321,13 +317,9 @@ type CombatDispatcher () =
                 |> Character.getStance
                 |> Stance.getStats
 
-            let minorWounds = character.MinorWounds
-            let majorWounds = character.MajorWounds
-
-            Content.association "StatsBox" boxProperties [
-
-                stat "MinorWounds" "Minor Wounds" $"{minorWounds}"
-                stat "MajorWounds" "Major Wounds" $"{majorWounds}"
+            let stats = [
+                stat "MinorWounds" "Minor Wounds" $"{character.MinorWounds}"
+                stat "MajorWounds" "Major Wounds" $"{character.MajorWounds}"
                 stat "Gall" "Gall" $"{gall} {gallStance}"
                 stat "Lymph" "Lymph" $"{lymph} {lymphStance}"
                 stat "Oil" "Oil" $"{oil} {oilStance}"
@@ -336,8 +328,10 @@ type CombatDispatcher () =
                 stat "Initiative" "Initiative" $"{character.Initiative}"
 
                 let connections = Area.getConnections character.ID model.Area
-                coords "CombatLocation" $"Location {connections}"
+                location "CombatLocation" $"Location {connections}"
             ]
+
+            Content.association "Stats" boxProperties stats
 
 
 
