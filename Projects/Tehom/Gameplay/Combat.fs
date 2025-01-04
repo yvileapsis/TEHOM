@@ -333,14 +333,15 @@ with
                 [ "Unimplemented", false ]
         )
 
-    // TODO: processes just the first physical sequence, should process the entire turn
     static member getSuccesses turn =
         turn.Checks
-        |> List.tryFind (fun x -> match x.Action with PhysicalSequence _ -> true | _ -> false)
-        |> fun check ->
-            match check with
-            | Some check -> check.Successes
-            | None -> 0
+        |> List.fold (fun state check ->
+            match check.Action with
+            | PhysicalSequence _ ->
+                state + check.Successes
+            | _ ->
+                state
+        ) 0
 
 type CombatState =
     | TurnNone
