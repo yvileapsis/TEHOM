@@ -583,6 +583,7 @@ type RenderMessage3d =
     | RenderVoxel of RenderVoxel
     | ConfigureLighting3d of Lighting3dConfig
     | ConfigureRenderer3d of Renderer3dConfig
+    | ConfigureFilter of bool
     | LoadRenderPackage3d of string
     | UnloadRenderPackage3d of string
     | ReloadRenderAssets3d
@@ -909,6 +910,7 @@ type [<ReferenceEquality>] GlRenderer3d =
           FilterBilateralDownSample4dShader : OpenGL.Filter.FilterBilateralDownSampleShader
           FilterBilateralUpSample4dShader : OpenGL.Filter.FilterBilateralUpSampleShader
           FilterFxaaShader : OpenGL.Filter.FilterFxaaShader
+          FilterCustomShader : OpenGL.Filter.FilterCustomShader
           PhysicallyBasedShadowStaticPointShader : OpenGL.PhysicallyBased.PhysicallyBasedShader
           PhysicallyBasedShadowStaticSpotShader : OpenGL.PhysicallyBased.PhysicallyBasedShader
           PhysicallyBasedShadowStaticDirectionalShader : OpenGL.PhysicallyBased.PhysicallyBasedShader
@@ -967,6 +969,7 @@ type [<ReferenceEquality>] GlRenderer3d =
           LightMaps : Dictionary<uint64, OpenGL.LightMap.LightMap>
           mutable LightingConfig : Lighting3dConfig
           mutable RendererConfig : Renderer3dConfig
+          mutable CustomFilterConfig : bool
           mutable InstanceFields : single array
           mutable UserDefinedStaticModelFields : single array
           LightsDesiringShadows : Dictionary<uint64, SortableLight>
@@ -3235,6 +3238,11 @@ type [<ReferenceEquality>] GlRenderer3d =
         OpenGL.PhysicallyBased.DrawFilterFxaaSurface (compositionTexture, renderer.PhysicallyBasedQuad, renderer.FilterFxaaShader)
         OpenGL.Hl.Assert ()
 
+        if renderer.CustomFilterConfig then
+            // render filter quad via fxaa
+            OpenGL.PhysicallyBased.DrawFilterCustomSurface (compositionTexture, renderer.PhysicallyBasedQuad, renderer.FilterCustomShader)
+            OpenGL.Hl.Assert ()
+
         // destroy cached geometries that weren't rendered this frame
         if topLevelRender then
             for geometry in renderer.PhysicallyBasedTerrainGeometries do
@@ -3347,6 +3355,8 @@ type [<ReferenceEquality>] GlRenderer3d =
                 renderer.LightingConfig <- l3c
             | ConfigureRenderer3d r3c ->
                 renderer.RendererConfig <- r3c
+            | ConfigureFilter value ->
+                renderer.CustomFilterConfig <- value
             | LoadRenderPackage3d packageName ->
                 GlRenderer3d.handleLoadRenderPackage packageName renderer
             | UnloadRenderPackage3d packageName ->
@@ -3654,6 +3664,10 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // create filter fxaa shader
         let filterFxaaShader = OpenGL.Filter.CreateFilterFxaaShader Constants.Paths.FilterFxaaShaderFilePath
+        OpenGL.Hl.Assert ()
+
+        // create filter fxaa shader
+        let filterCustomShader = OpenGL.Filter.CreateFilterCustomShader Constants.Paths.FilterCustomShaderFilePath
         OpenGL.Hl.Assert ()
 
         // create shadow shaders
@@ -3974,6 +3988,7 @@ type [<ReferenceEquality>] GlRenderer3d =
               FilterBilateralDownSample4dShader = filterBilateralDownSample4dShader
               FilterBilateralUpSample4dShader = filterBilateralUpSample4dShader
               FilterFxaaShader = filterFxaaShader
+              FilterCustomShader = filterCustomShader
               PhysicallyBasedShadowStaticPointShader = shadowStaticPointShader
               PhysicallyBasedShadowStaticSpotShader = shadowStaticSpotShader
               PhysicallyBasedShadowStaticDirectionalShader = shadowStaticDirectionalShader
@@ -4032,6 +4047,7 @@ type [<ReferenceEquality>] GlRenderer3d =
               LightMaps = dictPlus HashIdentity.Structural []
               LightingConfig = Lighting3dConfig.defaultConfig
               RendererConfig = Renderer3dConfig.defaultConfig
+              CustomFilterConfig = true
               InstanceFields = Array.zeroCreate<single> (Constants.Render.InstanceFieldCount * Constants.Render.InstanceBatchPrealloc)
               UserDefinedStaticModelFields = [||]
               LightsDesiringShadows = dictPlus HashIdentity.Structural []

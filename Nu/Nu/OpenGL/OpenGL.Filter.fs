@@ -38,6 +38,11 @@ module Filter =
         { InputTextureUniform : int
           FilterFxaaShader : uint }
 
+    /// Describes an fxaa shader that's loaded into GPU.
+    type FilterCustomShader =
+        { InputTextureUniform : int
+          FilterCustomShader : uint }
+
     /// Create a filter box shader.
     let CreateFilterBoxShader (shaderFilePath : string) =
 
@@ -115,3 +120,17 @@ module Filter =
         // make shader record
         { InputTextureUniform = inputTextureUniform
           FilterFxaaShader = shader }
+
+    /// Create a filter fxaa shader.
+    let CreateFilterCustomShader (shaderFilePath : string) =
+
+        // create shader
+        let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
+
+        // retrieve uniforms
+        let inputTextureUniform = Gl.GetUniformLocation (shader, "inputTexture")
+
+        // make shader record
+        { InputTextureUniform = inputTextureUniform
+          FilterCustomShader = shader }
