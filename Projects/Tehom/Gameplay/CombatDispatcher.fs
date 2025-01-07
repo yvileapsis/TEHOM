@@ -18,6 +18,7 @@ type CombatMessage =
 
 type CombatCommand =
     | RollInitiative
+    | UpdateGraph
     | GameEffect of GameEffect
     interface Command
 
@@ -29,7 +30,7 @@ module CombatExtensions =
         member this.Combat = this.ModelGeneric<Combat> ()
 
 type CombatDispatcher () =
-    inherit Entity2dDispatcher<Combat, CombatMessage,CombatCommand> (false, false, false, Combat.initial)
+    inherit Entity2dDispatcher<Combat, CombatMessage, CombatCommand> (false, false, false, Combat.initial)
 
     override this.Definitions (_, _) = [
         Entity.Size == Constants.Render.VirtualResolution.V3 / 2f
@@ -67,7 +68,7 @@ type CombatDispatcher () =
                 [StartPlaying], model
             else
                 let model = Combat.update model world
-                just model
+                [UpdateGraph], model
 
         | TurnProcess ->
             match model.CombatState with
@@ -253,18 +254,31 @@ type CombatDispatcher () =
             let world = entity.SetCombat model world
             just world
 
+        | UpdateGraph ->
+            let graph = entity / "Graph"
+            let graphSites = graph.GetGraph world
+            let graphSites = { graphSites with Graph = model.Area.Sites }
+            let world = graph.SetGraph graphSites world
+            just world
+
     override this.TruncateModel model = {
         model with
             DisplayLeftModel = None
             DisplayRightModel = None
+            Area = Area.empty
     }
     override this.UntruncateModel (model, model') = {
         model with
             DisplayLeftModel = model'.DisplayLeftModel
             DisplayRightModel = model'.DisplayRightModel
+            Area = model'.Area
     }
 
     override this.Content (model, _) = [
+
+        Content.entity<GraphDispatcher> "Graph" [
+            Entity.PositionLocal == v3 90f 90f 0f
+        ]
 
         // Constant
         Content.button "AdvanceTurn" [
