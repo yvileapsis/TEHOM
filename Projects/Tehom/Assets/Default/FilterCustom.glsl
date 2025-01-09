@@ -25,88 +25,137 @@ in vec2 texCoordsOut;
 
 layout(location = 0) out vec4 frag;
 
-float dither8x8(vec2 position, float brightness) {
-    int x = int(mod(position.x * textureSize(inputTexture, 0).x, 8.0));
-    int y = int(mod(position.y * textureSize(inputTexture, 0).y, 8.0));
-    int index = x + y * 8;
-    float limit = 0.0;
+const float bayerMatrix8x8[64] = float[64](
+    0.0/ 64.0, 48.0/ 64.0, 12.0/ 64.0, 60.0/ 64.0,  3.0/ 64.0, 51.0/ 64.0, 15.0/ 64.0, 63.0/ 64.0,
+    32.0/ 64.0, 16.0/ 64.0, 44.0/ 64.0, 28.0/ 64.0, 35.0/ 64.0, 19.0/ 64.0, 47.0/ 64.0, 31.0/ 64.0,
+    8.0/ 64.0, 56.0/ 64.0,  4.0/ 64.0, 52.0/ 64.0, 11.0/ 64.0, 59.0/ 64.0,  7.0/ 64.0, 55.0/ 64.0,
+    40.0/ 64.0, 24.0/ 64.0, 36.0/ 64.0, 20.0/ 64.0, 43.0/ 64.0, 27.0/ 64.0, 39.0/ 64.0, 23.0/ 64.0,
+    2.0/ 64.0, 50.0/ 64.0, 14.0/ 64.0, 62.0/ 64.0,  1.0/ 64.0, 49.0/ 64.0, 13.0/ 64.0, 61.0/ 64.0,
+    34.0/ 64.0, 18.0/ 64.0, 46.0/ 64.0, 30.0/ 64.0, 33.0/ 64.0, 17.0/ 64.0, 45.0/ 64.0, 29.0/ 64.0,
+    10.0/ 64.0, 58.0/ 64.0,  6.0/ 64.0, 54.0/ 64.0,  9.0/ 64.0, 57.0/ 64.0,  5.0/ 64.0, 53.0/ 64.0,
+    42.0/ 64.0, 26.0/ 64.0, 38.0/ 64.0, 22.0/ 64.0, 41.0/ 64.0, 25.0/ 64.0, 37.0/ 64.0, 21.0 / 64.0
+);
 
-    if (x < 8) {
-    if (index == 0) limit = 0.015625;
-    if (index == 1) limit = 0.515625;
-    if (index == 2) limit = 0.140625;
-    if (index == 3) limit = 0.640625;
-    if (index == 4) limit = 0.046875;
-    if (index == 5) limit = 0.546875;
-    if (index == 6) limit = 0.171875;
-    if (index == 7) limit = 0.671875;
-    if (index == 8) limit = 0.765625;
-    if (index == 9) limit = 0.265625;
-    if (index == 10) limit = 0.890625;
-    if (index == 11) limit = 0.390625;
-    if (index == 12) limit = 0.796875;
-    if (index == 13) limit = 0.296875;
-    if (index == 14) limit = 0.921875;
-    if (index == 15) limit = 0.421875;
-    if (index == 16) limit = 0.203125;
-    if (index == 17) limit = 0.703125;
-    if (index == 18) limit = 0.078125;
-    if (index == 19) limit = 0.578125;
-    if (index == 20) limit = 0.234375;
-    if (index == 21) limit = 0.734375;
-    if (index == 22) limit = 0.109375;
-    if (index == 23) limit = 0.609375;
-    if (index == 24) limit = 0.953125;
-    if (index == 25) limit = 0.453125;
-    if (index == 26) limit = 0.828125;
-    if (index == 27) limit = 0.328125;
-    if (index == 28) limit = 0.984375;
-    if (index == 29) limit = 0.484375;
-    if (index == 30) limit = 0.859375;
-    if (index == 31) limit = 0.359375;
-    if (index == 32) limit = 0.0625;
-    if (index == 33) limit = 0.5625;
-    if (index == 34) limit = 0.1875;
-    if (index == 35) limit = 0.6875;
-    if (index == 36) limit = 0.03125;
-    if (index == 37) limit = 0.53125;
-    if (index == 38) limit = 0.15625;
-    if (index == 39) limit = 0.65625;
-    if (index == 40) limit = 0.8125;
-    if (index == 41) limit = 0.3125;
-    if (index == 42) limit = 0.9375;
-    if (index == 43) limit = 0.4375;
-    if (index == 44) limit = 0.78125;
-    if (index == 45) limit = 0.28125;
-    if (index == 46) limit = 0.90625;
-    if (index == 47) limit = 0.40625;
-    if (index == 48) limit = 0.25;
-    if (index == 49) limit = 0.75;
-    if (index == 50) limit = 0.125;
-    if (index == 51) limit = 0.625;
-    if (index == 52) limit = 0.21875;
-    if (index == 53) limit = 0.71875;
-    if (index == 54) limit = 0.09375;
-    if (index == 55) limit = 0.59375;
-    if (index == 56) limit = 1.0;
-    if (index == 57) limit = 0.5;
-    if (index == 58) limit = 0.875;
-    if (index == 59) limit = 0.375;
-    if (index == 60) limit = 0.96875;
-    if (index == 61) limit = 0.46875;
-    if (index == 62) limit = 0.84375;
-    if (index == 63) limit = 0.34375;
-    }
+const vec3 palette[30] = vec3[30](
+    vec3(1.0, 0.0, 0.0),  // Red
+    vec3(0.0, 1.0, 0.0),  // Green
+    vec3(0.0, 0.0, 1.0),  // Blue
 
-    return brightness < limit ? 0.0 : 1.0;
+    vec3(0.5, 0.0, 0.0),  // Red
+    vec3(0.0, 0.5, 0.0),  // Green
+    vec3(0.0, 0.0, 0.5),  // Blue
+
+    vec3(0.7, 0.0, 0.0),  // Red
+    vec3(0.0, 0.7, 0.0),  // Green
+    vec3(0.0, 0.0, 0.7),  // Blue
+
+    vec3(1.0, 1.0, 0.0),  // Yellow
+    vec3(1.0, 0.0, 1.0),  // Magenta
+    vec3(0.0, 1.0, 1.0),  // Cyan
+
+    vec3(0.5, 0.5, 0.0),  // Yellow
+    vec3(0.5, 0.0, 0.5),  // Magenta
+    vec3(0.0, 0.5, 0.5),  // Cyan
+
+    vec3(0.7, 0.7, 0.0),  // Yellow
+    vec3(0.7, 0.0, 0.7),  // Magenta
+    vec3(0.0, 0.7, 0.7),  // Cyan
+
+    vec3(1.0, 0.5, 0.0),  // Orange
+    vec3(0.5, 0.0, 1.0),  // Purple
+    vec3(0.5, 1.0, 0.0),  // Lime
+
+    vec3(1.0, 0.0, 0.5),  // Pink
+    vec3(0.0, 0.5, 1.0),  // Sky Blue
+    vec3(0.0, 1.0, 0.5),  // Mint
+
+    vec3(0.3, 0.3, 0.3),  // White
+    vec3(0.9, 0.9, 0.9),  // White
+    vec3(1.0, 1.0, 1.0),  // White
+
+    vec3(0.2, 0.2, 0.2),  // Dark gray
+    vec3(0.1, 0.1, 0.1),  // Darker gray
+    vec3(0.0, 0.0, 0.0)   // Black
+);
+const int paletteLength = 30;
+
+
+vec3 hsl2rgb(vec3 c)
+{
+    vec3 rgb = clamp(abs(mod(c.x*6.+vec3(0.,4.,2.),6.)-3.)-1.,0.,1.);
+
+    return c.z + c.y * (rgb - .5) * (1. - abs(2. * c.z - 1.));
 }
 
-vec4 dither8x8(vec2 position, vec3 color, float brightness) {
-    return vec4(color * dither8x8(position, brightness), 0);
+vec3 rgb2hsl(vec3 c) {
+    float h = 0.;
+    float s = 0.;
+    float l = 0.;
+    float r = c.r;
+    float g = c.g;
+    float b = c.b;
+    float cMin = min(r, min(g, b));
+    float cMax = max(r, max(g, b));
+
+    l = (cMax + cMin) / 2.;
+    if (cMax > cMin) {
+    float cDelta = cMax - cMin;
+    s = l < .0 ? cDelta / (cMax+cMin) : cDelta / (2. - (cMax + cMin));
+    if(r == cMax) {
+    h = (g - b) / cDelta;
+    } else if(g == cMax) {
+    h = 2. + (b - r) / cDelta;
+    } else {
+    h = 4. + (r - g) / cDelta;
+    }
+
+    if(h < 0.) {
+    h += 6.;
+    }
+    h = h / 6.;
+    }
+    return vec3(h, s, l);
+}
+
+float hueDistance(vec3 h1, vec3 h2)
+{
+    vec3 diff = abs(h1 - h2);
+
+    return dot(diff, diff);
+}
+
+vec3[2] closestColors(vec3 hue) {
+    vec3 ret[2];
+    vec3 closest = vec3(-2, -2, -2);
+    vec3 secondClosest = vec3(-2, -2, -2);
+    vec3 temp;
+    for (int i = 0; i < paletteLength; ++i) {
+        temp = palette[i];
+        float tempDistance = hueDistance(temp, hue);
+        if (tempDistance < hueDistance(closest, hue)) {
+            secondClosest = closest;
+            closest = temp;
+        } else {
+            if (tempDistance < hueDistance(secondClosest, hue)) {
+                secondClosest = temp;
+            }
+        }
+    }
+    ret[0] = closest;
+    ret[1] = secondClosest;
+    return ret;
+}
+
+vec3 dither1(vec2 uv, vec3 color) {
+    int x = int(uv.x) % 8;
+    int y = int(uv.y) % 8;
+    float threshold = bayerMatrix8x8[y * 8 + x];
+    return color.rgb + threshold;
 }
 
 void main()
 {
+/*
     // compute texel size
     vec2 texelSize = 1.0 / textureSize(inputTexture, 0).xy;
 
@@ -139,9 +188,29 @@ void main()
     // compute the minimum and maximum luminosity of the surrounding texels to use for edge detection
     float lumMin = min(lumCC, min(min(lumTL, lumTR), min(lumBL, lumBR)));
     float lumMax = max(lumCC, max(max(lumTL, lumTR), max(lumBL, lumBR)));
-    float lumResult2 = dot(lum, result2);
+    float lumResult2 = dot(lum, result2);*/
 
-    float brightness = dot(vec3(0.299, 0.587, 0.114), texture(inputTexture, texCoordsOut.xy).xyz);
-    // write    
-    frag = dither8x8(texCoordsOut.xy, texture(inputTexture, texCoordsOut.xy).xyz, brightness); // vec4(texture(inputTexture, texCoordsOut.xy).xyz, 1.0);
+
+    float pixelSize = 2.0;
+
+    vec2 textureSize = vec2(1920, 1056);
+
+    vec2 texelSize = pixelSize / textureSize;
+
+    vec2 coords = texelSize * floor(texCoordsOut.xy / texelSize);
+
+    vec3 color = texture(inputTexture, coords).xyz;
+
+    float brightness = dot(vec3(0.299, 0.587, 0.114), color);
+
+    vec3 dither = dither1(coords * textureSize, color);
+
+    vec3[2] closest = closestColors(dither);
+
+    vec3 colorbanding = floor((4 - 1.0f) * dither + vec3(0.5)) / (4 - 1.0f);
+
+    vec4 colorOut = vec4(closest[0], 1.0);
+
+    // write
+    frag = colorOut; // vec4(texture(inputTexture, texCoordsOut.xy).xyz, 1.0);
 }

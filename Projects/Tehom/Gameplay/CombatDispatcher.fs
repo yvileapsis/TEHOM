@@ -276,6 +276,12 @@ type CombatDispatcher () =
 
     override this.Content (model, _) = [
 
+        Content.staticSprite "Background" [
+            Entity.Size == v3 280f 80f 0f
+            Entity.StaticImage == Assets.Default.Black
+            Entity.Color == Color.White.WithA 0.5f
+        ]
+
         Content.entity<GraphDispatcher> "Graph" [
             Entity.PositionLocal == v3 90f 90f 0f
         ]

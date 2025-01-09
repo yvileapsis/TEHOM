@@ -119,6 +119,7 @@ type GameplayDispatcher () =
 //            let world = World.setEye3dRotation (Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -20f, 0f)) world
             let world = World.setEye2dCenter (v2 0f 0f) world
             let world = World.setEye2dCenter (v2 640f 360f) world
+            World.enqueueRenderMessage3d (ConfigureFilter true) world
             just world
 
         | StartQuitting ->
@@ -178,7 +179,7 @@ type GameplayDispatcher () =
         match model.GameplayState with
         | Playing ->
 
-            Content.groupFromFile Simulants.GameplayScene.Name "Assets/Room/Scene.nugroup" [] [
+            Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] [
                 let coordinates, rotations = model.CoordinatesAndRotations |> List.unzip
 
                 Content.composite<Ball3dDispatcher> "Chisel" [
@@ -204,6 +205,29 @@ type GameplayDispatcher () =
                 Content.ball3d "Nanghait" [
                     Entity.Position := coordinates[3]
                     Entity.Rotation := rotations[3]
+                ]
+
+                Content.light3d "Lamp" [
+                    Entity.Position := v3 0f 6f 0f
+                    Entity.Rotation := Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 3.5f * cos (11f * 0.0005f * float32 model.GameplayTime), 0f, Math.DegreesToRadians 3.5f * sin (13f * 0.0005f * float32 model.GameplayTime))
+                    Entity.LightCutoff := 7.1f + 0.1f * (sin (0.001f * float32 model.GameplayTime)) + 0.005f * (sin (0.1f * float32 model.GameplayTime))
+                    Entity.LightType := SpotLight (0.9f, 1.35f)
+                ]
+
+                Content.sphere3d "Sphere" [
+                    Entity.Position == v3 0.5f 1.05f 1.6f
+                    Entity.Scale == v3 0.25f 0.25f 0.25f
+                    Entity.RenderStyle == Forward (0.0f, 0.0f)
+                ]
+
+                ContentEx.text3d "Text" [
+                    Entity.Position == v3 0.0f 2.5f -2.6f
+                    Entity.Scale == v3 2f -0.5f 1f
+                    Entity.Text == "TEHOM"
+                    Entity.FontStyling == Set.ofList [ FontStyle.Bold ]
+                    Entity.FontSizing == Some 40
+                    Entity.RenderStyle == Forward (0.0f, 0.0f)
+                    Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = ValueSome (color 0.3f 0.3f 0.3f 1f)}
                 ]
 
             ]
