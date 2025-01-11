@@ -12,7 +12,10 @@ type CombatMessage =
     | Update
     | TurnProcess
     | ProcessCharacterTurn of Entity * Turn
-    | SelectNext of int
+    | UpdatePossibleActions
+    | SetPlannedTarget of int
+    | AddPlannedAction of int
+    | RemovePlannedAction of int
     | TimeUpdate
     interface Message
 
@@ -84,7 +87,17 @@ type CombatDispatcher () =
             | TurnAttacker attacker ->
                 let model =
                     if Combat.isCharacterControlled attacker then
-                        let model = { model with Selections = AttackerAI.getMovesMatrix attacker world }
+                        let model = {
+                            model with
+                                PossibleTargets = AttackerAI.getPossibleTargets attacker model world
+                                PlannedTarget = Some (AttackerAI.findTarget attacker model world)
+                        }
+                        let model = {
+                            model with
+                                PossibleActions = AttackerAI.getPossibleActions attacker model world
+                                DistanceCurrentReach = AttackerAI.getCoveredDistance2 attacker model world
+                                DistanceToTarget = AttackerAI.getDistanceBetweenAttackerAndTarget attacker model world
+                        }
                         model
                     else
                         model
@@ -94,17 +107,24 @@ type CombatDispatcher () =
             | TurnAttackPlan attacker ->
                 let plan =
                     if Combat.isCharacterControlled attacker then
-                        AttackerAI.customPlan attacker model.Area model world |> Some
+                        AttackerAI.customPlan attacker model.Area model world
                     else
                         AttackerAI.tryPlan attacker model.Area model world
 
-                let model = { model with Selections = List.empty }
+                let model = {
+                    model with
+                        PossibleTargets = []
+                        PossibleActions = []
+                        PlannedTarget = None
+                        PlannedActions = []
+                }
 
                 match plan with
                 | Some attackerAction ->
                     let model = { model with CombatState = TurnDefender (attacker, attackerAction) }
                     just model
                 | None ->
+                    let model = { model with CombatState = TurnAttacker attacker }
                     just model
 
             | TurnDefender (attacker, attackPlan) ->
@@ -167,20 +187,66 @@ type CombatDispatcher () =
 
             withSignals signals model
 
-        | SelectNext i ->
-            match List.tryItem i model.Selections with
-            | Some (head::tail) ->
-                let list = tail @ [head]
+        | SetPlannedTarget i ->
 
-                let selections =
-                    model.Selections
-                    |> List.indexed
-                    |> List.map (fun (j, list') -> if i = j then list else list')
+            let target, possible = List.item i model.PossibleTargets
 
-                let model = { model with Selections = selections }
+            if possible then
+
+                let model = {
+                    model with
+                        PlannedTarget = Some target
+                }
+
                 just model
-            | _ ->
+            else
                 just model
+
+        | UpdatePossibleActions ->
+
+            let attacker =
+                match model.CombatState with
+                | TurnAttacker attacker -> attacker
+                | TurnAttackPlan attacker -> attacker
+                | _ -> failwith "todo"
+
+            let model = {
+                model with
+                    PossibleTargets = AttackerAI.getPossibleTargets attacker model world
+                    PossibleActions = AttackerAI.getPossibleActions attacker model world
+                    DistanceCurrentReach = AttackerAI.getCoveredDistance2 attacker model world
+                    DistanceToTarget = AttackerAI.getDistanceBetweenAttackerAndTarget attacker model world
+            }
+            just model
+
+        | AddPlannedAction i ->
+            let action, possible = List.item i model.PossibleActions
+
+            if possible then
+                let model = {
+                    model with
+                        PlannedActions = model.PlannedActions @ [ action ]
+                }
+
+                let signals : Signal list = [
+                    UpdatePossibleActions
+                ]
+
+                withSignals signals model
+            else
+                just model
+
+        | RemovePlannedAction i ->
+            let model = {
+                model with
+                    PlannedActions = List.removeAt i model.PlannedActions
+            }
+
+            let signals : Signal list = [
+                UpdatePossibleActions
+            ]
+
+            withSignals signals model
 
         | TimeUpdate ->
             let gameDelta = world.GameDelta
@@ -277,7 +343,7 @@ type CombatDispatcher () =
     override this.Content (model, _) = [
 
         Content.staticSprite "Background" [
-            Entity.Size == v3 280f 80f 0f
+            Entity.Size == v3 480f 180f 0f
             Entity.StaticImage == Assets.Default.Black
             Entity.Color == Color.White.WithA 0.5f
         ]
@@ -353,7 +419,111 @@ type CombatDispatcher () =
 
             Content.association "Stats" boxProperties stats
 
+        // TODO: Display reach + stride distance, also display it on the map
+        match model.CombatState with
+        | TurnAttackPlan attacker when Combat.isCharacterControlled attacker ->
+            let action (i, action, enabled) = Content.button $"Selectable{i}" [
+                Entity.Absolute == false
+                Entity.Size == v3 60.0f 5.0f 0.0f
+                Entity.Text := $"{action}"
+                Entity.Font == Assets.Gui.ClearSansFont
+                Entity.FontSizing == Some 5
+                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                Entity.TextColor := if enabled then Color.FloralWhite else Color.Gray
+                Entity.ClickEvent => AddPlannedAction i
+            ]
 
+            Content.association "PossibleActions" [
+                Entity.Absolute == false
+                Entity.PositionLocal == v3 -180.0f 0.0f 0.0f
+                Entity.Size == v3 40.0f 40.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+            ] (
+                model.PossibleActions
+                |> List.indexed
+                |> List.map (fun (i, (action, possible)) -> i, Action.describe action, possible)
+                |> List.map action
+            )
+
+        | _ ->
+            ()
+
+        match model.CombatState with
+        | TurnAttackPlan attacker when Combat.isCharacterControlled attacker ->
+            let action (i, action, enabled) = Content.button $"Selectable{i}" [
+                Entity.Absolute == false
+                Entity.Size == v3 30.0f 5.0f 0.0f
+                Entity.Text := $"{action}"
+                Entity.Font == Assets.Gui.ClearSansFont
+                Entity.FontSizing == Some 5
+                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                Entity.TextColor := if enabled then Color.FloralWhite else Color.Gray
+                Entity.ClickEvent => SetPlannedTarget i
+            ]
+
+            Content.association "PossibleTargets" [
+                Entity.Absolute == false
+                Entity.PositionLocal == v3 -210.0f 0.0f 0.0f
+                Entity.Size == v3 40.0f 40.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+            ] (
+                model.PossibleTargets
+                // TOOD: annoying, can't access world name, will need to store name
+                |> List.indexed
+                |> List.map (fun (i, (entity, possible)) -> i, $"{entity.Name}", possible)
+                |> List.map action
+            )
+
+        | _ ->
+            ()
+
+        match model.PlannedTarget with
+        | Some entity ->
+            Content.button "PlannedTarget" [
+                Entity.Absolute == false
+                Entity.PositionLocal == v3 -40.0f 30.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Size == v3 40.0f 5.0f 0.0f
+                Entity.Text := $"{entity.Name}"
+                Entity.Font == Assets.Gui.ClearSansFont
+                Entity.FontSizing == Some 5
+                Entity.TextColor == Color.FloralWhite
+            ]
+        | None ->
+            ()
+
+        match model.CombatState with
+        | TurnAttackPlan attacker when Combat.isCharacterControlled attacker ->
+            Content.button "Distance" [
+                Entity.Absolute == false
+                Entity.PositionLocal == v3 -100.0f 30.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Size == v3 40.0f 5.0f 0.0f
+                Entity.Text := $"{model.DistanceCurrentReach}"
+                Entity.Font == Assets.Gui.ClearSansFont
+                Entity.FontSizing == Some 5
+                Entity.TextColor == Color.FloralWhite
+            ]
+
+            Content.button "Distance2" [
+                Entity.Absolute == false
+                Entity.PositionLocal == v3 40.0f 30.0f 0.0f
+                Entity.Elevation == 10.0f
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Size == v3 40.0f 5.0f 0.0f
+                Entity.Text := $"{model.DistanceToTarget}"
+                Entity.Font == Assets.Gui.ClearSansFont
+                Entity.FontSizing == Some 5
+                Entity.TextColor == Color.FloralWhite
+            ]
+        | _ ->
+            ()
 
         match left with
         | Some entity ->
@@ -388,11 +558,11 @@ type CombatDispatcher () =
                             Entity.FontSizing == Some 5
                             Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
                             Entity.TextColor == Color.FloralWhite
-                            Entity.ClickEvent => SelectNext i
+                            Entity.ClickEvent => RemovePlannedAction i
                         ]
 
-                        model.Selections
-                        |> List.map (List.head >> Move.getName)
+                        model.PlannedActions
+                        |> List.map Action.describe
                         |> List.indexed
                         |> List.map action
 

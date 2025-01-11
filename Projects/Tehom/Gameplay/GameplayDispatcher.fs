@@ -13,14 +13,12 @@ type [<SymbolicExpansion>] Gameplay = {
     GameplayTime : int64
     GameplayState : GameplayState
     CoordinatesAndRotations : (Vector3 * Quaternion) list
-    TwoLists : int list * int list
 }
 with
     static member empty = {
         GameplayTime = 0L
         GameplayState = Quit
         CoordinatesAndRotations = []
-        TwoLists = [], []
     }
 
     static member initial = {
@@ -34,7 +32,6 @@ with
                     v3 -2.75f 1f 0f, Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians -90f, 0f, 0f)
                 ]
 //                |> List.randomShuffle
-            TwoLists = List.init 64 id, List.init 16 id
     }
 
 type GameplayMessage =
@@ -42,7 +39,6 @@ type GameplayMessage =
     | FinishQuitting
     | Update
     | Shuffle
-    | Move of bool * int
     | TimeUpdate
     interface Message
 
@@ -90,22 +86,6 @@ type GameplayDispatcher () =
             let model = Gameplay.initial
             just model
 
-        | Move (left, num) ->
-
-            let fromList, toList =
-                if left then model.TwoLists else (fun (x, y) -> y, x) model.TwoLists
-
-            let value = List.item num fromList
-            let fromList = List.removeAt num fromList
-            let toList = toList @ [ value ]
-
-            let twoLists =
-                if left then fromList, toList else toList, fromList
-
-            let model = { model with TwoLists = twoLists }
-
-            just model
-
         | TimeUpdate ->
             let gameDelta = world.GameDelta
             let model = { model with GameplayTime = model.GameplayTime + gameDelta.Updates }
@@ -140,39 +120,6 @@ type GameplayDispatcher () =
                 Entity.FontSizing == Some 8
                 Entity.Text == "Shuffle!"
                 Entity.ClickEvent => Shuffle
-            ]
-
-            Content.composite "Test" [] [
-
-                Content.association "Test1" [
-                    Entity.PositionLocal == v3 -192f 80f 0f
-                    Entity.Size == v3 64f 64f 0f
-                    Entity.Layout == Flow (FlowDownward, FlowParent)
-                ] [
-                    for i, j in List.indexed (fst model.TwoLists) do
-                        Content.button $"{i}" [
-                            Entity.Text := $"{j}"
-                            Entity.Size == v3 32.0f 4.0f 0.0f
-                            Entity.Font == Assets.Gui.ClearSansFont
-                            Entity.FontSizing == Some 4
-                            Entity.ClickEvent => Move (true, i)
-                        ]
-                ]
-
-                Content.association "Test2" [
-                    Entity.PositionLocal == v3 -192f 0f 0f
-                    Entity.Size == v3 64f 64f 0f
-                    Entity.Layout == Flow (FlowDownward, FlowParent)
-                ] [
-                    for i, j in List.indexed (snd model.TwoLists) do
-                        Content.button $"{i}" [
-                            Entity.Text := $"{j}"
-                            Entity.Size == v3 32.0f 4.0f 0.0f
-                            Entity.Font == Assets.Gui.ClearSansFont
-                            Entity.FontSizing == Some 4
-                            Entity.ClickEvent => Move (false, i)
-                        ]
-                ]
             ]
         ]
 

@@ -54,8 +54,8 @@ module Random =
         Gen.random2 0 max
 
 type TurnType =
-    | Action
-    | Reaction
+    | Active
+    | Reactive
 
 type Check = {
     Action : Action
@@ -128,7 +128,7 @@ type Turn = {
 with
     static member empty = {
         Turn = 0
-        Type = Reaction
+        Type = Reactive
         Checks = []
     }
 
@@ -368,7 +368,13 @@ type [<SymbolicExpansion>] Combat = {
     DisplayLeftModel : Character option
     DisplayRightEntity : Entity option
     DisplayRightModel : Character option
-    Selections : Move list list
+
+    PossibleActions : (Action * bool) List
+    PossibleTargets : (Entity * bool) list
+    PlannedActions : Action list
+    PlannedTarget : Entity option
+    DistanceCurrentReach : uint32
+    DistanceToTarget : uint32
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
@@ -386,7 +392,12 @@ with
         DisplayRightEntity = None
         DisplayRightModel = None
 
-        Selections = List.empty
+        PossibleActions = []
+        PossibleTargets = []
+        PlannedActions = []
+        PlannedTarget = None
+        DistanceCurrentReach = 0u
+        DistanceToTarget = 0u
     }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.

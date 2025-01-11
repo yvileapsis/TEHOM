@@ -196,10 +196,20 @@ module Action =
         | StanceChange of Stance
         | PhysicalSequence of Move list
 
+    with
+        static member describe action =
+            match action with
+            | FullMentalAction -> failwith "todo"
+            | FullPhysicalAction -> failwith "todo"
+            | StanceChange stance -> $"Stance Change to {stance}"
+            | PhysicalSequence moves -> $"{moves |> List.head |> Move.getName}"
+
+
     type CustomAction = {
         Name : String
         Actions : Action list
     }
+
 
 type Action = Action.Action
 

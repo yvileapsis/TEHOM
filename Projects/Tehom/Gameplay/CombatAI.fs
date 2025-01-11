@@ -16,7 +16,85 @@ module AttackerAI =
             |> Character.getWeapons
             |> List.map Strike
 
-        strikes @ [ Power; Press ]
+        strikes @ [ Power; Press ] @ [ Stride ]
+
+    let getDistanceBetweenAttackerAndTarget (attacker : Entity) combat world =
+        let area = combat.Area
+
+        let (Some target) = combat.PlannedTarget
+
+        let attackerName = attacker.Name
+        let targetName = target.Name
+
+        match Area.findPath attackerName targetName area with
+        | _::_ as path ->
+
+            let distance = List.last path |> snd
+
+            distance
+        | _ ->
+            0u
+
+    let getCoveredDistance actions character =
+        let reach = Character.getReach character
+        let speed = Character.getSpeed character
+
+        reach +
+        (actions
+        |> List.fold (fun distance action ->
+            match action with
+            | PhysicalSequence [ Stride ] ->
+                distance + speed
+            | _ ->
+                distance
+        ) 0u)
+
+    let getCoveredDistance2 (attacker : Entity) combat world =
+        let character = attacker.GetCharacter world
+        let plannedActions = combat.PlannedActions
+        getCoveredDistance plannedActions character
+
+    let getPossibleActions (attacker : Entity) combat world =
+
+        let character = attacker.GetCharacter world
+        let statCombatant = Character.getStat Gall character
+        let plannedActions = combat.PlannedActions
+
+        let isAttackExecutable attack =
+
+            let area = combat.Area
+
+            let (Some target) = combat.PlannedTarget
+
+            let attackerName = attacker.Name
+            let targetName = target.Name
+
+            match Area.findPath attackerName targetName area with
+            | _::_ as path ->
+
+                let distance = List.last path |> snd
+                // in reach
+                if (getCoveredDistance plannedActions character >= distance) then
+                    true
+                else
+                    false
+            | _ ->
+                false
+
+        let moveWithinActionLimit move =
+            int statCombatant > (List.length plannedActions)
+
+        getPossibleMoves character
+        |> List.map (fun x ->
+            let executable =
+                if List.contains x Move.positioning then
+                    moveWithinActionLimit x
+                else
+                    moveWithinActionLimit x
+                    && isAttackExecutable x
+
+            PhysicalSequence [ x ], executable
+        )
 
     let getMovesMatrix (attacker : Entity) world =
 
@@ -26,35 +104,42 @@ module AttackerAI =
 
         List.init statCombatant (fun _ -> getPossibleMoves character)
 
+    let getPossibleTargets attacker combat world =
+        // TODO: some sort of allegiance system
+        combat.Combatants
+        |> List.remove (fun entity -> entity = attacker)
+        |> List.map (fun entity -> entity, true)
 
     // pick target with the most wounds, excluding combatant himself
-    let findTarget attacker gameplay world =
-        // TODO: some sort of allegiance system
-        let otherCombatants =
-            gameplay.Combatants
-            |> List.remove (fun entity -> entity = attacker)
-        Combat.getCharacterMostWounds otherCombatants world
-
+    let findTarget attacker combat world =
+        let targets =
+            getPossibleTargets attacker combat world
+            |> List.filter snd
+            |> List.map fst
+        Combat.getCharacterMostWounds targets world
 
     let customPlan (attacker: Entity) area combat world =
 
-        let target = findTarget attacker combat world
+        if List.notEmpty combat.PlannedActions then
+            // TODO: move to planning
+            let (Some target) =
+                combat.PlannedTarget
+            let stance =
+                [ Check.unstoppable (StanceChange Stance.attacker) ]
 
-        let selections =
-            combat.Selections
-            |> List.map List.head
+            let checks =
+                combat.PlannedActions
+                // threshold should be generated for the action
+                |> List.map (fun action -> Check.attack action (4) target)
 
-        let checks = [
-            Check.unstoppable (StanceChange Stance.attacker)
-            Check.attack (PhysicalSequence selections) (List.length selections) target
-        ]
-
-        {
-            Turn.empty with
-                Turn = combat.Turn
-                Type = TurnType.Action
-                Checks = checks
-        }
+            Some {
+                Turn.empty with
+                    Turn = combat.Turn
+                    Type = TurnType.Active
+                    Checks = stance @ checks
+            }
+        else
+            None
 
 
     // attack in the case character has no programming
@@ -152,7 +237,7 @@ module AttackerAI =
                 |> fun checks -> Some {
                     Turn.empty with
                         Turn = gameplay.Turn
-                        Type = TurnType.Action
+                        Type = TurnType.Active
                         Checks = checks
                 }
 
@@ -267,7 +352,7 @@ module DefenderAI =
                 |> fun checks -> Some {
                     Turn.empty with
                         Turn = gameplay.Turn
-                        Type = TurnType.Reaction
+                        Type = TurnType.Reactive
                         Checks = checks
                 }
             | _ ->

@@ -150,7 +150,7 @@ vec3 dither1(vec2 uv, vec3 color) {
     int x = int(uv.x) % 8;
     int y = int(uv.y) % 8;
     float threshold = bayerMatrix8x8[y * 8 + x];
-    return color.rgb + threshold;
+    return color.rgb + threshold;// - 0.2;
 }
 
 void main()

@@ -138,20 +138,27 @@ type GraphDispatcher () =
 
     override this.Content (model, _) = [
 
-        let sprite name coords = Content.staticSprite name [
+        let sprite name coords = Content.staticSprite $"Vertice-{name}" [
             Entity.Size := v3 6f 6f 0f
             Entity.PositionLocal := coords
             Entity.StaticImage == Assets.Default.Ball
             Entity.Elevation == 10f
+            Entity.Color ==
+                if name = "player" then
+                    Color.Cyan
+                elif name = "rat" then
+                    Color.Red
+                else
+                    Color.White
         ]
 
-        let line name (coord1 : Vector3) (coord2 : Vector3) =
+        let line label1 label2 (coord1 : Vector3) (coord2 : Vector3) =
             let position = (coord2 + coord1) / 2f
             let distance = (coord2 - coord1).Length ()
             let vector = (coord2 - coord1)
             let angle = Math.Atan2 (float vector.Y, float vector.X)
             let rotation = Quaternion.CreateFromYawPitchRoll (0f, 0f, float32 angle)
-            Content.staticSprite name [
+            Content.staticSprite $"Line-{label1}-{label2}" [
                 Entity.Size := v3 distance 2f 0f
                 Entity.PositionLocal := position
                 Entity.RotationLocal := rotation
@@ -162,10 +169,10 @@ type GraphDispatcher () =
         let graph = model.DisplayGraph
 
         for (v, l) in Vertices.toList graph do
-            sprite $"Vertice-{v}" l
+            sprite v l
 
         for (label1, label2, _) in Graph.Directed.Edges.toList graph do
             let _, pos1 = Vertices.find label1 graph
             let _, pos2 = Vertices.find label2 graph
-            line $"Line-{label1}-{label2}" pos1 pos2
+            line label1 label2 pos1 pos2
     ]
