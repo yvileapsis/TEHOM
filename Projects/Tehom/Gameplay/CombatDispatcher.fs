@@ -11,7 +11,6 @@ type CombatMessage =
     | StartPlaying
     | Update
     | TurnProcess
-    | ProcessCharacterTurn of Entity * Turn
     | UpdatePossibleActions
     | SetPlannedTarget of int
     | AddPlannedAction of int
@@ -23,14 +22,8 @@ type CombatCommand =
     | RollInitiative
     | UpdateGraph
     | GameEffect of GameEffect
+    | ProcessCharacterTurn of Turn list
     interface Command
-
-[<AutoOpen>]
-module CombatExtensions =
-    type Entity with
-        member this.GetCombat world = this.GetModelGeneric<Combat> world
-        member this.SetCombat value world = this.SetModelGeneric<Combat> value world
-        member this.Combat = this.ModelGeneric<Combat> ()
 
 type CombatDispatcher () =
     inherit Entity2dDispatcher<Combat, CombatMessage, CombatCommand> (false, false, false, Combat.initial)
@@ -78,7 +71,7 @@ type CombatDispatcher () =
             | TurnNone ->
                 match model.Combatants with
                 | attacker::_ ->
-                    let signals : Signal list = [ GameEffect (CharacterReset attacker) ]
+                    let signals : Signal list = [ GameEffect (CharacterDo (attacker, Character.turnReset)) ]
                     let model = { model with CombatState = TurnAttacker attacker }
                     withSignals signals model
                 | _ ->
@@ -121,71 +114,60 @@ type CombatDispatcher () =
 
                 match plan with
                 | Some attackerAction ->
-                    let model = { model with CombatState = TurnDefender (attacker, attackerAction) }
+                    let model = { model with CombatState = TurnDefender attackerAction }
                     just model
                 | None ->
                     let model = { model with CombatState = TurnAttacker attacker }
                     just model
 
-            | TurnDefender (attacker, attackPlan) ->
+            | TurnDefender attackPlan ->
                 attackPlan.Checks
                 |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
                 |> function
                     | Some { OpposedBy = [defender] } ->
-                        let model = { model with CombatState = TurnDefencePlan (attacker, attackPlan, defender) }
+                        let model = { model with CombatState = TurnDefencePlan (attackPlan, defender) }
                         just model
                     | _ ->
                         just model
 
-            | TurnDefencePlan (attacker, attackPlan, defender) ->
+            | TurnDefencePlan (attackPlan, defender) ->
                 let action =
                     attackPlan.Checks
                     |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
                     |> _.Value
 
-                match DefenderAI.tryPlan attacker action defender model.Area model world with
+                match DefenderAI.tryPlan attackPlan.Entity action defender model.Area model world with
                 | Some defencePlan ->
-                    let model = { model with CombatState = TurnExecute (attacker, attackPlan, defender, defencePlan) }
+                    let model = { model with CombatState = TurnAttackKarmaBid (attackPlan, defencePlan) }
                     just model
                 | None ->
                     just model
 
-            | TurnAttackKarmaBid ->
-                failwith "todo"
+            | TurnAttackKarmaBid (attackPlan, defencePlan) ->
+                let attacker' = attackPlan.Entity.GetCharacter world
+                let attackPlan = {
+                    attackPlan with
+                        Checks = (Check.unstoppable (KarmaBet attacker'.FractureCurrent))::attackPlan.Checks
+                }
+                let model = { model with CombatState = TurnDefenceKarmaBid (attackPlan, defencePlan) }
+                just model
 
-            | TurnDefenceKarmaBid ->
-                failwith "todo"
+            | TurnDefenceKarmaBid (attackPlan, defencePlan) ->
+                let defender' = defencePlan.Entity.GetCharacter world
+                let defencePlan = {
+                    defencePlan with
+                        Checks = (Check.unstoppable (KarmaBet defender'.FractureCurrent))::defencePlan.Checks
+                }
+                let model = { model with CombatState = TurnExecute (attackPlan, defencePlan) }
+                just model
 
-            | TurnExecute (attacker, attackPlan, defender, defencePlan)->
-                let attackerTurn =
-                    let character = attacker.GetCharacter world
-                    Turn.applyStance character attackPlan
-
-                let defenderTurn =
-                    let character = defender.GetCharacter world
-                    Turn.applyStance character defencePlan
-
-                // TODO: add karma betting
-
-                let attackerTurn, defenderTurn = Turn.opposedTurns attackerTurn defenderTurn
-
-                let model = Combat.advanceTurn attacker defender attackerTurn defenderTurn model
-
-                let model = { model with CombatState = TurnNone }
+            | TurnExecute (attackPlan, defencePlan)->
 
                 let signals : Signal list = [
-                    ProcessCharacterTurn (attacker, attackerTurn)
-                    ProcessCharacterTurn (defender, defenderTurn)
+                    ProcessCharacterTurn [attackPlan; defencePlan]
                 ]
 
                 withSignals signals model
-
-        | ProcessCharacterTurn (actor, turn) ->
-            let signals : Signal list =
-                Turn.processTurn actor turn model.Area world
-                |> List.map (fun signal -> GameEffect signal)
-
-            withSignals signals model
 
         | SetPlannedTarget i ->
 
@@ -256,7 +238,6 @@ type CombatDispatcher () =
     override this.Command (model, command, entity, world) =
 
         match command with
-
         | RollInitiative ->
 
             let combatants, world =
@@ -287,37 +268,8 @@ type CombatDispatcher () =
 
             just world
 
-        | GameEffect (CharacterReset entity) ->
-            let character = entity.GetCharacter world
-            let character = Character.turnReset character
-            let world = entity.SetCharacter character world
-            just world
-
-        | GameEffect (CharacterStanceChange (entity, stance)) ->
-            let character = entity.GetCharacter world
-            let character = Character.stanceChange stance character
-            let world = entity.SetCharacter character world
-            just world
-
-        | GameEffect (Damage (entity, size, damage)) ->
-            let character = entity.GetCharacter world
-            let sizeDifference = Character.getSize character - size
-            let character = Character.doDamage sizeDifference damage character
-            let world = entity.SetCharacter character world
-            just world
-
-        | GameEffect (TravelInter (character, location)) ->
-            let area = model.Area
-            let area = Area.moveSite character location area
-            let model = { model with Area = area }
-            let world = entity.SetCombat model world
-            just world
-
-        | GameEffect (TravelIntra (character, location, distance)) ->
-            let area = model.Area
-            let area = Area.establishDistance distance character location area
-            let model = { model with Area = area }
-            let world = entity.SetCombat model world
+        | GameEffect effect ->
+            let world = entity.ExecuteGameEffect effect world
             just world
 
         | UpdateGraph ->
@@ -326,6 +278,91 @@ type CombatDispatcher () =
             let graphSites = { graphSites with Graph = model.Area.Sites }
             let world = graph.SetGraph graphSites world
             just world
+
+        | ProcessCharacterTurn list ->
+
+            // horrifying code that needs to be optimized
+            // takes apart turn, separates it into smaller subturns, orders those to specific execution-ready order
+            // order is unopposed - opposed - unopposed
+            // TODO: figure out better representation for this
+            let split turn =
+                turn.Checks
+                |> List.fold (fun (prevOpposed, index, listOfLists) check ->
+                    let opposed = Check.isOpposed check
+                    match listOfLists with
+                    | (_, turn)::tail when prevOpposed = opposed ->
+                        opposed, index, (index, { turn with Checks = turn.Checks @ [ check ] })::tail
+                    | listOfLists ->
+                        opposed, index + 1, (index, { turn with Checks = [check] })::listOfLists
+                ) (false, 0, [])
+                |> fun (_, _, result) -> result
+                |> Map.ofList
+
+            let split turns =
+                turns
+                |> List.map split
+                |> List.fold (fun bigmap map ->
+                    map
+                    |> Map.fold (fun bigmap key value ->
+                        let value =
+                            match Map.tryFind key bigmap with
+                            | Some value' ->
+                                (value::value')
+                            | None ->
+                                [value]
+                        Map.add key value bigmap
+                    ) bigmap
+                ) Map.empty
+                |> Map.toList
+
+            let unsplit turns =
+                turns
+                |> List.concat
+                |> List.fold (fun turns turn ->
+                    match List.tryFindIndex (fun turn' -> turn'.Entity = turn.Entity) turns with
+                    | Some index ->
+                        let turn' = List.item index turns
+                        let turn' = { turn' with Checks = turn'.Checks @ turn.Checks; Passed = turn'.Passed @ turn.Passed }
+                        List.replace index turn' turns |> snd
+                    | None ->
+                        List.append [turn] turns
+                ) List.empty
+            // end of horrifying code
+
+            let costs turns world =
+                turns
+                |> List.foldMap (fun turn (world : World) -> Turn.processCosts turn world) world
+
+            let effects turns world =
+                turns
+                |> List.fold (fun world turn ->
+                    let effects = Turn.processEffects turn model.Area world
+                    List.fold (fun world effect -> entity.ExecuteGameEffect effect world ) world effects
+                ) world
+
+            let processing turns world =
+                let turns, world = costs turns world
+                let world = effects turns world
+                turns, world
+
+            let turns, world =
+                list
+                |> split
+                |> List.map snd
+                |> List.foldMap processing world
+                |> fun (turns, world) ->
+                    unsplit turns, world
+
+            let model = entity.GetCombat world
+
+            let model = Combat.advanceTurn turns model
+
+            let model = { model with CombatState = TurnNone }
+
+            let world = entity.SetCombat model world
+
+            just world
+
 
     override this.TruncateModel model = {
         model with
@@ -410,7 +447,7 @@ type CombatDispatcher () =
                 stat "Lymph" "Lymph" $"{lymph} {lymphStance}"
                 stat "Oil" "Oil" $"{oil} {oilStance}"
                 stat "Plasma" "Plasma" $"{plasma} {plasmaStance}"
-                stat "Stances" "Stances" $"{character.StancesLeft}"
+                stat "Stances" "Stances" $"{character.StancesCurrent}"
                 stat "Initiative" "Initiative" $"{character.Initiative}"
 
                 let connections = Area.getConnections character.ID model.Area
@@ -532,7 +569,7 @@ type CombatDispatcher () =
                 statsBox entity [
                     Entity.Absolute == false
                     Entity.Elevation == 10.0f
-                    Entity.PositionLocal == v3 -100.0f 0.0f 0.0f
+                    Entity.PositionLocal == v3 -110.0f 0.0f 0.0f
                     Entity.Size == v3 60.0f 40.0f 0.0f
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
@@ -552,7 +589,7 @@ type CombatDispatcher () =
 
                         let action (i, action) = Content.button $"ActionSelectable{i}" [
                             Entity.Absolute == false
-                            Entity.Size == v3 40.0f 5.0f 0.0f
+                            Entity.Size == v3 60.0f 5.0f 0.0f
                             Entity.Text := $"{action}"
                             Entity.Font == Assets.Gui.ClearSansFont
                             Entity.FontSizing == Some 5
@@ -570,7 +607,7 @@ type CombatDispatcher () =
 
                         let action (i, (action, success)) = Content.text $"Action{i}" [
                             Entity.Absolute == false
-                            Entity.Size == v3 40.0f 5.0f 0.0f
+                            Entity.Size == v3 60.0f 5.0f 0.0f
                             Entity.Text := $"{action}"
                             Entity.Font == Assets.Gui.ClearSansFont
                             Entity.FontSizing == Some 5
@@ -588,7 +625,7 @@ type CombatDispatcher () =
                 Content.association "Actions" [
                     Entity.Absolute == false
                     Entity.PositionLocal == v3 -40.0f 0.0f 0.0f
-                    Entity.Size == v3 40.0f 40.0f 0.0f
+                    Entity.Size == v3 60.0f 40.0f 0.0f
                     Entity.Elevation == 10.0f
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
@@ -603,7 +640,7 @@ type CombatDispatcher () =
                 statsBox entity [
                     Entity.Absolute == false
                     Entity.Elevation == 10.0f
-                    Entity.PositionLocal == v3 100.0f 0.0f 0.0f
+                    Entity.PositionLocal == v3 110.0f 0.0f 0.0f
                     Entity.Size == v3 60.0f 40.0f 0.0f
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
@@ -622,7 +659,7 @@ type CombatDispatcher () =
 
                         let action (i, (action, success)) = Content.text $"Action{i}" [
                             Entity.Absolute == false
-                            Entity.Size == v3 40.0f 5.0f 0.0f
+                            Entity.Size == v3 60.0f 5.0f 0.0f
                             Entity.Text := $"{action}"
                             Entity.Font == Assets.Gui.ClearSansFont
                             Entity.FontSizing == Some 5
@@ -640,7 +677,7 @@ type CombatDispatcher () =
                 Content.association "Actions" [
                     Entity.Absolute == false
                     Entity.PositionLocal == v3 40.0f 0.0f 0.0f
-                    Entity.Size == v3 40.0f 40.0f 0.0f
+                    Entity.Size == v3 60.0f 40.0f 0.0f
                     Entity.Elevation == 10.0f
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
@@ -654,8 +691,14 @@ type CombatDispatcher () =
             let left = left.Value
             let right = right.Value
 
-            let leftSuccesses = Turn.getSuccesses leftLastTurn
-            let rightSuccesses = Turn.getSuccesses rightLastTurn
+            let turnTypeLeft = List.last leftLastTurn.Checks
+            let turnTypeLeft = turnTypeLeft.Type
+
+            let turnTypeRight = List.last rightLastTurn.Checks
+            let turnTypeRight = turnTypeRight.Type
+
+            let leftSuccesses = Character.getStamina turnTypeLeft left
+            let rightSuccesses = Character.getStamina turnTypeRight right
 
             let turnResult =
                 if leftSuccesses = rightSuccesses then

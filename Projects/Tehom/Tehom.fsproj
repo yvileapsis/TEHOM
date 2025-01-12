@@ -48,10 +48,10 @@
 		<Compile Include="Events.fs" />
 		<Compile Include="Prototypes\Rogue.fs" />
 		<Compile Include="Gameplay\Body.fs" />
+		<Compile Include="Gameplay\Area.fs" />
 		<Compile Include="Gameplay\Character.fs" />
 		<Compile Include="Gameplay\CharacterDispatcher.fs" />
 		<Compile Include="Gameplay\CharacterContent.fs" />
-		<Compile Include="Gameplay\Area.fs" />
 		<Compile Include="Gameplay\Combat.fs" />
 		<Compile Include="Gameplay\CombatAI.fs" />
 		<Compile Include="Gameplay\GraphDispatcher.fs" />

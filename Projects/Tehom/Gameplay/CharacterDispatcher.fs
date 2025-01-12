@@ -10,6 +10,10 @@ module CharacterExtensions =
         member this.GetCharacter world = this.GetModelGeneric<Character> world
         member this.SetCharacter value world = this.SetModelGeneric<Character> value world
         member this.Character = this.ModelGeneric<Character> ()
+        member this.SetCharacterWith updater world =
+            let character = this.GetCharacter world
+            let character = updater character
+            this.SetCharacter character world
 
 type CharacterDispatcher () =
     inherit EntityDispatcher<Character, Message, Command> (true, false, false, false, Character.empty)

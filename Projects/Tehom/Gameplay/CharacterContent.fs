@@ -19,7 +19,7 @@ module CharacterContent =
 
             Body = Body.human
 
-            Stances = 2
+            StancesBase = 2
 
             Weapons = [
                 Weapon.bite "head"
@@ -38,7 +38,7 @@ module CharacterContent =
             Lymph = Stat.Average
             Oil = Stat.Average
             Plasma = Stat.Average
-            Stances = 1
+            StancesBase = 1
     }
 
     let rat = {
@@ -62,14 +62,17 @@ module CharacterContent =
             CustomActions = [
                 { Name = "Aggressive"; Actions = [
                     StanceChange (Stance.make Gall [Plasma; Plasma; Plasma] Stance.empty)
-                    PhysicalSequence [ Jump; Power; Strike (Weapon.bite "head"); Press ]
+                    RollStance
+                    for i in [ Jump; Power; Strike (Weapon.bite "head"); Press ] do Move i
                 ] }
                 { Name = "Neutral"; Actions = [
-                    PhysicalSequence [ Strike (Weapon.bite "head"); Press; Press; Press ]
+                    RollStance
+                    for i in [ Strike (Weapon.bite "head"); Press; Press; Press ] do Move i
                 ] }
                 { Name = "Defence"; Actions = [
                     StanceChange (Stance.make Lymph [Gall; Gall; Gall; Gall; Plasma; Plasma] Stance.empty)
-                    PhysicalSequence [ Dodge; Dodge; Dodge; Dodge; ]
+                    RollStance
+                    for i in [ Dodge; Dodge; Dodge; Dodge; ] do Move i
                 ] }
             ]
     }

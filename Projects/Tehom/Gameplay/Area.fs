@@ -6,18 +6,6 @@ open Prime
 open Nu
 open Graph
 
-(*
-* 5 Rooms:
-* Waitroom, barricaded windows, rolling hospital bed, locked exit door, you wake up here
-* Registration room, safe with useful stuff like a pistol maybe
-* Main hall
-* Electrical room to fix the lights, rat attacks
-* Surgery room, surgery table, dog on the table, note (dog ate the key), opening it lets spider chandalier escape
-* Goal is to go to surgery room, take the key, return to waitroom, open the door and exit.
-* Optionally you can fix lights and fight spider chandalier.
-*)
-
-
 module Area =
 
     type Site =

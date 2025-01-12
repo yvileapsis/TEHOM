@@ -1,7 +1,27 @@
 namespace Tehom
 
 open System
+open System.Numerics
 open Prime
+open Nu
+
+module Random =
+    let rollDie () = Gen.random2 1 7
+    let rollDice count =
+        Seq.init count (fun _ -> rollDie ())
+    let rollDiceThreshold count threshold =
+        rollDice count
+        |> Seq.fold (fun state x -> if x > threshold then state + 1 else state) 0
+
+    let getItemsFromList length list =
+        let gen () = Gen.randomItem list
+        List.init length (fun _ -> gen ())
+
+    let getItemFromList list =
+        Gen.randomItem list
+
+    let rollInitiative max =
+        Gen.random2 0 max
 
 module Weapon =
     type Type =
@@ -139,6 +159,21 @@ type Element =
     // GLOPS
     // HOBLS
 
+type CheckType =
+    | NoType
+    | PhysicalActive
+    | PhysicalReactive
+    | MentalActive
+    | MentalReactive
+with
+    static member getOpposite checkType =
+        match checkType with
+        | NoType -> NoType
+        | PhysicalActive -> PhysicalReactive
+        | PhysicalReactive -> PhysicalActive
+        | MentalActive -> MentalReactive
+        | MentalReactive -> MentalActive
+
 type Move = Move.Move
 
 // TODO: figure out where this should be
@@ -191,18 +226,26 @@ with
 
 module Action =
     type Action =
+        | NoAction
         | FullMentalAction
         | FullPhysicalAction
+        | SkillSelect of int
         | StanceChange of Stance
-        | PhysicalSequence of Move list
+        | RollStance
+        | KarmaBet of int
+        | Move of Move
 
     with
         static member describe action =
             match action with
+            | NoAction -> failwith "todo"
             | FullMentalAction -> failwith "todo"
             | FullPhysicalAction -> failwith "todo"
-            | StanceChange stance -> $"Stance Change to {stance}"
-            | PhysicalSequence moves -> $"{moves |> List.head |> Move.getName}"
+            | StanceChange stance -> $"Stance {Stance.getStats stance}"
+            | Move moves -> $"{moves |> Move.getName}"
+            | SkillSelect i -> $"Betting {i} Karma"
+            | KarmaBet i -> $"Betting {i} Karma"
+            | RollStance -> "Rolling Stats"
 
 
     type CustomAction = {
@@ -210,6 +253,29 @@ module Action =
         Actions : Action list
     }
 
+type Cost = {
+    StaminaMentalActive : int
+    StaminaPhysicalActive : int
+    StaminaMentalReactive : int
+    StaminaPhysicalReactive : int
+    ActionsPhysicalActive : int
+    ActionsMentalActive : int
+    ActionsPhysicalReactive : int
+    ActionsMentalReactive : int
+    Stances : int
+}
+with
+    static member empty = {
+        StaminaMentalActive = 0
+        StaminaPhysicalActive = 0
+        StaminaMentalReactive = 0
+        StaminaPhysicalReactive = 0
+        ActionsPhysicalActive = 0
+        ActionsMentalActive = 0
+        ActionsPhysicalReactive = 0
+        ActionsMentalReactive = 0
+        Stances = 0
+    }
 
 type Action = Action.Action
 
@@ -251,10 +317,13 @@ module Character =
         Oil : Stat
         Plasma : Stat
 
-        PhysicalActions : int
-        MentalActions : int
-        Stances : int
-        Fracture : int
+        ActionsPhysicalActiveBase : int
+        ActionsMentalActiveBase : int
+        ActionsPhysicalReactiveBase : int
+        ActionsMentalReactiveBase : int
+
+        StancesBase : int
+        FractureBase : int
 
         Edges : Stat list
         CustomActions : Action.CustomAction list
@@ -269,10 +338,24 @@ module Character =
 
         Initiative : int
 
-        PhysicalActionsLeft : int
-        MentalActionsLeft : int
-        StancesLeft : int
-        FractureLeft : int
+        StaminaPhysicalActiveBase : int
+        StaminaMentalActiveBase : int
+        StaminaPhysicalReactiveBase : int
+        StaminaMentalReactiveBase : int
+
+        // TODO: worth considering NOT having limits on the number of actions, relying on stamina only
+        StaminaPhysicalActiveCurrent : int
+        StaminaMentalActiveCurrent : int
+        StaminaPhysicalReactiveCurrent : int
+        StaminaMentalReactiveCurrent : int
+
+        ActionsPhysicalActiveCurrent : int
+        ActionsMentalActiveCurrent : int
+        ActionsPhysicalReactiveCurrent : int
+        ActionsMentalReactiveCurrent : int
+
+        StancesCurrent : int
+        FractureCurrent : int
 
         Stance : Stance
 
@@ -297,24 +380,60 @@ module Character =
             && - int oilChange < int oil
             && - int plasmaChange < int plasma
 
-        static member stanceChange (stance : Stance) character =
+        static member setStance (stance : Stance) character =
             let verified = Character.stanceVerify stance (Character.getStats character)
-            if (character.StancesLeft > 0 && verified) then
-                {
-                    character with
-                        Stance = stance
-                        StancesLeft = character.StancesLeft - 1
-                }
+            if (verified) then
+                { character with Stance = stance }
             else
                 character
 
-        static member turnReset (character : Character) =
-            let character = Character.stanceChange Stance.empty character
+        static member removeKarma remove (character : Character) =
+            let fracture = max 0 (character.FractureCurrent - remove)
             let character = {
                 character with
-                    PhysicalActionsLeft = character.PhysicalActions
-                    MentalActionsLeft = character.MentalActions
-                    StancesLeft = character.Stances
+                    FractureCurrent = fracture
+            }
+            character
+
+        static member turnReset (character : Character) =
+            let character = Character.setStance Stance.empty character
+            let character = {
+                character with
+                    StaminaMentalActiveCurrent = 0
+                    StaminaPhysicalActiveCurrent = 0
+                    StaminaMentalReactiveCurrent = 0
+                    StaminaPhysicalReactiveCurrent = 0
+                    ActionsPhysicalActiveCurrent = character.ActionsPhysicalActiveBase
+                    ActionsMentalActiveCurrent = character.ActionsMentalActiveBase
+                    ActionsPhysicalReactiveCurrent = character.ActionsPhysicalReactiveBase
+                    ActionsMentalReactiveCurrent = character.ActionsMentalReactiveBase
+                    StancesCurrent = character.StancesBase
+            }
+            character
+
+        static member canPay (cost : Cost) character =
+            character.StaminaMentalActiveCurrent >= cost.StaminaMentalActive
+            && character.StaminaPhysicalActiveCurrent >= cost.StaminaPhysicalActive
+            && character.StaminaMentalReactiveCurrent >= cost.StaminaMentalReactive
+            && character.StaminaPhysicalReactiveCurrent >= cost.StaminaPhysicalReactive
+            && character.ActionsPhysicalActiveCurrent >= cost.ActionsPhysicalActive
+            && character.ActionsMentalActiveCurrent >= cost.ActionsMentalActive
+            && character.ActionsPhysicalReactiveCurrent >= cost.ActionsPhysicalReactive
+            && character.ActionsMentalReactiveCurrent >= cost.ActionsMentalReactive
+            && character.StancesCurrent >= cost.Stances
+
+        static member pay (cost : Cost) character =
+            let character = {
+                character with
+                    StaminaMentalActiveCurrent = character.StaminaMentalActiveCurrent - cost.StaminaMentalActive
+                    StaminaPhysicalActiveCurrent = character.StaminaPhysicalActiveCurrent - cost.StaminaPhysicalActive
+                    StaminaMentalReactiveCurrent = character.StaminaMentalReactiveCurrent - cost.StaminaMentalReactive
+                    StaminaPhysicalReactiveCurrent = character.StaminaPhysicalReactiveCurrent - cost.StaminaPhysicalReactive
+                    ActionsPhysicalActiveCurrent = character.ActionsPhysicalActiveCurrent - cost.ActionsPhysicalActive
+                    ActionsMentalActiveCurrent = character.ActionsMentalActiveCurrent - cost.ActionsMentalActive
+                    ActionsPhysicalReactiveCurrent = character.ActionsPhysicalReactiveCurrent - cost.ActionsPhysicalReactive
+                    ActionsMentalReactiveCurrent = character.ActionsMentalReactiveCurrent - cost.ActionsMentalReactive
+                    StancesCurrent = character.StancesCurrent - cost.Stances
             }
             character
 
@@ -479,6 +598,32 @@ module Character =
         static member hasCustomActions character =
             not (List.isEmpty character.CustomActions)
 
+        static member roll character =
+            let (gall, lymph, oil, plasma) = Character.getStancedStats character
+            let character = {
+                character with
+                    StaminaPhysicalActiveBase = Random.rollDiceThreshold (int gall) 3
+                    StaminaPhysicalReactiveBase = Random.rollDiceThreshold (int lymph) 3
+                    StaminaMentalActiveBase = Random.rollDiceThreshold (int oil) 3
+                    StaminaMentalReactiveBase = Random.rollDiceThreshold (int plasma) 3
+            }
+            let character = {
+                character with
+                    StaminaPhysicalActiveCurrent = character.StaminaPhysicalActiveBase
+                    StaminaPhysicalReactiveCurrent = character.StaminaPhysicalReactiveBase
+                    StaminaMentalActiveCurrent = character.StaminaMentalActiveBase
+                    StaminaMentalReactiveCurrent = character.StaminaMentalReactiveBase
+            }
+            character
+
+        static member getStamina actionType character =
+            match actionType with
+            | PhysicalActive -> character.StaminaPhysicalActiveBase
+            | PhysicalReactive -> character.StaminaPhysicalReactiveBase
+            | MentalActive -> character.StaminaMentalActiveBase
+            | MentalReactive -> character.StaminaMentalReactiveBase
+            | NoType -> 0
+
         static member empty = {
             ID = String.empty
             Name = String.empty
@@ -494,14 +639,30 @@ module Character =
             Edges = []
             CustomActions = []
 
-            PhysicalActions = 1
-            PhysicalActionsLeft = 0
-            MentalActions = 1
-            MentalActionsLeft = 0
-            Stances = 0
-            StancesLeft = 0
-            Fracture = 0
-            FractureLeft = 0
+            StaminaMentalActiveBase = 0
+            StaminaPhysicalActiveBase = 0
+            StaminaMentalReactiveBase = 0
+            StaminaPhysicalReactiveBase = 0
+
+            StaminaMentalActiveCurrent = 0
+            StaminaPhysicalActiveCurrent = 0
+            StaminaMentalReactiveCurrent = 0
+            StaminaPhysicalReactiveCurrent = 0
+
+            ActionsPhysicalReactiveBase = 0
+            ActionsMentalReactiveBase = 0
+            ActionsPhysicalReactiveCurrent = 0
+            ActionsMentalReactiveCurrent = 0
+
+            ActionsPhysicalActiveBase = 0
+            ActionsPhysicalActiveCurrent = 0
+            ActionsMentalActiveBase = 0
+            ActionsMentalActiveCurrent = 0
+
+            StancesBase = 0
+            StancesCurrent = 0
+            FractureBase = 0
+            FractureCurrent = 0
 
             MajorWounds = MajorWounds.Healthy
             MinorWounds = 0

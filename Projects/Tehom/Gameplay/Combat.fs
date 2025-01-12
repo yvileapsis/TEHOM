@@ -29,58 +29,26 @@ TODO: Tiniest vertical slice:
 *)
 
 type GameEffect =
-    | CharacterReset of Entity
-    | CharacterStanceChange of Entity * Stance
+    | CharacterDo of Entity * (Character -> Character)
     | Damage of Entity * Size : int * Damage : int
     | TravelInter of String * String
     | TravelIntra of String * String * uint32
 
-module Random =
-    let rollDie () = Gen.random2 1 7
-    let rollDice count =
-        Seq.init count (fun _ -> rollDie ())
-    let rollDiceThreshold count threshold =
-        rollDice count
-        |> Seq.fold (fun state x -> if x > threshold then state + 1 else state) 0
-
-    let getItemsFromList length list =
-        let gen () = Gen.randomItem list
-        List.init length (fun _ -> gen ())
-
-    let getItemFromList list =
-        Gen.randomItem list
-
-    let rollInitiative max =
-        Gen.random2 0 max
-
-type TurnType =
-    | Active
-    | Reactive
 
 type Check = {
     Action : Action
-
-    Skill : int
-
-    Element : Element option
-    Successes : int
-    Threshold : int
-
+    Type : CheckType
+    Cost : Cost
     Target : Entity option
-
     OpposedBy : Entity list
-    OpposedSuccesses : int
 }
 with
     static member empty = {
-        Action = PhysicalSequence []
-        Skill = 0
-        Element = None
-        Successes = 0
-        Threshold = 0
+        Action = NoAction
+        Type = NoType
+        Cost = Cost.empty
         Target = None
         OpposedBy = []
-        OpposedSuccesses = 0
     }
 
     static member unstoppable action = {
@@ -88,270 +56,230 @@ with
             Action = action
     }
 
-    static member unopposed action threshold = {
-        Check.empty with
-            Action = action
-            Threshold = threshold
+    static member unopposed action cost = {
+        Check.unstoppable action with
+            Cost = cost
     }
 
-    static member opposed action threshold target = {
-        Check.empty with
-            Action = action
-            Threshold = threshold
+    static member isUnstoppable check =
+        (List.isEmpty check.OpposedBy) && check.Cost = Cost.empty
+
+    static member isUnopposed check =
+        List.isEmpty check.OpposedBy
+
+    static member opposed action cost target = {
+        Check.unopposed action cost with
             OpposedBy = [target]
     }
 
-    static member attack action threshold target = {
-        Check.empty with
-            Action = action
-            Element = Some Gall
-            Threshold = threshold
-            OpposedBy = [target]
+    static member targeted action cost target = {
+        Check.opposed action cost target with
             Target = Some target
     }
 
-    static member defence action threshold target = {
-        Check.empty with
-            Action = action
-            Element = Some Lymph
-            Threshold = threshold
-            OpposedBy = [target]
-            Target = Some target
-    }
+    static member isOpposed check =
+        List.notEmpty check.OpposedBy
 
+    static member stance action =
+        Check.unopposed action { Cost.empty with Stances = 1}
+
+    static member moveAttack action target =
+        let cost = { Cost.empty with StaminaPhysicalActive = 1 }
+        { Check.targeted action cost target with Type = PhysicalActive }
+
+    static member moveDefence action target =
+        let cost = { Cost.empty with StaminaPhysicalReactive = 1 }
+        { Check.targeted action cost target with Type = PhysicalReactive }
+
+    static member applyCosts (actor : Entity) check (world : World) =
+        let character = actor.GetCharacter world
+
+        if Check.isUnstoppable check then
+            true, world
+
+        elif Check.isUnopposed check then
+            if Character.canPay check.Cost character then
+                let world = actor.SetCharacterWith (Character.pay check.Cost) world
+                true, world
+            else
+                false, world
+
+        else
+            if Character.canPay check.Cost character then
+                let world = actor.SetCharacterWith (Character.pay check.Cost) world
+
+                let enemyStamina =
+                    check.OpposedBy
+                    |> List.map (fun entity -> entity.GetCharacter world)
+                    |> List.map (Character.getStamina (CheckType.getOpposite check.Type))
+                    |> List.max
+
+                let actorStamina = Character.getStamina check.Type character
+
+                (actorStamina > enemyStamina), world
+            else
+                false, world
+
+    static member processCheck check before after (attacker : Entity) area world =
+
+        match check.Action with
+        | SkillSelect i ->
+            // TODO: implement skills
+            // CharacterDo (attacker, 0)
+            []
+        | StanceChange stance ->
+            [ CharacterDo (attacker, Character.setStance stance) ]
+        | KarmaBet bet ->
+            [ CharacterDo (attacker, Character.removeKarma bet) ]
+        | RollStance ->
+            [ CharacterDo (attacker, Character.roll) ]
+        | Move move' ->
+
+            let bonusDamage damage =
+                let damage =
+                    match before with
+                    | [] -> damage
+                    | _ ->
+                        before
+                        |> List.rev
+                        |> List.foldWhile (fun bonus move ->
+                            match move.Action with
+                            | Move Power -> Some (bonus + 5)
+                            | _ -> None
+                        ) damage
+                let damage =
+                    match after with
+                    | _::after ->
+                        after
+                        |> List.foldWhile (fun bonus move ->
+                            match move.Action with
+                            | Move Press -> Some (bonus + 2)
+                            | _ -> None
+                        ) damage
+                    | _ -> damage
+                damage
+
+            match move' with
+            | Stride
+            | Climb
+            | Crawl
+            | Jump
+            | Roll
+            | Sidestep
+            | Dash
+            | Swim ->
+                // TODO: to decrease stupidity, process movement in bulk like other moves
+                match check.Target with
+                | Some target ->
+                    let attackerCharacter = attacker.GetCharacter world
+                    let reach = Character.getReach attackerCharacter
+                    let speed = Character.getSpeed attackerCharacter
+
+                    match Area.moveWithinReach attacker.Name target.Name reach speed area with
+                    | Some moveInter, Some moveIntra ->
+                        [TravelInter moveInter; TravelIntra moveIntra]
+                    | Some moveInter, None ->
+                        [TravelInter moveInter]
+                    | None, Some moveIntra ->
+                        [TravelIntra moveIntra]
+                    | None, None ->
+                        []
+                | None ->
+                    []
+
+            | Block
+            | Crouch
+            | Delay
+            | Dodge
+            | Spin ->
+                []
+            | Cast
+            | Power
+            | Press
+            | Ready
+            | Retarget ->
+                []
+            | Burst
+            | Fire ->
+                []
+            | Grab
+            | Knockout
+            | Slam
+            | Sweep
+            | Toss
+            | Throw ->
+                []
+            | Strike weapon ->
+                match check.Target with
+                | Some target ->
+                    // weapon
+                    let damage = Weapon.getDamage weapon
+                    let size = Weapon.getSizeBoost weapon
+                    // moves
+                    let damage = bonusDamage damage
+                    // attacker
+                    let attackerCharacter = attacker.GetCharacter world
+                    let size = size + Character.getSize attackerCharacter
+                    [Damage (target, size, damage)]
+
+                | None ->
+                    []
+        | _ ->
+            []
 
 type Turn = {
     Turn : int
-    Type : TurnType
+    Entity : Entity
     Checks : Check list
+    Passed : bool list
 }
 with
     static member empty = {
         Turn = 0
-        Type = Reactive
+        Entity = Entity
         Checks = []
+        Passed = []
     }
 
-    static member applyStance combatant turn =
+    static member processCosts turn world =
+        turn.Checks
+        |> List.foldMap (fun check (world : World) ->
+            let result, world = Check.applyCosts turn.Entity check world
+            result, world
+        ) world
+        |> fun (checks, world) -> { turn with Passed = checks }, world
+
+    static member zip turn =
+        List.zip turn.Checks turn.Passed
+
+    static member processEffects turn area world =
         let checks =
-            turn.Checks
-            |> List.foldMap (fun check combatant ->
-                match check.Action with
-                | StanceChange stance ->
-                    let combatant = Character.stanceChange stance combatant
-                    check, combatant
-                | _ ->
-                    match check.Element with
-                    | Some element ->
+            Turn.zip turn
+            |> List.filter snd
+            |> List.map fst
 
-                        let stat = Character.getStancedStat element combatant |> int
-                        let successes = Random.rollDiceThreshold stat 3
-                        let check = { check with Successes = successes }
-
-                        check, combatant
-
-                    | None ->
-
-                        check, combatant
-            ) combatant
-            |> fst
-        { turn with Checks = checks }
-
-    // TODO: Simplest way to do it for now
-    static member opposedTurns left right =
-        let leftSuccesses =
-            left.Checks
-            |> List.fold (fun acc check -> acc + check.Successes) 0
-        let rightSuccesses =
-            right.Checks
-            |> List.fold (fun acc check -> acc + check.Successes) 0
-
-        let leftChecks =
-            left.Checks
-            |> List.map (fun check ->
-                if List.isEmpty check.OpposedBy then
-                    check
-                else
-                    { check with OpposedSuccesses = rightSuccesses }
-            )
-
-        let rightChecks =
-            right.Checks
-            |> List.map (fun check ->
-                if List.isEmpty check.OpposedBy then
-                    check
-                else
-                    { check with OpposedSuccesses = leftSuccesses }
-            )
-
-        { left with Checks = leftChecks }, { right with Checks = rightChecks }
-
-    static member processMove moveID moves (attacker : Entity) (defender : Entity) area world =
-
-        let bonusDamage moveID moves damage =
-            let before, after = List.splitAt moveID moves
-            let damage =
-                match before with
-                | [] -> damage
-                | _ ->
-                    before
-                    |> List.rev
-                    |> List.foldWhile (fun bonus move ->
-                        match move with
-                        | Power -> Some (bonus + 5)
-                        | _ -> None
-                    ) damage
-            let damage =
-                match after with
-                | _::after ->
-                    after
-                    |> List.foldWhile (fun bonus move ->
-                        match move with
-                        | Press -> Some (bonus + 2)
-                        | _ -> None
-                    ) damage
-                | _ -> damage
-            damage
-
-        let move = List.item moveID moves
-        match move with
-        | Stride
-        | Climb
-        | Crawl
-        | Jump
-        | Roll
-        | Sidestep
-        | Dash
-        | Swim ->
-            let attackerCharacter = attacker.GetCharacter world
-            let reach = Character.getReach attackerCharacter
-            let speed = Character.getSpeed attackerCharacter
-
-            match Area.moveWithinReach attacker.Name defender.Name reach speed area with
-            | Some moveInter, Some moveIntra ->
-                [TravelInter moveInter; TravelIntra moveIntra]
-            | Some moveInter, None ->
-                [TravelInter moveInter]
-            | None, Some moveIntra ->
-                [TravelIntra moveIntra]
-            | None, None ->
-                []
-        | Block
-        | Crouch
-        | Delay
-        | Dodge
-        | Spin ->
-            []
-        | Cast
-        | Power
-        | Press
-        | Ready
-        | Retarget ->
-            []
-        | Burst
-        | Fire ->
-            []
-        | Grab
-        | Knockout
-        | Slam
-        | Sweep
-        | Toss
-        | Throw ->
-            []
-        | Strike weapon ->
-            // weapon
-            let damage = Weapon.getDamage weapon
-            let size = Weapon.getSizeBoost weapon
-            // moves
-            let damage = bonusDamage moveID moves damage
-            // attacker
-            let attackerCharacter = attacker.GetCharacter world
-            let size = size + Character.getSize attackerCharacter
-            [Damage (defender, size, damage)]
-
-    static member processTurn actor turn area world =
-        turn.Checks
-        |> List.fold (fun effects check ->
-            match check.Action with
-            | FullMentalAction ->
-                effects
-
-            | FullPhysicalAction ->
-                effects
-
-            | StanceChange stance ->
-                let effect =
-                    CharacterStanceChange (actor, stance)
-                effects @ [ effect ]
-
-            | PhysicalSequence moves ->
-                let successes = check.Successes
-                let blocks = check.OpposedSuccesses
-
-                let effects' =
-                    let indexes, moves =
-                        moves
-                        |> List.indexed
-                        |> List.takeWhile (fun (i, move) ->
-                            // positioning is always successful for now, but should check if within reach of enemy later
-                            ((List.contains move Move.positioning) || (successes > blocks)) && (i < successes)
-                        )
-                        |> List.unzip
-
-                    match check.Target with
-                    | Some target ->
-                        List.map (fun i ->
-                            Turn.processMove i moves actor target area world
-                        ) indexes
-                        |> List.concat
-                    | None ->
-                        []
-                effects @ effects'
-            ) []
-
-    // TODO: processes just the first physical sequence, should process the entire turn
-    static member getMoves turn =
-        turn.Checks
-        |> List.tryFind (fun x -> match x.Action with PhysicalSequence _ -> true | _ -> false)
-        |> function
-            | Some { Action = PhysicalSequence moves } -> moves
-            | _ -> []
-
-    static member describe turn =
-        turn.Checks
-        |> List.collect (fun check ->
-            match check.Action with
-            | PhysicalSequence moves ->
-                let describeMove (i, move) =
-                    Move.getName move, i < check.Successes
-                moves
-                |> List.indexed
-                |> List.map describeMove
-            | StanceChange stance ->
-                [ "Stance Change", true ]
-            | _ ->
-                [ "Unimplemented", false ]
+        checks
+        |> List.indexed
+        |> List.collect (fun (i, check) ->
+            let before, after = List.splitAt i checks
+            Check.processCheck check before after turn.Entity area world
         )
 
-    static member getSuccesses turn =
-        turn.Checks
-        |> List.fold (fun state check ->
-            match check.Action with
-            | PhysicalSequence _ ->
-                state + check.Successes
-            | _ ->
-                state
-        ) 0
+    static member describe turn =
+        Turn.zip turn
+        |> List.map (fun (check, succeeded) ->
+            Action.describe check.Action, succeeded
+        )
 
 type CombatState =
     | TurnNone
     | TurnAttacker of Attacker : Entity
     | TurnAttackPlan of Attacker : Entity
-    | TurnDefender of Attacker : Entity * AttackPlan : Turn
-    | TurnDefencePlan of Attacker : Entity * AttackPlan : Turn * Defender : Entity
-    | TurnAttackKarmaBid
-    | TurnDefenceKarmaBid
-    | TurnExecute of Attacker : Entity * AttackPlan : Turn * Defender : Entity * DefencePlan : Turn
+    | TurnDefender of AttackPlan : Turn
+    | TurnDefencePlan of AttackPlan : Turn * Defender : Entity
+    | TurnAttackKarmaBid of AttackPlan : Turn * DefencePlan : Turn
+    | TurnDefenceKarmaBid of AttackPlan : Turn * DefencePlan : Turn
+    | TurnExecute of AttackPlan : Turn * DefencePlan : Turn
 
 // this is our MMCC model type representing gameplay.
 // this model representation uses update time, that is, time based on number of engine updates.
@@ -437,19 +365,19 @@ with
         entity = player
 
 
-    static member advanceTurn attacker defender attackerTurn defenderTurn combat =
+    static member advanceTurn turns' combat =
 
         let history =
             combat.History
             |> Map.map (fun entity turns ->
-                if entity = attacker then
-                    attackerTurn::turns
-                elif entity = defender then
-                    defenderTurn::turns
-                else
+                match turns' |> List.tryFind (fun (turn : Turn) -> entity = turn.Entity) with
+                | Some turn ->
+                    turn::turns
+                | None ->
                     turns
             )
 
+        let attacker = List.head combat.Combatants
         let combatants = List.tail combat.Combatants
 
         let model = {
@@ -460,3 +388,39 @@ with
         }
 
         model
+
+[<AutoOpen>]
+module CombatExtensions =
+    type Entity with
+        member this.GetCombat world = this.GetModelGeneric<Combat> world
+        member this.SetCombat value world = this.SetModelGeneric<Combat> value world
+        member this.Combat = this.ModelGeneric<Combat> ()
+        member this.ExecuteGameEffect effect world =
+            match effect with
+            | CharacterDo (entity, func) ->
+                let world = entity.SetCharacterWith func world
+                world
+
+            | Damage (entity, size, damage) ->
+                let func character =
+                    let sizeDifference = Character.getSize character - size
+                    let character = Character.doDamage sizeDifference damage character
+                    character
+                let world = entity.SetCharacterWith func world
+                world
+
+            | TravelInter (character, location) ->
+                let model = this.GetCombat world
+                let area = model.Area
+                let area = Area.moveSite character location area
+                let combat = { model with Area = area }
+                let world = this.SetCombat combat world
+                world
+
+            | TravelIntra (character, location, distance) ->
+                let model = this.GetCombat world
+                let area = model.Area
+                let area = Area.establishDistance distance character location area
+                let model = { model with Area = area }
+                let world = this.SetCombat model world
+                world

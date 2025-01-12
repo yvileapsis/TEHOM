@@ -43,7 +43,7 @@ module AttackerAI =
         (actions
         |> List.fold (fun distance action ->
             match action with
-            | PhysicalSequence [ Stride ] ->
+            | Move Stride ->
                 distance + speed
             | _ ->
                 distance
@@ -93,7 +93,7 @@ module AttackerAI =
                     moveWithinActionLimit x
                     && isAttackExecutable x
 
-            PhysicalSequence [ x ], executable
+            Move x, executable
         )
 
     let getMovesMatrix (attacker : Entity) world =
@@ -126,21 +126,22 @@ module AttackerAI =
                 combat.PlannedTarget
             let stance =
                 [ Check.unstoppable (StanceChange Stance.attacker) ]
+            let roll =
+                [ Check.unstoppable RollStance ]
 
             let checks =
                 combat.PlannedActions
                 // threshold should be generated for the action
-                |> List.map (fun action -> Check.attack action (4) target)
+                |> List.map (fun action -> Check.moveAttack action target)
 
             Some {
                 Turn.empty with
                     Turn = combat.Turn
-                    Type = TurnType.Active
-                    Checks = stance @ checks
+                    Checks = stance @ roll @ checks
+                    Entity = attacker
             }
         else
             None
-
 
     // attack in the case character has no programming
     let attackDefault character moves attacks target =
@@ -160,39 +161,39 @@ module AttackerAI =
         move @ attack
         |> fun x -> [
             Check.unstoppable (StanceChange Stance.attacker)
-            Check.attack (PhysicalSequence x) (List.length x) target
+            Check.unstoppable RollStance
+            for i in x do Check.moveAttack (Move i) target
         ]
 
     // attack in the case character is programmed
     let attackCustom character threshold target =
-        character.CustomActions
-        |> List.sortByDescending (fun { Actions = actions } ->
-            actions
-            |> List.fold (fun priority action ->
-                match action with
-                | StanceChange { GallStance = gall; LymphStance = lymph } ->
-                    // if healthy pick aggressive stance, otherwise pick defensive stance
-                    if Character.isDamaged character then
-                        lymph
-                    else
-                        gall
-                | _ ->
-                    priority
-            ) 0
-        )
-        |> List.head
+        let customAction =
+            character.CustomActions
+            |> List.sortByDescending (fun { Actions = actions } ->
+                actions
+                |> List.fold (fun priority action ->
+                    match action with
+                    | StanceChange { GallStance = gall; LymphStance = lymph } ->
+                        // if healthy pick aggressive stance, otherwise pick defensive stance
+                        if Character.isDamaged character then
+                            lymph
+                        else
+                            gall
+                    | _ ->
+                        priority
+                ) 0
+            )
+            |> List.head
+
+        customAction
         |> _.Actions
         |> List.map (function
-            | PhysicalSequence seq ->
-                let action =
-                    seq
-                    |> List.truncate threshold
-                    |> PhysicalSequence
-                Check.attack action threshold target
+            | Move _ as action ->
+                Check.moveAttack action target
             | StanceChange _ as action ->
+                Check.stance action
+            | action ->
                 Check.unstoppable action
-            | _ ->
-                Check.empty
         )
 
     // plan attacker actions
@@ -237,8 +238,8 @@ module AttackerAI =
                 |> fun checks -> Some {
                     Turn.empty with
                         Turn = gameplay.Turn
-                        Type = TurnType.Active
                         Checks = checks
+                        Entity = attacker
                 }
 
             | _ ->
@@ -251,10 +252,8 @@ module DefenderAI =
 
     let analyzeAttackerMoves attackerAction =
         match attackerAction.Action with
-        | PhysicalSequence moves ->
-            moves
-            |> List.filter (fun move -> List.contains move Move.attacks)
-            |> List.length
+        | Move move ->
+            if List.contains move Move.attacks then 1 else 0
         | _ ->
             0
 
@@ -284,35 +283,35 @@ module DefenderAI =
         defence @ attack
         |> fun x -> [
             Check.unstoppable (StanceChange Stance.attacker)
-            Check.defence (PhysicalSequence x) (List.length x) target
+            Check.unstoppable RollStance
+            for i in x do Check.moveDefence (Move i) target
         ]
 
     // defence in the case character is programmed
     let defenceCustom character threshold target =
-        character.CustomActions
-        |> List.sortByDescending (fun { Actions = actions } ->
-            actions
-            |> List.fold (fun priority action ->
-                match action with
-                | StanceChange { LymphStance = lymph } ->
-                    lymph
-                | _ ->
-                    priority
-            ) 0
-        )
-        |> List.head
+        let customAction =
+            character.CustomActions
+            |> List.sortByDescending (fun { Actions = actions } ->
+                actions
+                |> List.fold (fun priority action ->
+                    match action with
+                    | StanceChange { LymphStance = lymph } ->
+                        lymph
+                    | _ ->
+                        priority
+                ) 0
+            )
+            |> List.head
+
+        customAction
         |> _.Actions
         |> List.map (function
-            | PhysicalSequence seq ->
-                let action =
-                    seq
-                    |> List.truncate threshold
-                    |> PhysicalSequence
-                Check.defence action threshold target
+            | Move _ as action ->
+                Check.moveDefence action target
             | StanceChange _ as action ->
+                Check.stance action
+            | action ->
                 Check.unstoppable action
-            | _ ->
-                Check.empty
         )
 
     // plan defender actions
@@ -348,12 +347,13 @@ module DefenderAI =
                 // not in reach
                 // TODO: assumes enemy coordinate is static which is false
                 else
-                    []
+                    defenceDefault character 0 0 target
+
                 |> fun checks -> Some {
                     Turn.empty with
                         Turn = gameplay.Turn
-                        Type = TurnType.Reactive
                         Checks = checks
+                        Entity = defender
                 }
             | _ ->
                 None
