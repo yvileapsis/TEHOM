@@ -9,6 +9,7 @@ open Area
 
 type GraphMessage =
     | Update
+    | Select of string
     interface Message
 
 type SitesGraph = {
@@ -16,10 +17,12 @@ type SitesGraph = {
     GraphStored : Sites
     DisplayGraph : Graph<String, Vector3, Relationship>
     Iterations : int
-    AttractionForce : float32
-    RepulsionForce : float32
-    CenterForce : float32
+    Force : float32
+    DistanceMult : float32
+    ZeroDistanceForce : float32
     IterationsLeft : int
+    NodeDistances : Map<String * String, uint option>
+    SelectedText : string
 }
 with
     static member empty = {
@@ -27,10 +30,12 @@ with
         GraphStored = Graph.empty
         DisplayGraph = Graph.empty
         Iterations = 50
-        AttractionForce = 0.002f
-        RepulsionForce = 0.05f
-        CenterForce = 0.007f
+        Force = 2f
+        DistanceMult = 0.05f
+        ZeroDistanceForce = 0.025f
         IterationsLeft = 1000
+        NodeDistances = Map.empty
+        SelectedText = ""
     }
 
 [<AutoOpen>]
@@ -52,53 +57,55 @@ type GraphDispatcher () =
     override this.Message (model, message, entity, world) =
 
         match message with
-        | _ ->
-
-
-            let repulsion (graph : Graph<String, Vector3, Relationship>) =
-                graph
-                |> Vertices.map (fun v l ->
-                    graph
-                    |> Vertices.fold l (fun l v' l' ->
-                        let delta = l - l'
-                        let distance = float32 (delta.Length ()) + 0.01f
-                        let force = model.RepulsionForce / distance
-                        l + (delta / distance) * force
-                    )
-                )
-
+        | Update ->
             let attraction (graph : Graph<String, Vector3, Relationship>) =
                 graph
                 |> Vertices.map (fun v l ->
-                    let e1, _, _, e2 = Graph.getContext v graph
-                    let list = e1 @ e2
 
-                    list
-                    |> List.fold (fun l (v', e) ->
-                        let _, _, l', _ = Graph.getContext v' graph
-                        let delta = l - l'
-                        let distance = float32 (delta.Length ()) + 0.01f
-                        let force = distance * distance * model.AttractionForce
-                        l - (delta / distance) * force
-                    ) l
+                    graph
+                    |> Vertices.fold l (fun l v' l' ->
+
+                        match model.NodeDistances[v, v'] with
+                        | Some targetDistance ->
+
+                            let targetDistance = model.DistanceMult * float32 targetDistance
+                            let delta = l - l'
+                            let distance = float32 (delta.Length ()) + 0.01f
+                            let deltaNorm = delta / distance
+                            let distance' = distance - targetDistance
+                            let force = distance' * (if targetDistance = 0f then model.ZeroDistanceForce else model.Force / targetDistance)
+                            l - deltaNorm * force
+
+                        | None ->
+
+                            let targetDistance = 20f
+                            let delta = l - l'
+                            let distance = float32 (delta.Length ()) + 0.01f
+                            let deltaNorm = delta / distance
+                            let distance' = distance - targetDistance
+                            let force = distance' * model.ZeroDistanceForce
+                            l - deltaNorm * force
+
+                    )
                 )
 
-            let center (graph : Graph<String, Vector3, Relationship>) =
+            let recenter (graph : Graph<String, Vector3, Relationship>) =
+                let center =
+                    graph
+                    |> Vertices.toList
+                    |> List.map snd
+                    |> fun list ->
+                        let (sum : Vector3) = List.sum list
+                        let (average : Vector3) = sum / float32 (List.length list)
+                        average
+
                 graph
                 |> Vertices.map (fun v l ->
-                    let e1, _, _, e2 = Graph.getContext v graph
-                    let list = e1 @ e2
-
-                    let centerDistance = v3 0f 0f 0f
-                    let numberedges = List.length list
-                    let delta = l - centerDistance
-                    let distance = float32 (delta.Length ()) + 0.01f
-                    let force = (float32 numberedges) * model.CenterForce * distance
-
-                    l - (delta / distance) * force
+                    l - center
                 )
 
-            let iter = repulsion >> attraction >> center
+
+            let iter = attraction >> recenter
             let fiveiters = List.init model.Iterations (fun _ -> iter) |> List.fold (>>) id
 
             if model.Graph <> model.GraphStored then
@@ -120,7 +127,41 @@ type GraphDispatcher () =
                             let y = float32 (i / 6) * 16f - 3f * 16f
                             v3 x y 0f
                     )
-                let model = { model with DisplayGraph = graph; GraphStored = model.Graph; IterationsLeft = 1000 }
+
+                let graph' =
+                    graph
+                    |> Edges.undirect (fun edge1 edge2 ->
+                        edge1
+                    )
+                    |> Edges.choose (fun v1 v2 edge ->
+                        match edge with
+                        | Distance x -> Some (uint x)
+                        | Consists -> None
+                        | Contains -> Some 150u
+                        | LiesAbove -> Some 150u
+                        | Covers -> Some 150u
+                        | IsOnEdge -> Some 150u
+                    )
+
+                let vertices =
+                    graph' |> Vertices.toList |> List.map fst
+
+                let nodeDistance =
+                    vertices
+                    |> List.fold (fun map v ->
+                        let tree = Query.spTree v graph'
+
+                        vertices
+                        |> List.fold (fun (map : Map<String * String, uint option>) v' ->
+                            let distance =
+                                Query.getDistance v' tree
+
+                            Map.add (v, v') distance map
+                        ) map
+                    ) Map.empty
+
+
+                let model = { model with DisplayGraph = graph; GraphStored = model.Graph; NodeDistances = nodeDistance; IterationsLeft = 1000 }
                 just model
             elif model.IterationsLeft > 0 then
                 let graph = model.DisplayGraph
@@ -130,6 +171,10 @@ type GraphDispatcher () =
             else
                 just model
 
+        | Select str ->
+            let model = { model with SelectedText = str }
+            just model
+
     override this.Command (model, command, entity, world) =
 
         match command with
@@ -138,21 +183,25 @@ type GraphDispatcher () =
 
     override this.Content (model, _) = [
 
-        let sprite name coords = Content.staticSprite $"Vertice-{name}" [
+        let sprite name coords = Content.button $"Vertice-{name}" [
             Entity.Size := v3 6f 6f 0f
             Entity.PositionLocal := coords
-            Entity.StaticImage == Assets.Default.Ball
+            Entity.UpImage == Assets.Default.Ball
+            Entity.DownImage == Assets.Default.Ball
             Entity.Elevation == 10f
-            Entity.Color ==
+            Entity.TextColor ==
                 if name = "player" then
                     Color.Cyan
                 elif name = "rat" then
                     Color.Red
                 else
                     Color.White
+            Entity.Text == string (Array.head (String.toArray name))
+            Entity.FontSizing == Some 6
+            Entity.ClickEvent => Select name
         ]
 
-        let line label1 label2 (coord1 : Vector3) (coord2 : Vector3) =
+        let line label1 label2 (coord1 : Vector3) (coord2 : Vector3) relationship =
             let position = (coord2 + coord1) / 2f
             let distance = (coord2 - coord1).Length ()
             let vector = (coord2 - coord1)
@@ -164,6 +213,20 @@ type GraphDispatcher () =
                 Entity.RotationLocal := rotation
                 Entity.StaticImage == Assets.Default.White
                 Entity.Elevation == 5f
+                Entity.Color ==
+                    match relationship with
+                    | Distance uint32 ->
+                        Color.White
+                    | Consists ->
+                        Color.Black
+                    | Contains ->
+                        Color.Gray
+                    | LiesAbove ->
+                        Color.Green
+                    | Covers ->
+                        Color.Beige
+                    | IsOnEdge ->
+                        Color.BlueViolet
             ]
 
         let graph = model.DisplayGraph
@@ -171,8 +234,20 @@ type GraphDispatcher () =
         for (v, l) in Vertices.toList graph do
             sprite v l
 
-        for (label1, label2, _) in Graph.Directed.Edges.toList graph do
+        for (label1, label2, relationship) in Graph.Directed.Edges.toList graph do
             let _, pos1 = Vertices.find label1 graph
             let _, pos2 = Vertices.find label2 graph
-            line label1 label2 pos1 pos2
+            line label1 label2 pos1 pos2 relationship
+
+
+        Content.text "SelectedText" [
+            Entity.Size == v3 80f 10f 0f
+            Entity.PositionLocal == v3 0f -60f 0f
+            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+            Entity.Text := model.SelectedText
+            Entity.TextColor == Color.FloralWhite
+            Entity.Font == Assets.Gui.ClearSansFont
+            Entity.FontSizing == Some 5
+            Entity.ClickEvent => Select ""
+        ]
     ]

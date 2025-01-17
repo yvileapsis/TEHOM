@@ -110,7 +110,7 @@ module Area =
             |> Vertices.add ("room2table3", Site.empty)
             |> Vertices.add ("room2exitWaitingRoom", Site.empty)
 
-            |> Directed.Edges.add ("room2walls", "room2exitWaitingRoom", LiesAbove)
+            |> Directed.Edges.add ("room2walls", "room2exitWaitingRoom", IsOnEdge)
             |> Directed.Edges.add ("room2floor", "room2table1", LiesAbove)
             |> Directed.Edges.add ("room2floor", "room2table2", LiesAbove)
             |> Directed.Edges.add ("room2floor", "room2table3", LiesAbove)
