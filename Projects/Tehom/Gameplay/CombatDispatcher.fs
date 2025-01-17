@@ -8,7 +8,6 @@ open Nu
 open Action
 
 type CombatMessage =
-    | StartPlaying
     | Update
     | TurnProcess
     | UpdatePossibleActions
@@ -20,7 +19,6 @@ type CombatMessage =
 
 type CombatCommand =
     | RollInitiative
-    | UpdateGraph
     | GameEffect of GameEffect
     | ProcessCharacterTurn of Turn list
     interface Command
@@ -34,37 +32,18 @@ type CombatDispatcher () =
         Screen.UpdateEvent => Update
         Screen.TimeUpdateEvent => TimeUpdate
         Entity.AlwaysUpdate == true
+        Entity.RegisterEvent => RollInitiative
     ]
 
     override this.Message (model, message, entity, world) =
 
         match message with
-        | StartPlaying ->
-            let gameplay =
-                Combat.initial
-
-            let combatants =
-                world
-                |> World.getEntities Simulants.GameplayCharacters
-                |> List.ofSeq
-
-            let history =
-                combatants
-                |> List.map (fun c -> c, [])
-                |> Map.ofSeq
-
-            let gameplay = { gameplay with Combatants = combatants; History = history }
-
-            withSignals [
-                RollInitiative
-            ] gameplay
-
         | Update ->
             if model.Combatants = Combat.initial.Combatants then
                 [StartPlaying], model
             else
                 let model = Combat.update model world
-                [UpdateGraph], model
+                just model
 
         | TurnProcess ->
             match model.CombatState with
@@ -100,9 +79,9 @@ type CombatDispatcher () =
             | TurnAttackPlan attacker ->
                 let plan =
                     if Combat.isCharacterControlled attacker then
-                        AttackerAI.customPlan attacker model.Area model world
+                        AttackerAI.customPlan attacker model world
                     else
-                        AttackerAI.tryPlan attacker model.Area model world
+                        AttackerAI.tryPlan attacker model world
 
                 let model = {
                     model with
@@ -136,7 +115,7 @@ type CombatDispatcher () =
                     |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
                     |> _.Value
 
-                match DefenderAI.tryPlan attackPlan.Entity action defender model.Area model world with
+                match DefenderAI.tryPlan attackPlan.Entity action defender model world with
                 | Some defencePlan ->
                     let model = { model with CombatState = TurnAttackKarmaBid (attackPlan, defencePlan) }
                     just model
@@ -272,13 +251,6 @@ type CombatDispatcher () =
             let world = entity.ExecuteGameEffect effect world
             just world
 
-        | UpdateGraph ->
-            let graph = entity / "Graph"
-            let graphSites = graph.GetGraph world
-            let graphSites = { graphSites with Graph = model.Area.Sites }
-            let world = graph.SetGraph graphSites world
-            just world
-
         | ProcessCharacterTurn list ->
 
             // horrifying code that needs to be optimized
@@ -363,18 +335,15 @@ type CombatDispatcher () =
 
             just world
 
-
     override this.TruncateModel model = {
         model with
             DisplayLeftModel = None
             DisplayRightModel = None
-            Area = Area.empty
     }
     override this.UntruncateModel (model, model') = {
         model with
             DisplayLeftModel = model'.DisplayLeftModel
             DisplayRightModel = model'.DisplayRightModel
-            Area = model'.Area
     }
 
     override this.Content (model, _) = [
@@ -383,10 +352,6 @@ type CombatDispatcher () =
             Entity.Size == v3 480f 180f 0f
             Entity.StaticImage == Assets.Default.Black
             Entity.Color == Color.White.WithA 0.5f
-        ]
-
-        Content.entity<GraphDispatcher> "Graph" [
-            Entity.PositionLocal == v3 90f 90f 0f
         ]
 
         // Constant
@@ -449,9 +414,6 @@ type CombatDispatcher () =
                 stat "Plasma" "Plasma" $"{plasma} {plasmaStance}"
                 stat "Stances" "Stances" $"{character.StancesCurrent}"
                 stat "Initiative" "Initiative" $"{character.Initiative}"
-
-                let connections = Area.getConnections character.ID model.Area
-                location "CombatLocation" $"Location {connections}"
             ]
 
             Content.association "Stats" boxProperties stats

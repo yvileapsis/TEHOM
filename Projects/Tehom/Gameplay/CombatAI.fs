@@ -19,13 +19,14 @@ module AttackerAI =
         strikes @ [ Power; Press ] @ [ Stride ]
 
     let getDistanceBetweenAttackerAndTarget (attacker : Entity) combat world =
-        let area = combat.Area
 
         let (Some target) = combat.PlannedTarget
 
         let attackerName = attacker.Name
         let targetName = target.Name
 
+        let area = combat.Area
+        let area = area.GetArea world
         match Area.findPath attackerName targetName area with
         | _::_ as path ->
 
@@ -69,6 +70,7 @@ module AttackerAI =
             let attackerName = attacker.Name
             let targetName = target.Name
 
+            let area = area.GetArea world
             match Area.findPath attackerName targetName area with
             | _::_ as path ->
 
@@ -118,7 +120,7 @@ module AttackerAI =
             |> List.map fst
         Combat.getCharacterMostWounds targets world
 
-    let customPlan (attacker: Entity) area combat world =
+    let customPlan (attacker: Entity) combat world =
 
         if List.notEmpty combat.PlannedActions then
             // TODO: move to planning
@@ -197,17 +199,18 @@ module AttackerAI =
         )
 
     // plan attacker actions
-    let tryPlan (attacker: Entity) area gameplay world =
+    let tryPlan (attacker: Entity) model world =
 
         let character = attacker.GetCharacter world
 
         if Character.canAct character then
 
-            let target = findTarget attacker gameplay world
+            let target = findTarget attacker model world
 
             let attackerName = attacker.Name
             let targetName = target.Name
 
+            let area = model.Area.GetArea world
             match Area.findPath attackerName targetName area with
             | _::_ as path ->
 
@@ -237,7 +240,7 @@ module AttackerAI =
 
                 |> fun checks -> Some {
                     Turn.empty with
-                        Turn = gameplay.Turn
+                        Turn = model.Turn
                         Checks = checks
                         Entity = attacker
                 }
@@ -315,7 +318,7 @@ module DefenderAI =
         )
 
     // plan defender actions
-    let tryPlan (attacker: Entity) attackerAction (defender: Entity) area gameplay world =
+    let tryPlan (attacker: Entity) attackerAction (defender: Entity) model world =
 
         let character = defender.GetCharacter world
 
@@ -326,6 +329,7 @@ module DefenderAI =
             let defenderName = defender.Name
             let targetName = target.Name
 
+            let area = model.Area.GetArea world
             match Area.findPath defenderName targetName area with
             | _::_ as path ->
 
@@ -351,7 +355,7 @@ module DefenderAI =
 
                 |> fun checks -> Some {
                     Turn.empty with
-                        Turn = gameplay.Turn
+                        Turn = model.Turn
                         Checks = checks
                         Entity = defender
                 }

@@ -31,8 +31,8 @@ TODO: Tiniest vertical slice:
 type GameEffect =
     | CharacterDo of Entity * (Character -> Character)
     | Damage of Entity * Size : int * Damage : int
-    | TravelInter of String * String
-    | TravelIntra of String * String * uint32
+    | TravelInter of Area : Entity * String * String
+    | TravelIntra of Area : Entity * String * String * uint32
 
 
 type Check = {
@@ -120,7 +120,7 @@ with
             else
                 false, world
 
-    static member processCheck check before after (attacker : Entity) area world =
+    static member processCheck check before after (attacker : Entity) (area : Entity) world =
 
         match check.Action with
         | SkillSelect i ->
@@ -174,14 +174,15 @@ with
                     let attackerCharacter = attacker.GetCharacter world
                     let reach = Character.getReach attackerCharacter
                     let speed = Character.getSpeed attackerCharacter
+                    let model = area.GetArea world
 
-                    match Area.moveWithinReach attacker.Name target.Name reach speed area with
-                    | Some moveInter, Some moveIntra ->
-                        [TravelInter moveInter; TravelIntra moveIntra]
-                    | Some moveInter, None ->
-                        [TravelInter moveInter]
-                    | None, Some moveIntra ->
-                        [TravelIntra moveIntra]
+                    match Area.moveWithinReach attacker.Name target.Name reach speed model with
+                    | Some (fst, snd), Some (fst', snd', thd') ->
+                        [TravelInter (area, fst, snd); TravelIntra (area, fst', snd', thd')]
+                    | Some (fst, snd), None ->
+                        [TravelInter (area, fst, snd)]
+                    | None, Some (fst, snd, thd) ->
+                        [TravelIntra (area, fst, snd, thd)]
                     | None, None ->
                         []
                 | None ->
@@ -290,7 +291,7 @@ type [<SymbolicExpansion>] Combat = {
     Turn : int
     Combatants : Entity list
     History : Map<Entity, Turn list>
-    Area : Area
+    Area : Entity
 
     DisplayLeftEntity : Entity option
     DisplayLeftModel : Character option
@@ -313,7 +314,7 @@ with
         Turn = 0
         Combatants = []
         History = Map.empty
-        Area = Area.empty
+        Area = Entity
 
         DisplayLeftEntity = None
         DisplayLeftModel = None
@@ -333,7 +334,6 @@ with
         Combat.empty with
             DisplayLeftEntity = Some (Simulants.GameplayCharacters / CharacterContent.player.ID)
             DisplayRightEntity = Some (Simulants.GameplayCharacters / CharacterContent.rat.ID)
-            Area = Area.level1
     }
 
     // this updates the gameplay model every frame that gameplay is active.
@@ -409,18 +409,10 @@ module CombatExtensions =
                 let world = entity.SetCharacterWith func world
                 world
 
-            | TravelInter (character, location) ->
-                let model = this.GetCombat world
-                let area = model.Area
-                let area = Area.moveSite character location area
-                let combat = { model with Area = area }
-                let world = this.SetCombat combat world
+            | TravelInter (area, character, location) ->
+                let world = area.SetAreaWith (Area.moveSite character location) world
                 world
 
-            | TravelIntra (character, location, distance) ->
-                let model = this.GetCombat world
-                let area = model.Area
-                let area = Area.establishDistance distance character location area
-                let model = { model with Area = area }
-                let world = this.SetCombat model world
+            | TravelIntra (area, character, location, distance) ->
+                let world = area.SetAreaWith (Area.establishDistance distance character location) world
                 world

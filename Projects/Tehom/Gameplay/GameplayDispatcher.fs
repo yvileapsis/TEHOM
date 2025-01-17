@@ -44,6 +44,7 @@ type GameplayMessage =
 
 type GameplayCommand =
     | SetupScene
+    | StartCombat of (Entity * Entity * Entity)
     | StartQuitting
     interface Command
 
@@ -100,20 +101,46 @@ type GameplayDispatcher () =
             let world = World.setEye2dCenter (v2 0f 0f) world
             let world = World.setEye2dCenter (v2 640f 360f) world
             World.enqueueRenderMessage3d (ConfigureFilter true) world
-            just world
+
+            let area, world = World.createEntity<AreaDispatcher> NoOverlay (Some [|"Area"|]) Simulants.GameplayGui world
+            let world = area.SetArea Area.level1 world
+
+            let player, world = World.createEntity<CharacterDispatcher> NoOverlay (Some [|CharacterContent.player.ID|]) Simulants.GameplayCharacters world
+            let world = player.SetCharacter CharacterContent.player world
+
+            let rat, world = World.createEntity<CharacterDispatcher> NoOverlay (Some [|CharacterContent.rat.ID|]) Simulants.GameplayCharacters world
+            let world = rat.SetCharacter CharacterContent.rat world
+
+            [StartCombat (area, player, rat)], world
 
         | StartQuitting ->
             let world = World.publish () entity.QuitEvent entity world
             just world
 
+        | StartCombat (area, player, rat) ->
+
+            let combat, world = World.createEntity<CombatDispatcher> DefaultOverlay (Some [|"Combat"|]) Simulants.GameplayGui world
+
+            let model =
+                Combat.initial
+
+            let combatants =
+                [player; rat]
+
+            let history =
+                combatants
+                |> List.map (fun c -> c, [])
+                |> Map.ofSeq
+
+            let model = { model with Combatants = combatants; History = history; Area = area }
+
+            let world = combat.SetCombat model world
+
+            just world
 
     override this.Content (model, entity) = [
 
         Content.group Simulants.GameplayGui.Name [] [
-            Content.entity<CombatDispatcher> Simulants.GameplayCombat.Name [
-                //Entity.PositionLocal == v3 -160f -90f 0f
-            ]
-
             Content.button "Shuffle" [
                 Entity.Position == v3 -192f 160f 0f
                 Entity.Size == v3 64f 16f 0f
@@ -179,9 +206,6 @@ type GameplayDispatcher () =
 
             ]
 
-            Content.group Simulants.GameplayCharacters.Name [] [
-                character CharacterContent.player
-                character CharacterContent.rat
-            ]
+            Content.group Simulants.GameplayCharacters.Name [] []
         | Quit -> ()
     ]

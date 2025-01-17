@@ -33,3 +33,4 @@ module Simulants =
     let GameplayScene = Gameplay / "Scene"
     let GameplayCharacters = Gameplay / "Characters"
     let GameplayCombat = Gameplay / "Combat"
+    let GameplayArea = Gameplay / "Area"
