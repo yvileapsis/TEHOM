@@ -33,7 +33,18 @@ type GameEffect =
     | Damage of Entity * Size : int * Damage : int
     | TravelInter of Area : Entity * String * String
     | TravelIntra of Area : Entity * String * String * uint32
-
+with
+    static member travel actor target closeness distance (area : Entity) world =
+        let model = area.GetArea world
+        match Area.moveWithinReach actor target closeness distance model with
+        | Some (fst, snd), Some (fst', snd', thd') ->
+            [TravelInter (area, fst, snd); TravelIntra (area, fst', snd', thd')]
+        | Some (fst, snd), None ->
+            [TravelInter (area, fst, snd)]
+        | None, Some (fst, snd, thd) ->
+            [TravelIntra (area, fst, snd, thd)]
+        | None, None ->
+            []
 
 type Check = {
     Action : Action
@@ -134,31 +145,6 @@ with
         | RollStance ->
             [ CharacterDo (attacker, Character.roll) ]
         | Move move' ->
-
-            let bonusDamage damage =
-                let damage =
-                    match before with
-                    | [] -> damage
-                    | _ ->
-                        before
-                        |> List.rev
-                        |> List.foldWhile (fun bonus move ->
-                            match move.Action with
-                            | Move Power -> Some (bonus + 5)
-                            | _ -> None
-                        ) damage
-                let damage =
-                    match after with
-                    | _::after ->
-                        after
-                        |> List.foldWhile (fun bonus move ->
-                            match move.Action with
-                            | Move Press -> Some (bonus + 2)
-                            | _ -> None
-                        ) damage
-                    | _ -> damage
-                damage
-
             match move' with
             | Stride
             | Climb
@@ -168,26 +154,30 @@ with
             | Sidestep
             | Dash
             | Swim ->
-                // TODO: to decrease stupidity, process movement in bulk like other moves
-                match check.Target with
-                | Some target ->
-                    let attackerCharacter = attacker.GetCharacter world
-                    let reach = Character.getReach attackerCharacter
-                    let speed = Character.getSpeed attackerCharacter
-                    let model = area.GetArea world
+                let should =
+                    after
+                    |> List.map (fun check -> match check.Action with Move Stride-> true | _ -> false)
+                    |> List.contains true
+                    |> not
 
-                    match Area.moveWithinReach attacker.Name target.Name reach speed model with
-                    | Some (fst, snd), Some (fst', snd', thd') ->
-                        [TravelInter (area, fst, snd); TravelIntra (area, fst', snd', thd')]
-                    | Some (fst, snd), None ->
-                        [TravelInter (area, fst, snd)]
-                    | None, Some (fst, snd, thd) ->
-                        [TravelIntra (area, fst, snd, thd)]
-                    | None, None ->
+                if should then
+                    match check.Target with
+                    | Some target ->
+
+                        let moves =
+                            check::before
+                            |> List.sumBy (fun check -> match check.Action with Move Stride -> 1u | _ -> 0u)
+
+                        let attackerCharacter = attacker.GetCharacter world
+                        let reach = Character.getReach attackerCharacter
+                        let distance = moves * Character.getSpeed attackerCharacter
+
+                        GameEffect.travel attacker.Name target.Name reach distance area world
+
+                    | None ->
                         []
-                | None ->
+                else
                     []
-
             | Block
             | Crouch
             | Delay
@@ -213,6 +203,32 @@ with
             | Strike weapon ->
                 match check.Target with
                 | Some target ->
+
+                    let bonusDamage damage =
+                        let damage =
+                            match before with
+                            | [] -> damage
+                            | _ ->
+                                before
+                                |> List.rev
+                                |> List.foldWhile (fun bonus move ->
+                                    match move.Action with
+                                    | Move Power -> Some (bonus + 5)
+                                    | _ -> None
+                                ) damage
+                        let damage =
+                            match after with
+                            | _::after ->
+                                after
+                                |> List.foldWhile (fun bonus move ->
+                                    match move.Action with
+                                    | Move Press -> Some (bonus + 2)
+                                    | _ -> None
+                                ) damage
+                            | _ -> damage
+                        damage
+
+
                     // weapon
                     let damage = Weapon.getDamage weapon
                     let size = Weapon.getSizeBoost weapon
@@ -263,7 +279,7 @@ with
         |> List.indexed
         |> List.collect (fun (i, check) ->
             let before, after = List.splitAt i checks
-            Check.processCheck check before after turn.Entity area world
+            Check.processCheck check before (List.tail after) turn.Entity area world
         )
 
     static member describe turn =
@@ -416,3 +432,5 @@ module CombatExtensions =
             | TravelIntra (area, character, location, distance) ->
                 let world = area.SetAreaWith (Area.establishDistance distance character location) world
                 world
+        member this.ExecuteGameEffects effects world =
+            List.fold (fun world effect -> this.ExecuteGameEffect effect world) world effects

@@ -45,6 +45,7 @@ type GameplayMessage =
 type GameplayCommand =
     | SetupScene
     | StartCombat of (Entity * Entity * Entity)
+    | MoveToSelected
     | StartQuitting
     interface Command
 
@@ -81,7 +82,21 @@ type GameplayDispatcher () =
             just model
 
         | Update ->
-            just model
+            let area = Simulants.GameplayArea
+            let player = Simulants.GameplayCharacters / "player"
+            let rat = Simulants.GameplayCharacters / "rat"
+
+            let areaModel = area.GetArea world
+
+            let distance =
+                Area.findPath rat.Name player.Name areaModel
+                |> List.last
+                |> snd
+
+            if distance < 200u && not (World.getExists Simulants.GameplayCombat world) then
+                [StartCombat (area, player, rat)], model
+            else
+                just model
 
         | Shuffle ->
             let model = Gameplay.initial
@@ -111,7 +126,7 @@ type GameplayDispatcher () =
             let rat, world = World.createEntity<CharacterDispatcher> NoOverlay (Some [|CharacterContent.rat.ID|]) Simulants.GameplayCharacters world
             let world = rat.SetCharacter CharacterContent.rat world
 
-            [StartCombat (area, player, rat)], world
+            just world
 
         | StartQuitting ->
             let world = World.publish () entity.QuitEvent entity world
@@ -138,6 +153,30 @@ type GameplayDispatcher () =
 
             just world
 
+        | MoveToSelected ->
+
+            let player = Simulants.GameplayCharacters / "player"
+
+            let playerModel = player.GetCharacter world
+
+            let speed = Character.getSpeed playerModel
+
+            let reach = Character.getReach playerModel
+
+            let area = Simulants.GameplayArea
+
+            let graph = area / "Graph"
+
+            let model = graph.GetGraph world
+
+            let target = model.SelectedText
+
+            let effect = GameEffect.travel player.Name target reach speed area world
+
+            let world = player.ExecuteGameEffects effect world
+
+            just world
+
     override this.Content (model, entity) = [
 
         Content.group Simulants.GameplayGui.Name [] [
@@ -147,6 +186,14 @@ type GameplayDispatcher () =
                 Entity.FontSizing == Some 8
                 Entity.Text == "Shuffle!"
                 Entity.ClickEvent => Shuffle
+            ]
+
+            Content.button "Move" [
+                Entity.Position == v3 192f 160f 0f
+                Entity.Size == v3 64f 16f 0f
+                Entity.FontSizing == Some 8
+                Entity.Text == "Move!"
+                Entity.ClickEvent => MoveToSelected
             ]
         ]
 

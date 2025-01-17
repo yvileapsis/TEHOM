@@ -32,5 +32,5 @@ module Simulants =
     let GameplayQuit = GameplayGui / "Quit"
     let GameplayScene = Gameplay / "Scene"
     let GameplayCharacters = Gameplay / "Characters"
-    let GameplayCombat = Gameplay / "Combat"
-    let GameplayArea = Gameplay / "Area"
+    let GameplayCombat = GameplayGui / "Combat"
+    let GameplayArea = GameplayGui / "Area"
