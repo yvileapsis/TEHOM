@@ -118,7 +118,7 @@ type GameplayDispatcher () =
             World.enqueueRenderMessage3d (ConfigureFilter true) world
 
             let area, world = World.createEntity<AreaDispatcher> NoOverlay (Some [|"Area"|]) Simulants.GameplayGui world
-            let world = area.SetArea Area.level1 world
+            let world = area.SetArea Area.level1clinic world
 
             let player, world = World.createEntity<CharacterDispatcher> NoOverlay (Some [|CharacterContent.player.ID|]) Simulants.GameplayCharacters world
             let world = player.SetCharacter CharacterContent.player world

@@ -34,7 +34,7 @@ module Area =
         }
 
         // * Waitroom, barricaded windows, rolling hospital bed, locked exit door, you wake up here
-        static member room1 : Sites =
+        static member room1waitroom : Sites =
             Graph.empty
             // room itself
             |> Vertices.add ("room1", Site.empty)
@@ -78,8 +78,8 @@ module Area =
             |> Directed.Edges.add ("room1gurney", "player", LiesAbove)
 
 
-        // main hall, rat
-        static member room2 : Sites =
+        // * Main hall, chairs, first rat attacks
+        static member room2mainhall : Sites =
             Graph.empty
             |> Vertices.add ("room2", Site.empty)
 
@@ -118,12 +118,33 @@ module Area =
             |> Vertices.add ("rat", Site.empty)
             |> Directed.Edges.add ("room2floor", "rat", LiesAbove)
 
-        static member level1 = {
+        // * Registration room, safe with useful stuff like a pistol maybe, code locked, code is gotten from a book
+        //   (can be seen from waitroom through glass)
+        static member room3registration : Sites =
+            Graph.empty
+
+        // * Electrical room to fix the lights, second rat attacks
+        static member room4electrical : Sites =
+            Graph.empty
+
+        // * Surgery room, surgery table, cat on the table, note (cat ate the key), opening it lets spider chandalier escape
+        static member room5surgery : Sites =
+            Graph.empty
+
+        // * Pharmacy shop, drugs you can use
+        static member room6pharmacy : Sites =
+            Graph.empty
+
+        // * Staircase, other floors blocked, but can move up and down.
+        static member room7staircase : Sites =
+            Graph.empty
+
+        static member level1clinic = {
             Name = "Clinic"
             Sites =
                 Graph.empty
-                |> Graph.join Area.room1
-                |> Graph.join Area.room2
+                |> Graph.join Area.room1waitroom
+                |> Graph.join Area.room2mainhall
                 |> Undirected.Edges.add ("room1exitMainHall", "room2exitWaitingRoom", IsOnEdge)
         }
 

@@ -10,22 +10,40 @@ open Character
 
 (*
 TODO: Always do the minimum implementation
-TODO: Skills and stances
-TODO: Player-controllable combat
-TODO: Combat start and combat end
-TODO: Non-combat exploration system with player controls
+
+TODO:
+    - The Seven Rooms
+    - Taking key
+    - Opening door
+    - Taking pistol
+
+TODO: Combat
+    - Doesn't end
+    - No skills
+    - Can't select stance
+    - No karma betting
+    - No inventory
+    - No cooldown
+    - Body doesn't impact anything
+
 TODO: Containers and notes
-TODO: Visibility system
-TODO: Enemy AI
+
+TODO: Debate
+
+TODO: Visibility system + Lights
+
 TODO: Tiniest vertical slice:
-* 5 Rooms:
-* Waitroom, barricaded windows, rolling hospital bed, locked exit door, you wake up here
-* Registration room, safe with useful stuff like a pistol maybe
-* Main hall
-* Electrical room to fix the lights, rat attacks
-* Surgery room, surgery table, dog on the table, note (dog ate the key), opening it lets spider chandalier escape
-* Goal is to go to surgery room, take the key, return to waitroom, open the door and exit.
-* Optionally you can fix lights and fight spider chandalier.
+    * 7 Rooms:
+    * Waitroom, barricaded windows, rolling hospital bed, locked exit door, you wake up here
+    * Registration room, safe with useful stuff like a pistol maybe, code locked, code is gotten from a book
+      (can be seen from waitroom through glass)
+    * Main hall, chairs, first rat attacks
+    * Electrical room to fix the lights, second rat attacks
+    * Surgery room, surgery table, cat on the table, note (cat ate the key), opening it lets spider chandalier escape
+    * Pharmacy shop, drugs you can use
+    * Staircase, other floors blocked, but can move up and down.
+    * Goal is to go to surgery room, take the key, return to waitroom, open the door and exit.
+    * Optionally you can fix lights and fight spider chandalier.
 *)
 
 type GameEffect =
@@ -372,7 +390,7 @@ with
         entities
         |> List.sortBy (fun (entity: Entity) ->
             let character = entity.GetCharacter world
-            character.MajorWounds
+            character.Wounds
         )
         |> List.last
 
