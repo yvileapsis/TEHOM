@@ -281,7 +281,7 @@ type Action = Action.Action
 
 module Character =
 
-    type MajorWounds =
+    type Wounds =
         | Healthy = 0
         | Hurt = 1
         | Bruised = 2
@@ -333,8 +333,8 @@ module Character =
         Weapons : Weapon list
 
         // Dynamic stats
-        MajorWounds : MajorWounds
-        MinorWounds : int
+        Wounds : Wounds
+        Injuries : int
 
         Initiative : int
 
@@ -474,27 +474,27 @@ module Character =
             let wounds =
                 if check 1 then
                     None
-                else if check 2 then
-                    if (character.MinorWounds < oil) then
+                elif check 2 then
+                    if (character.Injuries < oil) then
                         Some 0
                     else
                         Some 1
                 else
                     if check 3 then
                         Some 1
-                    else if check 4 then
+                    elif check 4 then
                         Some 2
-                    else if check 5 then
+                    elif check 5 then
                         Some 3
-                    else if check 6 then
+                    elif check 6 then
                         Some 4
-                    else if check 7 then
+                    elif check 7 then
                         Some 5
                     else
                         Some 6
 
             let maxDamage newValue =
-                 MajorWounds.Dead
+                 Wounds.Dead
                  |> int
                  |> min newValue
                  |> enum
@@ -503,9 +503,9 @@ module Character =
             | None ->
                 character
             | Some 0 ->
-                { character with MinorWounds = character.MinorWounds + 1 }
+                { character with Injuries = character.Injuries + 1 }
             | Some wounds ->
-                { character with MajorWounds = maxDamage (wounds + int character.MajorWounds) }
+                { character with Wounds = maxDamage (wounds + int character.Wounds) }
 
 
         static member getMaxInitiative character =
@@ -516,6 +516,11 @@ module Character =
             character.Initiative
 
         static member setInitiative initiative character =
+            { character with Initiative = initiative }
+
+        static member rollInitiative character =
+            let maxInitiative = Character.getMaxInitiative character
+            let initiative = Random.rollInitiative maxInitiative
             { character with Initiative = initiative }
 
         static member getSize character =
@@ -582,15 +587,15 @@ module Character =
             max reach weapon
 
         static member canAct character =
-            character.MajorWounds < MajorWounds.Down
+            character.Wounds < Wounds.Down
 
         static member isDead character =
-            character.MajorWounds = MajorWounds.Dead
+            character.Wounds = Wounds.Dead
 
         static member isDamaged character =
             let (_, _, oil, _) = Character.getStats character
             let oil = int oil
-            character.MinorWounds >= oil || character.MajorWounds > MajorWounds.Wounded
+            character.Injuries >= oil || character.Wounds > Wounds.Wounded
 
         static member getWeapons character =
             character.Weapons
@@ -664,8 +669,8 @@ module Character =
             FractureBase = 0
             FractureCurrent = 0
 
-            MajorWounds = MajorWounds.Healthy
-            MinorWounds = 0
+            Wounds = Wounds.Healthy
+            Injuries = 0
 
             Initiative = 0
         }

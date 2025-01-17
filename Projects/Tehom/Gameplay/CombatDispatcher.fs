@@ -219,27 +219,19 @@ type CombatDispatcher () =
         match command with
         | RollInitiative ->
 
-            let combatants, world =
+            let world =
                 model.Combatants
-                |> List.foldMap (fun (entity : Entity) (world : World)  ->
-                    let character = entity.GetCharacter world
-
-                    let character = Character.turnReset character
-
-                    let maxInitiative = Character.getMaxInitiative character
-                    let initiative = Random.rollInitiative maxInitiative
-                    let character = Character.setInitiative initiative character
-
-                    let world = entity.SetCharacter character world
-
-                    (entity, initiative), world
+                |> List.fold (fun (world : World) (entity : Entity) ->
+                    entity.SetCharacterWith (Character.turnReset >> Character.rollInitiative) world
                 ) world
 
             let combatants =
-                combatants
-                |> List.sortBy snd
+                model.Combatants
+                |> List.sortBy (fun (entity : Entity) ->
+                    let character = entity.GetCharacter world
+                    character.Initiative
+                )
                 |> List.rev
-                |> List.map fst
 
             let model = { model with Combatants = combatants }
 
@@ -406,8 +398,8 @@ type CombatDispatcher () =
                 |> Stance.getStats
 
             let stats = [
-                stat "MinorWounds" "Minor Wounds" $"{character.MinorWounds}"
-                stat "MajorWounds" "Major Wounds" $"{character.MajorWounds}"
+                stat "MinorWounds" "Minor Wounds" $"{character.Injuries}"
+                stat "MajorWounds" "Major Wounds" $"{character.Wounds}"
                 stat "Gall" "Gall" $"{gall} {gallStance}"
                 stat "Lymph" "Lymph" $"{lymph} {lymphStance}"
                 stat "Oil" "Oil" $"{oil} {oilStance}"
