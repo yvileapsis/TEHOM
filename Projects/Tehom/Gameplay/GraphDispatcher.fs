@@ -23,19 +23,21 @@ type SitesGraph = {
     IterationsLeft : int
     NodeDistances : Map<String * String, uint option>
     SelectedText : string
+    Zoom : bool
 }
 with
     static member empty = {
         Graph = Graph.empty
         GraphStored = Graph.empty
         DisplayGraph = Graph.empty
-        Iterations = 50
+        Iterations = 10
         Force = 2f
-        DistanceMult = 0.05f
+        DistanceMult = 0.15f
         ZeroDistanceForce = 0.025f
-        IterationsLeft = 1000
+        IterationsLeft = 20
         NodeDistances = Map.empty
         SelectedText = ""
+        Zoom = false
     }
 
 [<AutoOpen>]
@@ -48,10 +50,11 @@ module GraphExtensions =
 type GraphDispatcher () =
     inherit Entity2dDispatcher<SitesGraph, GraphMessage, Command> (false, false, false, SitesGraph.empty)
 
-    override this.Definitions (_, _) = [
+    override this.Definitions (model, _) = [
         Screen.UpdateEvent => Update
         Entity.AlwaysUpdate == true
         Entity.Size == v3 120f 120f 0f
+        Entity.PositionLocal := if model.Zoom then v3 90f 90f 0f else v3 0f 0f 0f
     ]
 
     override this.Message (model, message, entity, world) =
@@ -140,7 +143,7 @@ type GraphDispatcher () =
                         | Contains -> Some 150u
                         | LiesAbove -> Some 150u
                         | Covers -> Some 150u
-                        | IsOnEdge -> Some 150u
+                        | IsOnEdge -> Some 50u
                     )
 
                 let vertices =
@@ -161,7 +164,7 @@ type GraphDispatcher () =
                     ) Map.empty
 
 
-                let model = { model with DisplayGraph = graph; GraphStored = model.Graph; NodeDistances = nodeDistance; IterationsLeft = 1000 }
+                let model = { model with DisplayGraph = graph; GraphStored = model.Graph; NodeDistances = nodeDistance; IterationsLeft = 100 }
                 just model
             elif model.IterationsLeft > 0 then
                 let graph = model.DisplayGraph
@@ -169,6 +172,12 @@ type GraphDispatcher () =
                 let model = { model with DisplayGraph = graph; IterationsLeft = model.IterationsLeft - model.Iterations }
                 just model
             else
+                let model =
+                    if (World.getExists Simulants.GameplayCombat world) then
+                        { model with Zoom = true }
+                    else
+                        model
+
                 just model
 
         | Select str ->
@@ -185,10 +194,10 @@ type GraphDispatcher () =
 
         let sprite name coords = Content.button $"Vertice-{name}" [
             Entity.Size := v3 6f 6f 0f
-            Entity.PositionLocal := coords
+            Entity.PositionLocal := if model.Zoom then coords / 3f else coords
             Entity.UpImage == Assets.Default.Ball
             Entity.DownImage == Assets.Default.Ball
-            Entity.Elevation == 10f
+            Entity.ElevationLocal == 20f
             Entity.TextColor ==
                 if name = "player" then
                     Color.Cyan
@@ -212,7 +221,7 @@ type GraphDispatcher () =
                 Entity.PositionLocal := position
                 Entity.RotationLocal := rotation
                 Entity.StaticImage == Assets.Default.White
-                Entity.Elevation == 5f
+                Entity.ElevationLocal == 10f
                 Entity.Color ==
                     match relationship with
                     | Distance uint32 ->
@@ -237,17 +246,23 @@ type GraphDispatcher () =
         for (label1, label2, relationship) in Graph.Directed.Edges.toList graph do
             let _, pos1 = Vertices.find label1 graph
             let _, pos2 = Vertices.find label2 graph
-            line label1 label2 pos1 pos2 relationship
+            let pos1 = if model.Zoom then pos1 / 3f else pos1
+            let pos2 = if model.Zoom then pos2 / 3f else pos2
+            match relationship with
+            | Consists ->
+                ()
+            | _ ->
+                line label1 label2 pos1 pos2 relationship
 
 
         Content.text "SelectedText" [
-            Entity.Size == v3 80f 10f 0f
-            Entity.PositionLocal == v3 0f -60f 0f
+            Entity.Size == v3 120f 10f 0f
+            Entity.PositionLocal := if model.Zoom then v3 0f -40f 0f else v3 0f -100f 0f
             Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
             Entity.Text := model.SelectedText
             Entity.TextColor == Color.FloralWhite
             Entity.Font == Assets.Gui.ClearSansFont
-            Entity.FontSizing == Some 5
+            Entity.FontSizing == Some 8
             Entity.ClickEvent => Select ""
         ]
     ]

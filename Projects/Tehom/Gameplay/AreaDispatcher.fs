@@ -25,8 +25,13 @@ type AreaDispatcher () =
         ()
 
     override this.Content (model, entity) = [
+        Content.staticSprite "Background" [
+            Entity.Size == v3 300f 300f 0f
+            Entity.StaticImage == Assets.Default.Black
+            Entity.Color == Color.White.WithA 0.5f
+        ]
+
         Content.entity<GraphDispatcher> "Graph" [
-            Entity.PositionLocal == v3 90f 90f 0f
         ]
     ]
 

@@ -189,7 +189,7 @@ type GameplayDispatcher () =
             ]
 
             Content.button "Move" [
-                Entity.Position == v3 192f 160f 0f
+                Entity.Position == v3 0f -120f 0f
                 Entity.Size == v3 64f 16f 0f
                 Entity.FontSizing == Some 8
                 Entity.Text == "Move!"

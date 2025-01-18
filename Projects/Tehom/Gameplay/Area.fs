@@ -63,14 +63,18 @@ module Area =
             // actors inside the room
             |> Vertices.add ("room1barricadedWindow1", Site.empty)
             |> Vertices.add ("room1barricadedWindow2", Site.empty)
-            |> Vertices.add ("room1exitFinal", Site.empty)
-            |> Vertices.add ("room1exitMainHall", Site.empty)
+            |> Vertices.add ("room1exit2", Site.empty)
+            |> Vertices.add ("room1exit3", Site.empty)
+            |> Vertices.add ("room1exit6", Site.empty)
+            |> Vertices.add ("room1exit8", Site.empty)
             |> Vertices.add ("room1gurney", Site.empty)
             // locations of actors inside the room
             |> Directed.Edges.add ("room1walls", "room1barricadedWindow1", IsOnEdge)
             |> Directed.Edges.add ("room1walls", "room1barricadedWindow2", IsOnEdge)
-            |> Directed.Edges.add ("room1walls", "room1exitFinal", IsOnEdge)
-            |> Directed.Edges.add ("room1walls", "room1exitMainHall", IsOnEdge)
+            |> Directed.Edges.add ("room1walls", "room1exit2", IsOnEdge)
+            |> Directed.Edges.add ("room1walls", "room1exit3", IsOnEdge)
+            |> Directed.Edges.add ("room1walls", "room1exit6", IsOnEdge)
+            |> Directed.Edges.add ("room1walls", "room1exit8", IsOnEdge)
             |> Directed.Edges.add ("room1floor", "room1gurney", LiesAbove)
 
             // characters inside the room
@@ -108,9 +112,15 @@ module Area =
             |> Vertices.add ("room2table1", Site.empty)
             |> Vertices.add ("room2table2", Site.empty)
             |> Vertices.add ("room2table3", Site.empty)
-            |> Vertices.add ("room2exitWaitingRoom", Site.empty)
+            |> Vertices.add ("room2exit1", Site.empty)
+            |> Vertices.add ("room2exit4", Site.empty)
+            |> Vertices.add ("room2exit5", Site.empty)
+            |> Vertices.add ("room2exit7", Site.empty)
 
-            |> Directed.Edges.add ("room2walls", "room2exitWaitingRoom", IsOnEdge)
+            |> Directed.Edges.add ("room2walls", "room2exit1", IsOnEdge)
+            |> Directed.Edges.add ("room2walls", "room2exit4", IsOnEdge)
+            |> Directed.Edges.add ("room2walls", "room2exit5", IsOnEdge)
+            |> Directed.Edges.add ("room2walls", "room2exit7", IsOnEdge)
             |> Directed.Edges.add ("room2floor", "room2table1", LiesAbove)
             |> Directed.Edges.add ("room2floor", "room2table2", LiesAbove)
             |> Directed.Edges.add ("room2floor", "room2table3", LiesAbove)
@@ -122,22 +132,160 @@ module Area =
         //   (can be seen from waitroom through glass)
         static member room3registration : Sites =
             Graph.empty
+            |> Vertices.add ("room3", Site.empty)
+
+            |> Vertices.add ("room3floor", Site.empty)
+            |> Vertices.add ("room3ceiling", Site.empty)
+            |> Vertices.add ("room3walls", Site.empty)
+            |> Vertices.add ("room3corners", Site.empty)
+            |> Vertices.add ("room3air", Site.empty)
+
+            |> Directed.Edges.add ("room3", "room3floor", Consists)
+            |> Directed.Edges.add ("room3", "room3ceiling", Consists)
+            |> Directed.Edges.add ("room3", "room3walls", Consists)
+            |> Directed.Edges.add ("room3", "room3corners", Consists)
+            |> Directed.Edges.add ("room3", "room3air", Consists)
+
+            |> Directed.Edges.add ("room3air", "room3floor", Distance 150u)
+            |> Directed.Edges.add ("room3floor", "room3air", Distance 150u)
+            |> Directed.Edges.add ("room3air", "room3ceiling", Distance 100u)
+            |> Directed.Edges.add ("room3ceiling", "room3air", Distance 100u)
+            |> Directed.Edges.add ("room3air", "room3walls", Distance 400u)
+            |> Directed.Edges.add ("room3walls", "room3air", Distance 400u)
+            |> Directed.Edges.add ("room3floor", "room3walls", Distance 400u)
+            |> Directed.Edges.add ("room3walls", "room3floor", Distance 400u)
+            |> Directed.Edges.add ("room3corners", "room3floor", IsOnEdge)
+
+            |> Vertices.add ("room3exit1", Site.empty)
+
+            |> Directed.Edges.add ("room3walls", "room3exit1", IsOnEdge)
+
+            //|> Vertices.add ("rat", Site.empty)
+            //|> Directed.Edges.add ("room2floor", "rat", LiesAbove)
 
         // * Electrical room to fix the lights, second rat attacks
         static member room4electrical : Sites =
             Graph.empty
+            |> Vertices.add ("room4", Site.empty)
+
+            |> Vertices.add ("room4floor", Site.empty)
+            |> Vertices.add ("room4ceiling", Site.empty)
+            |> Vertices.add ("room4walls", Site.empty)
+            |> Vertices.add ("room4corners", Site.empty)
+            |> Vertices.add ("room4air", Site.empty)
+
+            |> Directed.Edges.add ("room4", "room4floor", Consists)
+            |> Directed.Edges.add ("room4", "room4ceiling", Consists)
+            |> Directed.Edges.add ("room4", "room4walls", Consists)
+            |> Directed.Edges.add ("room4", "room4corners", Consists)
+            |> Directed.Edges.add ("room4", "room4air", Consists)
+
+            |> Directed.Edges.add ("room4air", "room4floor", Distance 150u)
+            |> Directed.Edges.add ("room4floor", "room4air", Distance 150u)
+            |> Directed.Edges.add ("room4air", "room4ceiling", Distance 100u)
+            |> Directed.Edges.add ("room4ceiling", "room4air", Distance 100u)
+            |> Directed.Edges.add ("room4air", "room4walls", Distance 200u)
+            |> Directed.Edges.add ("room4walls", "room4air", Distance 200u)
+            |> Directed.Edges.add ("room4floor", "room4walls", Distance 200u)
+            |> Directed.Edges.add ("room4walls", "room4floor", Distance 200u)
+            |> Directed.Edges.add ("room4corners", "room4floor", IsOnEdge)
+
+            |> Vertices.add ("room4exit2", Site.empty)
+
+            |> Directed.Edges.add ("room4walls", "room4exit2", IsOnEdge)
 
         // * Surgery room, surgery table, cat on the table, note (cat ate the key), opening it lets spider chandalier escape
         static member room5surgery : Sites =
             Graph.empty
+            |> Vertices.add ("room5", Site.empty)
+
+            |> Vertices.add ("room5floor", Site.empty)
+            |> Vertices.add ("room5ceiling", Site.empty)
+            |> Vertices.add ("room5walls", Site.empty)
+            |> Vertices.add ("room5corners", Site.empty)
+            |> Vertices.add ("room5air", Site.empty)
+
+            |> Directed.Edges.add ("room5", "room5floor", Consists)
+            |> Directed.Edges.add ("room5", "room5ceiling", Consists)
+            |> Directed.Edges.add ("room5", "room5walls", Consists)
+            |> Directed.Edges.add ("room5", "room5corners", Consists)
+            |> Directed.Edges.add ("room5", "room5air", Consists)
+
+            |> Directed.Edges.add ("room5air", "room5floor", Distance 150u)
+            |> Directed.Edges.add ("room5floor", "room5air", Distance 150u)
+            |> Directed.Edges.add ("room5air", "room5ceiling", Distance 100u)
+            |> Directed.Edges.add ("room5ceiling", "room5air", Distance 100u)
+            |> Directed.Edges.add ("room5air", "room5walls", Distance 400u)
+            |> Directed.Edges.add ("room5walls", "room5air", Distance 400u)
+            |> Directed.Edges.add ("room5floor", "room5walls", Distance 400u)
+            |> Directed.Edges.add ("room5walls", "room5floor", Distance 400u)
+            |> Directed.Edges.add ("room5corners", "room5floor", IsOnEdge)
+
+            |> Vertices.add ("room5exit2", Site.empty)
+
+            |> Directed.Edges.add ("room5walls", "room5exit2", IsOnEdge)
 
         // * Pharmacy shop, drugs you can use
         static member room6pharmacy : Sites =
             Graph.empty
+            |> Vertices.add ("room6", Site.empty)
+
+            |> Vertices.add ("room6floor", Site.empty)
+            |> Vertices.add ("room6ceiling", Site.empty)
+            |> Vertices.add ("room6walls", Site.empty)
+            |> Vertices.add ("room6corners", Site.empty)
+            |> Vertices.add ("room6air", Site.empty)
+
+            |> Directed.Edges.add ("room6", "room6floor", Consists)
+            |> Directed.Edges.add ("room6", "room6ceiling", Consists)
+            |> Directed.Edges.add ("room6", "room6walls", Consists)
+            |> Directed.Edges.add ("room6", "room6corners", Consists)
+            |> Directed.Edges.add ("room6", "room6air", Consists)
+
+            |> Directed.Edges.add ("room6air", "room6floor", Distance 150u)
+            |> Directed.Edges.add ("room6floor", "room6air", Distance 150u)
+            |> Directed.Edges.add ("room6air", "room6ceiling", Distance 100u)
+            |> Directed.Edges.add ("room6ceiling", "room6air", Distance 100u)
+            |> Directed.Edges.add ("room6air", "room6walls", Distance 200u)
+            |> Directed.Edges.add ("room6walls", "room6air", Distance 200u)
+            |> Directed.Edges.add ("room6floor", "room6walls", Distance 200u)
+            |> Directed.Edges.add ("room6walls", "room6floor", Distance 200u)
+            |> Directed.Edges.add ("room6corners", "room6floor", IsOnEdge)
+
+            |> Vertices.add ("room6exit1", Site.empty)
+
+            |> Directed.Edges.add ("room6walls", "room6exit1", IsOnEdge)
 
         // * Staircase, other floors blocked, but can move up and down.
         static member room7staircase : Sites =
             Graph.empty
+            |> Vertices.add ("room7", Site.empty)
+
+            |> Vertices.add ("room7floor", Site.empty)
+            |> Vertices.add ("room7ceiling", Site.empty)
+            |> Vertices.add ("room7walls", Site.empty)
+            |> Vertices.add ("room7corners", Site.empty)
+            |> Vertices.add ("room7air", Site.empty)
+
+            |> Directed.Edges.add ("room7", "room7floor", Consists)
+            |> Directed.Edges.add ("room7", "room7ceiling", Consists)
+            |> Directed.Edges.add ("room7", "room7walls", Consists)
+            |> Directed.Edges.add ("room7", "room7corners", Consists)
+            |> Directed.Edges.add ("room7", "room7air", Consists)
+
+            |> Directed.Edges.add ("room7air", "room7floor", Distance 450u)
+            |> Directed.Edges.add ("room7floor", "room7air", Distance 450u)
+            |> Directed.Edges.add ("room7air", "room7ceiling", Distance 300u)
+            |> Directed.Edges.add ("room7ceiling", "room7air", Distance 300u)
+            |> Directed.Edges.add ("room7air", "room7walls", Distance 200u)
+            |> Directed.Edges.add ("room7walls", "room7air", Distance 200u)
+            |> Directed.Edges.add ("room7floor", "room7walls", Distance 200u)
+            |> Directed.Edges.add ("room7walls", "room7floor", Distance 200u)
+            |> Directed.Edges.add ("room7corners", "room7floor", IsOnEdge)
+
+            |> Vertices.add ("room7exit2", Site.empty)
+
+            |> Directed.Edges.add ("room7walls", "room7exit2", IsOnEdge)
 
         static member level1clinic = {
             Name = "Clinic"
@@ -145,7 +293,23 @@ module Area =
                 Graph.empty
                 |> Graph.join Area.room1waitroom
                 |> Graph.join Area.room2mainhall
-                |> Undirected.Edges.add ("room1exitMainHall", "room2exitWaitingRoom", IsOnEdge)
+                |> Directed.Edges.add ("room1exit2", "room2exit1", IsOnEdge)
+                |> Directed.Edges.add ("room2exit1", "room1exit2", IsOnEdge)
+                |> Graph.join Area.room3registration
+                |> Directed.Edges.add ("room1exit3", "room3exit1", IsOnEdge)
+                |> Directed.Edges.add ("room3exit1", "room1exit3", IsOnEdge)
+                |> Graph.join Area.room4electrical
+                |> Directed.Edges.add ("room2exit4", "room4exit2", IsOnEdge)
+                |> Directed.Edges.add ("room4exit2", "room2exit4", IsOnEdge)
+                |> Graph.join Area.room5surgery
+                |> Directed.Edges.add ("room2exit5", "room5exit2", IsOnEdge)
+                |> Directed.Edges.add ("room5exit2", "room2exit5", IsOnEdge)
+                |> Graph.join Area.room6pharmacy
+                |> Directed.Edges.add ("room1exit6", "room6exit1", IsOnEdge)
+                |> Directed.Edges.add ("room6exit1", "room1exit6", IsOnEdge)
+                |> Graph.join Area.room7staircase
+                |> Directed.Edges.add ("room2exit7", "room7exit2", IsOnEdge)
+                |> Directed.Edges.add ("room7exit2", "room2exit7", IsOnEdge)
         }
 
         static member find finder (area : Area) =
