@@ -63,23 +63,26 @@ module Area =
             // actors inside the room
             |> Vertices.add ("room1barricadedWindow1", Site.empty)
             |> Vertices.add ("room1barricadedWindow2", Site.empty)
+            |> Vertices.add ("room1windowroom3", Site.empty)
+            |> Vertices.add ("room1windowroom6", Site.empty)
             |> Vertices.add ("room1exit2", Site.empty)
             |> Vertices.add ("room1exit3", Site.empty)
             |> Vertices.add ("room1exit6", Site.empty)
             |> Vertices.add ("room1exit8", Site.empty)
             |> Vertices.add ("room1gurney", Site.empty)
+            |> Vertices.add ("room1chairs", Site.empty)
             // locations of actors inside the room
             |> Directed.Edges.add ("room1walls", "room1barricadedWindow1", IsOnEdge)
             |> Directed.Edges.add ("room1walls", "room1barricadedWindow2", IsOnEdge)
+            |> Directed.Edges.add ("room1walls", "room1windowroom3", IsOnEdge)
+            |> Directed.Edges.add ("room1walls", "room1windowroom6", IsOnEdge)
             |> Directed.Edges.add ("room1walls", "room1exit2", IsOnEdge)
             |> Directed.Edges.add ("room1walls", "room1exit3", IsOnEdge)
             |> Directed.Edges.add ("room1walls", "room1exit6", IsOnEdge)
             |> Directed.Edges.add ("room1walls", "room1exit8", IsOnEdge)
             |> Directed.Edges.add ("room1floor", "room1gurney", LiesAbove)
+            |> Directed.Edges.add ("room1floor", "room1chairs", LiesAbove)
 
-            // characters inside the room
-            |> Vertices.add ("player", Site.empty)
-            |> Directed.Edges.add ("room1gurney", "player", LiesAbove)
 
 
         // * Main hall, chairs, first rat attacks
@@ -109,9 +112,9 @@ module Area =
             |> Directed.Edges.add ("room2walls", "room2floor", Distance 600u)
             |> Directed.Edges.add ("room2corners", "room2floor", IsOnEdge)
 
-            |> Vertices.add ("room2table1", Site.empty)
-            |> Vertices.add ("room2table2", Site.empty)
-            |> Vertices.add ("room2table3", Site.empty)
+            |> Vertices.add ("room2chair1", Site.empty)
+            |> Vertices.add ("room2chair2", Site.empty)
+            |> Vertices.add ("room2chair3", Site.empty)
             |> Vertices.add ("room2exit1", Site.empty)
             |> Vertices.add ("room2exit4", Site.empty)
             |> Vertices.add ("room2exit5", Site.empty)
@@ -121,9 +124,9 @@ module Area =
             |> Directed.Edges.add ("room2walls", "room2exit4", IsOnEdge)
             |> Directed.Edges.add ("room2walls", "room2exit5", IsOnEdge)
             |> Directed.Edges.add ("room2walls", "room2exit7", IsOnEdge)
-            |> Directed.Edges.add ("room2floor", "room2table1", LiesAbove)
-            |> Directed.Edges.add ("room2floor", "room2table2", LiesAbove)
-            |> Directed.Edges.add ("room2floor", "room2table3", LiesAbove)
+            |> Directed.Edges.add ("room2floor", "room2chair1", LiesAbove)
+            |> Directed.Edges.add ("room2floor", "room2chair2", LiesAbove)
+            |> Directed.Edges.add ("room2floor", "room2chair3", LiesAbove)
 
             |> Vertices.add ("rat", Site.empty)
             |> Directed.Edges.add ("room2floor", "rat", LiesAbove)
@@ -160,6 +163,18 @@ module Area =
 
             |> Directed.Edges.add ("room3walls", "room3exit1", IsOnEdge)
 
+            // actors inside the room
+            |> Vertices.add ("room3windowroom1", Site.empty)
+            |> Vertices.add ("room3registrationdesk", Site.empty)
+            |> Vertices.add ("room3chairs", Site.empty)
+            |> Vertices.add ("room3safe", Site.empty)
+            |> Vertices.add ("room3book", Site.empty)
+            // locations of actors inside the room
+            |> Directed.Edges.add ("room3walls", "room3windowroom1", IsOnEdge)
+            |> Directed.Edges.add ("room3floor", "room3registrationdesk", LiesAbove)
+            |> Directed.Edges.add ("room3floor", "room3chairs", LiesAbove)
+            |> Directed.Edges.add ("room3floor", "room3safe", LiesAbove)
+            |> Directed.Edges.add ("room3registrationdesk", "room3book", LiesAbove)
             //|> Vertices.add ("rat", Site.empty)
             //|> Directed.Edges.add ("room2floor", "rat", LiesAbove)
 
@@ -194,6 +209,13 @@ module Area =
 
             |> Directed.Edges.add ("room4walls", "room4exit2", IsOnEdge)
 
+            // actors inside the room
+            |> Vertices.add ("room4generator", Site.empty)
+            |> Vertices.add ("room4generatorcontrols", Site.empty)
+            // locations of actors inside the room
+            |> Directed.Edges.add ("room4walls", "room4generator", IsOnEdge)
+            |> Directed.Edges.add ("room4floor", "room4generatorcontrols", LiesAbove)
+
         // * Surgery room, surgery table, cat on the table, note (cat ate the key), opening it lets spider chandalier escape
         static member room5surgery : Sites =
             Graph.empty
@@ -225,6 +247,18 @@ module Area =
 
             |> Directed.Edges.add ("room5walls", "room5exit2", IsOnEdge)
 
+            // actors inside the room
+            |> Vertices.add ("room5surgerytable", Site.empty)
+            |> Vertices.add ("room5instruments", Site.empty)
+            |> Vertices.add ("room5cat", Site.empty)
+            |> Vertices.add ("room5key", Site.empty)
+            // locations of actors inside the room
+            |> Directed.Edges.add ("room5floor", "room5surgerytable", LiesAbove)
+            |> Directed.Edges.add ("room5surgerytable", "room5instruments", LiesAbove)
+            |> Directed.Edges.add ("room5surgerytable", "room5cat", LiesAbove)
+            |> Directed.Edges.add ("room5cat", "room5key", LiesAbove)
+
+
         // * Pharmacy shop, drugs you can use
         static member room6pharmacy : Sites =
             Graph.empty
@@ -255,6 +289,12 @@ module Area =
             |> Vertices.add ("room6exit1", Site.empty)
 
             |> Directed.Edges.add ("room6walls", "room6exit1", IsOnEdge)
+            // actors inside the room
+            |> Vertices.add ("room6shelves", Site.empty)
+            |> Vertices.add ("room6drugs", Site.empty)
+            // locations of actors inside the room
+            |> Directed.Edges.add ("room6floor", "room6shelves", LiesAbove)
+            |> Directed.Edges.add ("room6shelves", "room6drugs", LiesAbove)
 
         // * Staircase, other floors blocked, but can move up and down.
         static member room7staircase : Sites =
@@ -298,6 +338,8 @@ module Area =
                 |> Graph.join Area.room3registration
                 |> Directed.Edges.add ("room1exit3", "room3exit1", IsOnEdge)
                 |> Directed.Edges.add ("room3exit1", "room1exit3", IsOnEdge)
+                |> Directed.Edges.add ("room1windowroom3", "room3windowroom1", IsOnEdge)
+                |> Directed.Edges.add ("room3windowroom1", "room1windowroom3", IsOnEdge)
                 |> Graph.join Area.room4electrical
                 |> Directed.Edges.add ("room2exit4", "room4exit2", IsOnEdge)
                 |> Directed.Edges.add ("room4exit2", "room2exit4", IsOnEdge)
@@ -310,6 +352,10 @@ module Area =
                 |> Graph.join Area.room7staircase
                 |> Directed.Edges.add ("room2exit7", "room7exit2", IsOnEdge)
                 |> Directed.Edges.add ("room7exit2", "room2exit7", IsOnEdge)
+
+                // characters inside the room
+                |> Vertices.add ("player", Site.empty)
+                |> Directed.Edges.add ("room1gurney", "player", LiesAbove)
         }
 
         static member find finder (area : Area) =
