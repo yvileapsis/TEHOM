@@ -10,6 +10,7 @@ open Area
 type GraphMessage =
     | Update
     | Select of string
+    | Click of string
     interface Message
 
 type SitesGraph = {
@@ -184,6 +185,10 @@ type GraphDispatcher () =
             let model = { model with SelectedText = str }
             just model
 
+        | Click s ->
+            // TODO: take key through use action
+            just model
+
     override this.Command (model, command, entity, world) =
 
         match command with
@@ -265,4 +270,77 @@ type GraphDispatcher () =
             Entity.FontSizing == Some 8
             Entity.ClickEvent => Select ""
         ]
+
+        let graph' =
+            model.Graph
+            |> Edges.undirect2 (fun vertex1 vertex2 edge ->
+                match edge with
+                | Contains -> true
+                | LiesAbove -> true
+                | Covers -> true
+                | IsOnEdge -> true
+                | _ -> false
+            ) (fun edge1 edge2 ->
+                edge1
+            )
+            |> Edges.choose (fun v1 v2 edge ->
+                match edge with
+                | Distance x -> Some (uint x)
+                | Consists -> None
+                | Contains -> Some 0u
+                | LiesAbove -> Some 0u
+                | Covers -> Some 0u
+                | IsOnEdge -> Some 0u
+            )
+
+        let vertices =
+            graph'
+            |> Vertices.toList |> List.map fst
+
+        let nodeDistance =
+            vertices
+            |> List.fold (fun map v ->
+                let tree = Query.spTree v graph'
+
+                vertices
+                |> List.fold (fun (map : Map<String * String, uint option>) v' ->
+                    let distance =
+                        Query.getDistance v' tree
+
+                    Map.add (v, v') distance map
+                ) map
+            ) Map.empty
+
+
+        let allwithinreach =
+            nodeDistance
+            |> Map.toList
+            |> List.filter (fun ((v, v'), distance) -> v = "player" && distance.IsSome && (distance < Some 150u))
+            |> List.map (fun ((v, v'), distance) -> v', distance)
+
+        Content.association "usables" [
+            Entity.Absolute == false
+            Entity.PositionLocal == v3 -180.0f 0.0f 0.0f
+            Entity.Size == v3 60.0f 40.0f 0.0f
+            Entity.Elevation == 10.0f
+            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+            Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+
+        ] [
+
+            for (vertex, distance) in allwithinreach do
+                Content.button $"use{vertex}" [
+                    Entity.Absolute == false
+                    Entity.Size == v3 60.0f 5.0f 0.0f
+                    Entity.Text := $"{vertex}"
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.FontSizing == Some 5
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    Entity.TextColor := Color.FloralWhite
+                    Entity.ClickEvent => Click vertex
+                ]
+
+        ]
+
+
     ]
