@@ -27,7 +27,7 @@ type CombatDispatcher () =
     inherit Entity2dDispatcher<Combat, CombatMessage, CombatCommand> (false, false, false, Combat.initial)
 
     override this.Definitions (_, _) = [
-        Entity.Size == Constants.Render.VirtualResolution.V3 / 2f
+        Entity.Size == Constants.Render.DisplayVirtualResolution.V3 / 2f
         Screen.DeselectingEvent => FinishQuitting
         Screen.UpdateEvent => Update
         Screen.TimeUpdateEvent => TimeUpdate

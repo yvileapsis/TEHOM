@@ -92,7 +92,7 @@ module Character =
         member this.CharacterProperties =
             match this.CharacterType with
             | Player -> CharacterProperties.defaultProperties
-            | Enemy -> { CharacterProperties.defaultProperties with PenetrationDepthMax = 0.1f }
+            | Enemy -> { CharacterProperties.defaultProperties with CollisionTolerance = 0.005f }
 
         static member private computeTraversalAnimations rotation linearVelocity angularVelocity character =
             match character.ActionState with

@@ -124,6 +124,8 @@ type SelectionManagerDispatcher () =
         match command with
         | PublishSelectionEvent ->
 
+            let scalar = single 3
+
             let transform = entity.GetTransform world
             let perimeter = transform.Perimeter.Box2
 
@@ -132,7 +134,7 @@ type SelectionManagerDispatcher () =
                 |> List.filter (fun entity ->
                     let v3 = entity.GetPosition world
                     let position =
-                        (World.position3dToPosition2d v3 world).V2 / (single Constants.Render.VirtualScalar)
+                        (World.position3dToPosition2d v3 world).V2 / scalar
                     perimeter.Intersects position
                 )
             let world = World.publish entities entity.SelectionEvent entity world

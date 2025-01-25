@@ -186,7 +186,8 @@ type GameplayDispatcher () =
                 let ray = World.getMouseRay3dWorld world
                 let origin = ray.Origin
                 let finale = ray.Origin + 100f * ray.Direction
-                let array = World.rayCast3dBodies origin finale 0xFFFFFFFF 0xFFFFFFFF false world
+                let segment = segment3 origin finale
+                let array = World.rayCast3dBodies segment 0xFFFFFFFF false world
                 Array.tryHead array
 
             match firstIntersection with

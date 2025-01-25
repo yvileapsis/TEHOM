@@ -135,7 +135,7 @@ W....!!....!!....!!....!!....!!....!"
         // the gui group
         Content.group "RogueBackground" [] [
             Content.staticSprite "Background" [
-                Entity.Size == Constants.Render.VirtualResolution.V3
+                Entity.Size == Constants.Render.DisplayVirtualResolution.V3
                 Entity.StaticImage == Assets.Default.Black
                 Entity.Color == Color.Black
             ]
