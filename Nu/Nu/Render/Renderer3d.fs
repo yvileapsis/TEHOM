@@ -1117,7 +1117,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                     | (true, fontSize) -> fontSize
                     | (false, _) -> Constants.Render.FontSizeDefault
                 else Constants.Render.FontSizeDefault
-            let fontSize = fontSizeDefault * Constants.Render.VirtualScalar
+            let fontSize = fontSizeDefault * renderer.GeometryViewport.DisplayScalar
             let fontOpt = SDL_ttf.TTF_OpenFont (asset.FilePath, fontSize)
             if fontOpt <> IntPtr.Zero
             then Some (FontAsset (fontSizeDefault, fontOpt))
@@ -2397,6 +2397,8 @@ type [<ReferenceEquality>] GlRenderer3d =
                 match renderAsset with
                 | FontAsset (fontSizeDefault, font) ->
 
+                    let virtualScalar = 3
+
                     // gather rendering resources
                     // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
                     // surface and texture one or more times a frame must be understood!
@@ -2412,13 +2414,13 @@ type [<ReferenceEquality>] GlRenderer3d =
                         // attempt to configure sdl font size
                         let fontSize =
                             match fontSizing with
-                            | Some fontSize -> fontSize * Constants.Render.VirtualScalar
-                            | None -> fontSizeDefault * Constants.Render.VirtualScalar
+                            | Some fontSize -> fontSize * virtualScalar
+                            | None -> fontSizeDefault * virtualScalar
                         let errorCode = SDL_ttf.TTF_SetFontSize (font, fontSize)
                         if errorCode <> 0 then
                             let error = SDL_ttf.TTF_GetError ()
                             Log.infoOnce ("Failed to set font size for font '" + scstring font + "' due to: " + error)
-                            SDL_ttf.TTF_SetFontSize (font, fontSizeDefault * Constants.Render.VirtualScalar) |> ignore<int>
+                            SDL_ttf.TTF_SetFontSize (font, fontSizeDefault * virtualScalar) |> ignore<int>
 
                         // configure sdl font style
                         let styleSdl =
@@ -2804,7 +2806,8 @@ type [<ReferenceEquality>] GlRenderer3d =
         let viewTranslationArray = viewTranslation.ToArray ()
         let invViewArray = (viewRotation).Inverted.ToArray ()
         let invProjectionArray = geometryProjection.Inverted.ToArray ()
-        let viewPort = v2 geometryViewport.NearDistance geometryViewport.FarDistance
+        let geometryViewport = renderer.GeometryViewport
+        let viewPort = v2 geometryViewport.DistanceNear geometryViewport.DistanceFar
         let viewPortBounds = (v4i geometryViewport.Bounds.Min.X geometryViewport.Bounds.Min.Y geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y).V4
 
         // get ambient lighting, sky box opt, and fallback light map
@@ -3399,8 +3402,12 @@ type [<ReferenceEquality>] GlRenderer3d =
 
                         // create reflection map
                         let reflectionMap =
+                            let renderTasks = GlRenderer3d.getRenderTasks renderPass renderer
+
+                            let renderGeometry = GlRenderer3d.renderGeometry renderPass renderTasks renderer
+
                             OpenGL.LightMap.CreateReflectionMap
-                                (GlRenderer3d.renderGeometry renderPass (GlRenderer3d.getRenderTasks renderPass renderer) renderer,
+                                (renderGeometry,
                                  Constants.Render.ReflectionMapResolution,
                                  lightProbeOrigin,
                                  lightProbeAmbientColor,
@@ -3563,20 +3570,18 @@ type [<ReferenceEquality>] GlRenderer3d =
                             | SpotLight (_, _) | DirectionalLight -> failwithumf ()
                         | _ -> ()
 
-        let viewport = Constants.Render.Viewport
+        let viewport = renderer.GeometryViewport
 
         // compute view and projection
-        let view = viewport.View3d (eyeCenter, eyeRotation)
-        let viewSkyBox = Matrix4x4.CreateFromQuaternion eyeRotation.Inverted
-        let projection = viewport.Projection3d
-        let viewRotation = viewport.View3d (Vector3.Zero, eyeRotation)
-        let viewTranslation = viewport.View3d (eyeCenter, Quaternion.CreateFromYawPitchRoll (0f, 0f, 0f))
+        let viewRotation = Viewport.getView3d Vector3.Zero eyeRotation
+        let viewTranslation = Viewport.getView3d eyeCenter (Quaternion.CreateFromYawPitchRoll (0f, 0f, 0f))
 
         // top-level geometry pass
         GlRenderer3d.renderGeometry
             normalPass normalTasks renderer
             true None eyeCenter
             (Viewport.getView3d eyeCenter eyeRotation)
+            viewRotation viewTranslation
             (Matrix4x4.CreateFromQuaternion eyeRotation.Inverted)
             (Viewport.getFrustum eyeCenter eyeRotation eyeFieldOfView geometryViewport)
             (Viewport.getProjection3d eyeFieldOfView geometryViewport)
@@ -3584,8 +3589,6 @@ type [<ReferenceEquality>] GlRenderer3d =
             (Viewport.getProjection3d eyeFieldOfView rasterViewport)
             renderbuffer
             framebuffer
-
-        GlRenderer3d.renderGeometry normalPass normalTasks renderer true None eyeCenter eyeRotation view viewRotation viewTranslation viewSkyBox viewport projection ssaoViewport offsetViewport projection renderbuffer framebuffer
 
         // reset terrain geometry book-keeping
         renderer.PhysicallyBasedTerrainGeometriesUtilized.Clear ()

@@ -804,23 +804,22 @@ type [<ReferenceEquality>] GlRenderer2d =
          text : RichTextParagraph list,
          eyeCenter : Vector2,
          eyeSize : Vector2,
-         windowSize,
          renderer : GlRenderer2d) =
 
         let transform = transform
         let clipOpt = clipOpt
 
-        flip3 OpenGL.SpriteBatch.InterruptSpriteBatchFrame windowSize renderer.SpriteBatchEnv $ fun () ->
+        flip3 OpenGL.SpriteBatch.InterruptSpriteBatchFrame renderer.Viewport renderer.SpriteBatchEnv $ fun () ->
 
             // gather context for rendering text
             let mutable transform = transform
             let absolute = transform.Absolute
             let perimeter = transform.Perimeter
-            let virtualScalar = (v2iDup Constants.Render.VirtualScalar).V2
+            let virtualScalar = (v2iDup renderer.Viewport.DisplayScalar).V2
             let position = perimeter.Min.V2 * virtualScalar
             let size = perimeter.Size.V2 * virtualScalar
-            let viewport = Constants.Render.Viewport
-            let viewProjection = viewport.ViewProjection2d (absolute, eyeCenter, eyeSize)
+            let viewProjection = Viewport.getViewProjection2d absolute eyeCenter eyeSize renderer.Viewport
+
 
             // get font pointer for point asset and set its styling and sizing
             let getFont fontAsset fontSizing (fontStyling: Set<FontStyle>) =
@@ -831,14 +830,14 @@ type [<ReferenceEquality>] GlRenderer2d =
                         // attempt to configure sdl font size
                         let fontSize =
                             match fontSizing with
-                            | Some fontSize -> fontSize * Constants.Render.VirtualScalar
-                            | None -> fontSizeDefault * Constants.Render.VirtualScalar
+                            | Some fontSize -> fontSize * renderer.Viewport.DisplayScalar
+                            | None -> fontSizeDefault * renderer.Viewport.DisplayScalar
 
                         let errorCode = SDL_ttf.TTF_SetFontSize (font, fontSize)
                         if errorCode <> 0 then
                             let error = SDL_ttf.TTF_GetError ()
                             Log.infoOnce ("Failed to set font size for font '" + scstring font + "' due to: " + error)
-                            SDL_ttf.TTF_SetFontSize (font, fontSizeDefault * Constants.Render.VirtualScalar) |> ignore<int>
+                            SDL_ttf.TTF_SetFontSize (font, fontSizeDefault * renderer.Viewport.DisplayScalar) |> ignore<int>
 
                         // configure sdl font style
                         let styleSdl =
@@ -1206,7 +1205,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                 let insetOpt : Box2 voption = ValueNone
                 let color = Color.White
 
-                OpenGL.Sprite.DrawSprite (vertices, indices, vao, &viewProjection, modelViewProjection.ToArray (), &insetOpt, &clipOpt, &color, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, windowSize, modelViewProjectionUniform, texCoords4Uniform, colorUniform, textureUniform, shader)
+                OpenGL.Sprite.DrawSprite (vertices, indices, vao, &viewProjection, modelViewProjection.ToArray (), &insetOpt, &clipOpt, &color, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, renderer.Viewport, modelViewProjectionUniform, texCoords4Uniform, colorUniform, textureUniform, shader)
                 OpenGL.Hl.Assert ()
 
                 // destroy texture
@@ -1244,10 +1243,9 @@ type [<ReferenceEquality>] GlRenderer2d =
         | RenderText descriptor ->
             GlRenderer2d.renderText
                 (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Text, descriptor.Font, descriptor.FontSizing, descriptor.FontStyling, &descriptor.Color, descriptor.Justification, descriptor.CursorOpt, eyeCenter, eyeSize, renderer)
-                (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Text, descriptor.Font, descriptor.FontSizing, descriptor.FontStyling, &descriptor.Color, descriptor.Justification, descriptor.CursorOpt, eyeCenter, eyeSize, windowSize, renderer)
         | RenderRichText descriptor ->
             GlRenderer2d.renderRichText
-                (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Entries, eyeCenter, eyeSize, windowSize, renderer)
+                (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Entries, eyeCenter, eyeSize, renderer)
         | RenderTiles descriptor ->
             GlRenderer2d.renderTiles
                 (&descriptor.Transform, &descriptor.ClipOpt, &descriptor.Color, &descriptor.Emission, descriptor.MapSize, descriptor.Tiles, descriptor.TileSourceSize, descriptor.TileSize, descriptor.TileAssets, eyeCenter, eyeSize, renderer)
