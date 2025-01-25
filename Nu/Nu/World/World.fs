@@ -187,6 +187,7 @@ module WorldModule3 =
                  VoxelDispatcher ()
                  Text3dDispatcher ()
                  RichTextDispatcher ()
+                 CustomFilter3dConfigDispatcher ()
                  ]
 
         static member private makeDefaultFacets () =

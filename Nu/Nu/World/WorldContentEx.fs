@@ -901,6 +901,26 @@ type VoxelDispatcher () =
     static member Facets =
         [typeof<VoxelFacet>]
 
+[<AutoOpen>]
+module CustomFilter3dConfigDispatcherExtensions =
+    type Entity with
+        member this.GetCustomFilter3dConfig world : CustomFilter3dConfig = this.Get (nameof this.CustomFilter3dConfig) world
+        member this.SetCustomFilter3dConfig (value : CustomFilter3dConfig) world = this.Set (nameof this.CustomFilter3dConfig) value world
+        member this.CustomFilter3dConfig = lens (nameof this.CustomFilter3dConfig) this this.GetCustomFilter3dConfig this.SetCustomFilter3dConfig
+
+type CustomFilter3dConfigDispatcher () =
+    inherit Entity3dDispatcher (false, false, false)
+
+    static member Properties =
+        [define Entity.CustomFilter3dConfig CustomFilter3dConfig.defaultConfig
+         define Entity.Presence Omnipresent
+         define Entity.AlwaysUpdate true]
+
+    override this.Update (entity, world) =
+        let config = entity.GetCustomFilter3dConfig world
+        World.enqueueRenderMessage3d (ConfigureCustomFilter3d config) world
+        world
+
 [<RequireQualifiedAccess>]
 module ContentEx =
     let camera entityName initializers = Content.entity<CameraDispatcher> entityName initializers
@@ -911,3 +931,4 @@ module ContentEx =
     let text3d entityName definitions = Content.entity<Text3dDispatcher> entityName definitions
     let glyph entityName initializers = Content.entity<GlyphMatrixDispatcher> entityName initializers
     let voxel entityName definitions = Content.entity<VoxelDispatcher> entityName definitions
+    let customFilter3dConfig entityName definitions = Content.entity<CustomFilter3dConfigDispatcher> entityName definitions

@@ -558,6 +558,13 @@ type [<SymbolicExpansion>] Renderer3dConfig =
           SsvfEnabled = Constants.Render.SsvfEnabledGlobalDefault
           SsrEnabled = Constants.Render.SsrEnabledGlobalDefault }
 
+/// Configures custom 3d filter.
+type [<SymbolicExpansion>] CustomFilter3dConfig =
+    { CustomFilterEnabled : bool }
+
+    static member defaultConfig =
+        { CustomFilterEnabled = false }
+
 /// A message to the 3d renderer.
 type RenderMessage3d =
     | CreateUserDefinedStaticModel of CreateUserDefinedStaticModel
@@ -582,8 +589,8 @@ type RenderMessage3d =
     | RenderTerrain of RenderTerrain
     | RenderVoxel of RenderVoxel
     | ConfigureLighting3d of Lighting3dConfig
+    | ConfigureCustomFilter3d of CustomFilter3dConfig
     | ConfigureRenderer3d of Renderer3dConfig
-    | ConfigureFilter of bool
     | LoadRenderPackage3d of string
     | UnloadRenderPackage3d of string
     | ReloadRenderAssets3d
@@ -956,8 +963,8 @@ type [<ReferenceEquality>] GlRenderer3d =
           mutable PhysicallyBasedBuffers : OpenGL.PhysicallyBased.PhysicallyBasedBuffers
           LightMaps : Dictionary<uint64, OpenGL.LightMap.LightMap>
           mutable LightingConfig : Lighting3dConfig
+          mutable CustomFilterConfig : CustomFilter3dConfig
           mutable RendererConfig : Renderer3dConfig
-          mutable CustomFilterConfig : bool
           mutable InstanceFields : single array
           mutable UserDefinedStaticModelFields : single array
           ForwardSurfacesComparer : IComparer<struct (single * single * Matrix4x4 * Presence * Box2 * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedSurface * single)>
@@ -3220,8 +3227,8 @@ type [<ReferenceEquality>] GlRenderer3d =
         OpenGL.PhysicallyBased.DrawFilterFxaaSurface (compositionTexture, renderer.PhysicallyBasedQuad, renderer.FilterFxaaShader)
         OpenGL.Hl.Assert ()
 
-        if renderer.CustomFilterConfig then
-            // render filter quad via fxaa
+        if renderer.CustomFilterConfig.CustomFilterEnabled then
+            // render filter quad
             OpenGL.PhysicallyBased.DrawFilterCustomSurface (compositionTexture, renderer.PhysicallyBasedQuad, renderer.FilterCustomShader)
             OpenGL.Hl.Assert ()
 
@@ -3345,7 +3352,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                 renderer.LightingConfig <- l3c
             | ConfigureRenderer3d r3c ->
                 renderer.RendererConfig <- r3c
-            | ConfigureFilter value ->
+            | ConfigureCustomFilter3d value ->
                 renderer.CustomFilterConfig <- value
             | LoadRenderPackage3d packageName ->
                 GlRenderer3d.handleLoadRenderPackage packageName renderer
@@ -3918,8 +3925,8 @@ type [<ReferenceEquality>] GlRenderer3d =
               PhysicallyBasedBuffers = physicallyBasedBuffers
               LightMaps = dictPlus HashIdentity.Structural []
               LightingConfig = Lighting3dConfig.defaultConfig
+              CustomFilterConfig = CustomFilter3dConfig.defaultConfig
               RendererConfig = Renderer3dConfig.defaultConfig
-              CustomFilterConfig = false
               InstanceFields = Array.zeroCreate<single> (Constants.Render.InstanceFieldCount * Constants.Render.InstanceBatchPrealloc)
               UserDefinedStaticModelFields = [||]
               ForwardSurfacesComparer = forwardSurfacesComparer

@@ -115,7 +115,6 @@ type GameplayDispatcher () =
 //            let world = World.setEye3dRotation (Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -20f, 0f)) world
             let world = World.setEye2dCenter (v2 0f 0f) world
             let world = World.setEye2dCenter (v2 640f 360f) world
-            World.enqueueRenderMessage3d (ConfigureFilter true) world
 
             let area, world = World.createEntity<AreaDispatcher> NoOverlay (Some [|"Area"|]) Simulants.GameplayGui world
             let world = area.SetArea Area.level1clinic world
@@ -202,6 +201,10 @@ type GameplayDispatcher () =
 
             Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] [
                 let coordinates, rotations = model.CoordinatesAndRotations |> List.unzip
+
+                ContentEx.customFilter3dConfig "CustomFilter" [
+                    Entity.CustomFilter3dConfig == { CustomFilter3dConfig.defaultConfig with CustomFilterEnabled = true }
+                ]
 
                 Content.composite<Ball3dDispatcher> "Chisel" [
                     Entity.Position := coordinates[0]
