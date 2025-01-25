@@ -332,7 +332,7 @@ module WorldEntityModule =
         /// Set the transform of an entity snapped to the give position and rotation snaps.
         member this.SetTransformPositionSnapped positionSnap (value : Transform) world =
             let mutable transform = value
-            transform.SnapPosition positionSnap
+            Transform.snapPosition (positionSnap, &transform)
             this.SetTransform transform world
 
         /// Try to get a property value and type.
@@ -393,15 +393,11 @@ module WorldEntityModule =
         /// Check that an entity is in the eye's view.
         member this.GetInView3d world = World.getEntityInView3d this world
 
-        /// Check that an entity is selected.
-        member this.GetSelected world =
-            let gameState = World.getGameState Game.Handle world
-            match gameState.SelectedScreenOpt with
-            | Some screen when this.Screen.Name = screen.Name -> true
-            | _ -> false
-
         /// Check that an entity exists in the world.
         member this.GetExists world = World.getEntityExists this world
+
+        /// Check that an entity is selected.
+        member this.GetSelected world = World.getEntitySelected this world
 
         /// Check if an entity is intersected by a ray.
         member this.RayCast ray world = World.rayCastEntity ray this world
@@ -648,26 +644,27 @@ module WorldEntityModule =
         /// Attempt to pick an entity at the given position.
         static member tryPickEntity2d position entities world =
             let entitiesSorted = World.sortEntities2d entities world
-            let viewport = World.getViewport world
+            let viewport = world.RasterViewport
             let eyeCenter = World.getEye2dCenter world
             let eyeSize = World.getEye2dSize world
             Array.tryFind (fun (entity : Entity) ->
                 if entity.GetPickable world then
-                    let positionWorld = viewport.MouseToWorld2d (entity.GetAbsolute world, position, eyeCenter, eyeSize)
+                    let positionWorld = Viewport.mouseToWorld2d (entity.GetAbsolute world) eyeCenter eyeSize position viewport
                     let bounds = (entity.GetBounds world).Box2
                     bounds.Intersects positionWorld
                 else false)
                 entitiesSorted
 
         /// Attempt to pick a 3d entity with the given ray.
-        static member tryPickEntity3d position entities world =
-            let viewport = World.getViewport world
+        static member tryPickEntity3d position entities (world : World) =
+            let viewport = world.RasterViewport
             let eyeCenter = World.getEye3dCenter world
             let eyeRotation = World.getEye3dRotation world
+            let eyeFieldOfView = World.getEye3dFieldOfView world
             let intersectionses =
                 Seq.map (fun (entity : Entity) ->
                     if entity.GetPickable world then
-                        let rayWorld = viewport.MouseToWorld3d (position, eyeCenter, eyeRotation)
+                        let rayWorld = Viewport.mouseToWorld3d eyeCenter eyeRotation eyeFieldOfView position viewport
                         let bounds = entity.GetBounds world
                         let intersectionOpt = rayWorld.Intersects bounds
                         if intersectionOpt.HasValue then
@@ -752,8 +749,8 @@ module WorldEntityModule =
                 Set.ofSeq
             World.generateEntitySequentialName2 dispatcherName existingEntityNames
 
-        /// Clear the content of the clipboard.
-        static member clearClipboard (_ : World) =
+        /// Clear any entity on the world's clipboard.
+        static member clearEntityFromClipboard (_ : World) =
             Clipboard <- None
 
         /// Copy an entity to the world's clipboard.
@@ -766,6 +763,10 @@ module WorldEntityModule =
             let entityDescriptor = World.writeEntity true EntityDescriptor.empty entity world
             Clipboard <- Some (true, entityDescriptor, entity)
             World.destroyEntityImmediate entity world
+
+        /// Check that there's an entity on the world's clipboard to paste.
+        static member canPasteEntityFromClipboard (_ : World) =
+            Clipboard.IsSome
 
         /// Paste an entity from the world's clipboard.
         static member pasteEntityFromClipboard tryForwardPropagationSource (distance : single) rightClickPosition positionSnapEir pasteType (parent : Simulant) world =
@@ -788,12 +789,11 @@ module WorldEntityModule =
                 let (position, positionSnapOpt) =
                     let absolute = entity.GetAbsolute world
                     if entity.GetIs2d world then
-                        let viewport = World.getViewport world
                         let eyeCenter = World.getEye2dCenter world
                         let eyeSize = World.getEye2dSize world
                         let position =
                             match pasteType with
-                            | PasteAtMouse -> (viewport.MouseToWorld2d (absolute, rightClickPosition, eyeCenter, eyeSize)).V3
+                            | PasteAtMouse -> (Viewport.mouseToWorld2d absolute eyeCenter eyeSize rightClickPosition world.RasterViewport).V3
                             | PasteAtLook -> eyeCenter.V3
                             | PasteAt position -> position
                         match positionSnapEir with
@@ -802,11 +802,11 @@ module WorldEntityModule =
                     else
                         let eyeCenter = World.getEye3dCenter world
                         let eyeRotation = World.getEye3dRotation world
+                        let eyeFieldOfView = World.getEye3dFieldOfView world
                         let position =
                             match pasteType with
                             | PasteAtMouse ->
-                                let viewport = Constants.Render.Viewport
-                                let ray = viewport.MouseToWorld3d (rightClickPosition, eyeCenter, eyeRotation)
+                                let ray = Viewport.mouseToWorld3d eyeCenter eyeRotation eyeFieldOfView rightClickPosition world.RasterViewport
                                 let forward = eyeRotation.Forward
                                 let plane = plane3 (eyeCenter + forward * distance) -forward
                                 let intersectionOpt = ray.Intersection plane
@@ -818,9 +818,7 @@ module WorldEntityModule =
                         | Left _ -> (position, None)
                 let mutable transform = entity.GetTransform world
                 transform.Position <- position
-                match positionSnapOpt with
-                | Some positionSnap -> transform.SnapPosition positionSnap
-                | None -> ()
+                match positionSnapOpt with Some positionSnap -> Transform.snapPosition (positionSnap, &transform) | None -> ()
                 let world = entity.SetTransform transform world
                 let world =
                     if tryForwardPropagationSource && not cut then

@@ -127,7 +127,7 @@ module WorldModuleGame =
                 let world =
                     match (World.getGameState game world).SelectedScreenOpt with
                     | Some screen ->
-                        let world = WorldModule.unregisterScreenPhysics false screen world
+                        let world = WorldModule.unregisterScreenPhysics screen world
                         let world = WorldModule.evictScreenElements screen world
                         world
                     | None -> world
@@ -143,7 +143,7 @@ module WorldModuleGame =
 
                     // populate singleton states
                     let world = WorldModule.admitScreenElements screen world
-                    let world = WorldModule.registerScreenPhysics false screen world
+                    let world = WorldModule.registerScreenPhysics screen world
 
                     // raise change event for some selection
                     let world = World.publishGameChange (nameof gameState.SelectedScreenOpt) previous value game world
@@ -305,15 +305,15 @@ module WorldModuleGame =
             let gameState = World.getGameState game world
             let previous = gameState.Eye3dCenter
             if v3Neq previous value then
-                let viewportInterior = Viewport (Constants.Render.NearPlaneDistanceInterior, Constants.Render.FarPlaneDistanceInterior, v2iZero, Constants.Render.Resolution)
-                let viewportExterior = Viewport (Constants.Render.NearPlaneDistanceExterior, Constants.Render.FarPlaneDistanceExterior, v2iZero, Constants.Render.Resolution)
-                let viewportImposter = Viewport (Constants.Render.NearPlaneDistanceImposter, Constants.Render.FarPlaneDistanceImposter, v2iZero, Constants.Render.Resolution)
+                let viewportInterior = Viewport.makeInterior ()
+                let viewportExterior = Viewport.makeExterior ()
+                let viewportImposter = Viewport.makeImposter ()
                 let gameState =
                     { gameState with
                         Eye3dCenter = value
-                        Eye3dFrustumInterior = viewportInterior.Frustum (value, gameState.Eye3dRotation)
-                        Eye3dFrustumExterior = viewportExterior.Frustum (value, gameState.Eye3dRotation)
-                        Eye3dFrustumImposter = viewportImposter.Frustum (value, gameState.Eye3dRotation) }
+                        Eye3dFrustumInterior = Viewport.getFrustum value gameState.Eye3dRotation gameState.Eye3dFieldOfView viewportInterior
+                        Eye3dFrustumExterior = Viewport.getFrustum value gameState.Eye3dRotation gameState.Eye3dFieldOfView viewportExterior
+                        Eye3dFrustumImposter = Viewport.getFrustum value gameState.Eye3dRotation gameState.Eye3dFieldOfView viewportImposter }
                 struct (true, world |> World.setGameState gameState game |> World.publishGameChange (nameof gameState.Eye3dCenter) previous value game)
             else struct (false, world)
 
@@ -332,25 +332,52 @@ module WorldModuleGame =
             let gameState = World.getGameState game world
             let previous = gameState.Eye3dRotation
             if quatNeq previous value then
-                let viewportInterior = Viewport (Constants.Render.NearPlaneDistanceInterior, Constants.Render.FarPlaneDistanceInterior, v2iZero, Constants.Render.Resolution)
-                let viewportExterior = Viewport (Constants.Render.NearPlaneDistanceExterior, Constants.Render.FarPlaneDistanceExterior, v2iZero, Constants.Render.Resolution)
-                let viewportImposter = Viewport (Constants.Render.NearPlaneDistanceImposter, Constants.Render.FarPlaneDistanceImposter, v2iZero, Constants.Render.Resolution)
+                let viewportInterior = Viewport.makeInterior ()
+                let viewportExterior = Viewport.makeExterior ()
+                let viewportImposter = Viewport.makeImposter ()
                 let gameState =
                     { gameState with
                         Eye3dRotation = value
-                        Eye3dFrustumInterior = viewportInterior.Frustum (gameState.Eye3dCenter, value)
-                        Eye3dFrustumExterior = viewportExterior.Frustum (gameState.Eye3dCenter, value)
-                        Eye3dFrustumImposter = viewportImposter.Frustum (gameState.Eye3dCenter, value) }
+                        Eye3dFrustumInterior = Viewport.getFrustum gameState.Eye3dCenter value gameState.Eye3dFieldOfView viewportInterior
+                        Eye3dFrustumExterior = Viewport.getFrustum gameState.Eye3dCenter value gameState.Eye3dFieldOfView viewportExterior
+                        Eye3dFrustumImposter = Viewport.getFrustum gameState.Eye3dCenter value gameState.Eye3dFieldOfView viewportImposter }
                 struct (true, world |> World.setGameState gameState game |> World.publishGameChange (nameof gameState.Eye3dRotation) previous value game)
             else struct (false, world)
-
+            
         /// Get the current 3d eye rotation.
         static member getEye3dRotation world =
             World.getGameEye3dRotation Game.Handle world
-
+            
         /// Set the current 3d eye rotation.
         static member setEye3dRotation value world =
             World.setGameEye3dRotation value Game.Handle world |> snd'
+
+        static member internal getGameEye3dFieldOfView game world =
+            (World.getGameState game world).Eye3dFieldOfView
+
+        static member internal setGameEye3dFieldOfView value game world =
+            let gameState = World.getGameState game world
+            let previous = gameState.Eye3dFieldOfView
+            if previous <> value then
+                let viewportInterior = Viewport.makeInterior ()
+                let viewportExterior = Viewport.makeExterior ()
+                let viewportImposter = Viewport.makeImposter ()
+                let gameState =
+                    { gameState with
+                        Eye3dFieldOfView = value
+                        Eye3dFrustumInterior = Viewport.getFrustum gameState.Eye3dCenter gameState.Eye3dRotation value viewportInterior
+                        Eye3dFrustumExterior = Viewport.getFrustum gameState.Eye3dCenter gameState.Eye3dRotation value viewportExterior
+                        Eye3dFrustumImposter = Viewport.getFrustum gameState.Eye3dCenter gameState.Eye3dRotation value viewportImposter }
+                struct (true, world |> World.setGameState gameState game |> World.publishGameChange (nameof gameState.Eye3dFieldOfView) previous value game)
+            else struct (false, world)
+
+        /// Get the current 3d eye field of view.
+        static member getEye3dFieldOfView world =
+            World.getGameEye3dFieldOfView Game.Handle world
+
+        /// Set the current 3d eye field of view.
+        static member setEye3dFieldOfView value world =
+            World.setGameEye3dFieldOfView value Game.Handle world |> snd'
 
         static member internal getGameEye3dFrustumInterior game world =
             (World.getGameState game world).Eye3dFrustumInterior
@@ -361,9 +388,11 @@ module WorldModuleGame =
         static member internal getGameEye3dFrustumImposter game world =
             (World.getGameState game world).Eye3dFrustumImposter
 
-        static member internal getGameEye3dFrustumView game world =
-            let viewport = Constants.Render.Viewport
-            viewport.Frustum (World.getGameEye3dCenter game world, World.getGameEye3dRotation game world)
+        static member internal getGameEye3dFrustumView game (world : World) =
+            let eyeCenter = World.getGameEye3dCenter game world
+            let eyeRotation = World.getGameEye3dRotation game world
+            let eyeFieldOfView = World.getGameEye3dFieldOfView game world
+            Viewport.getFrustum eyeCenter eyeRotation eyeFieldOfView world.RasterViewport
 
         /// Get the current interior 3d eye frustum.
         static member getEye3dFrustumInterior world =
@@ -384,19 +413,21 @@ module WorldModuleGame =
         /// Convert the given relative 3d position to the absolute 2d position.
         /// Useful for gui entities that track 3d entities.
         /// Where Z > 1.0f, position is behind view.
-        static member position3dToPosition2d position world =
+        static member position3dToPosition2d position (world : World) =
+            let rasterViewport = world.RasterViewport
             let eyeCenter = World.getEye3dCenter world
             let eyeRotation = World.getEye3dRotation world
-            let viewport = Constants.Render.Viewport
-            viewport.Position3dToPosition2d (position, eyeCenter, eyeRotation, Constants.Render.Resolution)
+            let eyeFieldOfView = World.getEye3dFieldOfView world
+            Viewport.position3dToPosition2d eyeCenter eyeRotation eyeFieldOfView position rasterViewport
 
         /// Convert the given absolute 2d position to the relative 3d ray.
         /// TODO: also implement position2dToPosition3d.
-        static member position2dToRay3d position world =
+        static member position2dToRay3d position (world : World) =
+            let rasterViewport = world.RasterViewport
             let eyeCenter = World.getEye3dCenter world
             let eyeRotation = World.getEye3dRotation world
-            let viewport = Constants.Render.Viewport
-            viewport.Position2dToRay3d (position, eyeCenter, eyeRotation, Constants.Render.Resolution)
+            let eyeFieldOfView = World.getEye3dFieldOfView world
+            Viewport.position2dToRay3d eyeCenter eyeRotation eyeFieldOfView position rasterViewport
 
         /// Get the current 3d light box.
         static member getLight3dBox world =
@@ -639,6 +670,7 @@ module WorldModuleGame =
         GameGetters.Add ("Eye2dSize", fun game world -> { PropertyType = typeof<Vector2>; PropertyValue = World.getGameEye2dSize game world })
         GameGetters.Add ("Eye3dCenter", fun game world -> { PropertyType = typeof<Vector3>; PropertyValue = World.getGameEye3dCenter game world })
         GameGetters.Add ("Eye3dRotation", fun game world -> { PropertyType = typeof<Quaternion>; PropertyValue = World.getGameEye3dRotation game world })
+        GameGetters.Add ("Eye3dFieldOfView", fun game world -> { PropertyType = typeof<single>; PropertyValue = World.getGameEye3dFieldOfView game world })
         GameGetters.Add ("Order", fun game world -> { PropertyType = typeof<int64>; PropertyValue = World.getGameOrder game world })
         GameGetters.Add ("Id", fun game world -> { PropertyType = typeof<Guid>; PropertyValue = World.getGameId game world })
 
@@ -651,6 +683,7 @@ module WorldModuleGame =
         GameSetters.Add ("Eye2dSize", fun property game world -> World.setGameEye2dSize (property.PropertyValue :?> Vector2) game world)
         GameSetters.Add ("Eye3dCenter", fun property game world -> World.setGameEye3dCenter (property.PropertyValue :?> Vector3) game world)
         GameSetters.Add ("Eye3dRotation", fun property game world -> World.setGameEye3dRotation (property.PropertyValue :?> Quaternion) game world)
+        GameSetters.Add ("Eye3dFieldOfView", fun property game world -> World.setGameEye3dFieldOfView (property.PropertyValue :?> single) game world)
 
     /// Initialize getters and setters
     let internal init () =

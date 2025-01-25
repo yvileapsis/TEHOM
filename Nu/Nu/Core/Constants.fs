@@ -73,6 +73,7 @@ module Engine =
     let [<Literal>] ParticleShadowOffsetDefault = 0.15f
     let [<Literal>] BillboardShadowOffsetDefault = 0.6f
     let [<Uniform>] Eye3dCenterDefault = Vector3 (0.0f, 0.0f, 2.0f)
+    let [<Uniform>] Eye3dFieldOfViewDefault = single (Math.PI / 3.0)
     let [<Uniform>] mutable QuadnodeSize = match ConfigurationManager.AppSettings.["QuadnodeSize"] with null -> 512.0f | size -> scvalue size
     let [<Uniform>] mutable QuadtreeDepth = match ConfigurationManager.AppSettings.["QuadtreeDepth"] with null -> 8 | depth -> scvalue depth
     let [<Uniform>] QuadtreeSize = Vector2 (QuadnodeSize * single (pown 2 QuadtreeDepth))
@@ -86,64 +87,7 @@ module Engine =
 [<RequireQualifiedAccess>]
 module Render =
 
-    /// The vendor names for which we have not yet experienced a need to call glFinish before swapping.
-    ///
-    /// be me -
-    /// Certain drivers seem to require glFinish before swap. Any documented insight into this?
-    ///
-    /// be chat-gpt -
-    /// The requirement for calling `glFinish()` before swapping buffers on certain drivers is an issue related to how
-    /// different GPUs and drivers handle the rendering pipeline and buffer swapping. While it's not explicitly
-    /// mandated in the OpenGL specification, some drivers have behavior that benefits from calling `glFinish()` to
-    /// ensure proper synchronization between the GPU and the display system. Here's why this might happen:
-    ///
-    /// ### 1. **Driver-Specific Behavior**
-    /// Some OpenGL drivers (particularly on older or less optimized systems) may not fully synchronize the pipeline
-    /// without a manual intervention like `glFinish()`. This can lead to incomplete frames being swapped to the
-    /// display, or the pipeline being flushed too late. By calling `glFinish()`, you force the GPU to complete all
-    /// previously issued commands before swapping buffers, which can help ensure that the rendered frame is complete.
-    ///
-    /// - **NVIDIA**: On some NVIDIA drivers, using `glFinish()` may help with synchronization issues where the GPU hasn’t completed rendering when the swap occurs.
-    /// - **Intel**: Integrated GPUs (like Intel's) sometimes have issues where they are slower to synchronize between CPU and GPU without `glFinish()`.
-    /// - **AMD**: Older AMD drivers also occasionally show issues that require `glFinish()` before `glSwapBuffers()` to ensure proper display.
-    ///
-    /// ### 2. **VSync and Buffer Management**
-    /// When VSync is enabled, buffer swaps should ideally occur at the vertical blanking interval (VBI) to avoid
-    /// tearing. However, some drivers may not respect VSync properly unless you ensure that all GPU commands are
-    /// completed before the swap. `glFinish()` forces the driver to ensure that the frame is fully rendered and ready
-    /// to be presented to the screen.
-    ///
-    /// ### 3. **Double and Triple Buffering**
-    /// If you're using **double buffering**, OpenGL typically uses an implicit synchronization between rendering and
-    /// swapping buffers. However, with **triple buffering**, there can be more frames in flight, and `glFinish()`
-    /// might be needed to avoid over-rendering frames ahead of the display refresh. This is because triple buffering
-    /// allows the GPU to continue rendering frames even if a buffer is waiting to be swapped, which can sometimes
-    /// cause tearing or incomplete frames being displayed unless forced to finish rendering.
-    ///
-    /// ### 4. **Swap Interval and Timing Issues**
-    /// In cases where **swap interval** is set (e.g., for VSync), some drivers may have timing issues, especially when
-    /// the system is under heavy load. If `glSwapBuffers()` is called while the GPU is still processing previous
-    /// frames, artifacts or incomplete frames might appear. Calling `glFinish()` forces a flush of the GPU pipeline,
-    /// ensuring that all previous commands are complete before the swap.
-    ///
-    /// ### Documented Insights:
-    /// While the OpenGL specification does not explicitly require `glFinish()` before `glSwapBuffers()`, several sources and community forums discuss situations where it's needed:
-    /// - **OpenGL Wiki - Synchronization**: The OpenGL Wiki highlights that implicit synchronization generally happens with buffer swaps but doesn’t rule out cases where explicit flushing (`glFinish()` or `glFlush()`) might be needed due to driver issues. [OpenGL Wiki - Synchronization](https://www.khronos.org/opengl/wiki/Synchronization#glFinish_and_glFlush)
-    /// - **NVIDIA Developer Documentation**: NVIDIA provides guidance on best practices, sometimes recommending `glFinish()` in specific performance-related debugging cases, particularly when dealing with multi-threading or complex GPU pipelines.
-    /// - **Community Observations (Stack Overflow, Forums)**: Various community discussions across platforms like Stack Overflow and Khronos forums have observed the need for `glFinish()` before `glSwapBuffers()` on specific hardware configurations, often to resolve visual artifacts or performance issues.
-    ///
-    /// ### Performance Impact:
-    /// Using `glFinish()` forces a full synchronization between CPU and GPU, which can reduce performance, as it
-    /// introduces a stall while waiting for the GPU to finish all operations. Therefore, it should be used only if
-    /// necessary (e.g., debugging or when a driver shows specific problems).
-    ///
-    /// ### Conclusion:
-    /// The need for `glFinish()` before `glSwapBuffers()` is typically driver-specific and arises due to differences
-    /// in how synchronization between the rendering pipeline and the display system is handled. While it's not part of
-    /// the OpenGL specification, calling `glFinish()` can help ensure proper synchronization, especially on
-    /// problematic drivers or when using VSync. If your application runs without visual issues or performance
-    /// degradation without `glFinish()`, it's usually best to avoid it for the sake of performance.
-    let [<Uniform>] VendorNamesExceptedFromSwapGlFinishRequirement = ["NVIDIA Corporation"; "AMD"; "ATI Technologies Inc."]
+    let [<Uniform>] VendorNamesExceptedFromSwapGlFinishRequirement = ["NVIDIA Corporation"; "AMD"; "ATI Technologies Inc."] // see https://github.com/bryanedds/Nu/wiki/Why-glFinish-for-Some-Drivers-or-Vendors
     let [<Literal>] IgnoreLightMapsName = "IgnoreLightMaps"
     let [<Literal>] OpaqueDistanceName = "OpaqueDistance"
     let [<Literal>] TwoSidedName = "TwoSided"
@@ -157,18 +101,8 @@ module Render =
     let [<Uniform>] mutable FarPlaneDistanceImposter = match ConfigurationManager.AppSettings.["FarPlaneDistanceImposter"] with null -> 4096.0f | distance -> scvalue distance
     let [<Uniform>] mutable NearPlaneDistanceOmnipresent = NearPlaneDistanceInterior
     let [<Uniform>] mutable FarPlaneDistanceOmnipresent = FarPlaneDistanceImposter
-    let [<Uniform>] mutable VirtualResolution = match ConfigurationManager.AppSettings.["VirtualResolution"] with null -> v2i 640 360 | resolution -> scvalue resolution
-    let [<Uniform>] mutable VirtualScalar = match ConfigurationManager.AppSettings.["VirtualScalar"] with null -> 3 | scalar -> scvalue scalar
-    let [<Uniform>] mutable Resolution = VirtualResolution * VirtualScalar
-    let [<Uniform>] mutable ShadowVirtualResolution = match ConfigurationManager.AppSettings.["ShadowVirtualResolution"] with null -> 512 | scalar -> scvalue scalar
-    let [<Uniform>] mutable ShadowResolution = Vector2i (ShadowVirtualResolution * VirtualScalar)
-    let [<Uniform>] mutable Viewport = Viewport (NearPlaneDistanceOmnipresent, FarPlaneDistanceOmnipresent, v2iZero, Resolution)
-    let OffsetMargin (windowSize : Vector2i) = Vector2i ((windowSize.X - Resolution.X) / 2, (windowSize.Y - Resolution.Y) / 2)
-    let OffsetViewport (windowSize : Vector2i) = Nu.Viewport (NearPlaneDistanceOmnipresent, FarPlaneDistanceOmnipresent, Box2i (OffsetMargin windowSize, Resolution))
+    let [<Uniform>] mutable DisplayVirtualResolution = match ConfigurationManager.AppSettings.["DisplayVirtualResolution"] with null -> v2i 640 360 | resolution -> scvalue resolution
     let [<Uniform>] mutable SsaoResolutionDivisor = match ConfigurationManager.AppSettings.["SsaoResolutionDivisor"] with null -> 1 | divisor -> scvalue divisor
-    let [<Uniform>] mutable SsaoResolution = Resolution / SsaoResolutionDivisor
-    let [<Uniform>] mutable SsaoViewport = Nu.Viewport (NearPlaneDistanceOmnipresent, FarPlaneDistanceOmnipresent, Box2i (v2iZero, SsaoResolution))
-    let [<Uniform>] mutable FieldOfView = match ConfigurationManager.AppSettings.["FieldOfView"] with null -> single (Math.PI / 3.0) | fov -> scvalue fov
     let [<Uniform>] Play3dBoxSize = Vector3 64.0f
     let [<Uniform>] Light3dBoxSize = Vector3 64.0f
     let [<Uniform>] WindowClearColor = Color.Zero
@@ -194,6 +128,7 @@ module Render =
     let [<Literal>] LightMapsMaxForward = 2
     let [<Literal>] LightsMaxDeferred = 32
     let [<Literal>] LightsMaxForward = 8
+    let [<Uniform>] mutable ShadowVirtualResolution = match ConfigurationManager.AppSettings.["ShadowVirtualResolution"] with null -> 128 | scalar -> scvalue scalar
     let [<Literal>] ShadowTexturesMaxShader = 16 // NOTE: remember to update SHADOW_TEXTURES_MAX in shaders when changing this!
     let [<Literal>] ShadowMapsMaxShader = 8 // NOTE: remember to update SHADOW_TEXTURES_MAX in shaders when changing this!
     let [<Uniform>] mutable ShadowTexturesMax = match ConfigurationManager.AppSettings.["ShadowTexturesMax"] with null -> 16 | shadowTexturesMax -> min (scvalue shadowTexturesMax) ShadowTexturesMaxShader
@@ -275,14 +210,21 @@ module Audio =
 module Physics =
 
     let [<Uniform>] GravityDefault = Vector3 (0.0f, -9.80665f, 0.0f)
-    let [<Literal>] BreakImpulseThresholdDefault = 100000.0f
-    let [<Literal>] SleepingThresholdLinear = 1.0f // NOTE: in the example or bullet source code (can't remember), this defaulted to 0.8f...
-    let [<Literal>] SleepingThresholdAngular = 1.0f // NOTE: ...and this defaulted to 1.0f.
+    let [<Uniform>] AlwaysObserve = match ConfigurationManager.AppSettings.["AlwaysObserve"] with null -> true | alwaysObserve -> scvalue alwaysObserve
+    let [<Literal>] BreakingPointDefault = 100000.0f
     let [<Literal>] CollisionWildcard = "*"
-    let [<Literal>] Collision3dMargin = 0.01f
-    let [<Literal>] AllowedCcdPenetration3d = 0.01f // NOTE: seems to also change the smoothness at which character slide.
+    let [<Uniform>] Collision3dBodiesMax = match ConfigurationManager.AppSettings.["Collision3dBodiesMax"] with null -> 10240 | step -> scvalue step
+    let [<Uniform>] Collision3dBodyPairsMax = match ConfigurationManager.AppSettings.["Collision3dBodyPairsMax"] with null -> 65536 | step -> scvalue step
+    let [<Uniform>] Collision3dContactConstraintsMax = match ConfigurationManager.AppSettings.["Collision3dContactConstraintsMax"] with null -> 10240 | step -> scvalue step
+    let [<Uniform>] Collision3dSteps = match ConfigurationManager.AppSettings.["Collision3dSteps"] with null -> 1 | step -> scvalue step
+    let [<Uniform>] Collision3dThreads = match ConfigurationManager.AppSettings.["Collision3dThreads"] with null -> max 1 (Environment.ProcessorCount - 2) | threads -> scvalue threads
+    let [<Uniform>] Collision3dBarriersMax = match ConfigurationManager.AppSettings.["Collision3dBarriersMax"] with null -> max 1 (Environment.ProcessorCount - 2) | barriers -> scvalue barriers
+    let [<Uniform>] Collision3dJobsMax = match ConfigurationManager.AppSettings.["Collision3dJobsMax"] with null -> 128 | jobs -> scvalue jobs
     let [<Uniform>] GroundAngleMax = single (Math.PI * 0.25)
-    let [<Uniform>] ThreadCount = max 1 (Environment.ProcessorCount - 2)
+    let [<Uniform>] BroadPhaseLayerNonMoving = byte 0 // NOTE: do not use this outside of the engine code.
+    let [<Uniform>] BroadPhaseLayerMoving = byte 1 // NOTE: do not use this outside of the engine code.
+    let [<Uniform>] ObjectLayerNonMoving = JoltPhysicsSharp.ObjectLayer 0us // NOTE: do not use this outside of the engine code.
+    let [<Uniform>] ObjectLayerMoving = JoltPhysicsSharp.ObjectLayer 1us // NOTE: do not use this outside of the engine code.
     let [<Literal>] InternalIndex = -1 // NOTE: do not use this outside of the engine code.
 
 [<RequireQualifiedAccess>]

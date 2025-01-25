@@ -1527,20 +1527,24 @@ module BodyJointFacetExtensions =
         member this.GetBodyJointTarget world : Entity Relation = this.Get (nameof this.BodyJointTarget) world
         member this.SetBodyJointTarget (value : Entity Relation) world = this.Set (nameof this.BodyJointTarget) value world
         member this.BodyJointTarget = lens (nameof this.BodyJointTarget) this this.GetBodyJointTarget this.SetBodyJointTarget
-        member this.GetBodyJointTarget2 world : Entity Relation = this.Get (nameof this.BodyJointTarget2) world
-        member this.SetBodyJointTarget2 (value : Entity Relation) world = this.Set (nameof this.BodyJointTarget2) value world
-        member this.BodyJointTarget2 = lens (nameof this.BodyJointTarget2) this this.GetBodyJointTarget2 this.SetBodyJointTarget2
+        member this.GetBodyJointTarget2Opt world : Entity Relation option = this.Get (nameof this.BodyJointTarget2Opt) world
+        member this.SetBodyJointTarget2Opt (value : Entity Relation option) world = this.Set (nameof this.BodyJointTarget2Opt) value world
+        member this.BodyJointTarget2Opt = lens (nameof this.BodyJointTarget2Opt) this this.GetBodyJointTarget2Opt this.SetBodyJointTarget2Opt
         member this.GetBodyJointEnabled world : bool = this.Get (nameof this.BodyJointEnabled) world
         member this.SetBodyJointEnabled (value : bool) world = this.Set (nameof this.BodyJointEnabled) value world
         member this.BodyJointEnabled = lens (nameof this.BodyJointEnabled) this this.GetBodyJointEnabled this.SetBodyJointEnabled
-        member this.GetBreakImpulseThreshold world : single = this.Get (nameof this.BreakImpulseThreshold) world
-        member this.SetBreakImpulseThreshold (value : single) world = this.Set (nameof this.BreakImpulseThreshold) value world
-        member this.BreakImpulseThreshold = lens (nameof this.BreakImpulseThreshold) this this.GetBreakImpulseThreshold this.SetBreakImpulseThreshold
+        member this.GetBreakingPoint world : single = this.Get (nameof this.BreakingPoint) world
+        member this.SetBreakingPoint (value : single) world = this.Set (nameof this.BreakingPoint) value world
+        member this.BreakingPoint = lens (nameof this.BreakingPoint) this this.GetBreakingPoint this.SetBreakingPoint
+        member this.GetBroken world : bool = this.Get (nameof this.Broken) world
+        member this.SetBroken (value : bool) world = this.Set (nameof this.Broken) value world
+        member this.Broken = lens (nameof this.Broken) this this.GetBroken this.SetBroken
         member this.GetCollideConnected world : bool = this.Get (nameof this.CollideConnected) world
         member this.SetCollideConnected (value : bool) world = this.Set (nameof this.CollideConnected) value world
         member this.CollideConnected = lens (nameof this.CollideConnected) this this.GetCollideConnected this.SetCollideConnected
         member this.GetBodyJointId world : BodyJointId = this.Get (nameof this.BodyJointId) world
         member this.BodyJointId = lensReadOnly (nameof this.BodyJointId) this this.GetBodyJointId
+        member this.BodyJointBreakEvent = Events.BodyJointBreakEvent --> this
 
 /// Augments an entity with a physics-driven joint.
 type BodyJointFacet () =
@@ -1549,41 +1553,47 @@ type BodyJointFacet () =
     static let tryGetBodyTargetIds (entity : Entity) world =
         match tryResolve entity (entity.GetBodyJointTarget world) with
         | Some targetEntity ->
-            match tryResolve entity (entity.GetBodyJointTarget2 world) with
-            | Some target2Entity ->
-                let targetId = { BodySource = targetEntity; BodyIndex = Constants.Physics.InternalIndex }
-                let target2Id = { BodySource = target2Entity; BodyIndex = Constants.Physics.InternalIndex }
-                Some (targetId, target2Id)
-            | None -> None
+            let targetId = { BodySource = targetEntity; BodyIndex = Constants.Physics.InternalIndex }
+            match entity.GetBodyJointTarget2Opt world with
+            | Some target2 ->
+                match tryResolve entity target2 with
+                | Some target2Entity ->
+                    let target2Id = { BodySource = target2Entity; BodyIndex = Constants.Physics.InternalIndex }
+                    Some (targetId, Some target2Id)
+                | None -> None
+            | None -> Some (targetId, None)
         | None -> None
 
     static member Properties =
         [define Entity.BodyJoint EmptyJoint
          define Entity.BodyJointTarget (Relation.makeParent ())
-         define Entity.BodyJointTarget2 (Relation.makeParent ())
+         define Entity.BodyJointTarget2Opt None
          define Entity.BodyJointEnabled true
-         define Entity.BreakImpulseThreshold Constants.Physics.BreakImpulseThresholdDefault
+         define Entity.BreakingPoint Constants.Physics.BreakingPointDefault
+         define Entity.Broken false
          define Entity.CollideConnected true
          computed Entity.BodyJointId (fun (entity : Entity) _ -> { BodyJointSource = entity; BodyJointIndex = Constants.Physics.InternalIndex }) None]
 
     override this.Register (entity, world) =
         let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyJoint)) entity (nameof BodyJointFacet) world
         let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyJointTarget)) entity (nameof BodyJointFacet) world
-        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyJointTarget2)) entity (nameof BodyJointFacet) world
+        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyJointTarget2Opt)) entity (nameof BodyJointFacet) world
         let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyJointEnabled)) entity (nameof BodyJointFacet) world
-        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BreakImpulseThreshold)) entity (nameof BodyJointFacet) world
+        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BreakingPoint)) entity (nameof BodyJointFacet) world
+        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Broken)) entity (nameof BodyJointFacet) world
         let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollideConnected)) entity (nameof BodyJointFacet) world
         world
 
     override this.RegisterPhysics (entity, world) =
         match tryGetBodyTargetIds entity world with
-        | Some (targetId, target2Id) ->
+        | Some (targetId, target2IdOpt) ->
             let bodyJointProperties =
                 { BodyJoint = entity.GetBodyJoint world
                   BodyJointTarget = targetId
-                  BodyJointTarget2 = target2Id
+                  BodyJointTarget2Opt = target2IdOpt
                   BodyJointEnabled = entity.GetBodyJointEnabled world
-                  BreakImpulseThreshold = entity.GetBreakImpulseThreshold world
+                  BreakingPoint = entity.GetBreakingPoint world
+                  Broken = entity.GetBroken world
                   CollideConnected = entity.GetCollideConnected world
                   BodyJointIndex = (entity.GetBodyJointId world).BodyJointIndex }
             World.createBodyJoint (entity.GetIs2d world) entity bodyJointProperties world
@@ -1591,8 +1601,8 @@ type BodyJointFacet () =
 
     override this.UnregisterPhysics (entity, world) =
         match tryGetBodyTargetIds entity world with
-        | Some (targetId, target2Id) ->
-            World.destroyBodyJoint (entity.GetIs2d world) targetId target2Id (entity.GetBodyJointId world) world
+        | Some (targetId, target2IdOpt) ->
+            World.destroyBodyJoint (entity.GetIs2d world) targetId target2IdOpt (entity.GetBodyJointId world) world
         | None -> world
 
     override this.GetAttributesInferred (_, _) =
@@ -1822,6 +1832,175 @@ type TmxMapFacet () =
     override this.GetAttributesInferred (entity, world) =
         let tmxMap = entity.GetTmxMap world
         TmxMap.getAttributesInferred (entity.GetTileSizeDivisor world) tmxMap
+
+[<AutoOpen>]
+module SpineSkeletonExtensions =
+    type Entity with
+        member this.GetSpineSkeleton world : SpineSkeleton AssetTag = this.Get (nameof this.SpineSkeleton) world
+        member this.SetSpineSkeleton (value : SpineSkeleton AssetTag) world = this.Set (nameof this.SpineSkeleton) value world
+        member this.SpineSkeleton = lens (nameof this.SpineSkeleton) this this.GetSpineSkeleton this.SetSpineSkeleton
+        member this.GetSpineSkeletonStateOpt world : SpineSkeletonState option = this.Get (nameof this.SpineSkeletonStateOpt) world
+        member this.SetSpineSkeletonStateOpt (value : SpineSkeletonState option) world = this.Set (nameof this.SpineSkeletonStateOpt) value world
+        member this.SpineSkeletonStateOpt = lens (nameof this.SpineSkeletonStateOpt) this this.GetSpineSkeletonStateOpt this.SetSpineSkeletonStateOpt
+        member this.GetSpineAnimations world : SpineAnimation array = this.Get (nameof this.SpineAnimations) world
+        member this.SetSpineAnimations (value : SpineAnimation array) world = this.Set (nameof this.SpineAnimations) value world
+        member this.SpineAnimations = lens (nameof this.SpineAnimations) this this.GetSpineAnimations this.SetSpineAnimations
+        member this.GetSpineAnimationSpeed world : single = this.Get (nameof this.SpineAnimationSpeed) world
+        member this.SetSpineAnimationSpeed (value : single) world = this.Set (nameof this.SpineAnimationSpeed) value world
+        member this.SpineAnimationSpeed = lens (nameof this.SpineAnimationSpeed) this this.GetSpineAnimationSpeed this.SetSpineAnimationSpeed
+        member this.GetSpineAnimationMix world : single = this.Get (nameof this.SpineAnimationMix) world
+        member this.SetSpineAnimationMix (value : single) world = this.Set (nameof this.SpineAnimationMix) value world
+        member this.SpineAnimationMix = lens (nameof this.SpineAnimationMix) this this.GetSpineAnimationMix this.SetSpineAnimationMix
+        member this.SpineSkeletonAnimationTriggerEvent = Events.SpineSkeletonAnimationTriggerEvent --> this
+
+/// Augments an entity with Spine skeleton content.
+/// NOTE: SpineSkeleteState fields are inherently imperative and therefore currently unsupported by undo / redo.
+type SpineSkeletonFacet () =
+    inherit Facet (false, false, false)
+
+    static let getOrTryCreateSpineSkeletonState (entity : Entity) world =
+        let spineSkeleton = entity.GetSpineSkeleton world
+        match entity.GetSpineSkeletonStateOpt world with
+        | None ->
+            match Metadata.tryGetSpineSkeletonMetadata spineSkeleton with
+            | ValueSome metadata ->
+                let startTime = entity.GetStartTime world
+                let localTime = world.GameTime - startTime
+                let spineSkeletonInstance = Spine.Skeleton metadata.SpineSkeletonData
+                spineSkeletonInstance.Time <- localTime.Seconds
+                let spineAnimationStateData = Spine.AnimationStateData spineSkeletonInstance.Data
+                spineAnimationStateData.DefaultMix <- entity.GetSpineAnimationMix world
+                let spineAnimationState = Spine.AnimationState spineAnimationStateData
+                let spineAnimations = entity.GetSpineAnimations world
+                spineAnimationState.ClearTracks ()
+                let mutable i = 0
+                for spineAnimation in spineAnimations do
+                    if notNull (spineAnimationState.Data.SkeletonData.FindAnimation spineAnimation.SpineAnimationName) then
+                        spineAnimationState.SetAnimation (i, spineAnimation.SpineAnimationName, spineAnimation.SpineAnimationPlayback = Loop) |> ignore<Spine.TrackEntry>
+                        i <- inc i
+                let color = entity.GetColor world
+                spineSkeletonInstance.R <- color.R
+                spineSkeletonInstance.G <- color.G
+                spineSkeletonInstance.B <- color.B
+                spineSkeletonInstance.A <- color.A
+                let spineSkeletonState = { SpineSkeleton = spineSkeletonInstance; SpineAnimationState = spineAnimationState }
+                let world = entity.SetSpineSkeletonStateOpt (Some spineSkeletonState) world
+                (Some spineSkeletonState, world)
+            | ValueNone -> (None, world)
+        | Some spineSkeletonState -> (Some spineSkeletonState, world)
+
+    static let handleAnimationChange evt world =
+        let entity = evt.Subscriber : Entity
+        let world = entity.SetSpineSkeletonStateOpt None world
+        let world = getOrTryCreateSpineSkeletonState entity world |> snd
+        (Cascade, world)
+
+    static member Properties =
+        [define Entity.AlwaysUpdate true
+         define Entity.StartTime GameTime.zero
+         define Entity.Color Color.White
+         define Entity.Flip FlipNone
+         define Entity.SpineSkeleton Assets.Default.SpineSkeleton
+         nonPersistent Entity.SpineSkeletonStateOpt None
+         define Entity.SpineAnimations [|{ SpineAnimationName = "idle"; SpineAnimationPlayback = Loop }|]
+         define Entity.SpineAnimationSpeed 1.0f
+         define Entity.SpineAnimationMix 0.2f]
+
+    override this.Register (entity, world) =
+        let world = World.sense handleAnimationChange entity.StartTime.ChangeEvent entity (nameof SpineSkeletonFacet) world
+        let world = World.sense handleAnimationChange entity.SpineSkeleton.ChangeEvent entity (nameof SpineSkeletonFacet) world
+        let world = World.sense handleAnimationChange entity.SpineAnimations.ChangeEvent entity (nameof SpineSkeletonFacet) world
+        let world = World.sense handleAnimationChange entity.SpineAnimationMix.ChangeEvent entity (nameof SpineSkeletonFacet) world
+        entity.SetStartTime world.GameTime world
+
+    override this.Update (entity, world) =
+        let deltaTime = world.GameDelta
+        let (spineSkeletonStateOpt, world) = getOrTryCreateSpineSkeletonState entity world
+        match spineSkeletonStateOpt with
+        | Some spineSkeletonState ->
+            let startTrackArgs = List ()
+            let interruptTrackArgs = List ()
+            let completeTrackArgs = List ()
+            let endTrackArgs = List ()
+            let eventTrackArgs = List ()
+            let startDelegate = Spine.AnimationState.TrackEntryDelegate startTrackArgs.Add
+            let interruptDelegate = Spine.AnimationState.TrackEntryDelegate interruptTrackArgs.Add
+            let completeDelegate = Spine.AnimationState.TrackEntryDelegate completeTrackArgs.Add
+            let endDelegate = Spine.AnimationState.TrackEntryDelegate endTrackArgs.Add
+            let eventDelegate = Spine.AnimationState.TrackEntryEventDelegate (fun entry event -> eventTrackArgs.Add (entry, event))
+            spineSkeletonState.SpineAnimationState.add_Start startDelegate
+            spineSkeletonState.SpineAnimationState.add_Interrupt interruptDelegate
+            spineSkeletonState.SpineAnimationState.add_Complete completeDelegate
+            spineSkeletonState.SpineAnimationState.add_End endDelegate
+            spineSkeletonState.SpineAnimationState.add_Event eventDelegate
+            let color = entity.GetColor world
+            spineSkeletonState.SpineSkeleton.R <- color.R
+            spineSkeletonState.SpineSkeleton.G <- color.G
+            spineSkeletonState.SpineSkeleton.B <- color.B
+            spineSkeletonState.SpineSkeleton.A <- color.A
+            let struct (scaleX, scaleY) =
+                match entity.GetFlip world with
+                | FlipNone -> struct (1.0f, 1.0f)
+                | FlipH -> struct (-1.0f, 1.0f)
+                | FlipV -> struct (1.0f, -1.0f)
+                | FlipHV -> struct (-1.0f, -1.0f)
+            spineSkeletonState.SpineSkeleton.ScaleX <- scaleX
+            spineSkeletonState.SpineSkeleton.ScaleY <- scaleY
+            spineSkeletonState.SpineAnimationState.TimeScale <- entity.GetSpineAnimationSpeed world
+            spineSkeletonState.SpineSkeleton.Update deltaTime.Seconds
+            spineSkeletonState.SpineAnimationState.Update deltaTime.Seconds
+            spineSkeletonState.SpineAnimationState.Apply spineSkeletonState.SpineSkeleton |> ignore<bool>
+            spineSkeletonState.SpineSkeleton.UpdateWorldTransform Spine.Skeleton.Physics.Update
+            spineSkeletonState.SpineAnimationState.remove_Start startDelegate
+            spineSkeletonState.SpineAnimationState.remove_Interrupt interruptDelegate
+            spineSkeletonState.SpineAnimationState.remove_Complete completeDelegate
+            spineSkeletonState.SpineAnimationState.remove_End endDelegate
+            spineSkeletonState.SpineAnimationState.remove_Event eventDelegate
+            let world = Seq.fold (fun world arg -> World.publishUnsorted (SpineSkeletonAnimationStartData arg) entity.SpineSkeletonAnimationTriggerEvent entity world) world startTrackArgs
+            let world = Seq.fold (fun world arg -> World.publishUnsorted (SpineSkeletonAnimationInterruptData arg) entity.SpineSkeletonAnimationTriggerEvent entity world) world interruptTrackArgs
+            let world = Seq.fold (fun world arg -> World.publishUnsorted (SpineSkeletonAnimationCompleteData arg) entity.SpineSkeletonAnimationTriggerEvent entity world) world completeTrackArgs
+            let world = Seq.fold (fun world arg -> World.publishUnsorted (SpineSkeletonAnimationEndData arg) entity.SpineSkeletonAnimationTriggerEvent entity world) world endTrackArgs
+            let world = Seq.fold (fun world arg -> World.publishUnsorted (SpineSkeletonAnimationEventData arg) entity.SpineSkeletonAnimationTriggerEvent entity world) world eventTrackArgs
+            world
+        | None -> world
+
+    override this.Render (_, entity, world) =
+        let spineSkeleton = entity.GetSpineSkeleton world
+        match entity.GetSpineSkeletonStateOpt world with
+        | Some spineSkeletonState ->
+            let mutable transform = entity.GetTransform world
+            let spineSkeletonId = entity.GetId world
+            let spineSkeletonClone = Spine.Skeleton spineSkeletonState.SpineSkeleton // NOTE: this is where the bulk of this entity's allocations are coming from.
+            let renderSpineSkeleton = RenderSpineSkeleton { Transform = transform; SpineSkeletonId = spineSkeletonId; SpineSkeletonClone = spineSkeletonClone }
+            let renderOperation = LayeredOperation2d { Elevation = transform.Elevation; Horizon = transform.Horizon; AssetTag = spineSkeleton; RenderOperation2d = renderSpineSkeleton }
+            World.enqueueRenderMessage2d renderOperation world
+        | None -> ()
+
+    override this.GetAttributesInferred (entity, world) =
+        let (spineSkeletonStateOpt, world) = getOrTryCreateSpineSkeletonState entity world
+        match spineSkeletonStateOpt with
+        | Some spineSkeletonState ->
+
+            // update skeleton so we can take some actual metrics
+            spineSkeletonState.SpineAnimationState.Apply spineSkeletonState.SpineSkeleton |> ignore<bool>
+            spineSkeletonState.SpineSkeleton.UpdateWorldTransform Spine.Skeleton.Physics.Update
+            let mutable (minX, minY, maxX, maxY) = (Single.MaxValue, Single.MaxValue, Single.MinValue, Single.MinValue)
+
+            // compute bounds
+            // NOTE: this uses a simplistic algorithm that merely makes a very loose approximation of the bounds since
+            // SkeletonBounds doesn't work in our test case.
+            // TODO: P1: improve the accuracy of this algorithm.
+            for slot in spineSkeletonState.SpineSkeleton.Slots do
+                if slot.Bone.Active then
+                    minX <- min minX slot.Bone.AX
+                    minY <- min minY slot.Bone.AY
+                    maxX <- max maxX slot.Bone.AX
+                    maxY <- max maxY slot.Bone.AY
+            let skeletonSize = v3 (maxX - minX) (maxY - minY) 0.0f
+            let skeletonOffset = v3 ((skeletonSize.X * 0.5f - maxX) / skeletonSize.X * 0.5f) ((skeletonSize.Y * 0.5f - maxY) / skeletonSize.Y * 0.5f) 0.0f
+            AttributesInferred.important skeletonSize skeletonOffset
+
+        | None -> base.GetAttributesInferred (entity, world)
 
 [<AutoOpen>]
 module LayoutFacetExtensions =

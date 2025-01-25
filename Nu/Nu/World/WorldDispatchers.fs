@@ -368,6 +368,14 @@ type TmxMapDispatcher () =
     static member Facets =
         [typeof<TmxMapFacet>]
 
+/// Gives an entity the base behavior of a Spine skeleton.
+/// NOTE: Spine skeletons are inherently imperative and therefore currently unsupported by undo / redo.
+type SpineSkeletonDispatcher () =
+    inherit Entity2dDispatcher (false, false, false)
+
+    static member Facets =
+        [typeof<SpineSkeletonFacet>]
+
 /// Gives an entity the base behavior of sky box.
 type SkyBoxDispatcher () =
     inherit Entity3dDispatcher (false, false, false)
@@ -601,7 +609,7 @@ type Character3dDispatcher () =
          define Entity.BodyShape (CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None })
          define Entity.LinearVelocityPrevious v3Zero
          define Entity.AngularVelocityPrevious v3Zero]
-         
+
     override this.Update (entity, world) =
         let rotation = entity.GetRotation world
         let linearVelocity = entity.GetLinearVelocity world

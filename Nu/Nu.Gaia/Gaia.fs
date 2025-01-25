@@ -101,7 +101,6 @@ module Gaia =
     let mutable private Snaps3d = Constants.Gaia.Snaps3dDefault
     let mutable private SnapDrag = 0.1f
     let mutable private AlternativeEyeTravelInput = false
-    let mutable private ReregisterPhysicsWorkaround = true
     let mutable private ImGuiDebugWindow = false
     let mutable private EntityHierarchySearchStr = ""
     let mutable private EntityHierarchyFilterPropagationSources = false
@@ -481,7 +480,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         GaiaState.make
             projectDllPath editModeOpt freshlyLoaded OpenProjectImperativeExecution EditWhileAdvancing
             DesiredEye2dCenter DesiredEye3dCenter DesiredEye3dRotation (World.getMasterSoundVolume world) (World.getMasterSongVolume world)            
-            Snaps2dSelected Snaps2d Snaps3d NewEntityElevation NewEntityDistance AlternativeEyeTravelInput ReregisterPhysicsWorkaround
+            Snaps2dSelected Snaps2d Snaps3d NewEntityElevation NewEntityDistance AlternativeEyeTravelInput
 
     let private printGaiaState gaiaState =
         PrettyPrinter.prettyPrintSymbol (valueToSymbol gaiaState) PrettyPrinter.defaultPrinter
@@ -802,19 +801,16 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             world
         else snapshot RestorePoint world
 
-    let private inductEntity atMouse (entity : Entity) world =
+    let private inductEntity atMouse (entity : Entity) (world : World)=
         let (positionSnap, _, _) = getSnaps ()
-        let viewport = World.getViewport world
         let mutable entityTransform = entity.GetTransform world
         let world =
             if entity.GetIs2d world then
                 let eyeCenter = World.getEye2dCenter world
                 let eyeSize = World.getEye2dSize world
                 let entityPosition =
-                    if atMouse then
-                        viewport.MouseToWorld2d (entity.GetAbsolute world, RightClickPosition, eyeCenter, eyeSize)
-                    elif not (entity.GetAbsolute world) then
-                        eyeCenter
+                    if atMouse then Viewport.mouseToWorld2d (entity.GetAbsolute world) eyeCenter eyeSize RightClickPosition world.RasterViewport
+                    elif not (entity.GetAbsolute world) then eyeCenter
                     else v2Zero
                 let attributes = entity.GetAttributesInferred world
                 entityTransform.Position <- entityPosition.V3
@@ -827,9 +823,10 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             else
                 let eyeCenter = World.getEye3dCenter world
                 let eyeRotation = World.getEye3dRotation world
+                let eyeFieldOfView = World.getEye3dFieldOfView world
                 let entityPosition =
                     if atMouse then
-                        let ray = viewport.MouseToWorld3d (RightClickPosition, eyeCenter, eyeRotation)
+                        let ray = Viewport.mouseToWorld3d eyeCenter eyeRotation eyeFieldOfView RightClickPosition world.RasterViewport
                         let forward = eyeRotation.Forward
                         let plane = plane3 (eyeCenter + forward * NewEntityDistance) -forward
                         (ray.Intersection plane).Value
@@ -1060,17 +1057,19 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         | Some _ | None -> (false, world)
 
     let private tryPaste tryForwardPropagationSource atMouse parentOpt world =
-        let world = snapshot PasteEntity world
-        let positionSnapEir = if Snaps2dSelected then Left (a__ Snaps2d) else Right (a__ Snaps3d)
-        let parent = match parentOpt with Some parent -> parent | None -> SelectedGroup :> Simulant
-        let (entityOpt, world) = World.pasteEntityFromClipboard tryForwardPropagationSource NewEntityDistance RightClickPosition positionSnapEir atMouse parent world
-        match entityOpt with
-        | Some entity ->
-            selectEntityOpt (Some entity) world
-            ImGui.SetWindowFocus "Viewport"
-            ShowSelectedEntity <- true
-            (true, world)
-        | None -> (false, world)
+        if World.canPasteEntityFromClipboard world then
+            let world = snapshot PasteEntity world
+            let positionSnapEir = if Snaps2dSelected then Left (a__ Snaps2d) else Right (a__ Snaps3d)
+            let parent = match parentOpt with Some parent -> parent | None -> SelectedGroup :> Simulant
+            let (entityOpt, world) = World.pasteEntityFromClipboard tryForwardPropagationSource NewEntityDistance RightClickPosition positionSnapEir atMouse parent world
+            match entityOpt with
+            | Some entity ->
+                selectEntityOpt (Some entity) world
+                ImGui.SetWindowFocus "Viewport"
+                ShowSelectedEntity <- true
+                (true, world)
+            | None -> (false, world)
+        else (false, world)
 
     let private trySetSelectedEntityFamilyStatic static_ world =
         let rec setEntityFamilyStatic static_ (entity : Entity) world =
@@ -1273,7 +1272,6 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
     let private toggleAdvancing (world : World) =
         let wasAdvancing = world.Advancing
         let world = snapshot (if wasAdvancing then Halt else Advance) world
-        let world = if ReregisterPhysicsWorkaround && not wasAdvancing then World.reregisterPhysics true world else world // HACK: reregister physics as an automatic workaround for #856.
         let world = World.setAdvancing (not world.Advancing) world
         world
 
@@ -1317,7 +1315,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         let gaiaDirectory = Directory.GetCurrentDirectory ()
         match trySelectTargetDirAndMakeNuPluginFromFilePathOpt gaiaState.ProjectDllPath with
         | Right (Some (filePath, targetDir, plugin)) ->
-            Constants.Override.fromAppConfig filePath
+            Configure.fromAppConfig filePath
             try File.WriteAllText (gaiaDirectory + "/" + Constants.Gaia.StateFilePath, printGaiaState gaiaState)
             with _ -> Log.info "Could not save gaia state."
             (gaiaState, targetDir, plugin)
@@ -1330,10 +1328,10 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 Log.error ("Invalid Nu Assembly: " + gaiaState.ProjectDllPath)
             (GaiaState.defaultState, ".", gaiaPlugin)
 
-    let private tryMakeWorld sdlDeps worldConfig (plugin : NuPlugin) =
+    let private tryMakeWorld sdlDeps worldConfig geometryViewport rasterViewport outerViewport (plugin : NuPlugin) =
 
         // attempt to make the world
-        match World.tryMake sdlDeps worldConfig plugin with
+        match World.tryMake sdlDeps worldConfig geometryViewport rasterViewport outerViewport plugin with
         | Right world ->
 
             // initialize event filter as not to flood the log
@@ -1386,10 +1384,10 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         // error
         | Left error -> Left error
 
-    let private tryMakeSdlDeps () =
+    let private tryMakeSdlDeps windowSize =
         let sdlWindowConfig = { SdlWindowConfig.defaultConfig with WindowTitle = "Gaia" }
         let sdlConfig = { SdlConfig.defaultConfig with WindowConfig = sdlWindowConfig }
-        match SdlDeps.tryMake sdlConfig with
+        match SdlDeps.tryMake sdlConfig windowSize with
         | Left msg -> Left msg
         | Right sdlDeps -> Right (sdlConfig, sdlDeps)
 
@@ -1416,10 +1414,9 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                         | Some (_, entity) ->
                             if entity.GetIs2d world then
                                 if World.isKeyboardAltDown world then
-                                    let viewport = World.getViewport world
                                     let eyeCenter = World.getEye2dCenter world
                                     let eyeSize = World.getEye2dSize world
-                                    let mousePositionWorld = viewport.MouseToWorld2d (entity.GetAbsolute world, mousePosition, eyeCenter, eyeSize)
+                                    let mousePositionWorld = Viewport.mouseToWorld2d (entity.GetAbsolute world) eyeCenter eyeSize mousePosition world.RasterViewport
                                     let entityDegrees = if entity.MountExists world then entity.GetDegreesLocal world else entity.GetDegrees world
                                     DragEntityState <- DragEntityRotation2d (world.DateTime, ref false, mousePositionWorld, entityDegrees.Z + mousePositionWorld.Y, entity)
                                     world
@@ -1456,10 +1453,9 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                             ShowSelectedEntity <- true
                                             (duplicate, world)
                                         else (entity, world)
-                                    let viewport = World.getViewport world
                                     let eyeCenter = World.getEye2dCenter world
                                     let eyeSize = World.getEye2dSize world
-                                    let mousePositionWorld = viewport.MouseToWorld2d (entity.GetAbsolute world, mousePosition, eyeCenter, eyeSize)
+                                    let mousePositionWorld = Viewport.mouseToWorld2d (entity.GetAbsolute world) eyeCenter eyeSize mousePosition world.RasterViewport
                                     let entityPosition = entity.GetPosition world
                                     DragEntityState <- DragEntityPosition2d (world.DateTime, ref false, mousePositionWorld, entityPosition.V2 + mousePositionWorld, entity)
                                     world
@@ -1624,8 +1620,9 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             elif ImGui.IsKeyPressed ImGuiKey.F9 then ReloadCodeRequested <- 1; world
             elif ImGui.IsKeyPressed ImGuiKey.F11 then setFullScreen (not FullScreen); world
             elif ImGui.IsKeyPressed ImGuiKey.F12 then setCaptureMode (not CaptureMode); world
-            elif ImGui.IsKeyPressed ImGuiKey.UpArrow && ImGui.IsAltDown () then tryReorderSelectedEntity true world
-            elif ImGui.IsKeyPressed ImGuiKey.DownArrow && ImGui.IsAltDown () then tryReorderSelectedEntity false world
+            elif ImGui.IsKeyPressed ImGuiKey.Enter && ImGui.IsCtrlUp () && ImGui.IsShiftUp () && ImGui.IsAltDown () then World.tryToggleWindowFullScreen world
+            elif ImGui.IsKeyPressed ImGuiKey.UpArrow && ImGui.IsCtrlUp () && ImGui.IsShiftUp () && ImGui.IsAltDown () then tryReorderSelectedEntity true world
+            elif ImGui.IsKeyPressed ImGuiKey.DownArrow && ImGui.IsCtrlUp () && ImGui.IsShiftUp () && ImGui.IsAltDown () then tryReorderSelectedEntity false world
             elif ImGui.IsKeyPressed ImGuiKey.C && ImGui.IsCtrlUp () && ImGui.IsShiftUp () && ImGui.IsAltDown () then LogStr <- ""; world
             elif ImGui.IsKeyPressed ImGuiKey.N && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then ShowNewGroupDialog <- true; world
             elif ImGui.IsKeyPressed ImGuiKey.O && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then ShowOpenGroupDialog <- true; world
@@ -2155,7 +2152,23 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         let appendProperties : AppendProperties = { EditContext = makeContext None (Some unfocusProperty) }
         World.edit (AppendProperties appendProperties) simulant world
 
-    let private imGuiViewportManipulation world =
+    // NOTE: this function isn't used, but we hope it will be usable once we get unblocked on https://github.com/bryanedds/Nu/issues/549#issuecomment-2551574527
+    let private imGuiInnerViewportWindow world =
+        let windowName = "Inner Viewport"
+        let world =
+            if ImGui.Begin (windowName, ImGuiWindowFlags.NoNav) then
+                if ImGui.IsWindowFocused () && SelectedWindowRestoreRequested = 0 then SelectedWindowOpt <- Some windowName
+                let io = ImGui.GetIO()
+                let displaySize = io.DisplaySize.V2i
+                let windowPosition = ImGui.GetWindowPos().V2i
+                let windowSize = ImGui.GetWindowSize().V2i
+                let rasterViewport = Viewport.makeRaster (box2i (windowPosition.MapY (fun y -> displaySize.Y - y - windowSize.Y)) windowSize)
+                World.setRasterViewport rasterViewport world
+            else world
+        ImGui.End ()
+        world
+
+    let private imGuiViewportManipulation (world : World) =
 
         // viewport
         let io = ImGui.GetIO ()
@@ -2166,12 +2179,12 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             if ImGui.Begin ("Viewport", ImGuiWindowFlags.NoBackground ||| ImGuiWindowFlags.NoTitleBar ||| ImGuiWindowFlags.NoInputs ||| ImGuiWindowFlags.NoNav) then
 
                 // user-defined viewport manipulation
-                let viewport = Viewport (Constants.Render.NearPlaneDistanceInterior, Constants.Render.FarPlaneDistanceOmnipresent, v2iZero, Constants.Render.Resolution)
-                let projectionMatrix = viewport.Projection3d
+                let rasterViewport = world.RasterViewport
+                let projectionMatrix = Viewport.getProjection3d (World.getEye3dFieldOfView world) rasterViewport
                 let projection = projectionMatrix.ToArray ()
                 let operation =
                     ViewportOverlay
-                        { ViewportView = viewport.View3d (World.getEye3dCenter world, World.getEye3dRotation world)
+                        { ViewportView = Viewport.getView3d (World.getEye3dCenter world) (World.getEye3dRotation world)
                           ViewportProjection = projectionMatrix
                           ViewportBounds = box2 v2Zero io.DisplaySize
                           EditContext = makeContext None None }
@@ -2183,7 +2196,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                     | Some entity when entity.GetExists world && entity.GetIs3d world ->
                         let operation =
                             ViewportOverlay
-                                { ViewportView = viewport.View3d (World.getEye3dCenter world, World.getEye3dRotation world)
+                                { ViewportView = Viewport.getView3d (World.getEye3dCenter world) (World.getEye3dRotation world)
                                   ViewportProjection = projectionMatrix
                                   ViewportBounds = box2 v2Zero io.DisplaySize
                                   EditContext = makeContext None None }
@@ -2199,7 +2212,8 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                             ImGuizmo.ManipulateBox3
                                 (World.getEye3dCenter world,
                                  World.getEye3dRotation world,
-                                 World.getEye3dFrustumView world,
+                                 World.getEye3dFieldOfView world,
+                                 rasterViewport,
                                  (if not Snaps2dSelected && ImGui.IsCtrlUp () then Triple.fst Snaps3d else 0.0f),
                                  &lightProbeBounds)
                         match manipulationResult with
@@ -2218,7 +2232,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 let world =
                     match SelectedEntityOpt with
                     | Some entity when entity.GetExists world && entity.GetIs3d world && not io.WantCaptureMouseLocal && not (ImGuizmo.IsViewManipulateHovered ()) ->
-                        let viewMatrix = viewport.View3d (World.getEye3dCenter world, World.getEye3dRotation world)
+                        let viewMatrix = Viewport.getView3d (World.getEye3dCenter world) (World.getEye3dRotation world)
                         let view = viewMatrix.ToArray ()
                         let affineMatrix = entity.GetAffineMatrix world
                         let affine = affineMatrix.ToArray ()
@@ -2373,10 +2387,10 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                     | Some _ | None -> world
 
                 // view manipulation
-                if not CaptureMode && not ManipulationActive then
+                if not CaptureMode && not ManipulationActive && DragEntityState = DragEntityInactive then
                     let eyeRotationOld = World.getEye3dRotation world
                     let eyeRotationArray = Matrix4x4.CreateFromQuaternion(eyeRotationOld).Transposed.ToArray()
-                    ImGuizmo.ViewManipulate (&eyeRotationArray.[0], 1.0f, v2 1375.0f 100.0f, v2 128.0f 128.0f, uint 0x00000000)
+                    ImGuizmo.ViewManipulate (&eyeRotationArray.[0], 1.0f, v2 (single rasterViewport.Bounds.Size.X - 525.0f) 100.0f, v2 128.0f 128.0f, uint 0x00000000)
                     let eyeRotation = Matrix4x4.CreateFromArray(eyeRotationArray).Transposed.Rotation
                     if not io.WantCaptureMouseGlobal && eyeRotationOld.Up.Dot eyeRotation.Up >= 0.0f then DesiredEye3dRotation <- eyeRotation
                     if ImGuizmo.IsUsingViewManipulate () then io.SwallowMouse ()
@@ -2667,6 +2681,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 if ImGui.IsItemHovered ImGuiHoveredFlags.DelayNormal && ImGui.BeginTooltip () then
                     ImGui.Text "Toggle capture mode view (F12 to toggle)."
                     ImGui.EndTooltip ()
+                ImGui.SameLine ()
                 world
             else world
         ImGui.End ()
@@ -3150,6 +3165,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                 "#r \"FSharp.Core.dll\"\n" +
                                 "#r \"FSharp.Compiler.Service.dll\"\n" +
                                 "#r \"Aether.Physics2D.dll\"\n" +
+                                "#r \"JoltPhysicsSharp.dll\"\n" +
                                 "#r \"AssimpNet.dll\"\n" +
                                 "#r \"BulletSharp.dll\"\n" +
                                 "#r \"Csv.dll\"\n" +
@@ -3160,9 +3176,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                 "#r \"Pfim.dll\"\n" +
                                 "#r \"SDL2-CS.dll\"\n" +
                                 "#r \"TiledSharp.dll\"\n" +
-                                "#r \"ImGui.NET.dll\"\n" +
-                                "#r \"ImGuizmo.NET.dll\"\n" +
-                                "#r \"ImPlot.NET.dll\"\n" +
+                                "#r \"Twizzle.ImGui-Bundle.NET.dll\"\n" +
                                 "#r \"Prime.dll\"\n" +
                                 "#r \"Nu.Math.dll\"\n" +
                                 "#r \"Nu.dll\"\n" +
@@ -3403,7 +3417,6 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             ImGui.Checkbox ("Alternative Eye Travel Input", &AlternativeEyeTravelInput) |> ignore<bool>
             ImGui.Text "Misc"
             ImGui.Checkbox ("ImGui Debug Window", &ImGuiDebugWindow) |> ignore<bool>
-            ImGui.Checkbox ("Reregister Physics Workaround", &ReregisterPhysicsWorkaround) |> ignore<bool>
         ImGui.End ()
 
     let private imGuiAssetViewerWindow world =
@@ -3463,6 +3476,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         // prompt user to create new project
         let programDir = PathF.GetDirectoryName (Assembly.GetEntryAssembly().Location)
         let title = "Create Nu Project... *EDITOR RESTART REQUIRED!*"
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
         if ImGui.BeginPopupModal (title, &ShowNewProjectDialog) then
             ImGui.Text "Project Name"
@@ -3598,6 +3612,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
 
     let private imGuiOpenProjectDialog world =
         let title = "Choose a project .dll... *EDITOR RESTART REQUIRED!*"
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
         if ImGui.BeginPopupModal (title, &ShowOpenProjectDialog) then
             ImGui.Text "Game Assembly Path:"
@@ -3636,6 +3651,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
 
     let private imGuiCloseProjectDialog (world : World) =
         let title = "Close project... *EDITOR RESTART REQUIRED!*"
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
         if ImGui.BeginPopupModal (title, &ShowCloseProjectDialog) then
             ImGui.Text "Close the project and use Gaia in its default state?"
@@ -3659,6 +3675,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
     let private imGuiNewGroupDialog world =
         let title = "Create a group..."
         let opening = not (ImGui.IsPopupOpen title)
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if opening then ImGui.OpenPopup title
         if ImGui.BeginPopupModal (title, &ShowNewGroupDialog) then
             ImGui.Text "Group Name:"
@@ -3719,6 +3736,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         match SelectedGroup with
         | group when group.GetExists world ->
             let title = "Rename group..."
+            ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
             let opening = not (ImGui.IsPopupOpen title)
             if opening then ImGui.OpenPopup title
             if ImGui.BeginPopupModal (title, &ShowRenameGroupDialog) then
@@ -3768,6 +3786,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         match SelectedEntityOpt with
         | Some entity when entity.GetExists world ->
             let title = "Rename entity..."
+            ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
             let opening = not (ImGui.IsPopupOpen title)
             if opening then ImGui.OpenPopup title
             if ImGui.BeginPopupModal (title, &ShowRenameEntityDialog) then
@@ -3796,6 +3815,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         match SelectedEntityOpt with
         | Some entity when entity.GetExists world ->
             let title = "Entity deletion confirmation..."
+            ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
             let opening = not (ImGui.IsPopupOpen title)
             if opening then ImGui.OpenPopup title
             if ImGui.BeginPopupModal (title, &ShowDeleteEntityDialog) then
@@ -3829,6 +3849,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         match SelectedEntityOpt with
         | Some entity when entity.GetExists world ->
             let title = "Entity cut confirmation..."
+            ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
             let opening = not (ImGui.IsPopupOpen title)
             if opening then ImGui.OpenPopup title
             if ImGui.BeginPopupModal (title, &ShowCutEntityDialog) then
@@ -3860,6 +3881,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
 
     let private imGuiConfirmExitDialog world =
         let title = "Are you okay with exiting Gaia?"
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
         if ImGui.BeginPopupModal (title, &ShowConfirmExitDialog) then
             ImGui.Text "Any unsaved changes will be lost."
@@ -3881,6 +3903,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
 
     let private imGuiRestartDialog world =
         let title = "Editor restart required."
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
         if ImGui.BeginPopupModal title then
             ImGui.Text "Gaia will apply your configuration changes and exit. Restart Gaia after exiting."
@@ -3895,6 +3918,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
     let private imGuiMessageBoxDialog (message : string) world =
         let title = "Message!"
         let mutable showing = true
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
         if ImGui.BeginPopupModal (title, &showing) then
             ImGui.TextWrapped message
@@ -4027,6 +4051,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
 
     let private imGuiReloadingAssetsDialog world =
         let title = "Reloading assets..."
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
         if ImGui.BeginPopupModal title then
             ImGui.Text "Gaia is processing your request. Please wait for processing to complete."
@@ -4040,6 +4065,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
 
     let private imGuiReloadingCodeDialog world =
         let title = "Reloading code..."
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
         if ImGui.BeginPopupModal title then
             ImGui.Text "Gaia is processing your request. Please wait for processing to complete."
@@ -4053,6 +4079,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
 
     let private imGuiReloadingAllDialog world =
         let title = "Reloading assets and code..."
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
         if ImGui.BeginPopupModal title then
             ImGui.Text "Gaia is processing your request. Please wait for processing to complete."
@@ -4074,6 +4101,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
 
     let private imGuiExceptionDialog exn worldOld world =
         let title = "Unhandled Exception!"
+        ImGui.SetNextWindowPos (ImGui.MainViewportCenter, ImGuiCond.Appearing, v2Dup 0.5f)
         if not (ImGui.IsPopupOpen title) then ImGui.OpenPopup title
         if ImGui.BeginPopupModal title then
             ImGui.Text "Exception text:"
@@ -4392,7 +4420,11 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             File.WriteAllText (imguiIniFilePath, ImGuiIniFileStr)
 
         // attempt to create SDL dependencies
-        match tryMakeSdlDeps () with
+        let windowSize = Constants.Render.DisplayVirtualResolution * Globals.Render.DisplayScalar
+        let outerViewport = Viewport.makeOuter windowSize
+        let rasterViewport = Viewport.makeRaster outerViewport.Bounds
+        let geometryViewport = Viewport.makeGeometry outerViewport.Bounds.Size
+        match tryMakeSdlDeps windowSize with
         | Right (sdlConfig, sdlDeps) ->
 
             // attempt to create the world
@@ -4403,7 +4435,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                   FramePacing = false
                   ModeOpt = gaiaState.ProjectEditModeOpt
                   SdlConfig = sdlConfig }
-            match tryMakeWorld sdlDeps worldConfig plugin with
+            match tryMakeWorld sdlDeps worldConfig geometryViewport rasterViewport outerViewport plugin with
             | Right (screen, world) ->
 
                 // subscribe to events related to editing
