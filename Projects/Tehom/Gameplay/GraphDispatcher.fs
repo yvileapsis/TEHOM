@@ -13,7 +13,12 @@ type GraphMessage =
     | Click of string
     interface Message
 
+type GraphCommand =
+    | Click2 of string
+    interface Command
+
 type SitesGraph = {
+    Area : Area
     Graph : Sites
     GraphStored : Sites
     DisplayGraph : Graph<String, Vector3, Relationship>
@@ -28,6 +33,7 @@ type SitesGraph = {
 }
 with
     static member empty = {
+        Area = Area.empty
         Graph = Graph.empty
         GraphStored = Graph.empty
         DisplayGraph = Graph.empty
@@ -49,7 +55,7 @@ module GraphExtensions =
         member this.Graph = this.ModelGeneric<SitesGraph> ()
 
 type GraphDispatcher () =
-    inherit Entity2dDispatcher<SitesGraph, GraphMessage, Command> (false, false, false, SitesGraph.empty)
+    inherit Entity2dDispatcher<SitesGraph, GraphMessage, GraphCommand> (false, false, false, SitesGraph.empty)
 
     override this.Definitions (model, _) = [
         Screen.UpdateEvent => Update
@@ -62,6 +68,9 @@ type GraphDispatcher () =
 
         match message with
         | Update ->
+
+            let model = { model with Area = { Sites = model.Graph; Name = "Whatever" } }
+
             let attraction (graph : Graph<String, Vector3, Relationship>) =
                 graph
                 |> Vertices.map (fun v l ->
@@ -187,12 +196,15 @@ type GraphDispatcher () =
 
         | Click s ->
             // TODO: take key through use action
-            just model
+            let model = { model with Graph = Vertices.remove s model.Graph }
+            [Click2 s], model
 
     override this.Command (model, command, entity, world) =
 
         match command with
-        | _ ->
+        | Click2 s ->
+            let player = Simulants.GameplayCharacters / "player"
+            let world = player.SetCharacterWith (Character.addItem s) world
             just world
 
     override this.Content (model, _) = [

@@ -331,6 +331,7 @@ module Character =
         // depends on body type
         Body : Body
         Weapons : Weapon list
+        Items : string list
 
         // Dynamic stats
         Wounds : Wounds
@@ -629,6 +630,14 @@ module Character =
             | MentalReactive -> character.StaminaMentalReactiveBase
             | NoType -> 0
 
+        static member addItem item character =
+            let items = character.Items
+            let character = {
+                character with
+                    Items = item::items
+            }
+            character
+
         static member empty = {
             ID = String.empty
             Name = String.empty
@@ -641,6 +650,8 @@ module Character =
 
             Body = Body.empty
             Weapons = []
+            Items = []
+
             Edges = []
             CustomActions = []
 
