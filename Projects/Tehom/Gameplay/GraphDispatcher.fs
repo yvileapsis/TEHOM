@@ -2,6 +2,7 @@ namespace Tehom
 
 open System
 open System.Numerics
+open FParsec
 open Prime
 open Nu
 open Graph
@@ -19,30 +20,12 @@ type GraphCommand =
 
 type SitesGraph = {
     Area : Area
-    Graph : Sites
-    GraphStored : Sites
-    DisplayGraph : Graph<String, Vector3, Relationship>
-    Iterations : int
-    Force : float32
-    DistanceMult : float32
-    ZeroDistanceForce : float32
-    IterationsLeft : int
-    NodeDistances : Map<String * String, uint option>
     SelectedText : string
     Zoom : bool
 }
 with
     static member empty = {
         Area = Area.empty
-        Graph = Graph.empty
-        GraphStored = Graph.empty
-        DisplayGraph = Graph.empty
-        Iterations = 10
-        Force = 2f
-        DistanceMult = 0.15f
-        ZeroDistanceForce = 0.025f
-        IterationsLeft = 20
-        NodeDistances = Map.empty
         SelectedText = ""
         Zoom = false
     }
@@ -69,126 +52,18 @@ type GraphDispatcher () =
         match message with
         | Update ->
 
-            let model = { model with Area = { Sites = model.Graph; Name = "Whatever" } }
+            let area = Simulants.GameplayArea
+            let area = area.GetArea world
 
-            let attraction (graph : Graph<String, Vector3, Relationship>) =
-                graph
-                |> Vertices.map (fun v l ->
+            let model = { model with Area = area }
 
-                    graph
-                    |> Vertices.fold l (fun l v' l' ->
+            let model =
+                if (World.getExists Simulants.GameplayCombat world) then
+                    { model with Zoom = true }
+                else
+                    model
 
-                        match model.NodeDistances[v, v'] with
-                        | Some targetDistance ->
-
-                            let targetDistance = model.DistanceMult * float32 targetDistance
-                            let delta = l - l'
-                            let distance = float32 (delta.Length ()) + 0.01f
-                            let deltaNorm = delta / distance
-                            let distance' = distance - targetDistance
-                            let force = distance' * (if targetDistance = 0f then model.ZeroDistanceForce else model.Force / targetDistance)
-                            l - deltaNorm * force
-
-                        | None ->
-
-                            let targetDistance = 20f
-                            let delta = l - l'
-                            let distance = float32 (delta.Length ()) + 0.01f
-                            let deltaNorm = delta / distance
-                            let distance' = distance - targetDistance
-                            let force = distance' * model.ZeroDistanceForce
-                            l - deltaNorm * force
-
-                    )
-                )
-
-            let recenter (graph : Graph<String, Vector3, Relationship>) =
-                let center =
-                    graph
-                    |> Vertices.toList
-                    |> List.map snd
-                    |> fun list ->
-                        let (sum : Vector3) = List.sum list
-                        let (average : Vector3) = sum / float32 (List.length list)
-                        average
-
-                graph
-                |> Vertices.map (fun v l ->
-                    l - center
-                )
-
-
-            let iter = attraction >> recenter
-            let fiveiters = List.init model.Iterations (fun _ -> iter) |> List.fold (>>) id
-
-            if model.Graph <> model.GraphStored then
-                let graph =
-                    model.Graph
-                    |> Vertices.map (fun v l ->
-                        match Vertices.tryFind v model.DisplayGraph with
-                        | Some (_, l) ->
-                            l
-                        | _ ->
-                            let list =
-                                model.Graph
-                                |> Vertices.toList
-                                |> List.sort
-                                |> List.map fst
-
-                            let i = List.findIndex ((=) v) list
-                            let x = float32 (i % 6) * 16f - 3f * 16f
-                            let y = float32 (i / 6) * 16f - 3f * 16f
-                            v3 x y 0f
-                    )
-
-                let graph' =
-                    graph
-                    |> Edges.undirect (fun edge1 edge2 ->
-                        edge1
-                    )
-                    |> Edges.choose (fun v1 v2 edge ->
-                        match edge with
-                        | Distance x -> Some (uint x)
-                        | Consists -> None
-                        | Contains -> Some 150u
-                        | LiesAbove -> Some 150u
-                        | Covers -> Some 150u
-                        | IsOnEdge -> Some 50u
-                    )
-
-                let vertices =
-                    graph' |> Vertices.toList |> List.map fst
-
-                let nodeDistance =
-                    vertices
-                    |> List.fold (fun map v ->
-                        let tree = Query.spTree v graph'
-
-                        vertices
-                        |> List.fold (fun (map : Map<String * String, uint option>) v' ->
-                            let distance =
-                                Query.getDistance v' tree
-
-                            Map.add (v, v') distance map
-                        ) map
-                    ) Map.empty
-
-
-                let model = { model with DisplayGraph = graph; GraphStored = model.Graph; NodeDistances = nodeDistance; IterationsLeft = 100 }
-                just model
-            elif model.IterationsLeft > 0 then
-                let graph = model.DisplayGraph
-                let graph = graph |> fiveiters
-                let model = { model with DisplayGraph = graph; IterationsLeft = model.IterationsLeft - model.Iterations }
-                just model
-            else
-                let model =
-                    if (World.getExists Simulants.GameplayCombat world) then
-                        { model with Zoom = true }
-                    else
-                        model
-
-                just model
+            just model
 
         | Select str ->
             let model = { model with SelectedText = str }
@@ -196,7 +71,7 @@ type GraphDispatcher () =
 
         | Click s ->
             // TODO: take key through use action
-            let model = { model with Graph = Vertices.remove s model.Graph }
+            //let model = { model with Graph = Vertices.remove s model.Graph }
             [Click2 s], model
 
     override this.Command (model, command, entity, world) =
@@ -208,6 +83,12 @@ type GraphDispatcher () =
             just world
 
     override this.Content (model, _) = [
+
+        Content.staticSprite "Background" [
+            Entity.Size == v3 300f 300f 0f
+            Entity.StaticImage == Assets.Default.Black
+            Entity.Color == Color.White.WithA 0.5f
+        ]
 
         let sprite name coords = Content.button $"Vertice-{name}" [
             Entity.Size := v3 6f 6f 0f
@@ -255,22 +136,27 @@ type GraphDispatcher () =
                         Color.BlueViolet
             ]
 
-        let graph = model.DisplayGraph
-
-        for (v, l) in Vertices.toList graph do
-            sprite v l
-
-        for (label1, label2, relationship) in Graph.Directed.Edges.toList graph do
-            let _, pos1 = Vertices.find label1 graph
-            let _, pos2 = Vertices.find label2 graph
-            let pos1 = if model.Zoom then pos1 / 3f else pos1
-            let pos2 = if model.Zoom then pos2 / 3f else pos2
-            match relationship with
-            | Consists ->
+        for (v, l) in Vertices.toList model.Area.Sites do
+            match l.Position with
+            | Some pos ->
+                sprite v pos
+            | None ->
                 ()
-            | _ ->
-                line label1 label2 pos1 pos2 relationship
 
+        for (label1, label2, relationship) in Graph.Directed.Edges.toList model.Area.Sites do
+            let _, pos1 = Vertices.find label1 model.Area.Sites
+            let _, pos2 = Vertices.find label2 model.Area.Sites
+            match  pos1, pos2 with
+            | { Position = Some pos1 }, { Position = Some pos2 } ->
+                let pos1 = if model.Zoom then pos1 / 3f else pos1
+                let pos2 = if model.Zoom then pos2 / 3f else pos2
+                match relationship with
+                | Consists ->
+                    ()
+                | _ ->
+                    line label1 label2 pos1 pos2 relationship
+            | _ ->
+                ()
 
         Content.text "SelectedText" [
             Entity.Size == v3 120f 10f 0f
@@ -283,53 +169,6 @@ type GraphDispatcher () =
             Entity.ClickEvent => Select ""
         ]
 
-        let graph' =
-            model.Graph
-            |> Edges.undirect2 (fun vertex1 vertex2 edge ->
-                match edge with
-                | Contains -> true
-                | LiesAbove -> true
-                | Covers -> true
-                | IsOnEdge -> true
-                | _ -> false
-            ) (fun edge1 edge2 ->
-                edge1
-            )
-            |> Edges.choose (fun v1 v2 edge ->
-                match edge with
-                | Distance x -> Some (uint x)
-                | Consists -> None
-                | Contains -> Some 0u
-                | LiesAbove -> Some 0u
-                | Covers -> Some 0u
-                | IsOnEdge -> Some 0u
-            )
-
-        let vertices =
-            graph'
-            |> Vertices.toList |> List.map fst
-
-        let nodeDistance =
-            vertices
-            |> List.fold (fun map v ->
-                let tree = Query.spTree v graph'
-
-                vertices
-                |> List.fold (fun (map : Map<String * String, uint option>) v' ->
-                    let distance =
-                        Query.getDistance v' tree
-
-                    Map.add (v, v') distance map
-                ) map
-            ) Map.empty
-
-
-        let allwithinreach =
-            nodeDistance
-            |> Map.toList
-            |> List.filter (fun ((v, v'), distance) -> v = "player" && distance.IsSome && (distance < Some 150u))
-            |> List.map (fun ((v, v'), distance) -> v', distance)
-
         Content.association "usables" [
             Entity.Absolute == false
             Entity.PositionLocal == v3 -180.0f 0.0f 0.0f
@@ -340,7 +179,7 @@ type GraphDispatcher () =
 
         ] [
 
-            for (vertex, distance) in allwithinreach do
+            for (vertex, distance) in Area.getWithinReach "player" 150u model.Area do
                 Content.button $"use{vertex}" [
                     Entity.Absolute == false
                     Entity.Size == v3 60.0f 5.0f 0.0f

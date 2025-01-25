@@ -21,35 +21,18 @@ type AreaDispatcher () =
     override this.Definitions (_, _) =
         []
 
+    override this.Update (entity, world) =
+        entity.SetAreaWith (Area.iterateDisplay 1) world
+
     override this.Render (_, _, _, _) =
         ()
 
-    override this.Content (model, entity) = [
-        Content.staticSprite "Background" [
-            Entity.Size == v3 300f 300f 0f
-            Entity.StaticImage == Assets.Default.Black
-            Entity.Color == Color.White.WithA 0.5f
-        ]
-
-        Content.entity<GraphDispatcher> "Graph" [
-        ]
-    ]
-
-    override this.Update (entity, world) =
-
-        let model = entity.GetArea world
-        let graph = entity / "Graph"
-        let graphSites = graph.GetGraph world
-        let graphSites = { graphSites with Graph = model.Sites }
-        let world = graph.SetGraph graphSites world
-
-        world
 
 [<AutoOpen>]
 module AreaEntity =
-    let area (character : Area) =
-        Content.composite<AreaDispatcher> character.Name [
-            Entity.Area == character
+    let area (area : Area) =
+        Content.composite<AreaDispatcher> area.Name [
+            Entity.Area == area
         ] [
 
         ]

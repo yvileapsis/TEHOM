@@ -444,11 +444,11 @@ module CombatExtensions =
                 world
 
             | TravelInter (area, character, location) ->
-                let world = area.SetAreaWith (Area.moveSite character location) world
+                let world = area.SetAreaWith (Area.moveSite character location >> Area.iterateDisplay 10) world
                 world
 
             | TravelIntra (area, character, location, distance) ->
-                let world = area.SetAreaWith (Area.establishDistance distance character location) world
+                let world = area.SetAreaWith (Area.establishDistance distance character location >> Area.iterateDisplay 10) world
                 world
         member this.ExecuteGameEffects effects world =
             List.fold (fun world effect -> this.ExecuteGameEffect effect world) world effects

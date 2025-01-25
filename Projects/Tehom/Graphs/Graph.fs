@@ -282,6 +282,16 @@ module Vertices =
             |> List.choose (fun (v,l) -> if predicate v l then None else Some v)
         removeMany verticesToRemove g
 
+    /// Returns a new graph containing only the vertices for which the given predicate returns true.
+    /// TODO: optimize
+    let choose (predicate : 'Vertex -> 'Label -> 'RLabel option) (g:Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'RLabel,'Edge> =
+        let verticesToRemove =
+            g
+            |> toList
+            |> List.choose (fun (v,l) -> if Option.isSome (predicate v l) then None else Some v)
+        removeMany verticesToRemove g
+        |> map (fun v l -> Option.get (predicate v l))
+
 /// Functions for edges of both directed and undirected graphs
 module Edges =
 
@@ -310,6 +320,7 @@ module Edges =
         )
 
     ///Filter and map edges of the graph.
+    /// TODO: optimize
     let choose
         (chooser: 'Vertex -> 'Vertex -> 'Edge -> 'REdge option)
         (g: Graph<'Vertex,'Label,'Edge>)

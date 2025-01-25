@@ -114,10 +114,10 @@ type GameplayDispatcher () =
 //            let world = World.setEye3dCenter (v3 0f 2f 3f) world
 //            let world = World.setEye3dRotation (Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -20f, 0f)) world
             let world = World.setEye2dCenter (v2 0f 0f) world
-            let world = World.setEye2dCenter (v2 640f 360f) world
+            let world = World.setEye2dSize (v2 640f 360f) world
 
             let area, world = World.createEntity<AreaDispatcher> NoOverlay (Some [|"Area"|]) Simulants.GameplayGui world
-            let world = area.SetArea Area.level1clinic world
+            let world = area.SetArea Area.initial world
 
             let player, world = World.createEntity<CharacterDispatcher> NoOverlay (Some [|CharacterContent.player.ID|]) Simulants.GameplayCharacters world
             let world = player.SetCharacter CharacterContent.player world
@@ -164,7 +164,7 @@ type GameplayDispatcher () =
 
             let area = Simulants.GameplayArea
 
-            let graph = area / "Graph"
+            let graph = Simulants.GameplayGui / "Graph"
 
             let model = graph.GetGraph world
 
@@ -193,6 +193,10 @@ type GameplayDispatcher () =
                 Entity.FontSizing == Some 8
                 Entity.Text == "Move!"
                 Entity.ClickEvent => MoveToSelected
+            ]
+
+            Content.entity<GraphDispatcher> "Graph" [
+
             ]
         ]
 
