@@ -10,29 +10,31 @@ open Area
 
 type GraphMessage =
     | Update
-    | Select of string
-    | Click of string
+    | Select of String
+    | Click of String
     interface Message
 
 type GraphCommand =
-    | Remove of string
-    | Click2 of string
+    | RemoveFromGraph of String
+    | AddItemToPlayer of String
+    | MoveToSelected of String
+    | ReplaceSiteWith of String * Site
     interface Command
 
 type SitesGraph = {
-    Vertices : (String * Site * Vector3) list
-    Edges : (String * Vector3 * String * Vector3 * Relationship) list
-    EntitiesWithinDistance : (String * UInt32) list
+    Vertices : List<String * Site * Vector3>
+    Edges : List<String * Vector3 * String * Vector3 * Relationship>
+    Clickables : List<String * UInt32>
 
-    SelectedText : string
-    Zoom : bool
+    SelectedText : String
+    Zoom : Boolean
 }
 with
     static member empty = {
 
         Vertices = List.empty
         Edges = List.empty
-        EntitiesWithinDistance = List.empty
+        Clickables = List.empty
 
         SelectedText = ""
         Zoom = false
@@ -63,11 +65,18 @@ type GraphDispatcher () =
             let area = Simulants.GameplayArea
             let area = area.GetArea world
 
+            let vertices = Area.getDisplayVertices area
+
+            let clickables =
+                Area.getWithinReach "player" 150u area
+                @ (vertices |> List.choose (fun (s, site, _) -> if site.Type = Ground then Some (s, 0u) else None))
+                |> List.distinctBy fst
+
             let model = {
                 model with
-                    Vertices = Area.getDisplayVertices area
+                    Vertices = vertices
                     Edges = Area.getDisplayEdges area
-                    EntitiesWithinDistance = Area.getWithinReach "player" 150u area
+                    Clickables = clickables
                     Zoom = World.getExists Simulants.GameplayCombat world
             }
 
@@ -78,33 +87,78 @@ type GraphDispatcher () =
             just model
 
         | Click s ->
-            // TODO: take key through use action
-            [Remove s; Click2 s], model
+            let area = Simulants.GameplayArea
+            let area = area.GetArea world
+
+            let (s, site) = Area.getSite s area
+
+            match site.Type with
+            | Abstract ->
+                just model
+            | Ground ->
+                [MoveToSelected s], model
+            | RoomParts ->
+                just model
+            | Item ->
+                [RemoveFromGraph s; AddItemToPlayer s], model
+            | Furniture ->
+                just model
+            | Safe (notclosed, key, items) ->
+                let player = Simulants.GameplayCharacters / "player"
+                let playerModel = player.GetCharacter world
+                if notclosed || List.contains key playerModel.Items then
+                    let site = { site with Type = Safe (true, key, []) }
+                    [
+                        ReplaceSiteWith (s, site)
+                        for i in items do AddItemToPlayer i
+                    ], model
+                else
+                    just model
 
     override this.Command (model, command, entity, world) =
 
         match command with
-        | Remove s ->
+        | RemoveFromGraph s ->
             let area = Simulants.GameplayArea
             let world = area.SetAreaWith (Area.removeSite s) world
             just world
-        | Click2 s ->
+
+        | AddItemToPlayer s ->
             let player = Simulants.GameplayCharacters / "player"
             let world = player.SetCharacterWith (Character.addItem s) world
+            just world
+
+        | MoveToSelected s ->
+            let player = Simulants.GameplayCharacters / "player"
+            let playerModel = player.GetCharacter world
+
+            let speed = Character.getSpeed playerModel
+            let reach = Character.getReach playerModel
+
+            let area = Simulants.GameplayArea
+
+            let effect = GameEffect.travel player.Name s reach speed area world
+            let world = player.ExecuteGameEffects effect world
+
+            just world
+
+        | ReplaceSiteWith (s, site) ->
+            let area = Simulants.GameplayArea
+            let world = area.SetAreaWith (Area.replaceSite s site) world
             just world
 
     override this.TruncateModel model = {
         model with
             Vertices = List.empty
             Edges = List.empty
-            EntitiesWithinDistance = List.empty
+            Clickables = List.empty
     }
 
     override this.UntruncateModel (model, model') = {
         model with
             Vertices = model'.Vertices
             Edges = model'.Edges
-            EntitiesWithinDistance = model'.EntitiesWithinDistance
+            Clickables = model'.Clickables
     }
 
     override this.Content (model, _) = [
@@ -115,10 +169,27 @@ type GraphDispatcher () =
             Entity.Color == Color.White.WithA 0.5f
         ]
 
-        let sprite name coords = Content.button $"Vertice-{name}" [
+        Content.button "Move" [
+            Entity.PositionLocal == v3 0f -120f 0f
+            Entity.Size == v3 64f 16f 0f
+            Entity.FontSizing == Some 8
+            Entity.Text == "Move!"
+            Entity.ClickEvent => MoveToSelected model.SelectedText
+        ]
+
+        let sprite name site coords = Content.button $"Vertice-{name}" [
             Entity.Size := v3 6f 6f 0f
             Entity.PositionLocal := if model.Zoom then coords / 3f else coords
-            Entity.UpImage == Assets.Default.Ball
+            Entity.UpImage ==
+                match site.Type with
+                | Actor ->
+                    Assets.Default.Ball
+                | Item ->
+                    Assets.Default.Ball
+                | Safe(``open``, key, items) ->
+                    Assets.Default.Brick
+                | _ ->
+                    Assets.Default.White
             Entity.DownImage == Assets.Default.Ball
             Entity.ElevationLocal == 20f
             Entity.TextColor ==
@@ -162,7 +233,7 @@ type GraphDispatcher () =
             ]
 
         for (v, l, p) in model.Vertices do
-            sprite v p
+            sprite v l p
 
         for (v1, p1, v2, p2, relationship) in model.Edges do
             let pos1 = if model.Zoom then p1 / 3f else p1
@@ -190,7 +261,7 @@ type GraphDispatcher () =
 
         ] [
 
-            for (vertex, distance) in model.EntitiesWithinDistance do
+            for (vertex, distance) in model.Clickables do
                 Content.button $"use{vertex}" [
                     Entity.Absolute == false
                     Entity.Size == v3 60.0f 5.0f 0.0f

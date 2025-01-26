@@ -12,10 +12,8 @@ open Character
 TODO: Always do the minimum implementation
 
 TODO:
-    - The Seven Rooms
-    - Taking key
-    - Opening door
-    - Taking pistol
+    - Equipping pistol
+    - Opening doors
 
 TODO: Combat
     - Doesn't end
@@ -48,9 +46,9 @@ TODO: Tiniest vertical slice:
 
 type GameEffect =
     | CharacterDo of Entity * (Character -> Character)
-    | Damage of Entity * Size : int * Damage : int
+    | Damage of Entity * Size : Int32 * Damage : Int32
     | TravelInter of Area : Entity * String * String
-    | TravelIntra of Area : Entity * String * String * uint32
+    | TravelIntra of Area : Entity * String * String * UInt32
 with
     static member travel actor target closeness distance (area : Entity) world =
         let model = area.GetArea world
@@ -263,10 +261,10 @@ with
             []
 
 type Turn = {
-    Turn : int
+    Turn : Int32
     Entity : Entity
-    Checks : Check list
-    Passed : bool list
+    Checks : List<Check>
+    Passed : List<Boolean>
 }
 with
     static member empty = {
@@ -319,25 +317,25 @@ type CombatState =
 // this is our MMCC model type representing gameplay.
 // this model representation uses update time, that is, time based on number of engine updates.
 type [<SymbolicExpansion>] Combat = {
-    CombatTime : int64
+    CombatTime : Int64
     CombatState : CombatState
 
-    Turn : int
-    Combatants : Entity list
-    History : Map<Entity, Turn list>
+    Turn : Int32
+    Combatants : List<Entity>
+    History : Map<Entity, List<Turn>>
     Area : Entity
 
-    DisplayLeftEntity : Entity option
-    DisplayLeftModel : Character option
-    DisplayRightEntity : Entity option
-    DisplayRightModel : Character option
+    DisplayLeftEntity : Option<Entity>
+    DisplayLeftModel : Option<Character>
+    DisplayRightEntity : Option<Entity>
+    DisplayRightModel : Option<Character>
 
-    PossibleActions : (Action * bool) List
-    PossibleTargets : (Entity * bool) list
-    PlannedActions : Action list
-    PlannedTarget : Entity option
-    DistanceCurrentReach : uint32
-    DistanceToTarget : uint32
+    PossibleActions : List<Action * Boolean>
+    PossibleTargets : List<Entity * Boolean>
+    PlannedActions : List<Action>
+    PlannedTarget : Option<Entity>
+    DistanceCurrentReach : UInt32
+    DistanceToTarget : UInt32
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.

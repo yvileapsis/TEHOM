@@ -38,11 +38,11 @@ module Weapon =
 *)
     type Weapon = {
         Type : Type
-        Name : string
-        Damage : int
-        Range : uint32
-        Reload : int
-        ReloadLeft : int
+        Name : String
+        Damage : Int32
+        Range : UInt32
+        Reload : Int32
+        ReloadLeft : Int32
         RequiredLimb : String
     }
     with
@@ -178,10 +178,10 @@ type Move = Move.Move
 
 // TODO: figure out where this should be
 type Stance = {
-    GallStance : int
-    LymphStance : int
-    OilStance : int
-    PlasmaStance : int
+    GallStance : Int32
+    LymphStance : Int32
+    OilStance : Int32
+    PlasmaStance : Int32
 }
 with
     static member empty = {
@@ -250,19 +250,19 @@ module Action =
 
     type CustomAction = {
         Name : String
-        Actions : Action list
+        Actions : List<Action>
     }
 
 type Cost = {
-    StaminaMentalActive : int
-    StaminaPhysicalActive : int
-    StaminaMentalReactive : int
-    StaminaPhysicalReactive : int
-    ActionsPhysicalActive : int
-    ActionsMentalActive : int
-    ActionsPhysicalReactive : int
-    ActionsMentalReactive : int
-    Stances : int
+    StaminaMentalActive : Int32
+    StaminaPhysicalActive : Int32
+    StaminaMentalReactive : Int32
+    StaminaPhysicalReactive : Int32
+    ActionsPhysicalActive : Int32
+    ActionsMentalActive : Int32
+    ActionsPhysicalReactive : Int32
+    ActionsMentalReactive : Int32
+    Stances : Int32
 }
 with
     static member empty = {
@@ -317,46 +317,46 @@ module Character =
         Oil : Stat
         Plasma : Stat
 
-        ActionsPhysicalActiveBase : int
-        ActionsMentalActiveBase : int
-        ActionsPhysicalReactiveBase : int
-        ActionsMentalReactiveBase : int
+        ActionsPhysicalActiveBase : Int32
+        ActionsMentalActiveBase : Int32
+        ActionsPhysicalReactiveBase : Int32
+        ActionsMentalReactiveBase : Int32
 
-        StancesBase : int
-        FractureBase : int
+        StancesBase : Int32
+        FractureBase : Int32
 
-        Edges : Stat list
-        CustomActions : Action.CustomAction list
+        Edges : List<Stat>
+        CustomActions : List<Action.CustomAction>
 
         // depends on body type
         Body : Body
-        Weapons : Weapon list
-        Items : string list
+        Weapons : List<Weapon>
+        Items : List<String>
 
         // Dynamic stats
         Wounds : Wounds
-        Injuries : int
+        Injuries : Int32
 
-        Initiative : int
+        Initiative : Int32
 
-        StaminaPhysicalActiveBase : int
-        StaminaMentalActiveBase : int
-        StaminaPhysicalReactiveBase : int
-        StaminaMentalReactiveBase : int
+        StaminaPhysicalActiveBase : Int32
+        StaminaMentalActiveBase : Int32
+        StaminaPhysicalReactiveBase : Int32
+        StaminaMentalReactiveBase : Int32
 
         // TODO: worth considering NOT having limits on the number of actions, relying on stamina only
-        StaminaPhysicalActiveCurrent : int
-        StaminaMentalActiveCurrent : int
-        StaminaPhysicalReactiveCurrent : int
-        StaminaMentalReactiveCurrent : int
+        StaminaPhysicalActiveCurrent : Int32
+        StaminaMentalActiveCurrent : Int32
+        StaminaPhysicalReactiveCurrent : Int32
+        StaminaMentalReactiveCurrent : Int32
 
-        ActionsPhysicalActiveCurrent : int
-        ActionsMentalActiveCurrent : int
-        ActionsPhysicalReactiveCurrent : int
-        ActionsMentalReactiveCurrent : int
+        ActionsPhysicalActiveCurrent : Int32
+        ActionsMentalActiveCurrent : Int32
+        ActionsPhysicalReactiveCurrent : Int32
+        ActionsMentalReactiveCurrent : Int32
 
-        StancesCurrent : int
-        FractureCurrent : int
+        StancesCurrent : Int32
+        FractureCurrent : Int32
 
         Stance : Stance
 

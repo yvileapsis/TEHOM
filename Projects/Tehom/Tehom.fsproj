@@ -53,10 +53,10 @@
 		<Compile Include="Gameplay\CharacterContent.fs" />
 		<Compile Include="Gameplay\Area.fs" />
 		<Compile Include="Gameplay\AreaDispatcher.fs" />
-		<Compile Include="Gameplay\GraphDispatcher.fs" />
 		<Compile Include="Gameplay\Combat.fs" />
 		<Compile Include="Gameplay\CombatAI.fs" />
 		<Compile Include="Gameplay\CombatDispatcher.fs" />
+		<Compile Include="Gameplay\GraphDispatcher.fs" />
 		<Compile Include="Gameplay\GameplayDispatcher.fs" />
 		<Compile Include="Tehom.fs" />
 		<Compile Include="TehomPlugin.fs" />

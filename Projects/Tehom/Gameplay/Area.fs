@@ -10,7 +10,12 @@ module Area =
 
     type SiteType =
         | Ground
-        | NotGround
+        | RoomParts
+        | Abstract
+        | Item
+        | Furniture
+        | Safe of Open : Boolean * Key : String * Items : String list
+        | Actor
 
     type Site = {
         ID : String
@@ -23,14 +28,11 @@ module Area =
             ID = ""
             Label = ""
             Position = None
-            Type = NotGround
+            Type = RoomParts
         }
 
-        static member make id label =
-            { Site.empty with ID = id; Label = label }
-
-        static member makeGround id =
-            { Site.empty with ID = id; Type = Ground }
+        static member make id label t =
+            { Site.empty with ID = id; Label = label; Type = t }
 
     type Relationship =
         | Distance of Distance: UInt32
@@ -164,6 +166,12 @@ module Area =
                     sites'
             { area with Sites = sites }
 
+        static member replaceSite vertex site area =
+            let sites =
+                Vertices.replace (vertex, site) area.Sites
+
+            { area with Sites = sites }
+
         static member establishDistance distance site toDestination area =
             let sites = area.Sites
 
@@ -188,6 +196,9 @@ module Area =
                 match c with
                 | Some (p, v, l, s) -> $"{p} {v} {l} {s}"
                 | None -> String.empty
+
+        static member getSite site area =
+            Vertices.find site area.Sites
 
         static member getWithinReach site reach area =
             let graph' = Area.getAsNavigation area.Sites
@@ -271,6 +282,8 @@ module Area =
                             let distance' = distance - targetDistance
                             let force = distance' * area.ZeroDistanceForce
                             l - deltaNorm * force
+                            |> ignore
+                            l
 
                     )
                 )
@@ -307,6 +320,7 @@ module Area =
         static member getDisplayVertices area =
             area.Sites
             |> Vertices.toList
+            |> List.filter (fun (v, l) -> l.Type <> Abstract)
             |> List.choose (fun (v, l) ->
                 match l.Position with
                 | Some pos -> Some (v, l, pos)
@@ -338,21 +352,21 @@ module Area =
             ZeroDistanceForce = 0.025f
         }
 
-        static member add id =
-            let site = Site.make id ""
+        static member add id t =
+            let site = Site.make id "" t
             Vertices.add (site.ID, site)
 
-        static member addNamed id name =
-            let site = Site.make id name
+        static member addNamed id name t =
+            let site = Site.make id name t
             Vertices.add (site.ID, site)
 
         static member addPart where id =
-            let site = Site.make id ""
+            let site = Site.make id "" Abstract
             Vertices.add (site.ID, site)
             >> Directed.Edges.add (where, id, Consists)
 
         static member addFloor where id =
-            let site = Site.makeGround id
+            let site = Site.make id "" Ground
             Vertices.add (site.ID, site)
             >> Directed.Edges.add (where, id, Consists)
 
@@ -360,11 +374,14 @@ module Area =
             Directed.Edges.add (left, right, relationship)
             >> Directed.Edges.add (right, left, relationship)
 
+        static member relationshipRight left right relationship =
+            Directed.Edges.add (left, right, relationship)
+
         static member room id name (size : Vector3i) =
             let x = uint (size.X / 2)
             let y = uint (size.Y / 2)
             let z = uint (size.Z / 2)
-            Area.addNamed id name
+            Area.addNamed id name Abstract
             // room parts
             >> Area.addFloor id $"{id}floor"
             >> Area.addPart id $"{id}ceiling"
@@ -379,25 +396,45 @@ module Area =
             >> Area.relationship $"{id}air" $"{id}floor" (Distance z)
             >> Area.relationship $"{id}air" $"{id}ceiling" (Distance z)
             >> Area.relationship $"{id}air" $"{id}walls" (Distance x)
+            >> Area.relationship $"{id}floor" $"{id}walls" (Distance x)
+            >> Area.relationship $"{id}ceiling" $"{id}walls" (Distance x)
+            >> Area.relationship $"{id}corners" $"{id}floor" IsOnEdge
 //            >> Area.relationship $"{id}air" $"{id}wallN" (Distance x)
 //            >> Area.relationship $"{id}air" $"{id}wallE" (Distance y)
 //            >> Area.relationship $"{id}air" $"{id}wallS" (Distance x)
 //            >> Area.relationship $"{id}air" $"{id}wallW" (Distance y)
-            >> Area.relationship $"{id}floor" $"{id}walls" (Distance x)
 //            >> Area.relationship $"{id}floor" $"{id}wallN" (Distance x)
 //            >> Area.relationship $"{id}floor" $"{id}wallE" (Distance y)
 //            >> Area.relationship $"{id}floor" $"{id}wallS" (Distance x)
 //            >> Area.relationship $"{id}floor" $"{id}wallW" (Distance y)
-            >> Area.relationship $"{id}ceiling" $"{id}walls" (Distance x)
 //            >> Area.relationship $"{id}ceiling" $"{id}wallN" (Distance x)
 //            >> Area.relationship $"{id}ceiling" $"{id}wallE" (Distance y)
 //            >> Area.relationship $"{id}ceiling" $"{id}wallS" (Distance x)
 //            >> Area.relationship $"{id}ceiling" $"{id}wallW" (Distance y)
-            >> Area.relationship $"{id}corners" $"{id}floor" IsOnEdge
 
         static member exit where id =
-            Area.add id
+            Area.add id RoomParts
             >> Area.relationship where id IsOnEdge
+
+        static member roomPart where id t =
+            Area.add id RoomParts
+            >> Area.relationship where id t
+
+        static member furniture where id t =
+            Area.add id Furniture
+            >> Area.relationship where id t
+
+        static member item where id t =
+            Area.add id Item
+            >> Area.relationship where id t
+
+        static member safe where id t' t =
+            Area.add id t'
+            >> Area.relationship where id t
+
+        static member actor where id t =
+            Area.add id Actor
+            >> Area.relationship where id t
 
         // * Waitroom, barricaded windows, rolling hospital bed, locked exit door, you wake up here
         static member room1waitroom : Sites =
@@ -409,19 +446,12 @@ module Area =
             |> Area.exit "room1walls" "room1exit6"
             |> Area.exit "room1walls" "room1exit8"
             // actors inside the room
-            |> Vertices.add ("room1barricadedWindow1", Site.empty)
-            |> Vertices.add ("room1barricadedWindow2", Site.empty)
-            |> Vertices.add ("room1windowroom3", Site.empty)
-            |> Vertices.add ("room1windowroom6", Site.empty)
-            |> Vertices.add ("room1gurney", Site.empty)
-            |> Vertices.add ("room1chairs", Site.empty)
-            // locations of actors inside the room
-            |> Directed.Edges.add ("room1walls", "room1barricadedWindow1", IsOnEdge)
-            |> Directed.Edges.add ("room1walls", "room1barricadedWindow2", IsOnEdge)
-            |> Directed.Edges.add ("room1walls", "room1windowroom3", IsOnEdge)
-            |> Directed.Edges.add ("room1walls", "room1windowroom6", IsOnEdge)
-            |> Directed.Edges.add ("room1floor", "room1gurney", LiesAbove)
-            |> Directed.Edges.add ("room1floor", "room1chairs", LiesAbove)
+            |> Area.roomPart "room1walls" "room1barricadedWindow1" IsOnEdge
+            |> Area.roomPart "room1walls" "room1barricadedWindow2" IsOnEdge
+            |> Area.roomPart "room1walls" "room1windowroom3" IsOnEdge
+            |> Area.roomPart "room1walls" "room1windowroom6" IsOnEdge
+            |> Area.furniture "room1floor" "room1gurney" LiesAbove
+            |> Area.furniture "room1floor" "room1chairs" LiesAbove
 
         // * Main hall, chairs, first rat attacks
         static member room2mainhall : Sites =
@@ -433,16 +463,10 @@ module Area =
             |> Area.exit "room2walls" "room2exit5"
             |> Area.exit "room2walls" "room2exit7"
             // actors inside the room
-            |> Vertices.add ("room2chair1", Site.empty)
-            |> Vertices.add ("room2chair2", Site.empty)
-            |> Vertices.add ("room2chair3", Site.empty)
-            // locations of actors inside the room
-            |> Directed.Edges.add ("room2floor", "room2chair1", LiesAbove)
-            |> Directed.Edges.add ("room2floor", "room2chair2", LiesAbove)
-            |> Directed.Edges.add ("room2floor", "room2chair3", LiesAbove)
-
-            |> Vertices.add ("rat", Site.empty)
-            |> Directed.Edges.add ("room2floor", "rat", LiesAbove)
+            |> Area.furniture "room2floor" "room2chair1" LiesAbove
+            |> Area.furniture "room2floor" "room2chair2" LiesAbove
+            |> Area.furniture "room2floor" "room2chair3" LiesAbove
+            |> Area.actor "room2floor" "rat" LiesAbove
 
         // * Registration room, safe with useful stuff like a pistol maybe, code locked, code is gotten from a book
         //   (can be seen from waitroom through glass)
@@ -451,19 +475,12 @@ module Area =
             |> Area.room "room3" "Registration" (v3i 800 800 250)
             |> Area.exit "room3walls" "room3exit1"
             // actors inside the room
-            |> Vertices.add ("room3windowroom1", Site.empty)
-            |> Vertices.add ("room3registrationdesk", Site.empty)
-            |> Vertices.add ("room3chairs", Site.empty)
-            |> Vertices.add ("room3safe", Site.empty)
-            |> Vertices.add ("room3book", Site.empty)
-            // locations of actors inside the room
-            |> Directed.Edges.add ("room3walls", "room3windowroom1", IsOnEdge)
-            |> Directed.Edges.add ("room3floor", "room3registrationdesk", LiesAbove)
-            |> Directed.Edges.add ("room3floor", "room3chairs", LiesAbove)
-            |> Directed.Edges.add ("room3floor", "room3safe", LiesAbove)
-            |> Directed.Edges.add ("room3registrationdesk", "room3book", LiesAbove)
-            //|> Vertices.add ("rat", Site.empty)
-            //|> Directed.Edges.add ("room2floor", "rat", LiesAbove)
+            |> Area.roomPart "room3walls" "room3windowroom1" IsOnEdge
+            |> Area.furniture "room3floor" "room3registrationdesk" LiesAbove
+            |> Area.furniture "room3floor" "room3chairs" LiesAbove
+            |> Area.safe "room3floor" "room3safe" (Safe (false, "room5key", ["pistol"])) LiesAbove
+            |> Area.item "room3registrationdesk" "room3book" LiesAbove
+            //|> Area.actor "room3floor" "rat" LiesAbove
 
         // * Electrical room to fix the lights, second rat attacks
         static member room4electrical : Sites =
@@ -471,11 +488,8 @@ module Area =
             |> Area.room "room4" "Electrical Room" (v3i 400 400 250)
             |> Area.exit "room4walls" "room4exit2"
             // actors inside the room
-            |> Vertices.add ("room4generator", Site.empty)
-            |> Vertices.add ("room4generatorcontrols", Site.empty)
-            // locations of actors inside the room
-            |> Directed.Edges.add ("room4walls", "room4generator", IsOnEdge)
-            |> Directed.Edges.add ("room4floor", "room4generatorcontrols", LiesAbove)
+            |> Area.furniture "room4walls" "room4generator" IsOnEdge
+            |> Area.furniture "room4floor" "room4generatorcontrols" LiesAbove
 
         // * Surgery room, surgery table, cat on the table, note (cat ate the key), opening it lets spider chandalier escape
         static member room5surgery : Sites =
@@ -483,15 +497,10 @@ module Area =
             |> Area.room "room5" "Surgical Room" (v3i 400 400 250)
             |> Area.exit "room5walls" "room5exit2"
             // actors inside the room
-            |> Vertices.add ("room5surgerytable", Site.empty)
-            |> Vertices.add ("room5instruments", Site.empty)
-            |> Vertices.add ("room5cat", Site.empty)
-            |> Vertices.add ("room5key", Site.empty)
-            // locations of actors inside the room
-            |> Directed.Edges.add ("room5floor", "room5surgerytable", LiesAbove)
-            |> Directed.Edges.add ("room5surgerytable", "room5instruments", LiesAbove)
-            |> Directed.Edges.add ("room5surgerytable", "room5cat", LiesAbove)
-            |> Directed.Edges.add ("room5cat", "room5key", LiesAbove)
+            |> Area.furniture "room5floor" "room5surgerytable" LiesAbove
+            |> Area.item "room5surgerytable" "room5instruments" LiesAbove
+            |> Area.item "room5surgerytable" "room5cat" LiesAbove
+            |> Area.item "room5cat" "room5key" LiesAbove
 
         // * Pharmacy shop, drugs you can use
         static member room6pharmacy : Sites =
@@ -499,11 +508,8 @@ module Area =
             |> Area.room "room6" "Pharmacy" (v3i 400 400 250)
             |> Area.exit "room6walls" "room6exit1"
             // actors inside the room
-            |> Vertices.add ("room6shelves", Site.empty)
-            |> Vertices.add ("room6drugs", Site.empty)
-            // locations of actors inside the room
-            |> Directed.Edges.add ("room6floor", "room6shelves", LiesAbove)
-            |> Directed.Edges.add ("room6shelves", "room6drugs", LiesAbove)
+            |> Area.furniture "room6floor" "room6shelves" LiesAbove
+            |> Area.item "room6shelves" "room6drugs" LiesAbove
 
         // * Staircase, other floors blocked, but can move up and down.
         static member room7staircase : Sites =
@@ -531,8 +537,7 @@ module Area =
                     |> Graph.join Area.room7staircase
                     |> Area.relationship "room2exit7" "room7exit2" IsOnEdge
                     // characters inside the room
-                    |> Vertices.add ("player", Site.empty)
-                    |> Directed.Edges.add ("room1gurney", "player", LiesAbove)
+                    |> Area.actor "room1gurney" "player" LiesAbove
         }
 
         static member initial =

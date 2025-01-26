@@ -12,7 +12,7 @@ type GameplayState =
 type [<SymbolicExpansion>] Gameplay = {
     GameplayTime : int64
     GameplayState : GameplayState
-    CoordinatesAndRotations : (Vector3 * Quaternion) list
+    CoordinatesAndRotations : List<Vector3 * Quaternion>
 }
 with
     static member empty = {
@@ -45,7 +45,6 @@ type GameplayMessage =
 type GameplayCommand =
     | SetupScene
     | StartCombat of (Entity * Entity * Entity)
-    | MoveToSelected
     | StartQuitting
     interface Command
 
@@ -152,29 +151,6 @@ type GameplayDispatcher () =
 
             just world
 
-        | MoveToSelected ->
-
-            let player = Simulants.GameplayCharacters / "player"
-
-            let playerModel = player.GetCharacter world
-
-            let speed = Character.getSpeed playerModel
-
-            let reach = Character.getReach playerModel
-
-            let area = Simulants.GameplayArea
-
-            let graph = Simulants.GameplayGui / "Graph"
-
-            let model = graph.GetGraph world
-
-            let target = model.SelectedText
-
-            let effect = GameEffect.travel player.Name target reach speed area world
-
-            let world = player.ExecuteGameEffects effect world
-
-            just world
 
     override this.Content (model, entity) = [
 
@@ -185,14 +161,6 @@ type GameplayDispatcher () =
                 Entity.FontSizing == Some 8
                 Entity.Text == "Shuffle!"
                 Entity.ClickEvent => Shuffle
-            ]
-
-            Content.button "Move" [
-                Entity.Position == v3 0f -120f 0f
-                Entity.Size == v3 64f 16f 0f
-                Entity.FontSizing == Some 8
-                Entity.Text == "Move!"
-                Entity.ClickEvent => MoveToSelected
             ]
 
             Content.entity<GraphDispatcher> "Graph" [

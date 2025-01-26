@@ -292,6 +292,10 @@ module Vertices =
         removeMany verticesToRemove g
         |> map (fun v l -> Option.get (predicate v l))
 
+    /// TODO: optimize
+    let replace ((v, l) : LVertex<'Vertex,'Label>) (g : Graph<'Vertex,'Label,'Edge>) : Graph<'Vertex,'Label,'Edge> =
+        map (fun vertex label -> if vertex = v then l else label) g
+
 /// Functions for edges of both directed and undirected graphs
 module Edges =
 

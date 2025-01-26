@@ -11,9 +11,9 @@ type CombatMessage =
     | Update
     | TurnProcess
     | UpdatePossibleActions
-    | SetPlannedTarget of int
-    | AddPlannedAction of int
-    | RemovePlannedAction of int
+    | SetPlannedTarget of Int32
+    | AddPlannedAction of Int32
+    | RemovePlannedAction of Int32
     | TimeUpdate
     interface Message
 
