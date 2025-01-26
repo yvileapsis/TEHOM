@@ -10,15 +10,24 @@ type GameplayState =
     | Quit
 
 type [<SymbolicExpansion>] Gameplay = {
-    GameplayTime : int64
+    GameplayTime : Int64
     GameplayState : GameplayState
     CoordinatesAndRotations : List<Vector3 * Quaternion>
+    Positions : List<Vector3 * Quaternion>
+    PositionOld : Option<Vector3 * Quaternion>
+    LerpStepsLeft : Int32
 }
 with
     static member empty = {
         GameplayTime = 0L
         GameplayState = Quit
         CoordinatesAndRotations = []
+        Positions = [
+            v3 0f 0.5f 0.25f, Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -20f, 0f)
+            v3 0f 0.5f -0.75f, Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -60f, 0f)
+        ]
+        PositionOld = None
+        LerpStepsLeft = 0
     }
 
     static member initial = {
@@ -40,6 +49,8 @@ type GameplayMessage =
     | Update
     | Shuffle
     | TimeUpdate
+    | PosMove of Boolean
+    | Nil
     interface Message
 
 type GameplayCommand =
@@ -69,6 +80,13 @@ type GameplayDispatcher () =
         Screen.DeselectingEvent => FinishQuitting
         Screen.UpdateEvent => Update
         Screen.TimeUpdateEvent => TimeUpdate
+        Game.KeyboardKeyDownEvent =|> fun evt ->
+            if not evt.Data.Repeated then
+                match evt.Data.KeyboardKey with
+                | KeyboardKey.W -> PosMove true
+                | KeyboardKey.S -> PosMove false
+                | _ -> Nil
+            else Nil
     ]
 
     override this.Message (model, message, entity, world) =
@@ -81,6 +99,13 @@ type GameplayDispatcher () =
             just model
 
         | Update ->
+
+            let model =
+                if model.LerpStepsLeft > 0 then
+                    { model with LerpStepsLeft = model.LerpStepsLeft - 1 }
+                else
+                    { model with PositionOld = None }
+
             let area = Simulants.GameplayArea
             let player = Simulants.GameplayCharacters / "player"
             let rat = Simulants.GameplayCharacters / "rat"
@@ -104,6 +129,21 @@ type GameplayDispatcher () =
         | TimeUpdate ->
             let gameDelta = world.GameDelta
             let model = { model with GameplayTime = model.GameplayTime + gameDelta.Updates }
+            just model
+
+        | PosMove b ->
+            match model.Positions with
+            | head::tail ->
+                just {
+                    model with
+                        Positions = tail@[head]
+                        PositionOld = Some head
+                        LerpStepsLeft = 30
+                }
+            | _ ->
+                just model
+
+        | Nil ->
             just model
 
     override this.Command (model, command, entity, world) =
@@ -178,13 +218,24 @@ type GameplayDispatcher () =
                     Entity.CustomFilter3dConfig == { CustomFilter3dConfig.defaultConfig with CustomFilterEnabled = true }
                 ]
 
+                let cameraPos, cameraQuat =
+                    let targetPos = List.head model.Positions
+                    if model.PositionOld.IsSome then
+                        let oldPos = model.PositionOld.Value
+                        let curPos =
+                            Vector3.Lerp (fst oldPos, fst targetPos, float32 (30 - model.LerpStepsLeft) / 30f),
+                            Quaternion.Slerp (snd oldPos, snd targetPos, float32 (30 - model.LerpStepsLeft) / 30f)
+                        curPos
+                    else
+                        targetPos
+
                 Content.composite<Ball3dDispatcher> "Chisel" [
                     Entity.Position := coordinates[0]
                     Entity.Rotation := rotations[0]
                 ] [
                     ContentEx.camera "Camera" [
-                        Entity.PositionLocal == v3 0f 0.5f 0.25f
-                        Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -20f, 0f)
+                        Entity.PositionLocal := cameraPos
+                        Entity.RotationLocal := cameraQuat
                     ]
                 ]
 
@@ -211,7 +262,7 @@ type GameplayDispatcher () =
                 ]
 
                 Content.sphere3d "Sphere" [
-                    Entity.Position == v3 0.5f 1.05f 1.6f
+                    Entity.Position == v3 1.5f 1.05f 1.6f
                     Entity.Scale == v3 0.25f 0.25f 0.25f
                     Entity.RenderStyle == Forward (0.0f, 0.0f)
                 ]

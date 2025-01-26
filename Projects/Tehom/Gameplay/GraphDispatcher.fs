@@ -10,11 +10,13 @@ open Area
 
 type GraphMessage =
     | Update
+    | LeftClick
     | Select of String
     | Click of String
     interface Message
 
 type GraphCommand =
+    | ClickEvent of Entity
     | RemoveFromGraph of String
     | AddItemToPlayer of String
     | MoveToSelected of String
@@ -51,6 +53,7 @@ type GraphDispatcher () =
     inherit Entity2dDispatcher<SitesGraph, GraphMessage, GraphCommand> (false, false, false, SitesGraph.empty)
 
     override this.Definitions (model, _) = [
+        Game.MouseLeftDownEvent => LeftClick
         Screen.UpdateEvent => Update
         Entity.AlwaysUpdate == true
         Entity.Size == v3 120f 120f 0f
@@ -115,6 +118,33 @@ type GraphDispatcher () =
                 else
                     just model
 
+        | LeftClick ->
+            let intersections =
+                let ray = World.getMouseRay3dWorld world
+                let origin = ray.Origin
+                let finale = ray.Origin + 100f * ray.Direction
+                let segment = segment3 origin finale
+                let array = World.rayCast3dBodies segment 0xFFFFFFFF false world
+                let array =
+                    array
+                    |> Array.choose (fun x ->
+                        match x.BodyShapeIntersected.BodyId.BodySource with
+                        | :? Entity as intersected when intersected.Is<Ball3dDispatcher> world ->
+                            None
+                        | :? Entity as intersected ->
+                            Some intersected
+                        | _ ->
+                            None
+                    )
+                array
+
+            match Array.tryHead intersections with
+            | Some intersectionData ->
+                [ClickEvent intersectionData], model
+            | None ->
+                just model
+
+
     override this.Command (model, command, entity, world) =
 
         match command with
@@ -147,6 +177,12 @@ type GraphDispatcher () =
             let world = area.SetAreaWith (Area.replaceSite s site) world
             just world
 
+        | ClickEvent entity ->
+            let eventTrace = EventTrace.debug "GraphDispatcher" "handleMouseLeftUp" "Click" EventTrace.empty
+            let world = World.publishPlus () entity.ClickEvent eventTrace entity true false world
+            World.playSound 1f Assets.Default.Sound world
+            just world
+
     override this.TruncateModel model = {
         model with
             Vertices = List.empty
@@ -163,11 +199,11 @@ type GraphDispatcher () =
 
     override this.Content (model, _) = [
 
-        Content.staticSprite "Background" [
+        (*Content.staticSprite "Background" [
             Entity.Size == v3 300f 300f 0f
             Entity.StaticImage == Assets.Default.Black
             Entity.Color == Color.White.WithA 0.5f
-        ]
+        ]*)
 
         Content.button "Move" [
             Entity.PositionLocal == v3 0f -120f 0f
@@ -176,69 +212,6 @@ type GraphDispatcher () =
             Entity.Text == "Move!"
             Entity.ClickEvent => MoveToSelected model.SelectedText
         ]
-
-        let sprite name site coords = Content.button $"Vertice-{name}" [
-            Entity.Size := v3 6f 6f 0f
-            Entity.PositionLocal := if model.Zoom then coords / 3f else coords
-            Entity.UpImage ==
-                match site.Type with
-                | Actor ->
-                    Assets.Default.Ball
-                | Item ->
-                    Assets.Default.Ball
-                | Safe(``open``, key, items) ->
-                    Assets.Default.Brick
-                | _ ->
-                    Assets.Default.White
-            Entity.DownImage == Assets.Default.Ball
-            Entity.ElevationLocal == 20f
-            Entity.TextColor ==
-                if name = "player" then
-                    Color.Cyan
-                elif name = "rat" then
-                    Color.Red
-                else
-                    Color.White
-            Entity.Text == string (Array.head (String.toArray name))
-            Entity.FontSizing == Some 6
-            Entity.ClickEvent => Select name
-        ]
-
-        let line label1 label2 (coord1 : Vector3) (coord2 : Vector3) relationship =
-            let position = (coord2 + coord1) / 2f
-            let distance = (coord2 - coord1).Length ()
-            let vector = (coord2 - coord1)
-            let angle = Math.Atan2 (float vector.Y, float vector.X)
-            let rotation = Quaternion.CreateFromYawPitchRoll (0f, 0f, float32 angle)
-            Content.staticSprite $"Line-{label1}-{label2}" [
-                Entity.Size := v3 distance 2f 0f
-                Entity.PositionLocal := position
-                Entity.RotationLocal := rotation
-                Entity.StaticImage == Assets.Default.White
-                Entity.ElevationLocal == 10f
-                Entity.Color ==
-                    match relationship with
-                    | Distance uint32 ->
-                        Color.White
-                    | Consists ->
-                        Color.Black
-                    | Contains ->
-                        Color.Gray
-                    | LiesAbove ->
-                        Color.Green
-                    | Covers ->
-                        Color.Beige
-                    | IsOnEdge ->
-                        Color.BlueViolet
-            ]
-
-        for (v, l, p) in model.Vertices do
-            sprite v l p
-
-        for (v1, p1, v2, p2, relationship) in model.Edges do
-            let pos1 = if model.Zoom then p1 / 3f else p1
-            let pos2 = if model.Zoom then p2 / 3f else p2
-            line v1 v2 pos1 pos2 relationship
 
         Content.text "SelectedText" [
             Entity.Size == v3 120f 10f 0f
@@ -275,5 +248,100 @@ type GraphDispatcher () =
 
         ]
 
+        Content.composite "Container" [
+            Entity.ScaleLocal := v3 1f 1f 0.02f
+            Entity.PositionLocal == v3 0f 1.025f 1.5f
+            Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -90f, 0f)
+        ] [
+            Content.staticModel "Background" [
+                Entity.ScaleLocal := v3 1.5f 1.5f 1f
+                Entity.MaterialProperties == { MaterialProperties.defaultProperties with AlbedoOpt = ValueSome Color.Black; RoughnessOpt = ValueSome 0f }
+            ]
+
+
+            let sprite name site (coords : Vector3) = Content.sphere3d $"Vertice-{name}" [
+                Entity.ScaleLocal :=
+                    match site.Type with
+                    | Actor ->
+                        v3 0.04f 0.04f 2f
+                    | Item ->
+                        v3 0.03f 0.03f 2f
+                    | Safe(``open``, key, items) ->
+                        v3 0.04f 0.04f 2f
+                    | Ground ->
+                        v3 0.05f 0.05f 2f
+                    | _ ->
+                        v3 0.02f 0.02f 2f
+                Entity.PositionLocal := coords / 300f
+                Entity.StaticModel == Assets.Default.BallModel
+                Entity.MaterialProperties == {
+                    MaterialProperties.defaultProperties with
+                        AlbedoOpt = ValueSome (
+                            match site.Type with
+                            | Actor when name = "player" ->
+                                Color.Cyan
+                            | Actor when name = "rat" ->
+                                Color.Red
+                            | Actor ->
+                                Color.Green
+                            | Safe (_) ->
+                                Color.Aquamarine
+                            | Ground ->
+                                Color.White
+                            | _ ->
+                                Color.Gray
+                        )
+                        RoughnessOpt = ValueSome 0f
+                        MetallicOpt = ValueSome 0f
+                }
+                Entity.Text == string (Array.head (String.toArray name))
+                Entity.FontSizing == Some 6
+                Entity.ClickEvent => Select name
+            ]
+
+            let line label1 label2 (coord1 : Vector3) (coord2 : Vector3) relationship =
+                let position = (coord2 + coord1) / 2f
+                let distance = (coord2 - coord1).Length ()
+                let vector = (coord2 - coord1)
+                let angle = Math.Atan2 (float vector.Y, float vector.X)
+                let rotation = Quaternion.CreateFromYawPitchRoll (0f, 0f, float32 angle)
+                Content.staticModel $"Line-{label1}-{label2}" [
+                    Entity.ScaleLocal := v3 distance 0.005f 2f
+                    Entity.PositionLocal := position
+                    Entity.RotationLocal := rotation
+                    Entity.StaticImage == Assets.Default.White
+                    Entity.ElevationLocal == 10f
+                    Entity.MaterialProperties == {
+                        MaterialProperties.defaultProperties with
+                            AlbedoOpt = ValueSome (
+                                match relationship with
+                                | Distance uint32 ->
+                                    Color.White
+                                | Consists ->
+                                    Color.Black
+                                | Contains ->
+                                    Color.Gray
+                                | LiesAbove ->
+                                    Color.Green
+                                | Covers ->
+                                    Color.Beige
+                                | IsOnEdge ->
+                                    Color.BlueViolet
+                            )
+                            RoughnessOpt = ValueSome 0f
+                            MetallicOpt = ValueSome 0f
+                    }
+
+                ]
+
+            for (v, l, p) in model.Vertices do
+                sprite v l p
+
+            for (v1, p1, v2, p2, relationship) in model.Edges do
+                let pos1 = p1 / 300f
+                let pos2 = p2 / 300f
+                line v1 v2 pos1 pos2 relationship
+
+        ]
 
     ]
