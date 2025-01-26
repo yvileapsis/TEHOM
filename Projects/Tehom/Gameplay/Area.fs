@@ -155,6 +155,15 @@ module Area =
                     sites'
             { area with Sites = sites }
 
+        static member removeSite site area =
+            let sites =
+                match Graph.tryDecompose site area.Sites with
+                | Some (p, v, l, s), sites' ->
+                    sites'
+                | None, sites' ->
+                    sites'
+            { area with Sites = sites }
+
         static member establishDistance distance site toDestination area =
             let sites = area.Sites
 
@@ -181,10 +190,9 @@ module Area =
                 | None -> String.empty
 
         static member getWithinReach site reach area =
-
             let graph' = Area.getAsNavigation area.Sites
-
-            Query.spTree site graph'
+            graph'
+            |> Query.spTree site
             |> List.concat
             |> List.filter (fun (_, distance) -> distance < reach)
             |> List.distinct
@@ -228,14 +236,11 @@ module Area =
                 else
                     vertices
                     |> List.collect (fun v ->
-                        let tree = Query.spTree v graph
-
-                        vertices
-                        |> List.choose (fun v' ->
-                            match Query.getDistance v' tree with
-                            | Some distance -> Some ((v, v'), distance)
-                            | None -> None
-                        )
+                        graph
+                        |> Query.spTree v
+                        |> List.concat
+                        |> List.distinct
+                        |> List.map (fun (v', distance) -> (v, v'), distance)
                     )
                     |> Map.ofList
 
@@ -298,6 +303,30 @@ module Area =
                 )
 
             { area with Sites = sites; DistancesCache = nodeDistances }
+
+        static member getDisplayVertices area =
+            area.Sites
+            |> Vertices.toList
+            |> List.choose (fun (v, l) ->
+                match l.Position with
+                | Some pos -> Some (v, l, pos)
+                | None -> None
+            )
+
+        static member getDisplayEdges area =
+            area.Sites
+            |> Graph.Directed.Edges.toList
+            |> List.filter (fun (_, _, rel) -> rel <> Consists)
+            |> List.choose (fun (v1, v2, rel) ->
+                let _, pos1 = Vertices.find v1 area.Sites
+                let _, pos2 = Vertices.find v2 area.Sites
+                match  pos1, pos2 with
+                | { Position = Some pos1 }, { Position = Some pos2 } ->
+                    Some (v1, pos1, v2, pos2, rel)
+                | _ ->
+                    None
+            )
+
         static member empty = {
             Name = String.empty
             Sites = Graph.empty
@@ -354,12 +383,12 @@ module Area =
 //            >> Area.relationship $"{id}air" $"{id}wallE" (Distance y)
 //            >> Area.relationship $"{id}air" $"{id}wallS" (Distance x)
 //            >> Area.relationship $"{id}air" $"{id}wallW" (Distance y)
-//            >> Area.relationship $"{id}floor" $"{id}walls" (Distance x)
+            >> Area.relationship $"{id}floor" $"{id}walls" (Distance x)
 //            >> Area.relationship $"{id}floor" $"{id}wallN" (Distance x)
 //            >> Area.relationship $"{id}floor" $"{id}wallE" (Distance y)
 //            >> Area.relationship $"{id}floor" $"{id}wallS" (Distance x)
 //            >> Area.relationship $"{id}floor" $"{id}wallW" (Distance y)
-//            >> Area.relationship $"{id}ceiling" $"{id}walls" (Distance x)
+            >> Area.relationship $"{id}ceiling" $"{id}walls" (Distance x)
 //            >> Area.relationship $"{id}ceiling" $"{id}wallN" (Distance x)
 //            >> Area.relationship $"{id}ceiling" $"{id}wallE" (Distance y)
 //            >> Area.relationship $"{id}ceiling" $"{id}wallS" (Distance x)

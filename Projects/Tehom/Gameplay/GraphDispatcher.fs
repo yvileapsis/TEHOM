@@ -15,17 +15,25 @@ type GraphMessage =
     interface Message
 
 type GraphCommand =
+    | Remove of string
     | Click2 of string
     interface Command
 
 type SitesGraph = {
-    Area : Area
+    Vertices : (String * Site * Vector3) list
+    Edges : (String * Vector3 * String * Vector3 * Relationship) list
+    EntitiesWithinDistance : (String * UInt32) list
+
     SelectedText : string
     Zoom : bool
 }
 with
     static member empty = {
-        Area = Area.empty
+
+        Vertices = List.empty
+        Edges = List.empty
+        EntitiesWithinDistance = List.empty
+
         SelectedText = ""
         Zoom = false
     }
@@ -55,13 +63,13 @@ type GraphDispatcher () =
             let area = Simulants.GameplayArea
             let area = area.GetArea world
 
-            let model = { model with Area = area }
-
-            let model =
-                if (World.getExists Simulants.GameplayCombat world) then
-                    { model with Zoom = true }
-                else
-                    model
+            let model = {
+                model with
+                    Vertices = Area.getDisplayVertices area
+                    Edges = Area.getDisplayEdges area
+                    EntitiesWithinDistance = Area.getWithinReach "player" 150u area
+                    Zoom = World.getExists Simulants.GameplayCombat world
+            }
 
             just model
 
@@ -71,16 +79,33 @@ type GraphDispatcher () =
 
         | Click s ->
             // TODO: take key through use action
-            //let model = { model with Graph = Vertices.remove s model.Graph }
-            [Click2 s], model
+            [Remove s; Click2 s], model
 
     override this.Command (model, command, entity, world) =
 
         match command with
+        | Remove s ->
+            let area = Simulants.GameplayArea
+            let world = area.SetAreaWith (Area.removeSite s) world
+            just world
         | Click2 s ->
             let player = Simulants.GameplayCharacters / "player"
             let world = player.SetCharacterWith (Character.addItem s) world
             just world
+
+    override this.TruncateModel model = {
+        model with
+            Vertices = List.empty
+            Edges = List.empty
+            EntitiesWithinDistance = List.empty
+    }
+
+    override this.UntruncateModel (model, model') = {
+        model with
+            Vertices = model'.Vertices
+            Edges = model'.Edges
+            EntitiesWithinDistance = model'.EntitiesWithinDistance
+    }
 
     override this.Content (model, _) = [
 
@@ -136,27 +161,13 @@ type GraphDispatcher () =
                         Color.BlueViolet
             ]
 
-        for (v, l) in Vertices.toList model.Area.Sites do
-            match l.Position with
-            | Some pos ->
-                sprite v pos
-            | None ->
-                ()
+        for (v, l, p) in model.Vertices do
+            sprite v p
 
-        for (label1, label2, relationship) in Graph.Directed.Edges.toList model.Area.Sites do
-            let _, pos1 = Vertices.find label1 model.Area.Sites
-            let _, pos2 = Vertices.find label2 model.Area.Sites
-            match  pos1, pos2 with
-            | { Position = Some pos1 }, { Position = Some pos2 } ->
-                let pos1 = if model.Zoom then pos1 / 3f else pos1
-                let pos2 = if model.Zoom then pos2 / 3f else pos2
-                match relationship with
-                | Consists ->
-                    ()
-                | _ ->
-                    line label1 label2 pos1 pos2 relationship
-            | _ ->
-                ()
+        for (v1, p1, v2, p2, relationship) in model.Edges do
+            let pos1 = if model.Zoom then p1 / 3f else p1
+            let pos2 = if model.Zoom then p2 / 3f else p2
+            line v1 v2 pos1 pos2 relationship
 
         Content.text "SelectedText" [
             Entity.Size == v3 120f 10f 0f
@@ -179,11 +190,11 @@ type GraphDispatcher () =
 
         ] [
 
-            for (vertex, distance) in Area.getWithinReach "player" 150u model.Area do
+            for (vertex, distance) in model.EntitiesWithinDistance do
                 Content.button $"use{vertex}" [
                     Entity.Absolute == false
                     Entity.Size == v3 60.0f 5.0f 0.0f
-                    Entity.Text := $"{vertex}"
+                    Entity.Text := $"{vertex} [{distance}]"
                     Entity.Font == Assets.Gui.ClearSansFont
                     Entity.FontSizing == Some 5
                     Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
