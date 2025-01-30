@@ -23,8 +23,8 @@ with
         GameplayState = Quit
         CoordinatesAndRotations = []
         Positions = [
-            v3 0f 0.5f 0.25f, Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -20f, 0f)
             v3 0f 0.5f -0.75f, Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -60f, 0f)
+            v3 0f 0.5f 0.25f, Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -20f, 0f)
         ]
         PositionOld = None
         LerpStepsLeft = 0
@@ -267,7 +267,7 @@ type GameplayDispatcher () =
                     Entity.RenderStyle == Forward (0.0f, 0.0f)
                 ]
 
-                ContentEx.text3d "Text" [
+                ContentEx.sign3d "Text" [
                     Entity.Position == v3 0.0f 2.5f -2.6f
                     Entity.Scale == v3 2f -0.5f 1f
                     Entity.Text == "TEHOM"

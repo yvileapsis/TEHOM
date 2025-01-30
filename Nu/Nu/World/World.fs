@@ -186,6 +186,7 @@ module WorldModule3 =
                  ButtonExDispatcher ()
                  VoxelDispatcher ()
                  Text3dDispatcher ()
+                 Sign3dDispatcher ()
                  RichTextDispatcher ()
                  CustomFilter3dConfigDispatcher ()
                  ]

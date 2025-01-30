@@ -883,6 +883,14 @@ type Text3dDispatcher () =
     static member Facets =
         [typeof<Text3dFacet>]
 
+/// Gives an entity the base behavior of a static billboard.
+type Sign3dDispatcher () =
+    inherit VuiDispatcher ()
+
+    static member Facets =
+        [typeof<RigidBodyFacet>
+         typeof<Text3dFacet>]
+
 /// Gives an entity the base behavior of a gui text control.
 type GlyphMatrixDispatcher () =
     inherit GuiDispatcher ()
@@ -929,6 +937,7 @@ module ContentEx =
     let richText entityName initializers = Content.entity<RichTextDispatcher> entityName initializers
     let buttonEx entityName initializers = Content.entity<ButtonExDispatcher> entityName initializers
     let text3d entityName definitions = Content.entity<Text3dDispatcher> entityName definitions
+    let sign3d entityName definitions = Content.entity<Sign3dDispatcher> entityName definitions
     let glyph entityName initializers = Content.entity<GlyphMatrixDispatcher> entityName initializers
     let voxel entityName definitions = Content.entity<VoxelDispatcher> entityName definitions
     let customFilter3dConfig entityName definitions = Content.entity<CustomFilter3dConfigDispatcher> entityName definitions

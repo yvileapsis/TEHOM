@@ -90,32 +90,39 @@ type GraphDispatcher () =
             just model
 
         | Click s ->
-            let area = Simulants.GameplayArea
-            let area = area.GetArea world
+            if not (List.contains s (model.Clickables |> List.map fst)) then
+                printfn "not in range"
+                just model
+            else
+                let area = Simulants.GameplayArea
+                let area = area.GetArea world
 
-            let (s, site) = Area.getSite s area
+                let (s, site) = Area.getSite s area
 
-            match site.Type with
-            | Abstract ->
-                just model
-            | Ground ->
-                [MoveToSelected s], model
-            | RoomParts ->
-                just model
-            | Item ->
-                [RemoveFromGraph s; AddItemToPlayer s], model
-            | Furniture ->
-                just model
-            | Safe (notclosed, key, items) ->
-                let player = Simulants.GameplayCharacters / "player"
-                let playerModel = player.GetCharacter world
-                if notclosed || List.contains key playerModel.Items then
-                    let site = { site with Type = Safe (true, key, []) }
-                    [
-                        ReplaceSiteWith (s, site)
-                        for i in items do AddItemToPlayer i
-                    ], model
-                else
+                match site.Type with
+                | Abstract ->
+                    just model
+                | Ground ->
+                    [MoveToSelected s], model
+                | RoomParts ->
+                    just model
+                | Item ->
+                    [RemoveFromGraph s; AddItemToPlayer s], model
+                | Furniture ->
+                    just model
+                | Safe (notclosed, key, items) ->
+                    let player = Simulants.GameplayCharacters / "player"
+                    let playerModel = player.GetCharacter world
+                    if notclosed || List.contains key playerModel.Items then
+                        let site = { site with Type = Safe (true, key, []) }
+                        [
+                            ReplaceSiteWith (s, site)
+                            for i in items do AddItemToPlayer i
+                        ], model
+                    else
+                        just model
+                | Actor ->
+                    printfn $"that's {site.Label}"
                     just model
 
         | LeftClick ->
@@ -205,32 +212,38 @@ type GraphDispatcher () =
             Entity.Color == Color.White.WithA 0.5f
         ]*)
 
-        Content.button "Move" [
-            Entity.PositionLocal == v3 0f -120f 0f
-            Entity.Size == v3 64f 16f 0f
-            Entity.FontSizing == Some 8
-            Entity.Text == "Move!"
-            Entity.ClickEvent => MoveToSelected model.SelectedText
+        ContentEx.sign3d "Move" [
+            Entity.PositionLocal == v3 -0.4f 1.050f 1.5f
+            Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -90f, 0f)
+            Entity.ScaleLocal := v3 0.25f -0.04f 0.125f
+
+            Entity.FontSizing == Some 30
+            Entity.Text == "Use Selected"
+            Entity.ClickEvent => Click model.SelectedText
         ]
 
-        Content.text "SelectedText" [
-            Entity.Size == v3 120f 10f 0f
-            Entity.PositionLocal := if model.Zoom then v3 0f -40f 0f else v3 0f -100f 0f
+        ContentEx.sign3d "SelectedText" [
+
+            Entity.PositionLocal == v3 -0.4f 1.050f 1.45f
+            Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -90f, 0f)
+            Entity.ScaleLocal := v3 0.25f -0.04f 0.125f
+
             Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
             Entity.Text := model.SelectedText
             Entity.TextColor == Color.FloralWhite
             Entity.Font == Assets.Gui.ClearSansFont
-            Entity.FontSizing == Some 8
+            Entity.FontSizing == Some 30
             Entity.ClickEvent => Select ""
         ]
 
-        Content.association "usables" [
+        (*Content.association "usables" [
             Entity.Absolute == false
             Entity.PositionLocal == v3 -180.0f 0.0f 0.0f
             Entity.Size == v3 60.0f 40.0f 0.0f
             Entity.Elevation == 10.0f
             Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
             Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+            Entity.Visible == false
 
         ] [
 
@@ -246,6 +259,41 @@ type GraphDispatcher () =
                     Entity.ClickEvent => Click vertex
                 ]
 
+        ]*)
+
+
+        Content.composite "usables2" [
+            Entity.ScaleLocal := v3 1f 1f 0.02f
+            Entity.PositionLocal == v3 -0.75f 1.025f 1.5f
+            Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -90f, 0f)
+            Entity.Elevation == 10.0f
+            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+
+        ] [
+            Content.staticModel "Background" [
+                Entity.ScaleLocal := v3 0.5f 1.5f 1f
+                Entity.MaterialProperties == {
+                    MaterialProperties.defaultProperties with
+                        AlbedoOpt = ValueSome (Color.Black.WithA 0.5f)
+                        RoughnessOpt = ValueSome 0f
+                }
+                Entity.RenderStyle == Forward (0f, 0f)
+            ]
+
+            for i, (vertex, distance) in List.indexed model.Clickables do
+                ContentEx.sign3d $"use{vertex}" [
+                    Entity.Absolute == false
+                    Entity.Text := $"{vertex} [{distance}]"
+                    Entity.Font == Assets.Gui.ClearSansFont
+                    Entity.ScaleLocal := v3 0.25f -0.04f 0.125f
+                    Entity.PositionLocal := v3 0f (0.7f - 0.05f * float32 i) 0.6f
+                    Entity.FontSizing == Some 30
+                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                    Entity.TextColor := Color.FloralWhite
+                    Entity.ClickEvent => Click vertex
+                    Entity.BodyShape == (BoxShape { Size = v3 1f 30f 1f; TransformOpt = None; PropertiesOpt = None })
+                ]
+
         ]
 
         Content.composite "Container" [
@@ -255,7 +303,12 @@ type GraphDispatcher () =
         ] [
             Content.staticModel "Background" [
                 Entity.ScaleLocal := v3 1.5f 1.5f 1f
-                Entity.MaterialProperties == { MaterialProperties.defaultProperties with AlbedoOpt = ValueSome Color.Black; RoughnessOpt = ValueSome 0f }
+                Entity.MaterialProperties == {
+                    MaterialProperties.defaultProperties with
+                        AlbedoOpt = ValueSome (Color.Black.WithA 0.5f)
+                        RoughnessOpt = ValueSome 0f
+                }
+                Entity.RenderStyle == Forward (0f, 0f)
             ]
 
 

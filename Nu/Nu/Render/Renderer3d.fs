@@ -1768,6 +1768,41 @@ type [<ReferenceEquality>] GlRenderer3d =
         | ForwardRenderType (subsort, sort) ->
             renderTasks.ForwardStatic.Add struct (subsort, sort, billboardMatrix, presence, texCoordsOffset, properties, billboardSurface)
 
+    static member private categorizeStaticSpriteSurface
+        (eyeRotation : Quaternion,
+         model : Matrix4x4,
+         castShadow : bool,
+         presence : Presence,
+         insetOpt : Box2 option,
+         albedoMetadata : OpenGL.Texture.TextureMetadata,
+         properties,
+         orientUp,
+         shadowOffset,
+         billboardSurface,
+         renderType,
+         renderPass,
+         renderer) =
+        let texCoordsOffset =
+            match insetOpt with
+            | Some inset ->
+                let texelWidth = albedoMetadata.TextureTexelWidth
+                let texelHeight = albedoMetadata.TextureTexelHeight
+                let px = inset.Min.X * texelWidth
+                let py = (inset.Min.Y + inset.Size.Y) * texelHeight
+                let sx = inset.Size.X * texelWidth
+                let sy = -inset.Size.Y * texelHeight
+                Box2 (px, py, sx, sy)
+            | None -> box2 v2Zero v2One // shouldn't we still be using borders?
+        let renderTasks = GlRenderer3d.getRenderTasks renderPass renderer
+        match renderType with
+        | DeferredRenderType ->
+            let mutable renderOps = Unchecked.defaultof<_> // OPTIMIZATION: TryGetValue using the auto-pairing syntax of F# allocation when the 'TValue is a struct tuple.
+            if renderTasks.DeferredStatic.TryGetValue (billboardSurface, &renderOps)
+            then renderOps.Add struct (model, castShadow, presence, texCoordsOffset, properties)
+            else renderTasks.DeferredStatic.Add (billboardSurface, List ([struct (model, castShadow, presence, texCoordsOffset, properties)]))
+        | ForwardRenderType (subsort, sort) ->
+            renderTasks.ForwardStatic.Add struct (subsort, sort, model, presence, texCoordsOffset, properties, billboardSurface)
+
     static member private categorizeStaticModelSurface
         (model : Matrix4x4 inref,
          castShadow : bool,
@@ -3316,7 +3351,7 @@ type [<ReferenceEquality>] GlRenderer3d =
             | RenderText3d rt ->
                 let struct (billboardProperties, billboardMaterial) = GlRenderer3d.makeTypesetMaterial (&rt.Typeset, &rt.MaterialProperties, &rt.Material, renderer)
                 let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, m4Identity, box3 (v3 -0.5f 0.5f -0.5f) v3One, billboardProperties, billboardMaterial, -1, Assimp.Node.Empty, renderer.BillboardGeometry)
-                GlRenderer3d.categorizeBillboardSurface (eyeRotation, rt.ModelMatrix, rt.CastShadow, rt.Presence, rt.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rt.MaterialProperties, true, rt.ShadowOffset, billboardSurface, rt.RenderType, rt.RenderPass, renderer)
+                GlRenderer3d.categorizeStaticSpriteSurface (eyeRotation, rt.ModelMatrix, rt.CastShadow, rt.Presence, rt.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rt.MaterialProperties, true, rt.ShadowOffset, billboardSurface, rt.RenderType, rt.RenderPass, renderer)
             | RenderStaticModelSurface rsms ->
                 let insetOpt = Option.toValueOption rsms.InsetOpt
                 GlRenderer3d.categorizeStaticModelSurfaceByIndex (&rsms.ModelMatrix, rsms.CastShadow, rsms.Presence, &insetOpt, &rsms.MaterialProperties, &rsms.Material, rsms.StaticModel, rsms.SurfaceIndex, rsms.RenderType, rsms.RenderPass, renderer)
