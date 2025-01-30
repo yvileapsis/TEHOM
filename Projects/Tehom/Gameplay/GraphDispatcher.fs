@@ -56,8 +56,7 @@ type GraphDispatcher () =
         Game.MouseLeftDownEvent => LeftClick
         Screen.UpdateEvent => Update
         Entity.AlwaysUpdate == true
-        Entity.Size == v3 120f 120f 0f
-        Entity.PositionLocal := if model.Zoom then v3 90f 90f 0f else v3 0f 0f 0f
+        Entity.PositionLocal := v3 0f 0f 0f // if model.Zoom then v3 90f 90f 0f else
     ]
 
     override this.Message (model, message, entity, world) =
@@ -86,8 +85,11 @@ type GraphDispatcher () =
             just model
 
         | Select str ->
-            let model = { model with SelectedText = str }
-            just model
+            if model.SelectedText <> str then
+                let model = { model with SelectedText = str }
+                just model
+            else
+                [Click str], model
 
         | Click s ->
             if not (List.contains s (model.Clickables |> List.map fst)) then
@@ -212,30 +214,6 @@ type GraphDispatcher () =
             Entity.Color == Color.White.WithA 0.5f
         ]*)
 
-        ContentEx.sign3d "Move" [
-            Entity.PositionLocal == v3 -0.4f 1.050f 1.5f
-            Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -90f, 0f)
-            Entity.ScaleLocal := v3 0.25f -0.04f 0.125f
-
-            Entity.FontSizing == Some 30
-            Entity.Text == "Use Selected"
-            Entity.ClickEvent => Click model.SelectedText
-        ]
-
-        ContentEx.sign3d "SelectedText" [
-
-            Entity.PositionLocal == v3 -0.4f 1.050f 1.45f
-            Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -90f, 0f)
-            Entity.ScaleLocal := v3 0.25f -0.04f 0.125f
-
-            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-            Entity.Text := model.SelectedText
-            Entity.TextColor == Color.FloralWhite
-            Entity.Font == Assets.Gui.ClearSansFont
-            Entity.FontSizing == Some 30
-            Entity.ClickEvent => Select ""
-        ]
-
         (*Content.association "usables" [
             Entity.Absolute == false
             Entity.PositionLocal == v3 -180.0f 0.0f 0.0f
@@ -297,7 +275,7 @@ type GraphDispatcher () =
         ]
 
         Content.composite "Container" [
-            Entity.ScaleLocal := v3 1f 1f 0.02f
+            Entity.ScaleLocal := v3 0.6f 0.6f 0.02f
             Entity.PositionLocal == v3 0f 1.025f 1.5f
             Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (0f, Math.DegreesToRadians -90f, 0f)
         ] [
@@ -311,6 +289,29 @@ type GraphDispatcher () =
                 Entity.RenderStyle == Forward (0f, 0f)
             ]
 
+            ContentEx.sign3d "Act" [
+                Entity.PositionLocal == v3 -0.5f -0.5f 1.0f
+                Entity.ScaleLocal := v3 0.3f -0.05f 0.125f
+
+                Entity.FontSizing == Some 30
+                Entity.Text == "Use Selected"
+                Entity.ClickEvent => Click model.SelectedText
+                Entity.BodyShape == (BoxShape { Size = v3 1f 30f 1f; TransformOpt = None; PropertiesOpt = None })
+            ]
+
+            ContentEx.sign3d "SelectedText" [
+
+                Entity.PositionLocal == v3 -0.5f -0.45f 1.0f
+                Entity.ScaleLocal := v3 0.3f -0.05f 0.125f
+
+                Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                Entity.Text := model.SelectedText
+                Entity.TextColor == Color.FloralWhite
+                Entity.Font == Assets.Gui.ClearSansFont
+                Entity.FontSizing == Some 30
+                Entity.ClickEvent => Select ""
+                Entity.BodyShape == (BoxShape { Size = v3 1f 30f 1f; TransformOpt = None; PropertiesOpt = None })
+            ]
 
             let sprite name site (coords : Vector3) = Content.sphere3d $"Vertice-{name}" [
                 Entity.ScaleLocal :=
