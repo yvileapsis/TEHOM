@@ -328,7 +328,7 @@ type GraphDispatcher () =
                         v3 0.02f 0.02f 2f
                 Entity.PositionLocal := coords / 300f
                 Entity.StaticModel == Assets.Default.BallModel
-                Entity.MaterialProperties == {
+                Entity.MaterialProperties := {
                     MaterialProperties.defaultProperties with
                         AlbedoOpt = ValueSome (
                             match site.Type with
@@ -365,7 +365,7 @@ type GraphDispatcher () =
                     Entity.RotationLocal := rotation
                     Entity.StaticImage == Assets.Default.White
                     Entity.ElevationLocal == 10f
-                    Entity.MaterialProperties == {
+                    Entity.MaterialProperties := {
                         MaterialProperties.defaultProperties with
                             AlbedoOpt = ValueSome (
                                 match relationship with

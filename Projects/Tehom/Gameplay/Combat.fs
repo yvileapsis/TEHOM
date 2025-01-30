@@ -16,7 +16,6 @@ TODO:
     - Opening doors
 
 TODO: Combat
-    - Doesn't end
     - No skills
     - Can't select stance
     - No karma betting
@@ -313,6 +312,8 @@ type CombatState =
     | TurnAttackKarmaBid of AttackPlan : Turn * DefencePlan : Turn
     | TurnDefenceKarmaBid of AttackPlan : Turn * DefencePlan : Turn
     | TurnExecute of AttackPlan : Turn * DefencePlan : Turn
+    | Won of Winner : Entity
+    | Done of Winner : Entity
 
 // this is our MMCC model type representing gameplay.
 // this model representation uses update time, that is, time based on number of engine updates.
