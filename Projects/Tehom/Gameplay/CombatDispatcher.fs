@@ -10,11 +10,10 @@ type CombatMessage =
     | ReorderCombatants
     | TurnProcess
     | TurnFinish of List<Turn>
-    | UpdatePossibleActions
     | SetPlannedTarget of Int32
     | AddPlannedAction of Int32
     | RemovePlannedAction of Int32
-    | ChangePlannedFractureBet of Int32
+    | ChangePlannedFractureBet of Stamina
     | TimeUpdate
     interface Message
 
@@ -104,7 +103,6 @@ type CombatDispatcher () =
                 [ if Plan.isCustom plan then () else TurnProcess ], model
 
             | TurnDefenderPlanning (attack, defence) ->
-
                 match Plan.tryFinalizeDefence model.Area attack defence world with
                 | Some defence ->
                     let model = { model with CombatState = TurnDefenderFinish (attack, defence) }
@@ -117,7 +115,6 @@ type CombatDispatcher () =
                 [TurnProcess], model
 
             | TurnExecute (attack, defence)->
-
                 let attack = Turn.makeFromPlan attack
                 let defence = Turn.makeFromPlan defence
 
@@ -131,24 +128,17 @@ type CombatDispatcher () =
                 let model = { model with CombatState = Done entity }
                 [TurnProcess], model
 
-            | Done entity ->
+            | Done _ ->
                 just model
 
         | SetPlannedTarget i ->
             let model =
                 Combat.updatePlan (fun plan ->
                     let target, possible = List.item i plan.PossibleTargets
-                    if possible then
-                        Plan.setPlannedTarget target plan
-                    else
-                        plan
+                    let plan = if possible then Plan.setPlannedTarget target plan else plan
+                    let plan = Plan.update model.Combatants model.Area plan world
+                    plan
                 ) model
-
-            just model
-
-        | UpdatePossibleActions ->
-            let model =
-                Combat.updatePlan (fun plan -> Plan.update model.Combatants model.Area plan world) model
 
             just model
 
@@ -327,11 +317,6 @@ type CombatDispatcher () =
                     ])
                 ]
 
-                let location name text = ContentEx.richText name (textProperties @ [
-                    Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
-                    Entity.Text := text
-                ])
-
                 let (gall, lymph, oil, plasma) =
                     Character.getStats character
 
@@ -415,34 +400,148 @@ type CombatDispatcher () =
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
                 ] [
-                    Content.button $"Fracture" [
-                        Entity.Absolute == false
-                        Entity.Size == v3 30.0f 5.0f 0.0f
-                        Entity.Text := $"{plan.PlannedFractureBet}"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 5
-                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.TextColor := Color.FloralWhite
+                    Content.association "Fire" [
+                        Entity.Size == v3 90.0f 5.0f 0.0f
+                    ] [
+                        Content.button $"Fracture" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.Text := $"Fire: {plan.PlannedFractureBet.PhysicalActive}"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                        ]
+                        Content.button $"Increase" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.PositionLocal == v3 30.0f 0f 0f
+                            Entity.Text := $"+"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                            Entity.ClickEvent => ChangePlannedFractureBet Stamina.physicalActive
+                        ]
+                        Content.button $"Decrease" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.PositionLocal == v3 -30.0f 0f 0f
+                            Entity.Text := $"-"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                            Entity.ClickEvent => ChangePlannedFractureBet (Stamina.empty - Stamina.physicalActive)
+                        ]
                     ]
-                    Content.button $"Increase" [
-                        Entity.Absolute == false
-                        Entity.Size == v3 30.0f 5.0f 0.0f
-                        Entity.Text := $"+"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 5
-                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.TextColor := Color.FloralWhite
-                        Entity.ClickEvent => ChangePlannedFractureBet 1
+
+                    Content.association "Water" [
+                        Entity.Size == v3 90.0f 5.0f 0.0f
+                    ] [
+                        Content.button $"Fracture" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.Text := $"Water: {plan.PlannedFractureBet.PhysicalReactive}"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                        ]
+                        Content.button $"Increase" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.PositionLocal == v3 30.0f 0f 0f
+                            Entity.Text := $"+"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                            Entity.ClickEvent => ChangePlannedFractureBet Stamina.physicalReactive
+                        ]
+                        Content.button $"Decrease" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.PositionLocal == v3 -30.0f 0f 0f
+                            Entity.Text := $"-"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                            Entity.ClickEvent => ChangePlannedFractureBet (Stamina.empty - Stamina.physicalReactive)
+                        ]
                     ]
-                    Content.button $"Decrease" [
-                        Entity.Absolute == false
-                        Entity.Size == v3 30.0f 5.0f 0.0f
-                        Entity.Text := $"-"
-                        Entity.Font == Assets.Gui.ClearSansFont
-                        Entity.FontSizing == Some 5
-                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                        Entity.TextColor := Color.FloralWhite
-                        Entity.ClickEvent => ChangePlannedFractureBet -1
+
+                    Content.association "Air" [
+                        Entity.Size == v3 90.0f 5.0f 0.0f
+                    ] [
+                        Content.button $"Fracture" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.Text := $"Air: {plan.PlannedFractureBet.MentalActive}"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                        ]
+                        Content.button $"Increase" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.PositionLocal == v3 30.0f 0f 0f
+                            Entity.Text := $"+"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                            Entity.ClickEvent => ChangePlannedFractureBet Stamina.mentalActive
+                        ]
+                        Content.button $"Decrease" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.PositionLocal == v3 -30.0f 0f 0f
+                            Entity.Text := $"-"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                            Entity.ClickEvent => ChangePlannedFractureBet (Stamina.empty - Stamina.mentalActive)
+                        ]
+                    ]
+
+                    Content.association "Earth" [
+                        Entity.Size == v3 90.0f 5.0f 0.0f
+                    ] [
+                        Content.button $"Fracture" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.Text := $"Earth: {plan.PlannedFractureBet.MentalReactive}"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                        ]
+                        Content.button $"Increase" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.PositionLocal == v3 30.0f 0f 0f
+                            Entity.Text := $"+"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                            Entity.ClickEvent => ChangePlannedFractureBet Stamina.mentalReactive
+                        ]
+                        Content.button $"Decrease" [
+                            Entity.Absolute == false
+                            Entity.Size == v3 30.0f 5.0f 0.0f
+                            Entity.PositionLocal == v3 -30.0f 0f 0f
+                            Entity.Text := $"-"
+                            Entity.Font == Assets.Gui.ClearSansFont
+                            Entity.FontSizing == Some 5
+                            Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                            Entity.TextColor := Color.FloralWhite
+                            Entity.ClickEvent => ChangePlannedFractureBet (Stamina.empty - Stamina.mentalReactive)
+                        ]
                     ]
                 ]
 
@@ -524,11 +623,12 @@ type CombatDispatcher () =
                                 Entity.ClickEvent => RemovePlannedAction i
                             ]
 
-                            Plan.describe plan
+                            plan
+                            |> Plan.describe
                             |> List.indexed
                             |> List.map action
 
-                        | _, Some (lastTurn::_) ->
+                        | _, Some (turn::_) ->
 
                             let action (i, (action, success)) = Content.text $"Action{i}" [
                                 Entity.Absolute == false
@@ -540,7 +640,7 @@ type CombatDispatcher () =
                                 Entity.TextColor := if success then Color.FloralWhite else Color.Gray
                             ]
 
-                            lastTurn
+                            turn
                             |> Turn.describe
                             |> List.indexed
                             |> List.map action
@@ -592,8 +692,8 @@ type CombatDispatcher () =
                                 Entity.TextColor == Color.FloralWhite
                             ]
 
-                            plan.Checks
-                            |> List.map (fun check -> Action.describe check.Action)
+                            plan
+                            |> Plan.describe
                             |> List.indexed
                             |> List.map action
 
@@ -633,10 +733,10 @@ type CombatDispatcher () =
                 let left = left.Value
                 let right = right.Value
 
-                let _, turnTypeLeft, _ = List.last leftLastTurn.OrderedChecks
+                let turnTypeLeft = List.last leftLastTurn.Checks
                 let turnTypeLeft = turnTypeLeft.Type
 
-                let _, turnTypeRight, _ = List.last rightLastTurn.OrderedChecks
+                let turnTypeRight = List.last rightLastTurn.Checks
                 let turnTypeRight = turnTypeRight.Type
 
                 let leftSuccesses = Character.getStamina turnTypeLeft left
