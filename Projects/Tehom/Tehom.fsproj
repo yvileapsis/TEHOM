@@ -53,8 +53,8 @@
 		<Compile Include="Gameplay\CharacterContent.fs" />
 		<Compile Include="Gameplay\Area.fs" />
 		<Compile Include="Gameplay\AreaDispatcher.fs" />
+		<Compile Include="Gameplay\Turn.fs" />
 		<Compile Include="Gameplay\Combat.fs" />
-		<Compile Include="Gameplay\CombatAI.fs" />
 		<Compile Include="Gameplay\CombatDispatcher.fs" />
 		<Compile Include="Gameplay\GraphDispatcher.fs" />
 		<Compile Include="Gameplay\GameplayDispatcher.fs" />

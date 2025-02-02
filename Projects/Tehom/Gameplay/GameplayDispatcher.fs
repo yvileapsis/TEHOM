@@ -119,7 +119,9 @@ type GameplayDispatcher () =
                 |> List.last
                 |> snd
 
-            if distance < 200u && not (World.getExists Simulants.GameplayCombat world) && Character.canAct ratModel then
+            let canSee = distance < 200u && not (World.getExists Simulants.GameplayCombat world) && Character.canAct ratModel
+
+            if canSee then
                 [StartCombat (area, player, rat)], model
             else
                 just model

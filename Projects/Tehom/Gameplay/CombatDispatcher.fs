@@ -5,12 +5,11 @@ open System.Numerics
 open Prime
 open Nu
 
-open Action
-
 type CombatMessage =
     | Update
     | ReorderCombatants
     | TurnProcess
+    | TurnFinish of List<Turn>
     | UpdatePossibleActions
     | SetPlannedTarget of Int32
     | AddPlannedAction of Int32
@@ -68,15 +67,15 @@ type CombatDispatcher () =
                     just model
 
             | TurnAttackerBegin attacker ->
-                let plan = Plan.make attacker
-                let plan = Plan2.plan plan.Entity model world plan
+                let plan = Plan.make attacker model.Turn
+                let plan = Plan.plan model.Combatants model.Area plan world
 
                 let model = { model with CombatState = TurnAttackerPlanning plan }
 
-                [ if Plan2.shouldBePlanned plan then () else TurnProcess ], model
+                [ if Plan.isCustom plan then () else TurnProcess ], model
 
             | TurnAttackerPlanning attack ->
-                match Plan2.finalize attack model world with
+                match Plan.tryFinalizeAttack model.Area attack world with
                 | Some plan ->
                     let model = { model with CombatState = TurnAttackerFinish plan }
                     [TurnProcess], model
@@ -97,16 +96,16 @@ type CombatDispatcher () =
                     just model
 
             | TurnDefenderBegin (attack, defender) ->
-                let plan = Plan.make defender
-                let plan = Plan2.plan plan.Entity model world plan
+                let plan = Plan.make defender model.Turn
+                let plan = Plan.plan model.Combatants model.Area plan world
 
                 let model = { model with CombatState = TurnDefenderPlanning (attack, plan) }
 
-                [ if Plan2.shouldBePlanned plan then () else TurnProcess ], model
+                [ if Plan.isCustom plan then () else TurnProcess ], model
 
             | TurnDefenderPlanning (attack, defence) ->
 
-                match Plan2.finalizeDefence attack defence model world with
+                match Plan.tryFinalizeDefence model.Area attack defence world with
                 | Some defence ->
                     let model = { model with CombatState = TurnDefenderFinish (attack, defence) }
                     [TurnProcess], model
@@ -119,8 +118,8 @@ type CombatDispatcher () =
 
             | TurnExecute (attack, defence)->
 
-                let attack = Plan2.makeTurn attack
-                let defence = Plan2.makeTurn defence
+                let attack = Turn.makeFromPlan attack
+                let defence = Turn.makeFromPlan defence
 
                 let signals : Signal list = [
                     ProcessCharacterTurn [attack; defence]
@@ -140,7 +139,7 @@ type CombatDispatcher () =
                 Combat.updatePlan (fun plan ->
                     let target, possible = List.item i plan.PossibleTargets
                     if possible then
-                        Plan2.setPlannedTarget target plan
+                        Plan.setPlannedTarget target plan
                     else
                         plan
                 ) model
@@ -149,7 +148,7 @@ type CombatDispatcher () =
 
         | UpdatePossibleActions ->
             let model =
-                Combat.updatePlan (fun plan -> Plan2.update plan.Entity model world plan) model
+                Combat.updatePlan (fun plan -> Plan.update model.Combatants model.Area plan world) model
 
             just model
 
@@ -157,8 +156,8 @@ type CombatDispatcher () =
             let model =
                 Combat.updatePlan (fun plan ->
                     let action, possible = List.item i plan.PossibleActions
-                    let plan = Plan2.addPlannedAction action plan
-                    let plan = Plan2.update plan.Entity model world plan
+                    let plan = if possible then Plan.addPlannedAction action plan else plan
+                    let plan = Plan.update model.Combatants model.Area plan world
                     plan
                 ) model
 
@@ -167,8 +166,8 @@ type CombatDispatcher () =
         | RemovePlannedAction i ->
             let model =
                 Combat.updatePlan (fun plan ->
-                    let plan = Plan2.removePlannedAction i plan
-                    let plan = Plan2.update plan.Entity model world plan
+                    let plan = Plan.removePlannedAction i plan
+                    let plan = Plan.update model.Combatants model.Area plan world
                     plan
                 ) model
 
@@ -176,10 +175,7 @@ type CombatDispatcher () =
 
         | ChangePlannedFractureBet i ->
             let model =
-                Combat.updatePlan (fun plan ->
-                    let plan = Plan2.modifyFractureBet i plan
-                    plan
-                ) model
+                Combat.updatePlan (Plan.modifyFractureBet i) model
 
             just model
 
@@ -189,18 +185,24 @@ type CombatDispatcher () =
             just gameplay
 
         | ReorderCombatants ->
+            let model = Combat.orderCombatantsByInitiative model world
+            just model
 
-            let model = {
-                model with
-                    Combatants =
-                        model.Combatants
-                        |> List.sortBy (fun (entity : Entity) ->
-                            entity.GetCharacterWith Character.getInitiative world
-                        )
-                        |> List.rev
-            }
+        | TurnFinish turns ->
+
+            let model = Combat.advanceTurn turns model
+
+            let aliveEntities =
+                model.Combatants
+                |> List.filter (fun entity ->
+                    entity.GetCharacter world
+                    |> Character.canAct
+                )
+
+            let model = { model with CombatState = if List.length aliveEntities > 1 then TurnNone else Won (List.head aliveEntities) }
 
             just model
+
 
     override this.Command (model, command, entity, world) =
 
@@ -219,98 +221,32 @@ type CombatDispatcher () =
             let world = entity.ExecuteGameEffect effect world
             just world
 
-        | ProcessCharacterTurn list ->
-
-            // horrifying code that needs to be optimized
-            // takes apart turn, separates it into smaller subturns, orders those to specific execution-ready order
-            // order is unopposed - opposed - unopposed
-            // TODO: figure out better representation for this
-            let split turn =
-                turn.Checks
-                |> List.fold (fun (prevOpposed, index, listOfLists) check ->
-                    let opposed = Check.isOpposed check
-                    match listOfLists with
-                    | (_, turn)::tail when prevOpposed = opposed ->
-                        opposed, index, (index, { turn with Checks = turn.Checks @ [ check ] })::tail
-                    | listOfLists ->
-                        opposed, index + 1, (index, { turn with Checks = [check] })::listOfLists
-                ) (false, 0, [])
-                |> fun (_, _, result) -> result
-                |> Map.ofList
-
-            let split turns =
-                turns
-                |> List.map split
-                |> List.fold (fun bigmap map ->
-                    map
-                    |> Map.fold (fun bigmap key value ->
-                        let value =
-                            match Map.tryFind key bigmap with
-                            | Some value' ->
-                                (value::value')
-                            | None ->
-                                [value]
-                        Map.add key value bigmap
-                    ) bigmap
-                ) Map.empty
-                |> Map.toList
-
-            let unsplit turns =
-                turns
-                |> List.concat
-                |> List.fold (fun turns turn ->
-                    match List.tryFindIndex (fun turn' -> turn'.Entity = turn.Entity) turns with
-                    | Some index ->
-                        let turn' = List.item index turns
-                        let turn' = { turn' with Checks = turn'.Checks @ turn.Checks; Passed = turn'.Passed @ turn.Passed }
-                        List.replace index turn' turns |> snd
-                    | None ->
-                        List.append [turn] turns
-                ) List.empty
-            // end of horrifying code
+        | ProcessCharacterTurn turns ->
 
             // TODO: secondary fracture betting happens here as part of a turn, not a plan
-
-            let costs turns world =
+            let orderMax =
                 turns
-                |> List.foldMap (fun turn (world : World) -> Turn.processCosts turn world) world
-
-            let effects turns world =
-                turns
-                |> List.fold (fun world turn ->
-                    let effects = Turn.processEffects turn model.Area world
-                    List.fold (fun world effect -> entity.ExecuteGameEffect effect world ) world effects
-                ) world
-
-            let processing turns world =
-                let turns, world = costs turns world
-                let world = effects turns world
-                turns, world
+                |> List.map Turn.getSubTurns
+                |> List.max
 
             let turns, world =
-                list
-                |> split
-                |> List.map snd
-                |> List.foldMap processing world
-                |> fun (turns, world) ->
-                    unsplit turns, world
+                // turn processing is a little weird in that it synchorniously processes actions on the same sub-turn
+                List.init (1 + orderMax) id
+                |> List.fold (fun (turns, world) i ->
 
-            let model = entity.GetCombat world
+                    let turns, world =
+                        List.foldMap (fun turn (world : World) -> Turn.processCosts i turn world) world turns
 
-            let model = Combat.advanceTurn turns model
+                    let effects =
+                        List.collect (fun turn -> Turn.processEffects i turn model.Area world) turns
 
-            let aliveEntities =
-                model.Combatants
-                |> List.filter (fun entity ->
-                    entity.GetCharacter world
-                    |> Character.canAct
-                )
+                    let world =
+                        List.fold (fun world effect -> entity.ExecuteGameEffect effect world) world effects
 
-            let model = { model with CombatState = if List.length aliveEntities > 1 then TurnNone else Won (List.head aliveEntities) }
+                    turns, world
+                ) (turns, world)
 
-            let world = entity.SetCombat model world
-
-            just world
+            [TurnFinish turns], world
 
     override this.TruncateModel model = {
         model with
@@ -326,17 +262,24 @@ type CombatDispatcher () =
     override this.Content (model, _) = [
 
         match model.CombatState with
-        | Done entity ->
+        | Done _ ->
             ()
         | _ ->
 
             // TODO: Display reach + stride distance, also display it on the map
-            let plan =
+            let planLeft =
                 match model.CombatState with
-                | TurnAttackerPlanning attack when Plan2.shouldBePlanned attack ->
+                | TurnAttackerPlanning attack when Plan.isCustom attack ->
                     Some attack
-                | TurnDefenderPlanning (attack, defence) when Plan2.shouldBePlanned defence ->
+                | TurnDefenderPlanning (attack, defence) when Plan.isCustom defence ->
                     Some defence
+                | _ ->
+                    None
+
+            let planRight =
+                match model.CombatState with
+                | TurnDefenderPlanning (attack, defence) when Plan.isCustom defence ->
+                    Some attack
                 | _ ->
                     None
 
@@ -411,7 +354,7 @@ type CombatDispatcher () =
 
                 Content.association "Stats" boxProperties stats
 
-            match plan with
+            match planLeft with
             | Some plan ->
                 let action (i, action, enabled) = Content.button $"Selectable{i}" [
                     Entity.Absolute == false
@@ -567,8 +510,8 @@ type CombatDispatcher () =
 
                     let actions =
 
-                        match plan, leftHistory with
-                        | Some attack, _ when Plan2.shouldBePlanned attack  ->
+                        match planLeft, leftHistory with
+                        | Some plan, _  ->
 
                             let action (i, action) = Content.button $"ActionSelectable{i}" [
                                 Entity.Absolute == false
@@ -581,8 +524,7 @@ type CombatDispatcher () =
                                 Entity.ClickEvent => RemovePlannedAction i
                             ]
 
-                            attack.PlannedActions
-                            |> List.map Action.describe
+                            Plan.describe plan
                             |> List.indexed
                             |> List.map action
 
@@ -637,8 +579,25 @@ type CombatDispatcher () =
                     ]
 
                     let actions =
-                        match rightHistory with
-                        | Some (lastTurn::_) ->
+                        match planRight, rightHistory with
+                        | Some plan, _ ->
+
+                            let action (i, action) = Content.text $"ActionSelectable{i}" [
+                                Entity.Absolute == false
+                                Entity.Size == v3 60.0f 5.0f 0.0f
+                                Entity.Text := $"{action}"
+                                Entity.Font == Assets.Gui.ClearSansFont
+                                Entity.FontSizing == Some 5
+                                Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                                Entity.TextColor == Color.FloralWhite
+                            ]
+
+                            plan.Checks
+                            |> List.map (fun check -> Action.describe check.Action)
+                            |> List.indexed
+                            |> List.map action
+
+                        | _, Some (lastTurn::_) ->
 
                             let action (i, (action, success)) = Content.text $"Action{i}" [
                                 Entity.Absolute == false
@@ -674,10 +633,10 @@ type CombatDispatcher () =
                 let left = left.Value
                 let right = right.Value
 
-                let turnTypeLeft = List.last leftLastTurn.Checks
+                let _, turnTypeLeft, _ = List.last leftLastTurn.OrderedChecks
                 let turnTypeLeft = turnTypeLeft.Type
 
-                let turnTypeRight = List.last rightLastTurn.Checks
+                let _, turnTypeRight, _ = List.last rightLastTurn.OrderedChecks
                 let turnTypeRight = turnTypeRight.Type
 
                 let leftSuccesses = Character.getStamina turnTypeLeft left

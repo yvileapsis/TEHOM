@@ -2,8 +2,6 @@ namespace Tehom
 
 open Prime
 open Nu
-open Move
-open Action
 open Character
 
 module CharacterContent =

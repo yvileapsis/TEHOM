@@ -103,53 +103,52 @@ module Weapon =
 
 type Weapon = Weapon.Weapon
 
-module Move =
 
-    type Move =
-        | Block
-        | Burst
-        | Cast
-        | Climb
-        | Crawl
-        | Crouch
-        | Dash
-        | Delay
-        | Dodge
-        | Fire
-        | Grab
-        | Jump
-        | Knockout
-        | Power
-        | Press
-        | Ready
-        | Retarget
-        | Roll
-        | Sidestep
-        | Slam
-        | Spin
-        | Stride
-        | Strike of Weapon
-        | Sweep
-        | Swim
-        | Toss
-        | Throw
-    with
-        static member positioning = [
-            Climb; Crawl; Crouch; Dash; Jump; Roll; Sidestep; Stride; Swim;
-        ]
-        static member attacks = [
-            Fire; Grab; Knockout; Power; Press; Retarget; Slam; Strike Weapon.empty; Throw; Toss;
-        ]
-        static member defence = [
-            Block; Crouch; Dodge; Jump; Roll; Spin;
-        ]
-        static member special = [
-            Burst; Ready; Sweep;
-        ]
-        static member getName move =
-            match move with
-            | Strike weapon -> weapon.Name
-            | x -> $"{x}"
+type Move =
+    | Block
+    | Burst
+    | Cast
+    | Climb
+    | Crawl
+    | Crouch
+    | Dash
+    | Delay
+    | Dodge
+    | Fire
+    | Grab
+    | Jump
+    | Knockout
+    | Power
+    | Press
+    | Ready
+    | Retarget
+    | Roll
+    | Sidestep
+    | Slam
+    | Spin
+    | Stride
+    | Strike of Weapon
+    | Sweep
+    | Swim
+    | Toss
+    | Throw
+with
+    static member positioning = [
+        Climb; Crawl; Crouch; Dash; Jump; Roll; Sidestep; Stride; Swim;
+    ]
+    static member attacks = [
+        Fire; Grab; Knockout; Power; Press; Retarget; Slam; Strike Weapon.empty; Throw; Toss;
+    ]
+    static member defence = [
+        Block; Crouch; Dodge; Jump; Roll; Spin;
+    ]
+    static member special = [
+        Burst; Ready; Sweep;
+    ]
+    static member getName move =
+        match move with
+        | Strike weapon -> weapon.Name
+        | x -> $"{x}"
 
 type Element =
     | Gall // Bile
@@ -173,8 +172,6 @@ with
         | PhysicalReactive -> PhysicalActive
         | MentalActive -> MentalReactive
         | MentalReactive -> MentalActive
-
-type Move = Move.Move
 
 // TODO: figure out where this should be
 type Stance = {
@@ -224,34 +221,33 @@ with
     static member defender =
         Stance.make Lymph [Gall; Oil; Plasma] Stance.empty
 
-module Action =
-    type Action =
-        | NoAction
-        | FullMentalAction
-        | FullPhysicalAction
-        | SkillSelect of int
-        | StanceChange of Stance
-        | RollStance
-        | KarmaBet of int
-        | Move of Move
+type Action =
+    | NoAction
+    | FullMentalAction
+    | FullPhysicalAction
+    | SkillSelect of int
+    | StanceChange of Stance
+    | RollStance
+    | KarmaBet of int
+    | Move of Move
 
-    with
-        static member describe action =
-            match action with
-            | NoAction -> failwith "todo"
-            | FullMentalAction -> failwith "todo"
-            | FullPhysicalAction -> failwith "todo"
-            | StanceChange stance -> $"Stance {Stance.getStats stance}"
-            | Move moves -> $"{moves |> Move.getName}"
-            | SkillSelect i -> $"Betting {i} Karma"
-            | KarmaBet i -> $"Betting {i} Karma"
-            | RollStance -> "Rolling Stats"
+with
+    static member describe action =
+        match action with
+        | NoAction -> failwith "todo"
+        | FullMentalAction -> failwith "todo"
+        | FullPhysicalAction -> failwith "todo"
+        | StanceChange stance -> $"Stance {Stance.getStats stance}"
+        | Move moves -> $"{moves |> Move.getName}"
+        | SkillSelect i -> $"Betting {i} Karma"
+        | KarmaBet i -> $"Betting {i} Karma"
+        | RollStance -> "Rolling Stats"
 
 
-    type CustomAction = {
-        Name : String
-        Actions : List<Action>
-    }
+type CustomAction = {
+    Name : String
+    Actions : List<Action>
+}
 
 type Cost = {
     StaminaMentalActive : Int32
@@ -276,8 +272,6 @@ with
         ActionsMentalReactive = 0
         Stances = 0
     }
-
-type Action = Action.Action
 
 module Character =
 
@@ -326,7 +320,7 @@ module Character =
         FractureBase : Int32
 
         Edges : List<Stat>
-        CustomActions : List<Action.CustomAction>
+        CustomActions : List<CustomAction>
 
         // depends on body type
         Body : Body
@@ -645,6 +639,30 @@ module Character =
                     Items = item::items
             }
             character
+
+        static member getPossibleMoves character =
+            let strikes =
+                character
+                |> Character.getWeapons
+                |> List.map Strike
+
+            strikes @ [ Power; Press ] @ [ Stride ]
+
+        static member getCoveredDistance actions character =
+            let reach = Character.getReach character
+            let speed = Character.getSpeed character
+
+            let distance =
+                actions
+                |> List.fold (fun distance action ->
+                    match action with
+                    | Move Stride ->
+                        distance + speed
+                    | _ ->
+                        distance
+                ) 0u
+
+            reach + distance
 
         static member empty = {
             ID = String.empty
