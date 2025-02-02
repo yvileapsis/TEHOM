@@ -388,7 +388,7 @@ module Character =
             else
                 character
 
-        static member removeKarma remove (character : Character) =
+        static member removeFracture remove (character : Character) =
             let fracture = max 0 (character.FractureCurrent - remove)
             let character = {
                 character with
@@ -396,7 +396,22 @@ module Character =
             }
             character
 
-        static member turnReset (character : Character) =
+        static member getMaxInitiative character =
+            let (gall, _, _, plasma) = Character.getStats character
+            int gall + int plasma
+
+        static member getInitiative character =
+            character.Initiative
+
+        static member setInitiative initiative character =
+            { character with Initiative = initiative }
+
+        static member rollInitiative character =
+            let maxInitiative = Character.getMaxInitiative character
+            let initiative = Random.rollInitiative maxInitiative
+            { character with Initiative = initiative }
+
+        static member resetTurn (character : Character) =
             let character = Character.setStance Stance.empty character
             let character = {
                 character with
@@ -409,6 +424,15 @@ module Character =
                     ActionsPhysicalReactiveCurrent = character.ActionsPhysicalReactiveBase
                     ActionsMentalReactiveCurrent = character.ActionsMentalReactiveBase
                     StancesCurrent = character.StancesBase
+            }
+            character
+
+        static member resetCombat (character : Character) =
+            let character = Character.resetTurn character
+            let character = Character.rollInitiative character
+            let character = {
+                character with
+                    FractureCurrent = character.FractureBase
             }
             character
 
@@ -507,22 +531,6 @@ module Character =
                 { character with Injuries = character.Injuries + 1 }
             | Some wounds ->
                 { character with Wounds = maxDamage (wounds + int character.Wounds) }
-
-
-        static member getMaxInitiative character =
-            let (gall, _, _, plasma) = Character.getStats character
-            int gall + int plasma
-
-        static member getInitiative character =
-            character.Initiative
-
-        static member setInitiative initiative character =
-            { character with Initiative = initiative }
-
-        static member rollInitiative character =
-            let maxInitiative = Character.getMaxInitiative character
-            let initiative = Random.rollInitiative maxInitiative
-            { character with Initiative = initiative }
 
         static member getSize character =
             character.Body.Size

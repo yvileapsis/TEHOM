@@ -156,7 +156,7 @@ with
         | StanceChange stance ->
             [ CharacterDo (attacker, Character.setStance stance) ]
         | KarmaBet bet ->
-            [ CharacterDo (attacker, Character.removeKarma bet) ]
+            [ CharacterDo (attacker, Character.removeFracture bet) ]
         | RollStance ->
             [ CharacterDo (attacker, Character.roll) ]
         | Move move' ->
@@ -259,6 +259,41 @@ with
         | _ ->
             []
 
+type Plan = {
+    Entity : Entity
+    PossibleActions : List<Action * Boolean>
+    PossibleTargets : List<Entity * Boolean>
+    PlannedActions : List<Action>
+    PlannedTarget : Option<Entity>
+    PlannedFractureBet : Int32
+
+    DistanceCurrentReach : UInt32
+    DistanceToTarget : UInt32
+
+    Turn : Int32
+    Checks : List<Check>
+}
+with
+    static member empty = {
+        Entity = Entity
+        PossibleActions = []
+        PossibleTargets = []
+        PlannedActions = []
+        PlannedTarget = None
+        PlannedFractureBet = 0
+
+        DistanceCurrentReach = 0u
+        DistanceToTarget = 0u
+
+        Turn = 0
+        Checks = List.empty
+    }
+
+    static member make entity = {
+        Plan.empty with
+            Entity = entity
+    }
+
 type Turn = {
     Turn : Int32
     Entity : Entity
@@ -305,13 +340,13 @@ with
 
 type CombatState =
     | TurnNone
-    | TurnAttacker of Attacker : Entity
-    | TurnAttackPlan of Attacker : Entity
-    | TurnDefender of AttackPlan : Turn
-    | TurnDefencePlan of AttackPlan : Turn * Defender : Entity
-    | TurnAttackKarmaBid of AttackPlan : Turn * DefencePlan : Turn
-    | TurnDefenceKarmaBid of AttackPlan : Turn * DefencePlan : Turn
-    | TurnExecute of AttackPlan : Turn * DefencePlan : Turn
+    | TurnAttackerBegin of Attacker : Entity
+    | TurnAttackerPlanning of AttackPlan : Plan
+    | TurnAttackerFinish of AttackPlan : Plan
+    | TurnDefenderBegin of AttackTurn : Plan * Defender : Entity
+    | TurnDefenderPlanning of AttackTurn : Plan * DefenceTurn : Plan
+    | TurnDefenderFinish of AttackTurn : Plan * DefenceTurn : Plan
+    | TurnExecute of AttackTurn : Plan * DefenceTurn : Plan
     | Won of Winner : Entity
     | Done of Winner : Entity
 
@@ -320,6 +355,8 @@ type CombatState =
 type [<SymbolicExpansion>] Combat = {
     CombatTime : Int64
     CombatState : CombatState
+
+    FirstRun : Boolean
 
     Turn : Int32
     Combatants : List<Entity>
@@ -330,19 +367,14 @@ type [<SymbolicExpansion>] Combat = {
     DisplayLeftModel : Option<Character>
     DisplayRightEntity : Option<Entity>
     DisplayRightModel : Option<Character>
-
-    PossibleActions : List<Action * Boolean>
-    PossibleTargets : List<Entity * Boolean>
-    PlannedActions : List<Action>
-    PlannedTarget : Option<Entity>
-    DistanceCurrentReach : UInt32
-    DistanceToTarget : UInt32
 }
 with
     // this represents the gameplay model in a vacant state, such as when the gameplay screen is not selected.
     static member empty = {
         CombatTime = 0L
         CombatState = TurnNone
+
+        FirstRun = false
 
         Turn = 0
         Combatants = []
@@ -353,13 +385,6 @@ with
         DisplayLeftModel = None
         DisplayRightEntity = None
         DisplayRightModel = None
-
-        PossibleActions = []
-        PossibleTargets = []
-        PlannedActions = []
-        PlannedTarget = None
-        DistanceCurrentReach = 0u
-        DistanceToTarget = 0u
     }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
@@ -421,6 +446,15 @@ with
         }
 
         model
+
+    static member updatePlan updater model =
+        match model.CombatState with
+        | TurnAttackerPlanning plan ->
+            { model with CombatState = TurnAttackerPlanning (updater plan) }
+        | TurnDefenderPlanning (attack, plan) ->
+            { model with CombatState = TurnDefenderPlanning (attack, updater plan) }
+        | _ ->
+            model
 
 [<AutoOpen>]
 module CombatExtensions =

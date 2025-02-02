@@ -14,6 +14,10 @@ module CharacterExtensions =
             let character = this.GetCharacter world
             let character = updater character
             this.SetCharacter character world
+        member this.GetCharacterWith getter world =
+            let character = this.GetCharacter world
+            let value = getter character
+            value
 
 type CharacterDispatcher () =
     inherit EntityDispatcher<Character, Message, Command> (true, false, false, false, Character.empty)

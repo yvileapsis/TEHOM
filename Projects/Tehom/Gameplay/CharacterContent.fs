@@ -20,6 +20,7 @@ module CharacterContent =
             Body = Body.human
 
             StancesBase = 2
+            FractureBase = 15
 
             Weapons = [
                 Weapon.bite "head"
@@ -58,6 +59,8 @@ module CharacterContent =
                 Weapon.claw "armLeft"
                 Weapon.claw "armRight"
             ]
+
+            FractureBase = 5
 
             CustomActions = [
                 { Name = "Aggressive"; Actions = [

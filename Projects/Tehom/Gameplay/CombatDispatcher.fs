@@ -9,16 +9,18 @@ open Action
 
 type CombatMessage =
     | Update
+    | ReorderCombatants
     | TurnProcess
     | UpdatePossibleActions
     | SetPlannedTarget of Int32
     | AddPlannedAction of Int32
     | RemovePlannedAction of Int32
+    | ChangePlannedFractureBet of Int32
     | TimeUpdate
     interface Message
 
 type CombatCommand =
-    | RollInitiative
+    | ResetCombatants
     | GameEffect of GameEffect
     | ProcessCharacterTurn of Turn list
     interface Command
@@ -32,117 +34,96 @@ type CombatDispatcher () =
         Screen.UpdateEvent => Update
         Screen.TimeUpdateEvent => TimeUpdate
         Entity.AlwaysUpdate == true
-        Entity.RegisterEvent => RollInitiative
+        Entity.RegisterEvent => ResetCombatants
     ]
 
     override this.Message (model, message, entity, world) =
 
         match message with
         | Update ->
-            if model.Combatants = Combat.initial.Combatants then
-                [StartPlaying], model
-            else
-                let model = Combat.update model world
-                just model
+            let signals : List<Signal> = []
+            // TODO: remove when I figure out which event runs when entity is created if any
+            //       if no such event, create it as a facet lol
+            let signals, model =
+                if model.FirstRun = false then
+                    signals @ [
+                        ResetCombatants
+                        ReorderCombatants
+                    ], { model with FirstRun = true }
+                else
+                    signals, model
+
+            let model = Combat.update model world
+            signals, model
 
         | TurnProcess ->
             match model.CombatState with
             | TurnNone ->
                 match model.Combatants with
                 | attacker::_ ->
-                    let signals : Signal list = [ GameEffect (CharacterDo (attacker, Character.turnReset)); TurnProcess ]
-                    let model = { model with CombatState = TurnAttacker attacker }
+                    let signals : Signal list = [ GameEffect (CharacterDo (attacker, Character.resetTurn)); TurnProcess ]
+                    let model = { model with CombatState = TurnAttackerBegin attacker }
                     withSignals signals model
                 | _ ->
                     just model
 
-            | TurnAttacker attacker ->
-                if Combat.isCharacterControlled attacker then
-                    let model = {
-                        model with
-                            PossibleTargets = AttackerAI.getPossibleTargets attacker model world
-                            PlannedTarget = Some (AttackerAI.findTarget attacker model world)
-                    }
-                    let model = {
-                        model with
-                            PossibleActions = AttackerAI.getPossibleActions attacker model world
-                            DistanceCurrentReach = AttackerAI.getCoveredDistance2 attacker model world
-                            DistanceToTarget = AttackerAI.getDistanceBetweenAttackerAndTarget attacker model world
-                    }
-                    let model = { model with CombatState = TurnAttackPlan attacker }
-                    just model
-                else
-                    let model = { model with CombatState = TurnAttackPlan attacker }
-                    [TurnProcess], model
+            | TurnAttackerBegin attacker ->
+                let plan = Plan.make attacker
+                let plan = Plan2.plan plan.Entity model world plan
 
-            | TurnAttackPlan attacker ->
-                let plan =
-                    if Combat.isCharacterControlled attacker then
-                        AttackerAI.customPlan attacker model world
-                    else
-                        AttackerAI.tryPlan attacker model world
+                let model = { model with CombatState = TurnAttackerPlanning plan }
 
-                let model = {
-                    model with
-                        PossibleTargets = []
-                        PossibleActions = []
-                        PlannedTarget = None
-                        PlannedActions = []
-                }
+                [ if Plan2.shouldBePlanned plan then () else TurnProcess ], model
 
-                match plan with
-                | Some attackerAction ->
-                    let model = { model with CombatState = TurnDefender attackerAction }
-                    [TurnProcess], model
-                | None ->
-                    let model = { model with CombatState = TurnAttacker attacker }
-                    just model
-
-            | TurnDefender attackPlan ->
-                attackPlan.Checks
-                |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
-                |> function
-                    | Some { OpposedBy = [defender] } ->
-                        let model = { model with CombatState = TurnDefencePlan (attackPlan, defender) }
-                        [TurnProcess], model
-                    | _ ->
-                        just model
-
-            | TurnDefencePlan (attackPlan, defender) ->
-                let action =
-                    attackPlan.Checks
-                    |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
-                    |> _.Value
-
-                match DefenderAI.tryPlan attackPlan.Entity action defender model world with
-                | Some defencePlan ->
-                    let model = { model with CombatState = TurnAttackKarmaBid (attackPlan, defencePlan) }
+            | TurnAttackerPlanning attack ->
+                match Plan2.finalize attack model world with
+                | Some plan ->
+                    let model = { model with CombatState = TurnAttackerFinish plan }
                     [TurnProcess], model
                 | None ->
                     just model
 
-            | TurnAttackKarmaBid (attackPlan, defencePlan) ->
-                let attacker' = attackPlan.Entity.GetCharacter world
-                let attackPlan = {
-                    attackPlan with
-                        Checks = (Check.unstoppable (KarmaBet attacker'.FractureCurrent))::attackPlan.Checks
-                }
-                let model = { model with CombatState = TurnDefenceKarmaBid (attackPlan, defencePlan) }
+            | TurnAttackerFinish attack ->
+                let defenders =
+                    attack.Checks
+                    |> List.collect _.OpposedBy
+
+                // TODO: assumes one defender
+                match List.tryHead defenders with
+                | Some defender ->
+                    let model = { model with CombatState = TurnDefenderBegin (attack, defender) }
+                    [TurnProcess], model
+                | _ ->
+                    just model
+
+            | TurnDefenderBegin (attack, defender) ->
+                let plan = Plan.make defender
+                let plan = Plan2.plan plan.Entity model world plan
+
+                let model = { model with CombatState = TurnDefenderPlanning (attack, plan) }
+
+                [ if Plan2.shouldBePlanned plan then () else TurnProcess ], model
+
+            | TurnDefenderPlanning (attack, defence) ->
+
+                match Plan2.finalizeDefence attack defence model world with
+                | Some defence ->
+                    let model = { model with CombatState = TurnDefenderFinish (attack, defence) }
+                    [TurnProcess], model
+                | None ->
+                    just model
+
+            | TurnDefenderFinish (attack, defence) ->
+                let model = { model with CombatState = TurnExecute (attack, defence) }
                 [TurnProcess], model
 
-            | TurnDefenceKarmaBid (attackPlan, defencePlan) ->
-                let defender' = defencePlan.Entity.GetCharacter world
-                let defencePlan = {
-                    defencePlan with
-                        Checks = (Check.unstoppable (KarmaBet defender'.FractureCurrent))::defencePlan.Checks
-                }
-                let model = { model with CombatState = TurnExecute (attackPlan, defencePlan) }
-                [TurnProcess], model
+            | TurnExecute (attack, defence)->
 
-            | TurnExecute (attackPlan, defencePlan)->
+                let attack = Plan2.makeTurn attack
+                let defence = Plan2.makeTurn defence
 
                 let signals : Signal list = [
-                    ProcessCharacterTurn [attackPlan; defencePlan]
+                    ProcessCharacterTurn [attack; defence]
                 ]
 
                 withSignals signals model
@@ -155,93 +136,82 @@ type CombatDispatcher () =
                 just model
 
         | SetPlannedTarget i ->
+            let model =
+                Combat.updatePlan (fun plan ->
+                    let target, possible = List.item i plan.PossibleTargets
+                    if possible then
+                        Plan2.setPlannedTarget target plan
+                    else
+                        plan
+                ) model
 
-            let target, possible = List.item i model.PossibleTargets
-
-            if possible then
-
-                let model = {
-                    model with
-                        PlannedTarget = Some target
-                }
-
-                just model
-            else
-                just model
+            just model
 
         | UpdatePossibleActions ->
+            let model =
+                Combat.updatePlan (fun plan -> Plan2.update plan.Entity model world plan) model
 
-            let attacker =
-                match model.CombatState with
-                | TurnAttacker attacker -> attacker
-                | TurnAttackPlan attacker -> attacker
-                | _ -> failwith "todo"
-
-            let model = {
-                model with
-                    PossibleTargets = AttackerAI.getPossibleTargets attacker model world
-                    PossibleActions = AttackerAI.getPossibleActions attacker model world
-                    DistanceCurrentReach = AttackerAI.getCoveredDistance2 attacker model world
-                    DistanceToTarget = AttackerAI.getDistanceBetweenAttackerAndTarget attacker model world
-            }
             just model
 
         | AddPlannedAction i ->
-            let action, possible = List.item i model.PossibleActions
+            let model =
+                Combat.updatePlan (fun plan ->
+                    let action, possible = List.item i plan.PossibleActions
+                    let plan = Plan2.addPlannedAction action plan
+                    let plan = Plan2.update plan.Entity model world plan
+                    plan
+                ) model
 
-            if possible then
-                let model = {
-                    model with
-                        PlannedActions = model.PlannedActions @ [ action ]
-                }
-
-                let signals : Signal list = [
-                    UpdatePossibleActions
-                ]
-
-                withSignals signals model
-            else
-                just model
+            just model
 
         | RemovePlannedAction i ->
-            let model = {
-                model with
-                    PlannedActions = List.removeAt i model.PlannedActions
-            }
+            let model =
+                Combat.updatePlan (fun plan ->
+                    let plan = Plan2.removePlannedAction i plan
+                    let plan = Plan2.update plan.Entity model world plan
+                    plan
+                ) model
 
-            let signals : Signal list = [
-                UpdatePossibleActions
-            ]
+            just model
 
-            withSignals signals model
+        | ChangePlannedFractureBet i ->
+            let model =
+                Combat.updatePlan (fun plan ->
+                    let plan = Plan2.modifyFractureBet i plan
+                    plan
+                ) model
+
+            just model
 
         | TimeUpdate ->
             let gameDelta = world.GameDelta
             let gameplay = { model with CombatTime = model.CombatTime + gameDelta.Updates }
             just gameplay
 
+        | ReorderCombatants ->
+
+            let model = {
+                model with
+                    Combatants =
+                        model.Combatants
+                        |> List.sortBy (fun (entity : Entity) ->
+                            entity.GetCharacterWith Character.getInitiative world
+                        )
+                        |> List.rev
+            }
+
+            just model
+
     override this.Command (model, command, entity, world) =
 
         match command with
-        | RollInitiative ->
+        | ResetCombatants ->
 
             let world =
                 model.Combatants
                 |> List.fold (fun (world : World) (entity : Entity) ->
-                    entity.SetCharacterWith (Character.turnReset >> Character.rollInitiative) world
+                    entity.SetCharacterWith Character.resetCombat world
                 ) world
-
-            let combatants =
-                model.Combatants
-                |> List.sortBy (fun (entity : Entity) ->
-                    let character = entity.GetCharacter world
-                    character.Initiative
-                )
-                |> List.rev
-
-            let model = { model with Combatants = combatants }
-
-            let world = entity.SetCombat model world
 
             just world
 
@@ -298,6 +268,8 @@ type CombatDispatcher () =
                         List.append [turn] turns
                 ) List.empty
             // end of horrifying code
+
+            // TODO: secondary fracture betting happens here as part of a turn, not a plan
 
             let costs turns world =
                 turns
@@ -358,8 +330,18 @@ type CombatDispatcher () =
             ()
         | _ ->
 
+            // TODO: Display reach + stride distance, also display it on the map
+            let plan =
+                match model.CombatState with
+                | TurnAttackerPlanning attack when Plan2.shouldBePlanned attack ->
+                    Some attack
+                | TurnDefenderPlanning (attack, defence) when Plan2.shouldBePlanned defence ->
+                    Some defence
+                | _ ->
+                    None
+
             Content.staticSprite "Background" [
-                Entity.Size == v3 480f 180f 0f
+                Entity.Size == v3 480f 280f 0f
                 Entity.StaticImage == Assets.Default.Black
                 Entity.Color == Color.White.WithA 0.5f
             ]
@@ -423,14 +405,14 @@ type CombatDispatcher () =
                     stat "Oil" "Oil" $"{oil} {oilStance}"
                     stat "Plasma" "Plasma" $"{plasma} {plasmaStance}"
                     stat "Stances" "Stances" $"{character.StancesCurrent}"
+                    stat "Fracture" "Fracture" $"{character.FractureCurrent}"
                     stat "Initiative" "Initiative" $"{character.Initiative}"
                 ]
 
                 Content.association "Stats" boxProperties stats
 
-            // TODO: Display reach + stride distance, also display it on the map
-            match model.CombatState with
-            | TurnAttackPlan attacker when Combat.isCharacterControlled attacker ->
+            match plan with
+            | Some plan ->
                 let action (i, action, enabled) = Content.button $"Selectable{i}" [
                     Entity.Absolute == false
                     Entity.Size == v3 60.0f 5.0f 0.0f
@@ -450,17 +432,12 @@ type CombatDispatcher () =
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
                 ] (
-                    model.PossibleActions
+                    plan.PossibleActions
                     |> List.indexed
                     |> List.map (fun (i, (action, possible)) -> i, Action.describe action, possible)
                     |> List.map action
                 )
 
-            | _ ->
-                ()
-
-            match model.CombatState with
-            | TurnAttackPlan attacker when Combat.isCharacterControlled attacker ->
                 let action (i, action, enabled) = Content.button $"Selectable{i}" [
                     Entity.Absolute == false
                     Entity.Size == v3 30.0f 5.0f 0.0f
@@ -480,41 +457,75 @@ type CombatDispatcher () =
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
                 ] (
-                    model.PossibleTargets
+                    plan.PossibleTargets
                     // TOOD: annoying, can't access world name, will need to store name
                     |> List.indexed
                     |> List.map (fun (i, (entity, possible)) -> i, $"{entity.Name}", possible)
                     |> List.map action
                 )
 
-            | _ ->
-                ()
-
-            match model.PlannedTarget with
-            | Some entity ->
-                Content.button "PlannedTarget" [
+                Content.association "Fracture Bet" [
                     Entity.Absolute == false
-                    Entity.PositionLocal == v3 -40.0f 30.0f 0.0f
+                    Entity.PositionLocal == v3 -180.0f -100.0f 0.0f
+                    Entity.Size == v3 40.0f 40.0f 0.0f
                     Entity.Elevation == 10.0f
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                    Entity.Size == v3 40.0f 5.0f 0.0f
-                    Entity.Text := $"{entity.Name}"
-                    Entity.Font == Assets.Gui.ClearSansFont
-                    Entity.FontSizing == Some 5
-                    Entity.TextColor == Color.FloralWhite
+                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+                ] [
+                    Content.button $"Fracture" [
+                        Entity.Absolute == false
+                        Entity.Size == v3 30.0f 5.0f 0.0f
+                        Entity.Text := $"{plan.PlannedFractureBet}"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 5
+                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                        Entity.TextColor := Color.FloralWhite
+                    ]
+                    Content.button $"Increase" [
+                        Entity.Absolute == false
+                        Entity.Size == v3 30.0f 5.0f 0.0f
+                        Entity.Text := $"+"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 5
+                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                        Entity.TextColor := Color.FloralWhite
+                        Entity.ClickEvent => ChangePlannedFractureBet 1
+                    ]
+                    Content.button $"Decrease" [
+                        Entity.Absolute == false
+                        Entity.Size == v3 30.0f 5.0f 0.0f
+                        Entity.Text := $"-"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 5
+                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                        Entity.TextColor := Color.FloralWhite
+                        Entity.ClickEvent => ChangePlannedFractureBet -1
+                    ]
                 ]
-            | None ->
-                ()
 
-            match model.CombatState with
-            | TurnAttackPlan attacker when Combat.isCharacterControlled attacker ->
+                match plan.PlannedTarget with
+                | Some target ->
+                    Content.button "PlannedTarget" [
+                        Entity.Absolute == false
+                        Entity.PositionLocal == v3 -40.0f 30.0f 0.0f
+                        Entity.Elevation == 10.0f
+                        Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                        Entity.Size == v3 40.0f 5.0f 0.0f
+                        Entity.Text := $"{target.Name}"
+                        Entity.Font == Assets.Gui.ClearSansFont
+                        Entity.FontSizing == Some 5
+                        Entity.TextColor == Color.FloralWhite
+                    ]
+                | None ->
+                    ()
+
                 Content.button "Distance" [
                     Entity.Absolute == false
                     Entity.PositionLocal == v3 -100.0f 30.0f 0.0f
                     Entity.Elevation == 10.0f
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Size == v3 40.0f 5.0f 0.0f
-                    Entity.Text := $"{model.DistanceCurrentReach}"
+                    Entity.Text := $"{plan.DistanceCurrentReach}"
                     Entity.Font == Assets.Gui.ClearSansFont
                     Entity.FontSizing == Some 5
                     Entity.TextColor == Color.FloralWhite
@@ -526,7 +537,7 @@ type CombatDispatcher () =
                     Entity.Elevation == 10.0f
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Size == v3 40.0f 5.0f 0.0f
-                    Entity.Text := $"{model.DistanceToTarget}"
+                    Entity.Text := $"{plan.DistanceToTarget}"
                     Entity.Font == Assets.Gui.ClearSansFont
                     Entity.FontSizing == Some 5
                     Entity.TextColor == Color.FloralWhite
@@ -556,8 +567,8 @@ type CombatDispatcher () =
 
                     let actions =
 
-                        match model.CombatState, leftHistory with
-                        | TurnAttackPlan attacker, _ when Combat.isCharacterControlled attacker ->
+                        match plan, leftHistory with
+                        | Some attack, _ when Plan2.shouldBePlanned attack  ->
 
                             let action (i, action) = Content.button $"ActionSelectable{i}" [
                                 Entity.Absolute == false
@@ -570,7 +581,7 @@ type CombatDispatcher () =
                                 Entity.ClickEvent => RemovePlannedAction i
                             ]
 
-                            model.PlannedActions
+                            attack.PlannedActions
                             |> List.map Action.describe
                             |> List.indexed
                             |> List.map action

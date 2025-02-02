@@ -18,14 +18,13 @@ module AttackerAI =
 
         strikes @ [ Power; Press ] @ [ Stride ]
 
-    let getDistanceBetweenAttackerAndTarget (attacker : Entity) combat world =
+    let getDistanceBetweenAttackerAndTarget (plan : Plan) (area : Entity) world =
 
-        let (Some target) = combat.PlannedTarget
+        let (Some target) = plan.PlannedTarget
 
-        let attackerName = attacker.Name
+        let attackerName = plan.Entity.Name
         let targetName = target.Name
 
-        let area = combat.Area
         let area = area.GetArea world
         match Area.findPath attackerName targetName area with
         | _::_ as path ->
@@ -50,24 +49,22 @@ module AttackerAI =
                 distance
         ) 0u)
 
-    let getCoveredDistance2 (attacker : Entity) combat world =
-        let character = attacker.GetCharacter world
-        let plannedActions = combat.PlannedActions
+    let getCoveredDistance2 (plan : Plan) world =
+        let character = plan.Entity.GetCharacter world
+        let plannedActions = plan.PlannedActions
         getCoveredDistance plannedActions character
 
-    let getPossibleActions (attacker : Entity) combat world =
+    let getPossibleActions (plan : Plan) (area : Entity) world =
 
-        let character = attacker.GetCharacter world
+        let character = plan.Entity.GetCharacter world
         let statCombatant = Character.getStat Gall character
-        let plannedActions = combat.PlannedActions
+        let plannedActions = plan.PlannedActions
 
         let isAttackExecutable attack =
 
-            let area = combat.Area
+            let (Some target) = plan.PlannedTarget
 
-            let (Some target) = combat.PlannedTarget
-
-            let attackerName = attacker.Name
+            let attackerName = plan.Entity.Name
             let targetName = target.Name
 
             let area = area.GetArea world
@@ -120,30 +117,40 @@ module AttackerAI =
             |> List.map fst
         Combat.getCharacterMostWounds targets world
 
-    let customPlan (attacker: Entity) combat world =
+    let tryCustomPlan (plan : Plan) combat world =
 
-        if List.notEmpty combat.PlannedActions then
+        if List.notEmpty plan.PlannedActions && Option.isSome plan.PlannedTarget then
+
             // TODO: move to planning
             let (Some target) =
-                combat.PlannedTarget
+                plan.PlannedTarget
+
             let stance =
                 [ Check.unstoppable (StanceChange Stance.attacker) ]
+
             let roll =
                 [ Check.unstoppable RollStance ]
 
+            let fracture =
+                plan.PlannedFractureBet
+
+            let karmaBet =
+                [ Check.unstoppable (KarmaBet fracture) ]
+
             let checks =
-                combat.PlannedActions
+                plan.PlannedActions
                 // threshold should be generated for the action
                 |> List.map (fun action -> Check.moveAttack action target)
 
             Some {
-                Turn.empty with
+                plan with
                     Turn = combat.Turn
-                    Checks = stance @ roll @ checks
-                    Entity = attacker
+                    Checks = stance @ roll @ karmaBet @ checks
             }
+
         else
             None
+
 
     // attack in the case character has no programming
     let attackDefault character moves attacks target =
@@ -199,7 +206,9 @@ module AttackerAI =
         )
 
     // plan attacker actions
-    let tryPlan (attacker: Entity) model world =
+    let tryPlan (plan : Plan) model world =
+
+        let attacker = plan.Entity
 
         let character = attacker.GetCharacter world
 
@@ -239,10 +248,9 @@ module AttackerAI =
                         attackDefault character (int statCombatant) 0 target
 
                 |> fun checks -> Some {
-                    Turn.empty with
+                    plan with
                         Turn = model.Turn
                         Checks = checks
-                        Entity = attacker
                 }
 
             | _ ->
@@ -318,7 +326,9 @@ module DefenderAI =
         )
 
     // plan defender actions
-    let tryPlan (attacker: Entity) attackerAction (defender: Entity) model world =
+    let tryPlan (attacker: Entity) attackerAction (defence : Plan) model world =
+
+        let defender = defence.Entity
 
         let character = defender.GetCharacter world
 
@@ -354,12 +364,106 @@ module DefenderAI =
                     defenceDefault character 0 0 target
 
                 |> fun checks -> Some {
-                    Turn.empty with
+                    defence with
                         Turn = model.Turn
                         Checks = checks
-                        Entity = defender
                 }
             | _ ->
                 None
         else
             None
+
+module Plan2 =
+    let plan attacker (model : Combat) (world : World) (plan : Plan) =
+        let plan = {
+            plan with
+                PossibleTargets = AttackerAI.getPossibleTargets attacker model world
+                PlannedTarget = Some (AttackerAI.findTarget attacker model world)
+        }
+        let plan = {
+            plan with
+                PossibleActions = AttackerAI.getPossibleActions plan model.Area world
+                DistanceCurrentReach = AttackerAI.getCoveredDistance2 plan world
+                DistanceToTarget = AttackerAI.getDistanceBetweenAttackerAndTarget plan model.Area world
+        }
+        plan
+
+    let update attacker (model : Combat) (world : World) (plan : Plan) =
+        let plan = {
+            plan with
+                PossibleTargets = AttackerAI.getPossibleTargets attacker model world
+                PossibleActions = AttackerAI.getPossibleActions plan model.Area world
+                DistanceCurrentReach = AttackerAI.getCoveredDistance2 plan world
+                DistanceToTarget = AttackerAI.getDistanceBetweenAttackerAndTarget plan model.Area world
+        }
+        plan
+
+    let setPlannedTarget target (plan : Plan) =
+        let plan = {
+            plan with
+                PlannedTarget = Some target
+        }
+        plan
+
+    let addPlannedAction action (plan : Plan) =
+        let plan = {
+            plan with
+                PlannedActions = plan.PlannedActions @ [ action ]
+        }
+        plan
+
+    let removePlannedAction i (plan : Plan) =
+        let plan = {
+            plan with
+                PlannedActions = List.removeAt i plan.PlannedActions
+        }
+        plan
+
+    let modifyFractureBet i (plan : Plan) =
+        let plan = {
+            plan with
+                PlannedFractureBet = plan.PlannedFractureBet + i
+        }
+        plan
+
+
+    let shouldBePlanned (plan : Plan) =
+        Combat.isCharacterControlled plan.Entity
+
+    let finalize (plan : Plan) model world =
+
+        let attacker = plan.Entity
+        let character = attacker.GetCharacter world
+
+        let target = AttackerAI.findTarget attacker model world
+
+        let attackerName = attacker.Name
+        let targetName = target.Name
+
+        let area = model.Area.GetArea world
+
+        if not (Character.canAct character) ||
+            List.isEmpty (Area.findPath attackerName targetName area) then
+            None
+
+        elif Combat.isCharacterControlled attacker then
+            AttackerAI.tryCustomPlan plan model world
+
+        else
+            AttackerAI.tryPlan plan model world
+
+    let finalizeDefence (attack : Plan) (defence : Plan) model world =
+        let action =
+            attack.Checks
+            |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
+            |> _.Value
+
+        DefenderAI.tryPlan attack.Entity action defence model world
+
+    let makeTurn (plan : Plan) =
+        {
+            Turn.empty with
+                Turn = plan.Turn
+                Entity = plan.Entity
+                Checks = plan.Checks
+        }
