@@ -9,12 +9,10 @@ open Nu
 TODO: Always do the minimum implementation
 
 TODO:
-    - Equipping pistol
     - Opening doors
 
 TODO: Combat
     - No skills
-    - No inventory
     - No cooldown
     - Body doesn't impact anything
 

@@ -219,11 +219,32 @@ with
         | Dodge -> true
         | _ -> false
 
+    static member isPositioning move =
+        match move with
+        | Climb
+        | Crawl
+        | Crouch
+        | Dash
+        | Jump
+        | Roll
+        | Sidestep
+        | Stride
+        | Swim -> true
+        | _ -> false
+
     static member getName move =
         match move with
         | Strike weapon -> weapon.Name
         | x -> $"{x}"
 
+    static member getRange move =
+        match move with
+        | Fire weapon ->
+            Weapon.getRange weapon
+        | Strike weapon ->
+            Weapon.getRange weapon
+        | _ ->
+            0u
 
 type Element =
     | Gall // Bile
@@ -806,6 +827,14 @@ with
         }
         character
 
+    static member addWeapon weapon character =
+        let weapons = character.Weapons
+        let character = {
+            character with
+                Weapons = weapon::weapons
+        }
+        character
+
     static member getPossibleMoves character = [
         for i in Character.getWeapons character do
             if Weapon.isRanged i then
@@ -821,7 +850,6 @@ with
     ]
 
     static member getCoveredDistance actions character =
-        let reach = Character.getReach character
         let speed = Character.getSpeed character
 
         let distance =
@@ -834,7 +862,7 @@ with
                     distance
             ) 0u
 
-        reach + distance
+        distance
 
     static member empty = {
         ID = String.empty

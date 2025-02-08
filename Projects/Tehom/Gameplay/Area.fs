@@ -14,7 +14,7 @@ module Area =
         | Abstract
         | Item
         | Furniture
-        | Safe of Open : Boolean * Key : String * Items : String list
+        | Safe of Open : Boolean * Key : String * Items : String list * Weapons : Weapon list
         | Actor
 
     type Site = {
@@ -478,7 +478,7 @@ module Area =
             |> Area.roomPart "room3walls" "room3windowroom1" IsOnEdge
             |> Area.furniture "room3floor" "room3registrationdesk" LiesAbove
             |> Area.furniture "room3floor" "room3chairs" LiesAbove
-            |> Area.safe "room3floor" "room3safe" (Safe (false, "room5key", ["pistol"])) LiesAbove
+            |> Area.safe "room3floor" "room3safe" (Safe (false, "room5key", [], [ Weapon.pistol "armRight" ])) LiesAbove
             |> Area.item "room3registrationdesk" "room3book" LiesAbove
             //|> Area.actor "room3floor" "rat" LiesAbove
 

@@ -73,7 +73,7 @@ with
             Action.describe check.Action
         )
 
-    static member isCustom (plan : Plan) =
+    static member isPlanned (plan : Plan) =
         let player = Simulants.GameplayCharacters / CharacterContent.player.ID
         plan.Entity = player
 
@@ -421,7 +421,7 @@ with
             |> List.last
             |> snd
 
-    static member updatePossibleActions plan world =
+    static member updatePossibleChecks plan world =
 
         let character = plan.Entity.GetCharacter world
         let plannedActions = plan.Checks |> List.map _.Action
@@ -433,8 +433,15 @@ with
             |> List.fold (fun total check -> total + check.Cost) Cost.empty
 
         let isAttackExecutable check =
+            let range =
+                match check.Action with
+                | Move move when Move.isAttack move ->
+                    Move.getRange move
+                | _ ->
+                    Character.getReach character
+
             // in reach
-            coveredDistance >= distanceToTarget
+            coveredDistance + range >= distanceToTarget
 
         let moveWithinActionLimit check =
             Character.canTheoreticallyPay (totalCost + check.Cost) character
@@ -484,10 +491,16 @@ with
                     match check.Action with
                     | Move move when Move.isAttack move ->
                         check, defenceMoves >= attackMoves && isAttackExecutable check && moveWithinActionLimit check
+                    | Move move when Move.isPositioning move ->
+                        check, moveWithinActionLimit check
                     | _ ->
                         check, isAttackExecutable check && moveWithinActionLimit check
                 | None ->
-                    check, isAttackExecutable check && moveWithinActionLimit check
+                    match check.Action with
+                    | Move move when Move.isPositioning move ->
+                        check, moveWithinActionLimit check
+                    | _ ->
+                        check, isAttackExecutable check && moveWithinActionLimit check
             )
 
         let plan = { plan with PossibleChecks = checks }
@@ -507,13 +520,13 @@ with
     static member initialize (plan : Plan) (world : World)  =
         let plan = Plan.updatePossibleTargets plan world
         let plan = Plan.setTargetDefault plan
-        let plan = Plan.updatePossibleActions plan world
+        let plan = Plan.updatePossibleChecks plan world
         let plan = Plan.updateDistances plan world
         plan
 
     static member updateDerivatives (plan : Plan) (world : World) =
         let plan = Plan.updatePossibleTargets plan world
-        let plan = Plan.updatePossibleActions plan world
+        let plan = Plan.updatePossibleChecks plan world
         let plan = Plan.updateDistances plan world
         plan
 
@@ -533,7 +546,7 @@ with
             List.isEmpty (Area.findPath attackerName targetName areaModel) then
             None
 
-        elif Plan.isCustom plan then
+        elif Plan.isPlanned plan then
             Plan.tryMakeChecksPlanned plan world
 
         else
@@ -555,7 +568,7 @@ with
             List.isEmpty (Area.findPath attackerName targetName areaModel) then
             None
 
-        elif Plan.isCustom defence then
+        elif Plan.isPlanned defence then
             Plan.tryMakeChecksPlanned defence world
 
         else

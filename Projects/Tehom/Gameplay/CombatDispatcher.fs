@@ -72,7 +72,7 @@ type CombatDispatcher () =
 
                 let model = { model with CombatState = TurnAttackerPlanning plan }
 
-                [ if Plan.isCustom plan then () else TurnProcess ], model
+                [ if Plan.isPlanned plan then () else TurnProcess ], model
 
             | TurnAttackerPlanning attack ->
                 match Plan.tryFinalizeAttack model.Area attack world with
@@ -101,7 +101,7 @@ type CombatDispatcher () =
 
                 let model = { model with CombatState = TurnDefenderPlanning (attack, plan) }
 
-                [ if Plan.isCustom plan then () else TurnProcess ], model
+                [ if Plan.isPlanned plan then () else TurnProcess ], model
 
             | TurnDefenderPlanning (attack, defence) ->
                 match Plan.tryFinalizeDefence model.Area attack defence world with
@@ -264,16 +264,16 @@ type CombatDispatcher () =
             // TODO: Display reach + stride distance, also display it on the map
             let planLeft =
                 match model.CombatState with
-                | TurnAttackerPlanning attack when Plan.isCustom attack ->
+                | TurnAttackerPlanning attack when Plan.isPlanned attack ->
                     Some attack
-                | TurnDefenderPlanning (attack, defence) when Plan.isCustom defence ->
+                | TurnDefenderPlanning (attack, defence) when Plan.isPlanned defence ->
                     Some defence
                 | _ ->
                     None
 
             let planRight =
                 match model.CombatState with
-                | TurnDefenderPlanning (attack, defence) when Plan.isCustom defence ->
+                | TurnDefenderPlanning (attack, defence) when Plan.isPlanned defence ->
                     Some attack
                 | _ ->
                     None

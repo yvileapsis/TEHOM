@@ -19,8 +19,10 @@ type GraphCommand =
     | ClickEvent of Entity
     | RemoveFromGraph of String
     | AddItemToPlayer of String
+    | AddWeaponToPlayer of Weapon
     | MoveToSelected of String
     | ReplaceSiteWith of String * Site
+    | StartCombat of Entity * Entity * Entity
     interface Command
 
 type SitesGraph = {
@@ -93,13 +95,29 @@ type GraphDispatcher () =
 
         | Click s ->
             if not (List.contains s (model.Clickables |> List.map fst)) then
-                printfn "not in range"
-                just model
+
+                let area = Simulants.GameplayArea
+                let areaModel = area.GetArea world
+
+                let (s, site) = Area.getSite s areaModel
+
+                match site.Type with
+                | Actor ->
+                    printfn $"that's {site.Label}"
+                    let player = Simulants.GameplayCharacters / "player"
+                    let rat = Simulants.GameplayCharacters / s
+                    [
+                        StartCombat (area, player, rat)
+                    ], model
+                | _ ->
+                    printfn "not in range"
+                    just model
+
             else
                 let area = Simulants.GameplayArea
-                let area = area.GetArea world
+                let areaModel = area.GetArea world
 
-                let (s, site) = Area.getSite s area
+                let (s, site) = Area.getSite s areaModel
 
                 match site.Type with
                 | Abstract ->
@@ -112,20 +130,25 @@ type GraphDispatcher () =
                     [RemoveFromGraph s; AddItemToPlayer s], model
                 | Furniture ->
                     just model
-                | Safe (notclosed, key, items) ->
+                | Safe (notclosed, key, items, weapons) ->
                     let player = Simulants.GameplayCharacters / "player"
                     let playerModel = player.GetCharacter world
                     if notclosed || List.contains key playerModel.Items then
-                        let site = { site with Type = Safe (true, key, []) }
+                        let site = { site with Type = Safe (true, key, [], []) }
                         [
                             ReplaceSiteWith (s, site)
                             for i in items do AddItemToPlayer i
+                            for i in weapons do AddWeaponToPlayer i
                         ], model
                     else
                         just model
                 | Actor ->
                     printfn $"that's {site.Label}"
-                    just model
+                    let player = Simulants.GameplayCharacters / "player"
+                    let rat = Simulants.GameplayCharacters / s
+                    [
+                        StartCombat (area, player, rat)
+                    ], model
 
         | LeftClick ->
             let intersections =
@@ -167,6 +190,11 @@ type GraphDispatcher () =
             let world = player.SetCharacterWith (Character.addItem s) world
             just world
 
+        | AddWeaponToPlayer s ->
+            let player = Simulants.GameplayCharacters / "player"
+            let world = player.SetCharacterWith (Character.addWeapon s) world
+            just world
+
         | MoveToSelected s ->
             let player = Simulants.GameplayCharacters / "player"
             let playerModel = player.GetCharacter world
@@ -190,6 +218,27 @@ type GraphDispatcher () =
             let eventTrace = EventTrace.debug "GraphDispatcher" "handleMouseLeftUp" "Click" EventTrace.empty
             let world = World.publishPlus () entity.ClickEvent eventTrace entity true false world
             World.playSound 1f Assets.Default.Sound world
+            just world
+
+        | StartCombat (area, player, rat) ->
+
+            let combat, world = World.createEntity<CombatDispatcher> DefaultOverlay (Some [|"Combat"|]) Simulants.GameplayGui world
+
+            let model =
+                Combat.initial
+
+            let combatants =
+                [player; rat]
+
+            let history =
+                combatants
+                |> List.map (fun c -> c, [])
+                |> Map.ofSeq
+
+            let model = { model with Combatants = combatants; History = history; Area = area }
+
+            let world = combat.SetCombat model world
+
             just world
 
     override this.TruncateModel model = {
@@ -320,7 +369,7 @@ type GraphDispatcher () =
                         v3 0.04f 0.04f 2f
                     | Item ->
                         v3 0.03f 0.03f 2f
-                    | Safe(``open``, key, items) ->
+                    | Safe(``open``, key, items, weapons) ->
                         v3 0.04f 0.04f 2f
                     | Ground ->
                         v3 0.05f 0.05f 2f
