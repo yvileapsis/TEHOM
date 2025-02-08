@@ -2,7 +2,6 @@ namespace Tehom
 
 open Prime
 open Nu
-open Character
 
 module CharacterContent =
 
@@ -10,10 +9,7 @@ module CharacterContent =
         Character.empty with
             ID = "player"
             Name = "Player"
-            Gall = Stat.Gifted
-            Lymph = Stat.Gifted
-            Oil = Stat.Gifted
-            Plasma = Stat.Gifted
+            Stats = Stats.gifted
 
             Body = Body.human
 
@@ -33,19 +29,18 @@ module CharacterContent =
         Character.empty with
             ID = "enemy"
             Name = "Enemy"
-            Gall = Stat.Average
-            Lymph = Stat.Average
-            Oil = Stat.Average
-            Plasma = Stat.Average
+            Stats = Stats.average
             StancesBase = 1
     }
 
     let rat = {
         enemy with
-            Gall = Stat.Gifted
-            Lymph = Stat.Average
-            Oil = Stat.Average
-            Plasma = Stat.Feeble
+            Stats = {
+                Gall = 4
+                Lymph = 3
+                Oil = 3
+                Plasma = 1
+            }
 
             ID = "rat"
             Name = "Rat"
@@ -62,7 +57,7 @@ module CharacterContent =
 
             CustomActions = [
                 { Name = "Aggressive"; Actions = [
-                    StanceChange (Stance.make Gall [Plasma; Plasma; Plasma] Stance.empty)
+                    StanceChange (Stats.make Gall [Plasma; Plasma; Plasma] Stats.empty)
                     RollStance
                     for i in [ Jump; Power; Strike (Weapon.bite "head"); Press ] do Move i
                 ] }
@@ -71,7 +66,7 @@ module CharacterContent =
                     for i in [ Strike (Weapon.bite "head"); Press; Press; Press ] do Move i
                 ] }
                 { Name = "Defence"; Actions = [
-                    StanceChange (Stance.make Lymph [Gall; Gall; Gall; Gall; Plasma; Plasma] Stance.empty)
+                    StanceChange (Stats.make Lymph [Gall; Gall; Gall; Gall; Plasma; Plasma] Stats.empty)
                     RollStance
                     for i in [ Dodge; Dodge; Dodge; Dodge; ] do Move i
                 ] }

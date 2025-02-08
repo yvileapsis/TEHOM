@@ -4,7 +4,6 @@ open System
 open System.Numerics
 open Prime
 open Nu
-open Character
 
 (*
 TODO: Always do the minimum implementation

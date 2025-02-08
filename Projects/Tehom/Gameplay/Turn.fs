@@ -4,40 +4,60 @@ open System
 open System.Numerics
 open Prime
 open Nu
-open Character
 
 type Plan = {
+    Turn : Int32
+
     Entity : Entity
+
+    Combatants : List<Entity>
+
+    Area : Entity
+
     PossibleActions : List<Tehom.Action * Boolean>
     PossibleTargets : List<Entity * Boolean>
     PlannedTarget : Option<Entity>
-    PlannedFractureBet : Stamina
+    PlannedFracture : Stamina
+    PlannedStance : Stats
 
     DistanceCurrentReach : UInt32
     DistanceToTarget : UInt32
 
-    Turn : Int32
     Checks : List<Check>
 }
 with
     static member empty = {
+        Turn = 0
+
         Entity = Entity
+        Combatants = []
+        Area = Entity
+
         PossibleActions = []
         PossibleTargets = []
         PlannedTarget = None
-        PlannedFractureBet = Stamina.empty
+        PlannedFracture = Stamina.empty
+        PlannedStance = Stance.empty
 
         DistanceCurrentReach = 0u
         DistanceToTarget = 0u
 
-        Turn = 0
         Checks = List.empty
     }
 
-    static member make entity turnID = {
+    static member make turnID entity combatants area = {
         Plan.empty with
-            Entity = entity
             Turn = turnID
+            Entity = entity
+            Combatants = combatants
+            Area = area
+    }
+
+    static member updateBases entity combatants area plan = {
+        plan with
+            Entity = entity
+            Combatants = combatants
+            Area = area
     }
 
     static member describe (plan : Plan) =
@@ -65,8 +85,12 @@ with
         let plan = { plan with Checks = List.removeAt i plan.Checks }
         plan
 
-    static member modifyFractureBet i (plan : Plan) =
-        let plan = { plan with PlannedFractureBet = plan.PlannedFractureBet + i }
+    static member setFracture change (plan : Plan) =
+        let plan = { plan with PlannedFracture = change }
+        plan
+
+    static member setStance change (plan : Plan) =
+        let plan = { plan with PlannedStance = change }
         plan
 
     static member getCharacterMostWounds entities world =
@@ -77,28 +101,33 @@ with
         )
         |> List.last
 
-    static member getPossibleTargets attacker combatants =
+    static member getPossibleTargets attacker combatants world =
         // TODO: some sort of allegiance system
         combatants
         |> List.remove (fun entity -> entity = attacker)
+        |> List.sortBy (fun (entity: Entity) ->
+            let character = entity.GetCharacter world
+            character.Wounds
+        )
+        |> List.rev
         |> List.map (fun entity -> entity, true)
 
     // pick target with the most wounds, excluding combatant himself
-    static member findTarget attacker combatants world =
+    static member findTarget combatants world =
         let targets =
-            Plan.getPossibleTargets attacker combatants
+            combatants
             |> List.filter snd
             |> List.map fst
         Plan.getCharacterMostWounds targets world
 
-    static member getDistanceBetweenAttackerAndTarget (area : Entity) (plan : Plan) world =
+    static member getDistanceBetweenAttackerAndTarget (plan : Plan) world =
 
         let (Some target) = plan.PlannedTarget
 
         let attackerName = plan.Entity.Name
         let targetName = target.Name
 
-        let area = area.GetArea world
+        let area = plan.Area.GetArea world
         match Area.findPath attackerName targetName area with
         | _::_ as path ->
 
@@ -108,7 +137,7 @@ with
         | _ ->
             0u
 
-    static member getPossibleActions (area : Entity) (plan : Plan) world =
+    static member getPossibleActions (plan : Plan) world =
 
         let character = plan.Entity.GetCharacter world
         let statCombatant = Character.getStat Gall character
@@ -119,7 +148,7 @@ with
             let attackerName = plan.Entity.Name
             let targetName = target.Name
 
-            let area = area.GetArea world
+            let area = plan.Area.GetArea world
             match Area.findPath attackerName targetName area with
             | _::_ as path ->
 
@@ -157,13 +186,37 @@ with
         if List.notEmpty plan.Checks then
 
             let stance =
-                [ Check.unstoppable (StanceChange Stance.attacker) ]
+                [ Check.unstoppable (StanceChange Stats.attacker) ]
 
             let roll =
                 [ Check.unstoppable RollStance ]
 
             let fracture =
-                plan.PlannedFractureBet
+                plan.PlannedFracture
+
+            let karmaBet =
+                [ Check.unstoppable (FractureBet fracture) ]
+
+            let checks =
+                plan.Checks
+
+            Some { plan with Checks = stance @ roll @ karmaBet @ checks }
+
+        else
+            None
+
+    static member tryMakeChecksDefenceCustom (plan : Plan) =
+
+        if List.notEmpty plan.Checks then
+
+            let stance =
+                [ Check.unstoppable (StanceChange Stats.attacker) ]
+
+            let roll =
+                [ Check.unstoppable RollStance ]
+
+            let fracture =
+                plan.PlannedFracture
 
             let karmaBet =
                 [ Check.unstoppable (FractureBet fracture) ]
@@ -194,7 +247,7 @@ with
 
         move @ attack
         |> fun x -> [
-            Check.unstoppable (StanceChange Stance.attacker)
+            Check.unstoppable (StanceChange Stats.attacker)
             Check.unstoppable RollStance
             for i in x do Check.moveAttack (Move i) target
         ]
@@ -207,7 +260,7 @@ with
                 actions
                 |> List.fold (fun priority action ->
                     match action with
-                    | StanceChange { GallStance = gall; LymphStance = lymph } ->
+                    | StanceChange { Gall = gall; Lymph = lymph } ->
                         // if healthy pick aggressive stance, otherwise pick defensive stance
                         if Character.isDamaged character then
                             lymph
@@ -311,7 +364,7 @@ with
 
         defence @ attack
         |> fun x -> [
-            Check.unstoppable (StanceChange Stance.attacker)
+            Check.unstoppable (StanceChange Stats.attacker)
             Check.unstoppable RollStance
             for i in x do Check.moveDefence (Move i) target
         ]
@@ -324,7 +377,7 @@ with
                 actions
                 |> List.fold (fun priority action ->
                     match action with
-                    | StanceChange { LymphStance = lymph } ->
+                    | StanceChange { Lymph = lymph } ->
                         lymph
                     | _ ->
                         priority
@@ -344,7 +397,7 @@ with
         )
 
     // plan defender actions
-    static member tryMakeChecksDefenceCustom (attacker: Entity) attackerAction (defence : Plan) (area : Entity) world =
+    static member tryMakeChecksDefenceDefault (attacker: Entity) attackerAction (defence : Plan) (area : Entity) world =
 
         let defender = defence.Entity
 
@@ -387,47 +440,48 @@ with
         else
             None
 
-    static member plan combatants area (plan : Plan) (world : World)  =
+    static member updatePossibleTargets plan world =
         let plan = {
             plan with
-                PossibleTargets = Plan.getPossibleTargets plan.Entity combatants
-                PlannedTarget = Some (Plan.findTarget plan.Entity combatants world)
-        }
-
-        let plan = {
-            plan with
-                PossibleActions = Plan.getPossibleActions area plan world
-        }
-
-        let character = plan.Entity.GetCharacter world
-        let plannedActions = plan.Checks |> List.map _.Action
-
-        let plan = {
-            plan with
-                DistanceCurrentReach = Character.getCoveredDistance plannedActions character
-                DistanceToTarget = Plan.getDistanceBetweenAttackerAndTarget area plan world
+                PossibleTargets = Plan.getPossibleTargets plan.Entity plan.Combatants world
         }
         plan
 
-    static member update combatants area (plan : Plan) (world : World) =
+    static member setTargetDefault plan =
         let plan = {
             plan with
-                PossibleTargets = Plan.getPossibleTargets plan.Entity combatants
+                PlannedTarget = Some (plan.PossibleTargets |> List.head |> fst)
         }
+        plan
 
+    static member updatePossibleActions plan world =
         let plan = {
             plan with
-                PossibleActions = Plan.getPossibleActions area plan world
+                PossibleActions = Plan.getPossibleActions plan world
         }
+        plan
 
+    static member updateDistances plan world =
         let character = plan.Entity.GetCharacter world
         let plannedActions = plan.Checks |> List.map _.Action
-
         let plan = {
             plan with
                 DistanceCurrentReach = Character.getCoveredDistance plannedActions character
-                DistanceToTarget = Plan.getDistanceBetweenAttackerAndTarget area plan world
+                DistanceToTarget = Plan.getDistanceBetweenAttackerAndTarget plan world
         }
+        plan
+
+    static member initialize (plan : Plan) (world : World)  =
+        let plan = Plan.updatePossibleTargets plan world
+        let plan = Plan.setTargetDefault plan
+        let plan = Plan.updatePossibleActions plan world
+        let plan = Plan.updateDistances plan world
+        plan
+
+    static member updateDerivatives (plan : Plan) (world : World) =
+        let plan = Plan.updatePossibleTargets plan world
+        let plan = Plan.updatePossibleActions plan world
+        let plan = Plan.updateDistances plan world
         plan
 
     static member tryFinalizeAttack (area : Entity) (plan : Plan) world =
@@ -474,10 +528,10 @@ with
             None
 
         elif Plan.isCustom defence then
-            Plan.tryMakeChecksAttackCustom defence
+            Plan.tryMakeChecksDefenceCustom defence
 
         else
-            Plan.tryMakeChecksDefenceCustom attack.Entity action defence area world
+            Plan.tryMakeChecksDefenceDefault attack.Entity action defence area world
 
 type Turn = {
     Turn : Int32

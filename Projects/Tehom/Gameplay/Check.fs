@@ -4,7 +4,6 @@ open System
 open System.Numerics
 open Prime
 open Nu
-open Character
 
 type GameEffect =
     | CharacterDo of Entity * (Character -> Character)
