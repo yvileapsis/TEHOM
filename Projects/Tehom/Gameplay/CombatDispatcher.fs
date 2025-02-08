@@ -67,7 +67,7 @@ type CombatDispatcher () =
                     just model
 
             | TurnAttackerBegin attacker ->
-                let plan = Plan.make model.Turn attacker model.Combatants model.Area
+                let plan = Plan.make model.Turn None attacker model.Combatants model.Area
                 let plan = Plan.initialize plan world
 
                 let model = { model with CombatState = TurnAttackerPlanning plan }
@@ -96,7 +96,7 @@ type CombatDispatcher () =
                     just model
 
             | TurnDefenderBegin (attack, defender) ->
-                let plan = Plan.make model.Turn defender model.Combatants model.Area
+                let plan = Plan.make model.Turn (Some attack) defender model.Combatants model.Area
                 let plan = Plan.initialize plan world
 
                 let model = { model with CombatState = TurnDefenderPlanning (attack, plan) }
@@ -135,7 +135,7 @@ type CombatDispatcher () =
         | SetPlannedTarget i ->
             let model =
                 Combat.updatePlan (fun plan ->
-                    let target, possible = List.item i plan.PossibleTargets
+                    let target, path, possible = List.item i plan.PossibleTargets
                     let plan = if possible then Plan.setPlannedTarget target plan else plan
                     let plan = Plan.updateBases plan.Entity model.Combatants model.Area plan
                     let plan = Plan.updateDerivatives plan world
@@ -147,8 +147,8 @@ type CombatDispatcher () =
         | AddPlannedAction i ->
             let model =
                 Combat.updatePlan (fun plan ->
-                    let action, possible = List.item i plan.PossibleActions
-                    let plan = if possible then Plan.addPlannedAction action plan else plan
+                    let check, possible = List.item i plan.PossibleChecks
+                    let plan = if possible then Plan.addPlannedAction check plan else plan
                     let plan = Plan.updateBases plan.Entity model.Combatants model.Area plan
                     let plan = Plan.updateDerivatives plan world
                     plan
@@ -366,9 +366,9 @@ type CombatDispatcher () =
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
                 ] (
-                    plan.PossibleActions
+                    plan.PossibleChecks
                     |> List.indexed
-                    |> List.map (fun (i, (action, possible)) -> i, Action.describe action, possible)
+                    |> List.map (fun (i, (action, possible)) -> i, Action.describe action.Action, possible)
                     |> List.map action
                 )
 
@@ -391,10 +391,10 @@ type CombatDispatcher () =
                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
                 ] (
-                    plan.PossibleTargets
+                    Plan.getPossibleTargets plan
                     // TOOD: annoying, can't access world name, will need to store name
                     |> List.indexed
-                    |> List.map (fun (i, (entity, possible)) -> i, $"{entity.Name}", possible)
+                    |> List.map (fun (i, (entity, path, possible)) -> i, $"{entity.Name}", possible)
                     |> List.map action
                 )
 
@@ -414,7 +414,7 @@ type CombatDispatcher () =
                         Content.button $"Increase" [
                             Entity.Absolute == false
                             Entity.Size == v3 10f 5f 0f
-                            Entity.PositionLocal == v3 -20f 0f 0f
+                            Entity.PositionLocal == v3 20f 0f 0f
                             Entity.Text := $"+"
                             Entity.Font == Assets.Gui.ClearSansFont
                             Entity.FontSizing == Some 5
@@ -425,7 +425,7 @@ type CombatDispatcher () =
                         Content.button $"Decrease" [
                             Entity.Absolute == false
                             Entity.Size == v3 10f 5f 0f
-                            Entity.PositionLocal == v3 20f 0f 0f
+                            Entity.PositionLocal == v3 -20f 0f 0f
                             Entity.Text := $"-"
                             Entity.Font == Assets.Gui.ClearSansFont
                             Entity.FontSizing == Some 5

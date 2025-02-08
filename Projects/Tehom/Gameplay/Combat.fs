@@ -14,7 +14,6 @@ TODO:
 
 TODO: Combat
     - No skills
-    - Can't select stance
     - No inventory
     - No cooldown
     - Body doesn't impact anything

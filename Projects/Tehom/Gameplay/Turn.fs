@@ -5,8 +5,11 @@ open System.Numerics
 open Prime
 open Nu
 
+type Path = Graph.Query.LPath<String, UInt32>
+
 type Plan = {
     Turn : Int32
+    Countering : Option<Plan>
 
     Entity : Entity
 
@@ -14,8 +17,9 @@ type Plan = {
 
     Area : Entity
 
-    PossibleActions : List<Tehom.Action * Boolean>
-    PossibleTargets : List<Entity * Boolean>
+    PossibleChecks : List<Check * Boolean>
+    PossibleTargets : List<Entity * Path * Boolean>
+
     PlannedTarget : Option<Entity>
     PlannedFracture : Stamina
     PlannedStance : Stats
@@ -28,13 +32,15 @@ type Plan = {
 with
     static member empty = {
         Turn = 0
+        Countering = None
 
         Entity = Entity
         Combatants = []
         Area = Entity
 
-        PossibleActions = []
+        PossibleChecks = []
         PossibleTargets = []
+
         PlannedTarget = None
         PlannedFracture = Stamina.empty
         PlannedStance = Stance.empty
@@ -45,9 +51,10 @@ with
         Checks = List.empty
     }
 
-    static member make turnID entity combatants area = {
+    static member make turnID defence entity combatants area = {
         Plan.empty with
             Turn = turnID
+            Countering = defence
             Entity = entity
             Combatants = combatants
             Area = area
@@ -75,9 +82,7 @@ with
         let plan = { plan with PlannedTarget = Some target }
         plan
 
-    static member addPlannedAction action (plan : Plan) =
-        let (Some target) = plan.PlannedTarget
-        let check = Check.moveAttack action target
+    static member addPlannedAction check (plan : Plan) =
         let plan = { plan with Checks = plan.Checks @ [ check ] }
         plan
 
@@ -101,134 +106,29 @@ with
         )
         |> List.last
 
-    static member getPossibleTargets attacker combatants world =
-        // TODO: some sort of allegiance system
-        combatants
-        |> List.remove (fun entity -> entity = attacker)
-        |> List.sortBy (fun (entity: Entity) ->
-            let character = entity.GetCharacter world
-            character.Wounds
-        )
-        |> List.rev
-        |> List.map (fun entity -> entity, true)
+    static member tryMakeChecksPlanned (plan : Plan) world =
 
-    // pick target with the most wounds, excluding combatant himself
-    static member findTarget combatants world =
-        let targets =
-            combatants
-            |> List.filter snd
-            |> List.map fst
-        Plan.getCharacterMostWounds targets world
-
-    static member getDistanceBetweenAttackerAndTarget (plan : Plan) world =
-
-        let (Some target) = plan.PlannedTarget
-
-        let attackerName = plan.Entity.Name
-        let targetName = target.Name
-
-        let area = plan.Area.GetArea world
-        match Area.findPath attackerName targetName area with
-        | _::_ as path ->
-
-            let distance = List.last path |> snd
-
-            distance
-        | _ ->
-            0u
-
-    static member getPossibleActions (plan : Plan) world =
-
-        let character = plan.Entity.GetCharacter world
-        let statCombatant = Character.getStat Gall character
-        let plannedActions = plan.Checks |> List.map _.Action
-
-        let isAttackExecutable attack (target : Entity) =
-
-            let attackerName = plan.Entity.Name
-            let targetName = target.Name
-
-            let area = plan.Area.GetArea world
-            match Area.findPath attackerName targetName area with
-            | _::_ as path ->
-
-                let distance = List.last path |> snd
-                // in reach
-                if Character.getCoveredDistance plannedActions character >= distance then
-                    true
-                else
-                    false
-            | _ ->
-                false
-
-        let moveWithinActionLimit move =
-            int statCombatant > (List.length plannedActions)
-
-        Character.getPossibleMoves character
-        |> List.map (fun x ->
-
-            let executable =
-                if List.contains x Move.positioning then
-                    moveWithinActionLimit x
-                else
-                    match plan.PlannedTarget with
-                    | Some target ->
-                        moveWithinActionLimit x
-                        && isAttackExecutable x target
-                    | None ->
-                        false
-
-            Move x, executable
-        )
-
-    static member tryMakeChecksAttackCustom (plan : Plan) =
+        let character =
+            plan.Entity.GetCharacter world
 
         if List.notEmpty plan.Checks then
 
-            let stance =
-                [ Check.unstoppable (StanceChange Stats.attacker) ]
+            let checks = [
+                if Character.verifyStance plan.PlannedStance character then
+                    Check.unstoppable (StanceChange plan.PlannedStance)
 
-            let roll =
-                [ Check.unstoppable RollStance ]
+                Check.unstoppable RollStance
 
-            let fracture =
-                plan.PlannedFracture
+                if Character.verifyFracture plan.PlannedFracture character then
+                    Check.unstoppable (Fracture plan.PlannedFracture)
 
-            let karmaBet =
-                [ Check.unstoppable (FractureBet fracture) ]
+                for check in plan.Checks do check
+            ]
 
-            let checks =
-                plan.Checks
-
-            Some { plan with Checks = stance @ roll @ karmaBet @ checks }
+            Some { plan with Checks = checks }
 
         else
             None
-
-    static member tryMakeChecksDefenceCustom (plan : Plan) =
-
-        if List.notEmpty plan.Checks then
-
-            let stance =
-                [ Check.unstoppable (StanceChange Stats.attacker) ]
-
-            let roll =
-                [ Check.unstoppable RollStance ]
-
-            let fracture =
-                plan.PlannedFracture
-
-            let karmaBet =
-                [ Check.unstoppable (FractureBet fracture) ]
-
-            let checks =
-                plan.Checks
-
-            Some { plan with Checks = stance @ roll @ karmaBet @ checks }
-
-        else
-            None
-
 
     // attack in the case character has no programming
     static member attackDefault character moves attacks target =
@@ -311,14 +211,14 @@ with
                 if (reach >= distance) then
                     // custom actions
                     if Character.hasCustomActions character then
-                        Plan.attackCustom character (int statCombatant) target
+                        Plan.attackCustom character statCombatant target
                     // no custom actions
                     else
-                        Plan.attackDefault character 0 (int statCombatant) target
+                        Plan.attackDefault character 0 statCombatant target
                 // not in reach
                 else
                     // can run to
-                    if speed * statCombatant >= distance then
+                    if speed * (uint32 statCombatant) >= distance then
                         let movementMoves = round (float distance / float speed + 0.5) |> int
                         Plan.attackDefault character movementMoves (int statCombatant - movementMoves) target
                     // can't run to
@@ -332,12 +232,25 @@ with
         else
             None
 
-    static member analyzeAttackerMoves attackerAction =
-        match attackerAction.Action with
-        | Move move ->
-            if List.contains move Move.attacks then 1 else 0
-        | _ ->
-            0
+    static member countAttackerMoves (attack : Plan) =
+        attack.Checks
+        |> List.fold (fun state check ->
+            match check.Action with
+            | Move move when Move.isAttack move ->
+                state + if List.notEmpty check.OpposedBy then 1 else 0
+            | _ ->
+                state
+        ) 0
+
+    static member countDefenderMoves (defence : Plan) =
+        defence.Checks
+        |> List.fold (fun state check ->
+            match check.Action with
+            | Move move when Move.isDefence move ->
+                state + if List.notEmpty check.OpposedBy then 1 else 0
+            | _ ->
+                state
+        ) 0
 
     // defence in the case character has no programming
     static member defenceDefault character blocks attacks target =
@@ -397,7 +310,7 @@ with
         )
 
     // plan defender actions
-    static member tryMakeChecksDefenceDefault (attacker: Entity) attackerAction (defence : Plan) (area : Entity) world =
+    static member tryMakeChecksDefenceDefault (attack : Plan) (defence : Plan) (area : Entity) world =
 
         let defender = defence.Entity
 
@@ -405,7 +318,7 @@ with
 
         if Character.canAct character then
 
-            let target = attacker
+            let target = attack.Entity
 
             let defenderName = defender.Name
             let targetName = target.Name
@@ -427,7 +340,7 @@ with
                         Plan.defenceCustom character (int statCombatant) target
                     // no custom actions
                     else
-                        let attackMoves = Plan.analyzeAttackerMoves attackerAction
+                        let attackMoves = Plan.countAttackerMoves attack
                         Plan.defenceDefault character attackMoves (int statCombatant - attackMoves) target
                 // not in reach
                 // TODO: assumes enemy coordinate is static which is false
@@ -440,34 +353,154 @@ with
         else
             None
 
+    static member canSeeTarget entity target world =
+        true
+
+    static member canAttackTarget entity target path world =
+        match path with
+        | _::_ ->
+            true
+        | _ ->
+            false
+
+    static member getPossibleTargets plan =
+        plan.PossibleTargets
+
     static member updatePossibleTargets plan world =
-        let plan = {
-            plan with
-                PossibleTargets = Plan.getPossibleTargets plan.Entity plan.Combatants world
-        }
+        let targets =
+            plan.Combatants
+
+        // TODO: some sort of allegiance system
+        // exclude combatant himself
+        let targets =
+            targets
+            |> List.remove (fun entity -> entity = plan.Entity)
+
+        // sort targets most wounds to least wounds
+        let targets =
+            targets
+            |> List.sortBy (fun (entity : Entity) ->
+                let character = entity.GetCharacter world
+                character.Wounds
+            )
+            |> List.rev
+
+        let area = plan.Area.GetArea world
+
+        let targets =
+            targets
+            |> List.map (fun entity ->
+                let actor = plan.Entity.Name
+                let target = entity.Name
+                entity, Area.findPath actor target area
+            )
+
+        // map if they're valid targets
+        let targets =
+            targets
+            |> List.filter (fun (target, _) -> Plan.canSeeTarget plan.Entity target world)
+            |> List.map (fun (target, path) -> target, path, Plan.canAttackTarget plan.Entity target path world)
+
+        let plan = { plan with PossibleTargets = targets }
         plan
 
     static member setTargetDefault plan =
-        let plan = {
-            plan with
-                PlannedTarget = Some (plan.PossibleTargets |> List.head |> fst)
-        }
+        let target =
+            plan.PossibleTargets
+            |> List.head
+            |> fun (target, _, _) -> target
+
+        let plan = { plan with PlannedTarget = Some target }
         plan
 
+    static member getDistanceToTarget plan =
+        plan.PossibleTargets
+        |> List.find (fun (entity, _, _) -> Some entity = plan.PlannedTarget)
+        |> fun (_, path, _) ->
+            path
+            |> List.last
+            |> snd
+
     static member updatePossibleActions plan world =
-        let plan = {
-            plan with
-                PossibleActions = Plan.getPossibleActions plan world
-        }
+
+        let character = plan.Entity.GetCharacter world
+        let plannedActions = plan.Checks |> List.map _.Action
+        let coveredDistance = Character.getCoveredDistance plannedActions character
+        let distanceToTarget = Plan.getDistanceToTarget plan
+
+        let totalCost =
+            plan.Checks
+            |> List.fold (fun total check -> total + check.Cost) Cost.empty
+
+        let isAttackExecutable check =
+            // in reach
+            coveredDistance >= distanceToTarget
+
+        let moveWithinActionLimit check =
+            Character.canTheoreticallyPay (totalCost + check.Cost) character
+
+        let moves =
+            Character.getPossibleMoves character
+
+        let checks =
+            moves
+            |> List.map (fun move ->
+                let action = Move move
+                let (Some target) = plan.PlannedTarget
+                if Option.isNone plan.Countering then
+                    Check.moveAttack action target
+                else
+                    Check.moveDefence action target
+            )
+
+        let checks =
+            checks
+            |> List.remove (fun check ->
+                match plan.Countering with
+                | Some attack ->
+                    false
+                | None ->
+                    match check.Action with
+                    | Move move ->
+                        Move.isDefenceNotPositioning move
+                    | _ ->
+                        false
+            )
+
+        let attackMoves =
+            match plan.Countering with
+            | Some attack ->
+                Plan.countAttackerMoves attack
+            | None ->
+                0
+        let defenceMoves =
+            Plan.countDefenderMoves plan
+
+        let checks =
+            checks
+            |> List.map (fun check ->
+                match plan.Countering with
+                | Some _ ->
+                    match check.Action with
+                    | Move move when Move.isAttack move ->
+                        check, defenceMoves >= attackMoves && isAttackExecutable check && moveWithinActionLimit check
+                    | _ ->
+                        check, isAttackExecutable check && moveWithinActionLimit check
+                | None ->
+                    check, isAttackExecutable check && moveWithinActionLimit check
+            )
+
+        let plan = { plan with PossibleChecks = checks }
         plan
 
     static member updateDistances plan world =
         let character = plan.Entity.GetCharacter world
         let plannedActions = plan.Checks |> List.map _.Action
+
         let plan = {
             plan with
                 DistanceCurrentReach = Character.getCoveredDistance plannedActions character
-                DistanceToTarget = Plan.getDistanceBetweenAttackerAndTarget plan world
+                DistanceToTarget = Plan.getDistanceToTarget plan
         }
         plan
 
@@ -501,7 +534,7 @@ with
             None
 
         elif Plan.isCustom plan then
-            Plan.tryMakeChecksAttackCustom plan
+            Plan.tryMakeChecksPlanned plan world
 
         else
             Plan.tryMakeChecksAttackDefault plan area world
@@ -518,20 +551,15 @@ with
 
         let areaModel = area.GetArea world
 
-        let action =
-            attack.Checks
-            |> List.tryFind (fun check -> not (List.isEmpty check.OpposedBy))
-            |> _.Value
-
         if not (Character.canAct character) ||
             List.isEmpty (Area.findPath attackerName targetName areaModel) then
             None
 
         elif Plan.isCustom defence then
-            Plan.tryMakeChecksDefenceCustom defence
+            Plan.tryMakeChecksPlanned defence world
 
         else
-            Plan.tryMakeChecksDefenceDefault attack.Entity action defence area world
+            Plan.tryMakeChecksDefenceDefault attack defence area world
 
 type Turn = {
     Turn : Int32

@@ -129,7 +129,7 @@ with
             []
         | StanceChange stance ->
             [ CharacterDo (attacker, Character.setStance stance) ]
-        | FractureBet bet ->
+        | Fracture bet ->
             [ CharacterDo (attacker, Character.spendFractureOnStamina bet) ]
         | RollStance ->
             [ CharacterDo (attacker, Character.roll) ]
@@ -180,14 +180,14 @@ with
             | Retarget ->
                 []
             | Burst
-            | Fire ->
-                []
             | Grab
             | Knockout
             | Slam
             | Sweep
             | Toss
             | Throw ->
+                []
+            | Fire weapon ->
                 []
             | Strike weapon ->
                 match check.Target with

@@ -29,6 +29,11 @@ module Weapon =
         | Small
         | Medium
         | Large
+
+    // Used for whether attacking with said weapon is a strike or a fire
+    type RangeType =
+        | Melee
+        | Ranged
 (*
     type Requirement =
         | True
@@ -39,21 +44,35 @@ module Weapon =
 *)
     type Weapon = {
         Type : Type
+        RangeType : RangeType
         Name : String
         Damage : Int32
         Range : UInt32
+
+        Ready : Int32
+        ReadyLeft : Int32
         Reload : Int32
         ReloadLeft : Int32
+        Uses : Int32
+        UsesLeft : Int32
+
         RequiredLimb : String
     }
     with
         static member empty = {
             Type = Small
+            RangeType = Melee
             Name = String.empty
             Damage = 0
             Range = 0u
+
+            Ready = 0
+            ReadyLeft = 0
             Reload = 0
             ReloadLeft = 0
+            Uses = 0
+            UsesLeft = 0
+
             RequiredLimb = String.empty
         }
 
@@ -64,6 +83,7 @@ module Weapon =
                 Name = $"Fist Strike ({limb})"
                 Damage = 3
                 RequiredLimb = limb
+                Ready = 1
         }
 
         // only humans kick
@@ -73,6 +93,7 @@ module Weapon =
                 Name = $"Kick Strike ({limb})"
                 Damage = 4
                 RequiredLimb = limb
+                Ready = 2
         }
 
         // charactertics differ a lot based on body stats
@@ -82,6 +103,7 @@ module Weapon =
                 Name = "Bite"
                 Damage = 5
                 RequiredLimb = limb
+                Ready = 1
         }
 
         // charactertics differ a lot based on body stats
@@ -91,6 +113,20 @@ module Weapon =
                 Name = "Claw Swipe"
                 Damage = 5
                 RequiredLimb = limb
+                Ready = 1
+        }
+
+        static member pistol limb = {
+            Weapon.empty with
+                Type = Small
+                Name = "Glock 22"
+                Damage = 22
+                RequiredLimb = limb
+                Range = 300u
+                Ready = 1
+                Reload = 3
+                Uses = 15
+                UsesLeft = 15
         }
 
         static member getRange weapon = weapon.Range
@@ -101,6 +137,8 @@ module Weapon =
             | Medium -> 0
             | Large -> 1
 
+        static member isRanged weapon =
+            weapon.RangeType = RangeType.Ranged
 
 type Weapon = Weapon.Weapon
 
@@ -115,7 +153,7 @@ type Move =
     | Dash
     | Delay
     | Dodge
-    | Fire
+    | Fire of Weapon
     | Grab
     | Jump
     | Knockout
@@ -134,22 +172,58 @@ type Move =
     | Toss
     | Throw
 with
+
     static member positioning = [
         Climb; Crawl; Crouch; Dash; Jump; Roll; Sidestep; Stride; Swim;
     ]
+
     static member attacks = [
-        Fire; Grab; Knockout; Power; Press; Retarget; Slam; Strike Weapon.empty; Throw; Toss;
+        Fire Weapon.empty; Grab; Knockout; Power; Press; Retarget; Slam; Strike Weapon.empty; Throw; Toss;
     ]
+
     static member defence = [
         Block; Crouch; Dodge; Jump; Roll; Spin;
     ]
+
     static member special = [
         Burst; Ready; Sweep;
     ]
+
+    static member isAttack move =
+        match move with
+        | Fire _
+        | Grab
+        | Knockout
+        | Power
+        | Press
+        | Retarget
+        | Slam
+        | Strike _
+        | Throw
+        | Toss  -> true
+        | _ -> false
+
+    static member isDefence move =
+        match move with
+        | Block
+        | Crouch
+        | Dodge
+        | Jump
+        | Roll
+        | Spin -> true
+        | _ -> false
+
+    static member isDefenceNotPositioning move =
+        match move with
+        | Block
+        | Dodge -> true
+        | _ -> false
+
     static member getName move =
         match move with
         | Strike weapon -> weapon.Name
         | x -> $"{x}"
+
 
 type Element =
     | Gall // Bile
@@ -217,7 +291,7 @@ with
         Plasma = 4
     }
 
-    static member stanceVerify (stance : Stats) (stats : Stats) =
+    static member verify (stance : Stats) (stats : Stats) =
         let (gall, lymph, oil, plasma) = Stats.getStats stats
         let (gallChange, lymphChange, oilChange, plasmaChange) = Stats.getStats stance
         gallChange + lymphChange + oilChange + plasmaChange |> int = 0
@@ -319,7 +393,7 @@ type Action =
     | SkillSelect of int
     | StanceChange of Stance
     | RollStance
-    | FractureBet of Stamina
+    | Fracture of Stamina
     | Move of Move
 
 with
@@ -331,9 +405,8 @@ with
         | StanceChange stance -> $"Stance {Stats.getStats stance}"
         | Move moves -> $"{moves |> Move.getName}"
         | SkillSelect i -> $"Betting {i} Karma"
-        | FractureBet i -> $"Betting {i.PhysicalActive} {i.PhysicalReactive} {i.MentalActive} {i.MentalReactive} Karma"
+        | Fracture i -> $"Betting {i.PhysicalActive} {i.PhysicalReactive} {i.MentalActive} {i.MentalReactive} Karma"
         | RollStance -> "Rolling Stats"
-
 
 type CustomAction = {
     Name : String
@@ -356,6 +429,26 @@ with
         ActionsPhysicalReactive = 0
         ActionsMentalReactive = 0
         Stances = 0
+    }
+
+    static member (+) (cost, cost') = {
+        cost with
+            Stamina = cost.Stamina + cost'.Stamina
+            ActionsPhysicalActive = cost.ActionsPhysicalActive + cost'.ActionsPhysicalActive
+            ActionsMentalActive = cost.ActionsMentalActive + cost'.ActionsMentalActive
+            ActionsPhysicalReactive = cost.ActionsPhysicalReactive + cost'.ActionsPhysicalReactive
+            ActionsMentalReactive = cost.ActionsMentalReactive + cost'.ActionsMentalReactive
+            Stances = cost.Stances + cost'.Stances
+    }
+
+    static member (-) (cost, cost') = {
+        cost with
+            Stamina = cost.Stamina - cost'.Stamina
+            ActionsPhysicalActive = cost.ActionsPhysicalActive - cost'.ActionsPhysicalActive
+            ActionsMentalActive = cost.ActionsMentalActive - cost'.ActionsMentalActive
+            ActionsPhysicalReactive = cost.ActionsPhysicalReactive - cost'.ActionsPhysicalReactive
+            ActionsMentalReactive = cost.ActionsMentalReactive - cost'.ActionsMentalReactive
+            Stances = cost.Stances - cost'.Stances
     }
 
 type Wounds =
@@ -430,7 +523,7 @@ type Character = {
 with
 
     static member setStance (stance : Stats) character =
-        let verified = Stats.stanceVerify stance (Character.getStats character)
+        let verified = Stats.verify stance (Character.getStats character)
         if (verified) then
             { character with Stance = stance }
         else
@@ -500,6 +593,21 @@ with
         && character.ActionsMentalReactiveCurrent >= cost.ActionsMentalReactive
         && character.StancesCurrent >= cost.Stances
 
+    static member canTheoreticallyPay (cost : Cost) character =
+        character.Stats.Plasma >= cost.Stamina.MentalActive
+        && character.Stats.Oil >= cost.Stamina.MentalReactive
+        && character.Stats.Gall >= cost.Stamina.PhysicalActive
+        && character.Stats.Lymph >= cost.Stamina.PhysicalReactive
+        && character.StancesCurrent >= cost.Stances
+
+    static member verifyStance stance character =
+        stance <> Stance.empty
+        && Stance.verify stance character.Stats
+
+    static member verifyFracture fracture character =
+        fracture <> Stamina.empty
+        && Stamina.sum fracture >= character.FractureCurrent
+
     static member pay (cost : Cost) character =
         let character = {
             character with
@@ -527,13 +635,11 @@ with
         character
         |> Character.getStats
         |> Stats.getElement element
-        |> uint32
 
     static member getStancedStat element character =
         character
         |> Character.getStancedStats
         |> Stats.getElement element
-        |> uint32
 
     static member doDamage size damage character =
         let (_, lymph, oil, _) =
@@ -700,13 +806,19 @@ with
         }
         character
 
-    static member getPossibleMoves character =
-        let strikes =
-            character
-            |> Character.getWeapons
-            |> List.map Strike
+    static member getPossibleMoves character = [
+        for i in Character.getWeapons character do
+            if Weapon.isRanged i then
+                Fire i
+            else
+                Strike i
 
-        strikes @ [ Power; Press ] @ [ Stride ]
+        Power; Press
+
+        Stride
+
+        Block; Crouch; Dodge; Jump; Roll; Spin;
+    ]
 
     static member getCoveredDistance actions character =
         let reach = Character.getReach character
