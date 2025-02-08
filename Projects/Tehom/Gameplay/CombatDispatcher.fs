@@ -25,7 +25,7 @@ type CombatCommand =
     interface Command
 
 type CombatDispatcher () =
-    inherit Entity2dDispatcher<Combat, CombatMessage, CombatCommand> (false, false, false, Combat.initial)
+    inherit Entity2dDispatcher<Combat, CombatMessage, CombatCommand> (false, false, false, Combat.empty)
 
     override this.Definitions (_, _) = [
         Entity.Size == Constants.Render.DisplayVirtualResolution.V3 / 2f
@@ -731,5 +731,10 @@ type CombatDispatcher () =
 
 
             | _ -> ()
-
     ]
+
+    static member makeCombat combatants area world =
+        let combat, world = World.createEntity<CombatDispatcher> DefaultOverlay (Some [|"Combat"|]) Simulants.GameplayGui world
+        let model = Combat.initial combatants area
+        let world = combat.SetCombat model world
+        world

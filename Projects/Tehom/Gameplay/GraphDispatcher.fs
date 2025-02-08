@@ -103,7 +103,7 @@ type GraphDispatcher () =
 
                 match site.Type with
                 | Actor ->
-                    printfn $"that's {site.Label}"
+                    printfn $"that's {s} {site.Label}"
                     let player = Simulants.GameplayCharacters / "player"
                     let rat = Simulants.GameplayCharacters / s
                     [
@@ -221,24 +221,7 @@ type GraphDispatcher () =
             just world
 
         | StartCombat (area, player, rat) ->
-
-            let combat, world = World.createEntity<CombatDispatcher> DefaultOverlay (Some [|"Combat"|]) Simulants.GameplayGui world
-
-            let model =
-                Combat.initial
-
-            let combatants =
-                [player; rat]
-
-            let history =
-                combatants
-                |> List.map (fun c -> c, [])
-                |> Map.ofSeq
-
-            let model = { model with Combatants = combatants; History = history; Area = area }
-
-            let world = combat.SetCombat model world
-
+            let world = CombatDispatcher.makeCombat [player; rat] area world
             just world
 
     override this.TruncateModel model = {

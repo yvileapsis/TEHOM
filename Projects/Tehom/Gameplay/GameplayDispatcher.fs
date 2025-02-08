@@ -175,24 +175,7 @@ type GameplayDispatcher () =
             just world
 
         | StartCombat (area, player, rat) ->
-
-            let combat, world = World.createEntity<CombatDispatcher> DefaultOverlay (Some [|"Combat"|]) Simulants.GameplayGui world
-
-            let model =
-                Combat.initial
-
-            let combatants =
-                [player; rat]
-
-            let history =
-                combatants
-                |> List.map (fun c -> c, [])
-                |> Map.ofSeq
-
-            let model = { model with Combatants = combatants; History = history; Area = area }
-
-            let world = combat.SetCombat model world
-
+            let world = CombatDispatcher.makeCombat [player; rat] area world 
             just world
 
 

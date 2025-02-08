@@ -86,8 +86,14 @@ with
     }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
-    static member initial = {
+    static member initial combatants area = {
         Combat.empty with
+            Combatants = combatants
+            History =
+                combatants
+                |> List.map (fun c -> c, [])
+                |> Map.ofList
+            Area = area
             DisplayLeftEntity = Some (Simulants.GameplayCharacters / CharacterContent.player.ID)
             DisplayRightEntity = Some (Simulants.GameplayCharacters / CharacterContent.rat.ID)
     }
