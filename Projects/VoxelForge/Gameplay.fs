@@ -256,8 +256,21 @@ type GameplayDispatcher () =
                 for i in List.init 1 id do
                     ContentEx.voxel $"VoxelTest{i}" [
                         Entity.VoxelChunk == voxel
-                        Entity.Position == v3 (single (12 - i / 25) * size) 0f (single (12 - i % 25) * size)
-                        Entity.Size == v3 64f 64f 64f
+                        Entity.Position == v3Zero //v3 (single (12 - i / 25) * size) 0f (single (12 - i % 25) * size)
+                        Entity.Size == v3 16f 16f 16f
+                        Entity.BodyShape == PointsShape {
+                            Points = [|
+                                for i in -8 .. dec 8 do
+                                for j in -8 .. dec 8 do
+                                    v3 (float32 i) -8f (float32 j)
+
+                                for i in -8 .. dec 8 do
+                                for j in -8 .. dec 8 do
+                                    v3 (float32 i) -7.875f (float32 j)
+                            |]
+                            TransformOpt = None
+                            PropertiesOpt = None
+                        }
                     ]
             ]
 

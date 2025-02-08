@@ -701,16 +701,55 @@ module VoxelFacetExtensions =
 type VoxelFacet () =
     inherit Facet (true, false, false)
 
+    static let getBodyShape (entity : Entity) world =
+        let scalar = entity.GetScale world * entity.GetSize world
+        let bodyShape = entity.GetBodyShape world
+        if entity.GetIs2d world
+        then World.localizeBodyShape scalar bodyShape
+        else bodyShape
+
+    static let propagatePhysicsCenter (entity : Entity) (_ : Event<ChangeData, Entity>) world =
+        if entity.GetPhysicsMotion world <> ManualMotion then
+            let bodyId = entity.GetBodyId world
+            let center = if entity.GetIs2d world then entity.GetPerimeterCenter world else entity.GetPosition world
+            (Cascade, World.setBodyCenter center bodyId world)
+        else (Cascade, world)
+
+    static let propagatePhysicsRotation (entity : Entity) (evt : Event<ChangeData, Entity>) world =
+        if entity.GetPhysicsMotion world <> ManualMotion then
+            let bodyId = entity.GetBodyId world
+            let rotation = evt.Data.Value :?> Quaternion
+            (Cascade, World.setBodyRotation rotation bodyId world)
+        else (Cascade, world)
+
+    static let propagatePhysicsLinearVelocity (entity : Entity) (evt : Event<ChangeData, Entity>) world =
+        if entity.GetPhysicsMotion world <> ManualMotion then
+            let bodyId = entity.GetBodyId world
+            let linearVelocity = evt.Data.Value :?> Vector3
+            (Cascade, World.setBodyLinearVelocity linearVelocity bodyId world)
+        else (Cascade, world)
+
+    static let propagatePhysicsAngularVelocity (entity : Entity) (evt : Event<ChangeData, Entity>) world =
+        if entity.GetPhysicsMotion world <> ManualMotion then
+            let bodyId = entity.GetBodyId world
+            let angularVelocity = evt.Data.Value :?> Vector3
+            (Cascade, World.setBodyAngularVelocity angularVelocity bodyId world)
+        else (Cascade, world)
+
+    static let propagatePhysics (entity : Entity) (_ : Event<ChangeData, Entity>) world =
+        let world = entity.PropagatePhysics world
+        (Cascade, world)
+
     static member Properties =
         [define Entity.Size (v3 16.0f 16.0f 16.0f)
          define Entity.Presence Omnipresent
          define Entity.Static true
          define Entity.AlwaysRender true
          define Entity.BodyEnabled true
-         define Entity.Friction 0.5f
-         define Entity.Restitution 0.0f
-         define Entity.CollisionCategories "1"
-         define Entity.CollisionMask Constants.Physics.CollisionWildcard
+         define Entity.BodyType Static
+         define Entity.BodyShape (BoxShape { Size = v3One; TransformOpt = None; PropertiesOpt = None })
+
+
          define Entity.InsetOpt None
          define Entity.TerrainMaterialProperties TerrainMaterialProperties.defaultProperties
          define Entity.TerrainMaterial
@@ -737,62 +776,83 @@ type VoxelFacet () =
          define Entity.Segments v2iOne
          define Entity.Observable false
          nonPersistent Entity.AwakeTimeStamp 0L
+
+
+         define Entity.SleepingAllowed true
+         define Entity.Friction 0.5f
+         define Entity.Restitution 0.0f
+         define Entity.LinearVelocity v3Zero
+         define Entity.LinearDamping 0.0f
+         define Entity.AngularVelocity v3Zero
+         define Entity.AngularDamping 0.2f
+         define Entity.AngularFactor v3One
+         define Entity.Substance (Mass 1.0f)
+         define Entity.GravityOverride None
+         define Entity.CharacterProperties CharacterProperties.defaultProperties
+         define Entity.CollisionDetection Discontinuous
+         define Entity.CollisionCategories "1"
+         define Entity.CollisionMask Constants.Physics.CollisionWildcard
+         define Entity.PhysicsMotion SynchronizedMotion
+         define Entity.Sensor false
+         define Entity.Observable false
+         nonPersistent Entity.AwakeTimeStamp 0L
          computed Entity.Awake (fun (entity : Entity) world -> entity.GetAwakeTimeStamp world = world.UpdateTime) None
-         computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = 0 }) None]
+         computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = Constants.Physics.InternalIndex }) None
+
+         ]
 
     override this.Register (entity, world) =
-//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyEnabled)) entity (nameof VoxelFacet) world
-//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Transform)) entity (nameof VoxelFacet) world
-//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Friction)) entity (nameof VoxelFacet) world
-//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.Restitution)) entity (nameof VoxelFacet) world
-//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionCategories)) entity (nameof VoxelFacet) world
-//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.CollisionMask)) entity (nameof VoxelFacet) world
-//        let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.HeightMap)) entity (nameof VoxelFacet) world
+        let subIds = Array.init 5 (fun _ -> Gen.id64)
+        let world = World.subscribePlus subIds.[0] (propagatePhysicsCenter entity) (entity.ChangeEvent (nameof entity.Transform)) entity world |> snd
+        let world = World.subscribePlus subIds.[1] (propagatePhysicsRotation entity) (entity.ChangeEvent (nameof entity.Rotation)) entity world |> snd
+        let world = World.subscribePlus subIds.[2] (propagatePhysicsLinearVelocity entity) (entity.ChangeEvent (nameof entity.LinearVelocity)) entity world |> snd
+        let world = World.subscribePlus subIds.[3] (propagatePhysicsAngularVelocity entity) (entity.ChangeEvent (nameof entity.AngularVelocity)) entity world |> snd
+        let world = World.subscribePlus subIds.[4] (propagatePhysics entity) (entity.ChangeEvent "BodyPropertiesAffecting") entity world |> snd
+        let unsubscribe = fun world ->
+            Array.fold (fun world subId -> World.unsubscribe subId world) world subIds
+        let callback = fun evt world ->
+            if  Set.contains (nameof RigidBodyFacet) (evt.Data.Previous :?> string Set) &&
+                not (Set.contains (nameof RigidBodyFacet) (evt.Data.Value :?> string Set)) then
+                (Cascade, unsubscribe world)
+            else (Cascade, world)
+        let callback2 = fun _ world ->
+            (Cascade, unsubscribe world)
+        let world = World.sense callback entity.FacetNames.ChangeEvent entity (nameof RigidBodyFacet) world
+        let world = World.sense callback2 entity.UnregisteringEvent entity (nameof RigidBodyFacet) world
         let world = entity.SetAwakeTimeStamp world.UpdateTime world
         world
 
-    (*
     override this.RegisterPhysics (entity, world) =
-        match entity.TryGetTerrainResolution world with
-        | Some resolution ->
-            let mutable transform = entity.GetTransform world
-            let terrainShape =
-                { Resolution = resolution
-                  Bounds = transform.Bounds3d
-                  HeightMap = entity.GetHeightMap world
-                  TransformOpt = None
-                  PropertiesOpt = None }
-            let bodyProperties =
-                { Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
-                  Rotation = transform.Rotation
-                  Scale = transform.Scale
-                  BodyShape = TerrainShape terrainShape
-                  BodyType = Static
-                  SleepingAllowed = true
-                  Enabled = entity.GetBodyEnabled world
-                  Friction = entity.GetFriction world
-                  Restitution = entity.GetRestitution world
-                  LinearVelocity = v3Zero
-                  LinearDamping = 0.0f
-                  AngularVelocity = v3Zero
-                  AngularDamping = 0.0f
-                  AngularFactor = v3Zero
-                  Substance = Mass 0.0f
-                  GravityOverride = None
-                  CharacterProperties = CharacterProperties.defaultProperties
-                  CollisionDetection = Discontinuous
-                  CollisionCategories = Physics.categorizeCollisionMask (entity.GetCollisionCategories world)
-                  CollisionMask = Physics.categorizeCollisionMask (entity.GetCollisionMask world)
-                  Sensor = false
-                  Observable = entity.GetObservable world
-                  Awake = entity.GetAwake world
-                  BodyIndex = (entity.GetBodyId world).BodyIndex }
-            World.createBody false (entity.GetBodyId world) bodyProperties world
-        | None -> world
+        let mutable transform = entity.GetTransform world
+        let bodyProperties =
+            { Enabled = entity.GetBodyEnabled world
+              Center = if entity.GetIs2d world then transform.PerimeterCenter else transform.Position
+              Rotation = transform.Rotation
+              Scale = transform.Scale
+              BodyShape = getBodyShape entity world
+              BodyType = entity.GetBodyType world
+              SleepingAllowed = entity.GetSleepingAllowed world
+              Friction = entity.GetFriction world
+              Restitution = entity.GetRestitution world
+              LinearVelocity = entity.GetLinearVelocity world
+              LinearDamping = entity.GetLinearDamping world
+              AngularVelocity = entity.GetAngularVelocity world
+              AngularDamping = entity.GetAngularDamping world
+              AngularFactor = entity.GetAngularFactor world
+              Substance = entity.GetSubstance world
+              GravityOverride = entity.GetGravityOverride world
+              CharacterProperties = entity.GetCharacterProperties world
+              CollisionDetection = entity.GetCollisionDetection world
+              CollisionCategories = Physics.categorizeCollisionMask (entity.GetCollisionCategories world)
+              CollisionMask = Physics.categorizeCollisionMask (entity.GetCollisionMask world)
+              Sensor = entity.GetSensor world
+              Observable = entity.GetObservable world
+              Awake = entity.GetAwake world
+              BodyIndex = (entity.GetBodyId world).BodyIndex }
+        World.createBody (entity.GetIs2d world) (entity.GetBodyId world) bodyProperties world
 
     override this.UnregisterPhysics (entity, world) =
-        World.destroyBody false (entity.GetBodyId world) world
-        *)
+        World.destroyBody (entity.GetIs2d world) (entity.GetBodyId world) world
 
     override this.Render (renderPass, entity, world) =
 
