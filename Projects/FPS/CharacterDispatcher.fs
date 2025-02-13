@@ -13,7 +13,6 @@ type CharacterMessage =
     | WeaponPenetration of BodyPenetrationData
     | WeaponSeparationExplicit of BodySeparationExplicitData
     | WeaponSeparationImplicit of BodySeparationImplicitData
-    | UpdateInputKey of KeyboardKeyData
     | Update
     interface Message
 
@@ -51,9 +50,7 @@ type CharacterDispatcher (character : Character) =
          Entity.CharacterProperties == character.CharacterProperties
          Entity.BodyShape == CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None }
          Entity.Observable == true
-         Entity.FollowTargetOpt := Some Simulants.GameplayPlayer
          Entity.RegisterEvent => Register
-         Game.KeyboardKeyDownEvent =|> fun evt -> UpdateInputKey evt.Data
          Entity.UpdateEvent => Update
          Entity.BodyPenetrationEvent =|> fun evt -> CharacterPenetration evt.Data
          Entity.BodySeparationExplicitEvent =|> fun evt -> CharacterSeparationExplicit evt.Data
@@ -63,10 +60,6 @@ type CharacterDispatcher (character : Character) =
     override this.Message (character, message, entity, world) =
 
         match message with
-        | UpdateInputKey keyboardKeyData ->
-            let (jump, character) = Character.updateInputKey world.UpdateTime keyboardKeyData character
-            withSignals (if jump then [Jump] else []) character
-
         | Update ->
 
             // update character
@@ -169,8 +162,8 @@ type CharacterDispatcher (character : Character) =
         | UpdateAnimations (position, rotation, animations, invisible) ->
             let animatedModel = entity / Constants.Gameplay.CharacterAnimatedModelName
             let weapon = entity / Constants.Gameplay.CharacterWeaponName
-            let world = animatedModel.SetPosition (character.PositionInterp position) world
-            let world = animatedModel.SetRotation (character.RotationInterp rotation) world
+            let world = animatedModel.SetPosition (position) world
+            let world = animatedModel.SetRotation (rotation) world
             let world = animatedModel.SetAnimations animations world
             let world = animatedModel.SetVisible (not invisible) world
             let world = weapon.SetVisible (not invisible) world

@@ -41,13 +41,8 @@ module Character =
         | InjuryState of InjuryState
         | WoundState of WoundState
 
-
     type [<ReferenceEquality; SymbolicExpansion>] Character =
-        { PositionPrevious : Vector3 FQueue
-          RotationPrevious : Quaternion FQueue
-          LinearVelocityPrevious : Vector3 FQueue
-          AngularVelocityPrevious : Vector3 FQueue
-          HitPoints : int
+        { HitPoints : int
           ActionState : ActionState
           JumpState : JumpState
           CharacterCollisions : Entity Set
@@ -57,42 +52,15 @@ module Character =
           JumpSpeed : single
           WeaponModel : StaticModel AssetTag }
 
-        member this.PositionInterp position =
-            if not (FQueue.isEmpty this.PositionPrevious) then
-                let positions = FQueue.conj position this.PositionPrevious
-                Seq.sum positions / single positions.Length
-            else position
-
-        member this.RotationInterp rotation =
-            if not (FQueue.isEmpty this.RotationPrevious) then
-                let rotations = FQueue.conj rotation this.RotationPrevious
-                if rotations.Length > 1 then
-                    let unnormalized = Quaternion.Slerp (Seq.head rotations, Seq.last rotations, 0.5f)
-                    unnormalized.Normalized
-                else rotation
-            else rotation
-
-        member this.LinearVelocityInterp linearVelocity =
-            if not (FQueue.isEmpty this.LinearVelocityPrevious) then
-                let linearVelocities = FQueue.conj linearVelocity this.LinearVelocityPrevious
-                Seq.sum linearVelocities / single linearVelocities.Length
-            else linearVelocity
-
-        member this.AngularVelocityInterp angularVelocity =
-            if not (FQueue.isEmpty this.AngularVelocityPrevious) then
-                let angularVelocities = FQueue.conj angularVelocity this.AngularVelocityPrevious
-                Seq.sum angularVelocities / single angularVelocities.Length
-            else angularVelocity
-
         member this.CharacterProperties =
             { CharacterProperties.defaultProperties with CollisionTolerance = 0.005f }
 
-        static member private computeTraversalAnimations rotation linearVelocity angularVelocity character =
+        static member private computeTraversalAnimations (rotation : Quaternion) (linearVelocity : Vector3) (angularVelocity : Vector3) character =
             match character.ActionState with
             | NormalState ->
-                let rotationInterp = character.RotationInterp rotation
-                let linearVelocityInterp = character.LinearVelocityInterp linearVelocity
-                let angularVelocityInterp = character.AngularVelocityInterp angularVelocity
+                let rotationInterp = rotation
+                let linearVelocityInterp = linearVelocity
+                let angularVelocityInterp = angularVelocity
                 let forwardness = (linearVelocityInterp * 32.0f).Dot rotationInterp.Forward
                 let backness = (linearVelocityInterp * 32.0f).Dot -rotationInterp.Forward
                 let rightness = (linearVelocityInterp * 32.0f).Dot rotationInterp.Right
@@ -143,26 +111,6 @@ module Character =
                 let invisible = localTime / 5L % 2L = 0L
                 Some (animation, invisible)
 
-        static member private updateInterps position rotation linearVelocity angularVelocity character =
-
-            // update interps
-            let character =
-                { character with
-                    PositionPrevious = (if character.PositionPrevious.Length >= Constants.Gameplay.CharacterInterpolationSteps then character.PositionPrevious |> FQueue.tail else character.PositionPrevious) |> FQueue.conj position
-                    RotationPrevious = (if character.RotationPrevious.Length >= Constants.Gameplay.CharacterInterpolationSteps then character.RotationPrevious |> FQueue.tail else character.RotationPrevious) |> FQueue.conj rotation
-                    LinearVelocityPrevious = (if character.LinearVelocityPrevious.Length >= Constants.Gameplay.CharacterInterpolationSteps then character.LinearVelocityPrevious |> FQueue.tail else character.LinearVelocityPrevious) |> FQueue.conj linearVelocity
-                    AngularVelocityPrevious = (if character.AngularVelocityPrevious.Length >= Constants.Gameplay.CharacterInterpolationSteps then character.AngularVelocityPrevious |> FQueue.tail else character.AngularVelocityPrevious) |> FQueue.conj angularVelocity }
-
-            // ensure previous positions interp aren't stale (such as when an entity is moved in the editor with existing previous position state)
-            let character =
-                let positionInterp = character.PositionInterp position
-                if Vector3.Distance (positionInterp, position) > Constants.Gameplay.CharacterPositionInterpDistanceMax
-                then { character with PositionPrevious = List.init Constants.Gameplay.CharacterInterpolationSteps (fun _ -> position) |> FQueue.ofList }
-                else character
-
-            // fin
-            character
-
         static member private updateMotion time position (rotation : Quaternion) grounded (playerPosition : Vector3) character world =
 
             // update jump state
@@ -190,7 +138,10 @@ module Character =
                         if canUnobstruct then { character with ActionState = NormalState }
                         elif character.ActionState = NormalState then { character with ActionState = ObstructedState { ObstructedTime = time }}
                         else character
-                    let navSpeed = if character.ActionState = NormalState then (0.04f, 0.1f) else (0.0f, 0.3f)
+                    let navSpeed =
+                        if character.ActionState = NormalState
+                        then (character.WalkSpeed, character.TurnSpeed)
+                        else (0.0f, character.TurnSpeed * 3.0f)
                     (Some navSpeed, character)
                 | _ -> (None, character)
             match navSpeedsOpt with
@@ -200,7 +151,7 @@ module Character =
                     then Sphere (playerPosition, 0.1f) // when above player
                     else Sphere (playerPosition, 0.7f) // when at or below player
                 let nearest = sphere.Nearest position
-                let followOutput = World.nav3dFollow (Some 1.0f) (Some 10.0f) moveSpeed turnSpeed position rotation nearest Simulants.Gameplay world
+                let followOutput = World.nav3dFollow (Some 1.0f) (Some 12.0f) moveSpeed turnSpeed position rotation nearest Simulants.Gameplay world
                 (followOutput.NavPosition, followOutput.NavRotation, followOutput.NavLinearVelocity, followOutput.NavAngularVelocity, character)
             | None -> (position, rotation, v3Zero, v3Zero, character)
 
@@ -268,11 +219,7 @@ module Character =
                 else (Set.empty, { character with ActionState = AttackState attack })
             | _ -> (Set.empty, character)
 
-        static member updateInputKey time keyboardKeyData character =
-            false, character
-
         static member update time position rotation linearVelocity angularVelocity grounded playerPosition character world =
-            let character = Character.updateInterps position rotation linearVelocity angularVelocity character
             let (position, rotation, linearVelocity, angularVelocity, character) = Character.updateMotion time position rotation grounded playerPosition character world
             let character = Character.updateAction time position rotation playerPosition character
             let character = Character.updateState time character
@@ -281,17 +228,13 @@ module Character =
             (animations, invisible, attackedCharacters, position, rotation, character)
 
         static member initial =
-            { PositionPrevious = FQueue.empty
-              RotationPrevious = FQueue.empty
-              LinearVelocityPrevious = FQueue.empty
-              AngularVelocityPrevious = FQueue.empty
-              HitPoints = 5
+            { HitPoints = 5
               ActionState = NormalState
               JumpState = JumpState.initial
               CharacterCollisions = Set.empty
               WeaponCollisions = Set.empty
-              WalkSpeed = 0.05f
-              TurnSpeed = 0.05f
+              WalkSpeed = 3f
+              TurnSpeed = 3f
               JumpSpeed = 5.0f
               WeaponModel = Assets.Gameplay.GreatSwordModel }
 

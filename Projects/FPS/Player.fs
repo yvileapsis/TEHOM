@@ -44,10 +44,6 @@ module Player =
     type [<ReferenceEquality; SymbolicExpansion>] Player = {
         Position : Vector3
         Rotation : Quaternion
-        PositionPrevious : Vector3 FQueue
-        RotationPrevious : Quaternion FQueue
-        LinearVelocityPrevious : Vector3 FQueue
-        AngularVelocityPrevious : Vector3 FQueue
         HitPoints : int
         ActionState : ActionState
         JumpState : JumpState
@@ -65,43 +61,16 @@ module Player =
         InteractableDisplay : String
     }
     with
-        member this.PositionInterp position =
-            if not (FQueue.isEmpty this.PositionPrevious) then
-                let positions = FQueue.conj position this.PositionPrevious
-                Seq.sum positions / single positions.Length
-            else position
-
-        member this.RotationInterp rotation =
-            if not (FQueue.isEmpty this.RotationPrevious) then
-                let rotations = FQueue.conj rotation this.RotationPrevious
-                if rotations.Length > 1 then
-                    let unnormalized = Quaternion.Slerp (Seq.head rotations, Seq.last rotations, 0.5f)
-                    unnormalized.Normalized
-                else rotation
-            else rotation
-
-        member this.LinearVelocityInterp linearVelocity =
-            if not (FQueue.isEmpty this.LinearVelocityPrevious) then
-                let linearVelocities = FQueue.conj linearVelocity this.LinearVelocityPrevious
-                Seq.sum linearVelocities / single linearVelocities.Length
-            else linearVelocity
-
-        member this.AngularVelocityInterp angularVelocity =
-            if not (FQueue.isEmpty this.AngularVelocityPrevious) then
-                let angularVelocities = FQueue.conj angularVelocity this.AngularVelocityPrevious
-                Seq.sum angularVelocities / single angularVelocities.Length
-            else angularVelocity
 
         member this.CharacterProperties =
             CharacterProperties.defaultProperties
 
-
-        static member computeTraversalAnimations rotation linearVelocity angularVelocity character =
+        static member computeTraversalAnimations (rotation : Quaternion) (linearVelocity : Vector3) (angularVelocity : Vector3) character =
             match character.ActionState with
             | NormalState ->
-                let rotationInterp = character.RotationInterp rotation
-                let linearVelocityInterp = character.LinearVelocityInterp linearVelocity
-                let angularVelocityInterp = character.AngularVelocityInterp angularVelocity
+                let rotationInterp = rotation
+                let linearVelocityInterp = linearVelocity
+                let angularVelocityInterp = angularVelocity
                 let forwardness = (linearVelocityInterp * 32.0f).Dot rotationInterp.Forward
                 let backness = (linearVelocityInterp * 32.0f).Dot -rotationInterp.Forward
                 let rightness = (linearVelocityInterp * 32.0f).Dot rotationInterp.Right
@@ -152,34 +121,12 @@ module Player =
                 let invisible = localTime / 5L % 2L = 0L
                 Some (animation, invisible)
 
-        static member updateInterps position rotation linearVelocity angularVelocity character =
-
-            // update interps
-            let character =
-                { character with
-                    PositionPrevious = (if character.PositionPrevious.Length >= Constants.Gameplay.CharacterInterpolationSteps then character.PositionPrevious |> FQueue.tail else character.PositionPrevious) |> FQueue.conj position
-                    RotationPrevious = (if character.RotationPrevious.Length >= Constants.Gameplay.CharacterInterpolationSteps then character.RotationPrevious |> FQueue.tail else character.RotationPrevious) |> FQueue.conj rotation
-                    LinearVelocityPrevious = (if character.LinearVelocityPrevious.Length >= Constants.Gameplay.CharacterInterpolationSteps then character.LinearVelocityPrevious |> FQueue.tail else character.LinearVelocityPrevious) |> FQueue.conj linearVelocity
-                    AngularVelocityPrevious = (if character.AngularVelocityPrevious.Length >= Constants.Gameplay.CharacterInterpolationSteps then character.AngularVelocityPrevious |> FQueue.tail else character.AngularVelocityPrevious) |> FQueue.conj angularVelocity }
-
-            // ensure previous positions interp aren't stale (such as when an entity is moved in the editor with existing previous position state)
-            let character =
-                let positionInterp = character.PositionInterp position
-                if Vector3.Distance (positionInterp, position) > Constants.Gameplay.CharacterPositionInterpDistanceMax
-                then { character with PositionPrevious = List.init Constants.Gameplay.CharacterInterpolationSteps (fun _ -> position) |> FQueue.ofList }
-                else character
-
-            // fin
-            character
-
         static member updateMotion time position (rotation : Quaternion) grounded (playerPosition : Vector3) character world =
-
             // update jump state
             let lastTimeOnGround = if grounded then time else character.JumpState.LastTimeOnGround
             let character = { character with Player.JumpState.LastTimeOnGround = lastTimeOnGround }
 
             // update traversal
-
             // player traversal
             if character.ActionState = NormalState || not grounded then
 
@@ -206,10 +153,6 @@ module Player =
                 (position, rotation, walkVelocity, character)
 
             else (position, rotation, v3Zero, character)
-
-
-        static member updateAction time (position : Vector3) (rotation : Quaternion) (playerPosition : Vector3) character =
-            character
 
         static member updateState time character =
             match character.ActionState with
@@ -257,8 +200,6 @@ module Player =
             | _ -> (Set.empty, character)
 
         static member updateInputKey time keyboardKeyData character =
-
-
             // jumping
             if keyboardKeyData.KeyboardKey = KeyboardKey.Space && not keyboardKeyData.Repeated then
                 let sinceJump = time - character.JumpState.LastTime
@@ -286,10 +227,6 @@ module Player =
         static member initial = {
             Position = Vector3.Zero
             Rotation = Quaternion.Identity
-            PositionPrevious = FQueue.empty
-            RotationPrevious = FQueue.empty
-            LinearVelocityPrevious = FQueue.empty
-            AngularVelocityPrevious = FQueue.empty
             HitPoints = 5
             ActionState = NormalState
             JumpState = JumpState.initial

@@ -61,7 +61,6 @@ type PlayerDispatcher () =
         Entity.CharacterProperties == character.CharacterProperties
         Entity.BodyShape == CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None }
         Entity.Observable == true
-        Entity.FollowTargetOpt := None
         Entity.RegisterEvent => Register
         Game.KeyboardKeyDownEvent =|> fun evt -> UpdateInputKey evt.Data
         Entity.UpdateEvent => Update
@@ -114,9 +113,6 @@ type PlayerDispatcher () =
             let grounded = World.getBodyGrounded bodyId world
             let playerPosition = Simulants.GameplayPlayer.GetPosition world
 
-            let model = Player.updateInterps position rotation linearVelocity angularVelocity model
-
-
             // compute new rotation
             let turnSpeed = model.TurnSpeed * if grounded then 1.0f else 0.75f
             let turnVelocity =
@@ -148,7 +144,6 @@ type PlayerDispatcher () =
 
             let angularVelocity = v3 0f 0f 0f
 
-            let character = Player.updateAction time position rotation playerPosition character
             let character = Player.updateState time character
             let (attackedCharacters, model) = Player.updateAttackedCharacters time character
             let (animations, invisible) = Player.updateAnimations time position rotation linearVelocity angularVelocity model world
@@ -331,10 +326,8 @@ type PlayerDispatcher () =
             let bodyId = entity.GetBodyId world
             let grounded = World.getBodyGrounded bodyId world
 
-            let character = Player.updateInterps position rotation linearVelocity angularVelocity model
-
             // compute new rotation
-            let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
+            let turnSpeed = model.TurnSpeed * if grounded then 1.0f else 0.75f
 
             let turnVelocity =
                 (- mousePosition.X) * turnSpeed * 0.1f
@@ -348,7 +341,7 @@ type PlayerDispatcher () =
             let head = entity / "Head"
 
             // compute new rotation
-            let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
+            let turnSpeed = model.TurnSpeed * if grounded then 1.0f else 0.75f
             let turnVelocity =
                 (mousePosition.Y) * turnSpeed * 0.1f
 

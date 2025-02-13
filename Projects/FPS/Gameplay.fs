@@ -129,11 +129,8 @@ type GameplayDispatcher () =
         | TrackPlayer ->
 
             // update eye to look at player
-            let player = Simulants.GameplayPlayer.GetPlayer world
-            let position = Simulants.GameplayPlayer.GetPosition world
-            let rotation = Simulants.GameplayPlayer.GetRotation world
-            let positionInterp = player.PositionInterp position
-            let rotationInterp = player.RotationInterp rotation * Quaternion.CreateFromAxisAngle (v3Right, -0.1f)
+            let player = Simulants.GameplayPlayer
+            let position = player.GetPosition world
 
             // update sun to shine over player as snapped to shadow map's texel grid in shadow space. This is similar
             // in concept to - https://learn.microsoft.com/en-us/windows/win32/dxtecharts/common-techniques-to-improve-shadow-depth-maps?redirectedfrom=MSDN#moving-the-light-in-texel-sized-increments
@@ -144,7 +141,7 @@ type GameplayDispatcher () =
             let shadowWidth = sun.GetLightCutoff world * 2.0f
             let shadowResolution = Viewport.getShadowTextureBufferResolution 0 world.GeometryViewport
             let shadowTexelSize = shadowWidth / single shadowResolution.X // assuming square, of course
-            let positionShadow = positionInterp.Transform shadowView + v3Up * 12.0f // position of player + offset in shadow space
+            let positionShadow = position.Transform shadowView + v3Up * 12.0f // position of player + offset in shadow space
             let positionSnapped =
                 v3
                     (floor (positionShadow.X / shadowTexelSize) * shadowTexelSize)
