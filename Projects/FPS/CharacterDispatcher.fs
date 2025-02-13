@@ -51,7 +51,7 @@ type CharacterDispatcher (character : Character) =
          Entity.CharacterProperties == character.CharacterProperties
          Entity.BodyShape == CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None }
          Entity.Observable == true
-         Entity.FollowTargetOpt := match character.CharacterType with Enemy -> Some Simulants.GameplayPlayer | Player -> None
+         Entity.FollowTargetOpt := match character.CharacterType with Enemy -> Some Simulants.GameplayPlayer
          Entity.RegisterEvent => Register
          Game.KeyboardKeyDownEvent =|> fun evt -> UpdateInputKey evt.Data
          Entity.UpdateEvent => Update
@@ -99,7 +99,6 @@ type CharacterDispatcher (character : Character) =
                 | (Enemy, Enemy) ->
                     let character = { character with CharacterCollisions = Set.add penetratee character.CharacterCollisions }
                     just character
-                | (_, _) -> just character
             | :? Entity as penetratee when penetratee.Is<BulletDispatcher> world ->
 
                 World.playSound Constants.Audio.SoundVolumeDefault Assets.Gameplay.InjureSound world
@@ -219,13 +218,6 @@ type CharacterDispatcher (character : Character) =
     override this.Content (character, _) =
 
         [// hearts
-         if character.CharacterType = Player then
-            for i in 0 .. dec 5 do
-                Content.staticSprite ("Heart+" + string i)
-                    [Entity.Position == v3 (-284.0f + single i * 32.0f) -144.0f 0.0f
-                     Entity.Size == v3 32.0f 32.0f 0.0f
-                     Entity.StaticImage := if character.HitPoints >= inc i then Assets.Gameplay.HeartFull else Assets.Gameplay.HeartEmpty
-                     Entity.MountOpt == None]
 
          // animated model
          Content.composite<AnimatedModelDispatcher> Constants.Gameplay.CharacterAnimatedModelName

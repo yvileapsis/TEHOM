@@ -8,7 +8,6 @@ open MyGame
 module Character =
 
     type CharacterType =
-        | Player
         | Enemy
 
     type JumpState =
@@ -91,7 +90,6 @@ module Character =
 
         member this.CharacterProperties =
             match this.CharacterType with
-            | Player -> CharacterProperties.defaultProperties
             | Enemy -> { CharacterProperties.defaultProperties with CollisionTolerance = 0.005f }
 
         static member private computeTraversalAnimations rotation linearVelocity angularVelocity character =
@@ -178,32 +176,6 @@ module Character =
 
             // update traversal
             match character.CharacterType with
-            | Player ->
-
-                // player traversal
-                if character.ActionState = NormalState || not grounded then
-
-                    // compute new position
-                    let forward = rotation.Forward
-                    let right = rotation.Right
-                    let walkSpeed = character.WalkSpeed * if grounded then 1.0f else 0.75f
-                    let walkVelocity =
-                        (if World.isKeyboardKeyDown KeyboardKey.W world || World.isKeyboardKeyDown KeyboardKey.Up world then forward * walkSpeed else v3Zero) +
-                        (if World.isKeyboardKeyDown KeyboardKey.S world || World.isKeyboardKeyDown KeyboardKey.Down world then -forward * walkSpeed else v3Zero) +
-                        (if World.isKeyboardKeyDown KeyboardKey.A world then -right * walkSpeed else v3Zero) +
-                        (if World.isKeyboardKeyDown KeyboardKey.D world then right * walkSpeed else v3Zero)
-                    let position = if walkVelocity <> v3Zero then position + walkVelocity else position
-
-                    // compute new rotation
-                    let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
-                    let turnVelocity =
-                        (if World.isKeyboardKeyDown KeyboardKey.Right world then -turnSpeed else 0.0f) +
-                        (if World.isKeyboardKeyDown KeyboardKey.Left world then turnSpeed else 0.0f)
-                    let rotation = if turnVelocity <> 0.0f then rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity) else rotation
-                    (position, rotation, walkVelocity, v3 0.0f turnVelocity 0.0f, character)
-
-                else (position, rotation, v3Zero, v3Zero, character)
-
             | Enemy ->
 
                 // enemy traversal
@@ -261,7 +233,6 @@ module Character =
                         else character
                     else character
                 | _ -> character
-            | Player -> character
 
         static member private updateState time character =
             match character.ActionState with
@@ -277,7 +248,7 @@ module Character =
             | InjuryState injury ->
                 let actionState =
                     let localTime = time - injury.InjuryTime
-                    let injuryTime = match character.CharacterType with Player -> 30 | Enemy -> 40
+                    let injuryTime = match character.CharacterType with Enemy -> 40
                     if localTime < injuryTime
                     then InjuryState injury
                     else NormalState
@@ -310,32 +281,6 @@ module Character =
 
         static member updateInputKey time keyboardKeyData character =
             match character.CharacterType with
-            | Player ->
-
-                // jumping
-                if keyboardKeyData.KeyboardKey = KeyboardKey.Space && not keyboardKeyData.Repeated then
-                    let sinceJump = time - character.JumpState.LastTime
-                    let sinceOnGround = time - character.JumpState.LastTimeOnGround
-                    if sinceJump >= 12L && sinceOnGround < 10L && character.ActionState = NormalState then
-                        let character = { character with Character.JumpState.LastTime = time }
-                        (true, character)
-                    else (false, character)
-
-                // attacking
-                elif keyboardKeyData.KeyboardKey = KeyboardKey.RShift && not keyboardKeyData.Repeated then
-                    let character =
-                        match character.ActionState with
-                        | NormalState ->
-                            { character with ActionState = AttackState (AttackState.make time) }
-                        | AttackState attack ->
-                            let localTime = time - attack.AttackTime
-                            if localTime > 10L && not attack.FollowUpBuffered
-                            then { character with ActionState = AttackState { attack with FollowUpBuffered = true }}
-                            else character
-                        | ObstructedState _ | InjuryState _ | WoundState _ -> character
-                    (false, character)
-                else (false, character)
-
             | Enemy -> (false, character)
 
         static member update time position rotation linearVelocity angularVelocity grounded playerPosition character world =
@@ -362,9 +307,6 @@ module Character =
               TurnSpeed = 0.05f
               JumpSpeed = 5.0f
               WeaponModel = Assets.Gameplay.GreatSwordModel }
-
-        static member initialPlayer =
-            { Character.initial Player with WalkSpeed = 0.06f }
 
         static member initialEnemy =
             { Character.initial Enemy with HitPoints = 3 }

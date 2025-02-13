@@ -16,7 +16,8 @@ type PlayerMessage =
     | WeaponSeparationImplicit of BodySeparationImplicitData
     | UpdateInputKey of KeyboardKeyData
     | Update
-    | TakeItem of Entity
+    | InventoryAddItem of Entity
+    | InventoryDropItem of Int32
     interface Message
 
 type PlayerCommand =
@@ -30,7 +31,8 @@ type PlayerCommand =
     | Jump
     | RotateMove of MouseMoveData
     | Shoot
-    | DropItem of Int32
+    | InteractableActivate of Entity
+    | InteractableDrop of Entity
     interface Command
 
 [<AutoOpen>]
@@ -67,8 +69,7 @@ type PlayerDispatcher () =
         Entity.BodySeparationExplicitEvent =|> fun evt -> CharacterSeparationExplicit evt.Data
         Entity.BodySeparationImplicitEvent =|> fun evt -> CharacterSeparationImplicit evt.Data
         Game.PostUpdateEvent => SyncWeaponTransform
-//        Events.TakeItemEvent --> Simulants.GameplayScene --> Address.Wildcard =|> fun evt -> TakeItem evt.Data
-        Entity.TakeItemEvent =|> fun evt -> TakeItem evt.Data
+        Entity.TakeItemEvent =|> fun evt -> InventoryAddItem evt.Data
     ]
 
     override this.Message (model, message, entity, world) =
@@ -83,8 +84,22 @@ type PlayerDispatcher () =
                     { model with InventoryOpen = not model.InventoryOpen }
                 else
                     model
-            
-            withSignals (if jump then [Jump] else []) model
+
+            let signals : List<Signal> = [
+                if jump then Jump
+                if keyboardKeyData.KeyboardKey = KeyboardKey.E then
+                    match model.Interactable with
+                    | Some entity ->
+                        match entity.Parent with
+                        | :? Entity as interactable ->
+                            InteractableActivate interactable
+                        | _ ->
+                            ()
+                    | _ ->
+                        ()
+            ]
+
+            withSignals signals model
 
         | Update ->
 
@@ -99,11 +114,11 @@ type PlayerDispatcher () =
             let grounded = World.getBodyGrounded bodyId world
             let playerPosition = Simulants.GameplayPlayer.GetPosition world
 
-            let character = Player.updateInterps position rotation linearVelocity angularVelocity model
+            let model = Player.updateInterps position rotation linearVelocity angularVelocity model
 
 
             // compute new rotation
-            let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
+            let turnSpeed = model.TurnSpeed * if grounded then 1.0f else 0.75f
             let turnVelocity =
                 (if World.isKeyboardKeyDown KeyboardKey.Right world then -turnSpeed else 0.0f) +
                 (if World.isKeyboardKeyDown KeyboardKey.Left world then turnSpeed else 0.0f)
@@ -117,7 +132,7 @@ type PlayerDispatcher () =
             let head = entity / "Head"
 
             // compute new rotation
-            let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
+            let turnSpeed = model.TurnSpeed * if grounded then 1.0f else 0.75f
             let turnVelocity =
                 (if World.isKeyboardKeyDown KeyboardKey.Down world then -turnSpeed else 0.0f) +
                 (if World.isKeyboardKeyDown KeyboardKey.Up world then turnSpeed else 0.0f)
@@ -129,14 +144,14 @@ type PlayerDispatcher () =
                 else
                     rotationHead
 
-            let (position, rotation, linearVelocity, character) = Player.updateMotion time position rotation grounded playerPosition character world
+            let (position, rotation, linearVelocity, character) = Player.updateMotion time position rotation grounded playerPosition model world
 
             let angularVelocity = v3 0f 0f 0f
 
             let character = Player.updateAction time position rotation playerPosition character
             let character = Player.updateState time character
-            let (attackedCharacters, character) = Player.updateAttackedCharacters time character
-            let (animations, invisible) = Player.updateAnimations time position rotation linearVelocity angularVelocity character world
+            let (attackedCharacters, model) = Player.updateAttackedCharacters time character
+            let (animations, invisible) = Player.updateAnimations time position rotation linearVelocity angularVelocity model world
 
             // deploy signals from update
             let signals = [
@@ -144,9 +159,58 @@ type PlayerDispatcher () =
                 UpdateAnimations (position, rotation, Array.ofList animations, invisible)
                 if World.isMouseButtonDown MouseLeft world && not model.InventoryOpen then Shoot
             ]
-            let signals = match character.ActionState with WoundState wound when wound.WoundTime = world.UpdateTime - 60L -> PublishDie :> Signal :: signals | _ -> signals
+            let signals = match model.ActionState with WoundState wound when wound.WoundTime = world.UpdateTime - 60L -> PublishDie :> Signal :: signals | _ -> signals
             let signals = if attackedCharacters.Count > 0 then PublishAttacks attackedCharacters :> Signal :: signals else signals
-            withSignals signals character
+
+            let model = {
+                model with
+                    InventoryDisplay =
+                        model.Inventory
+                        |> List.map (fun entity ->
+                            entity.GetInventoryItemDisplayName world
+                        )
+            }
+
+            let screenCenterRay =
+                let eyeCenter = World.getEye3dCenter world
+                let eyeRotation = World.getEye3dRotation world
+                let eyeFieldOfView = World.getEye3dFieldOfView world
+                let mousePosition = World.getMousePosition world
+                Viewport.mouseToWorld3d eyeCenter eyeRotation eyeFieldOfView mousePosition world.RasterViewport
+
+            let intersections =
+                let ray = screenCenterRay
+                let origin = ray.Origin
+                let finale = ray.Origin + 100f * ray.Direction
+                let segment = segment3 origin finale
+                let array = World.rayCast3dBodies segment 0xFFFFFFFF false world
+                let array =
+                    array
+                    |> Array.choose (fun x ->
+                        // TODO: remake as correct body intersection instead of name checking
+                        match x.BodyShapeIntersected.BodyId.BodySource with
+                        | :? Entity as intersected when intersected.Name = Simulants.Interactable ->
+//                            match intersected.Parent with
+//                            | :? Entity as intersected' ->
+                                Some intersected
+//                            | _ ->
+//                                None
+                        | _ ->
+                            None
+                    )
+                array
+
+            let model =
+                match Array.tryHead intersections with
+                | Some entity ->
+                    { model with
+                        Interactable = Some entity
+                        InteractableDisplay = entity.GetInteractableDisplayName world
+                        }
+                | None ->
+                    { model with Interactable = None }
+
+            withSignals signals model
 
         | CharacterPenetration penetrationData ->
             match penetrationData.BodyShapePenetratee.BodyId.BodySource with
@@ -193,10 +257,14 @@ type PlayerDispatcher () =
                 just character
             | _ -> just model
 
-        | TakeItem s ->
-            let boxModel = s.GetModelGeneric<Box> world
-            let model = { model with List = List.append [boxModel.Name] model.List }
+        | InventoryAddItem s ->
+            let model = { model with Inventory = List.append [s] model.Inventory }
             just model
+
+        | InventoryDropItem i ->
+            let item = List.item i model.Inventory
+            let model = { model with Inventory = List.removeAt i model.Inventory }
+            withSignals [InteractableDrop item] model
 
     override this.Command (model, command, entity, world) =
 
@@ -317,28 +385,14 @@ type PlayerDispatcher () =
         | UpdateEyeTransform quaternion ->
             failwith "todo"
 
-        | DropItem s ->
+        | InteractableActivate entity' ->
+            let eventTrace = EventTrace.debug "PlayerDispatcher" "Activate" "" EventTrace.empty
+            let world = World.publishPlus entity entity'.ActivateEvent eventTrace entity true false world
+            just world
 
-            let name = List.item s model.List
-
-            let (box, world) = World.createEntity<BoxDispatcher> NoOverlay None entity.Group world // OPTIMIZATION: NoOverlay to avoid reflection.
-
-            let boxModel = { Box.empty with Name = name }
-
-            let world = box.SetModelGeneric<Box> boxModel world
-
-            let position = entity.GetPosition world
-            let rotation = entity.GetRotation world
-
-            let world = box.SetPosition position world
-            let world = box.SetRotation rotation world
-
-            let model = entity.GetPlayer world
-
-            let model = { model with List = List.removeAt s model.List }
-
-            let world = entity.SetPlayer model world
-
+        | InteractableDrop entity' ->
+            let eventTrace = EventTrace.debug "PlayerDispatcher" "Drop" "" EventTrace.empty
+            let world = World.publishPlus entity entity'.DropEvent eventTrace entity true false world
             just world
 
     override this.RayCast (ray, entity, world) =
@@ -398,20 +452,36 @@ type PlayerDispatcher () =
             ]
         ]
 
-        Content.staticSprite "Crosshair1st" [
+        Content.composite<StaticSpriteDispatcher> "Crosshair1st" [
             Entity.EnabledLocal := not model.InventoryOpen
             Entity.VisibleLocal := not model.InventoryOpen
             Entity.Size == v3 16f 16f 0f
             Entity.StaticImage == Assets.Gui.Crosshair
             Entity.MountOpt == None
+        ] [
+            if not model.InventoryOpen && model.Interactable.IsSome then
+                Content.staticSprite "Prompt" [
+                    Entity.Absolute == true
+                    Entity.Size == v3 16f 16f 0f
+                    Entity.StaticImage == Assets.Gui.CrosshairPrompt
+                ]
         ]
 
-        ContentEx.cursor "CrosshairInventory" [
+        Content.composite<CursorDispatcher> "CrosshairInventory" [
             Entity.EnabledLocal := model.InventoryOpen
             Entity.VisibleLocal := model.InventoryOpen
             Entity.Size == v3 16f 16f 0f
             Entity.StaticImage == Assets.Gui.Crosshair
             Entity.MountOpt == None
+            Entity.AlwaysUpdate == true
+        ] [
+            if model.InventoryOpen && model.Interactable.IsSome then
+                Content.staticSprite "Prompt" [
+                    Entity.PositionLocal == v3 8f -8f 0f
+                    Entity.Absolute == true
+                    Entity.Size == v3 16f 16f 0f
+                    Entity.StaticImage == Assets.Gui.CrosshairPrompt
+                ]
         ]
 
         if model.InventoryOpen then
@@ -425,16 +495,39 @@ type PlayerDispatcher () =
                 ]
 
                 Content.association "List" [
-                    Entity.PositionLocal == v3 -100f 60f 0f
+                    Entity.PositionLocal == v3 -60f 60f 0f
                     Entity.Layout == Flow (FlowDownward, FlowUnlimited)
                 ] [
-                    for (i, name) in List.indexed model.List do
+                    for (i, name) in List.indexed model.InventoryDisplay do
                         Content.button $"Item{i}" [
+                            Entity.Size == v3 80.0f 10.0f 0.0f
+                            Entity.FontSizing == Some 8
+                            Entity.Justification == Justified (JustifyLeft, JustifyMiddle)
+                            Entity.TextColor == Color.FloralWhite
                             Entity.Text := $"{name}"
-                            Entity.ClickEvent => DropItem i
+                            Entity.ClickEvent => InventoryDropItem i
                         ]
                 ]
-
             ]
+
+        if model.Interactable.IsSome then
+            Content.text "Name" [
+                Entity.Absolute == true
+                Entity.PositionLocal == v3 0f -120.0f 0.0f
+                Entity.Size == v3 128.0f 32.0f 0.0f
+                Entity.Text := $"{model.InteractableDisplay}"
+                Entity.FontSizing == Some 10
+                Entity.MountOpt == None
+            ]
+
+            Content.text "Take" [
+                Entity.Absolute == true
+                Entity.PositionLocal == v3 0f -130.0f 0.0f
+                Entity.Size == v3 128.0f 32.0f 0.0f
+                Entity.Text := $"E) Take"
+                Entity.FontSizing == Some 10
+                Entity.MountOpt == None
+            ]
+
 
     ]

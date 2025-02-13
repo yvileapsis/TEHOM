@@ -41,26 +41,30 @@ module Player =
         | InjuryState of InjuryState
         | WoundState of WoundState
 
-    type [<ReferenceEquality; SymbolicExpansion>] Player =
-        {
-          Position : Vector3
-          Rotation : Quaternion
-          PositionPrevious : Vector3 FQueue
-          RotationPrevious : Quaternion FQueue
-          LinearVelocityPrevious : Vector3 FQueue
-          AngularVelocityPrevious : Vector3 FQueue
-          HitPoints : int
-          ActionState : ActionState
-          JumpState : JumpState
-          CharacterCollisions : Entity Set
-          WeaponCollisions : Entity Set
-          WalkSpeed : single
-          TurnSpeed : single
-          JumpSpeed : single
+    type [<ReferenceEquality; SymbolicExpansion>] Player = {
+        Position : Vector3
+        Rotation : Quaternion
+        PositionPrevious : Vector3 FQueue
+        RotationPrevious : Quaternion FQueue
+        LinearVelocityPrevious : Vector3 FQueue
+        AngularVelocityPrevious : Vector3 FQueue
+        HitPoints : int
+        ActionState : ActionState
+        JumpState : JumpState
+        CharacterCollisions : Entity Set
+        WeaponCollisions : Entity Set
+        WalkSpeed : single
+        TurnSpeed : single
+        JumpSpeed : single
 
-          List : List<String>
-          InventoryOpen : Boolean }
+        Inventory : List<Entity>
+        InventoryDisplay : List<String>
+        InventoryOpen : Boolean
 
+        Interactable : Option<Entity>
+        InteractableDisplay : String
+    }
+    with
         member this.PositionInterp position =
             if not (FQueue.isEmpty this.PositionPrevious) then
                 let positions = FQueue.conj position this.PositionPrevious
@@ -295,5 +299,8 @@ module Player =
             TurnSpeed = 0.07f
             JumpSpeed = 5.0f
             InventoryOpen = false
-            List = [ "Whatever1"; "Whatever2"; "Whatever3"; "Whatever4" ]
+            Inventory = []
+            InventoryDisplay = []
+            Interactable = None
+            InteractableDisplay = String.empty
         }

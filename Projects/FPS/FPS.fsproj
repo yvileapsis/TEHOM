@@ -43,9 +43,10 @@
 		<Compile Include="Bullet.fs" />
 		<Compile Include="Character.fs" />
 		<Compile Include="CharacterDispatcher.fs" />
-		<Compile Include="Box.fs" />
+		<Compile Include="Common.fs" />
 		<Compile Include="Player.fs" />
 		<Compile Include="PlayerDispatcher.fs" />
+		<Compile Include="Box.fs" />
 		<Compile Include="Gameplay.fs" />
 		<Compile Include="MyGame.fs" />
 		<Compile Include="MyGamePlugin.fs" />

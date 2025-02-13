@@ -29,5 +29,8 @@ module Simulants =
     let GameplayScore = GameplayGui / "Score"
     let GameplayQuit = GameplayGui / "Quit"
     let GameplayScene = Gameplay / "Scene"
+    let GameplayInteractables = Gameplay / "Interactables"
     let GameplayPlayer = GameplayScene / "Player"
     let GameplaySun = GameplayScene / "Environment" / "Sun"
+
+    let Interactable = "Interactable"

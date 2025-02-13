@@ -85,7 +85,6 @@ type GameplayDispatcher () =
         | Die deadCharacter ->
             let character = deadCharacter.GetCharacter world
             match character.CharacterType with
-            | Player -> withSignal StartQuitting gameplay
             | Enemy ->
                 let gameplay = { gameplay with Score = gameplay.Score + 100 }
                 withSignal (DestroyEnemy deadCharacter) gameplay
@@ -171,10 +170,28 @@ type GameplayDispatcher () =
                 ] [
 
                 ]
+            ]
 
-                Content.entity<BoxDispatcher> "TestBox" [
-                    Entity.PositionLocal == v3 5.5f 1.8f 2.6f
+            Content.group Simulants.GameplayInteractables.Name [] [
+
+                Content.composite<BoxDispatcher> "Box1" [
+                    Entity.Box == Box.box "Box One"
+                ] [
+                    Content.entity Simulants.Interactable [
+                        Entity.Position == v3 5.5f 1.8f 2.6f
+                        Entity.MountOpt == None
+                    ]
                 ]
+
+                Content.composite<BoxDispatcher> "Box2" [
+                    Entity.Box == Box.box "Box Two"
+                ] [
+                    Content.entity Simulants.Interactable [
+                        Entity.Position == v3 6.5f 1.8f 2.6f
+                        Entity.MountOpt == None
+                    ]
+                ]
+
             ]
 
         // the gui group

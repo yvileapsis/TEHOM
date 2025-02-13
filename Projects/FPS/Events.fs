@@ -16,8 +16,12 @@ module Events =
 module EventsInverse =
 
     let TakeItemEvent = stoa<Entity> "TakeItem/Event"
+    let ActivateEvent = stoa<Entity> "Activate/Event"
+    let DropEvent = stoa<Entity> "Drop/Event"
 
 [<AutoOpen>]
 module GenericExtensions =
     type Entity with
         member this.TakeItemEvent = EventsInverse.TakeItemEvent --> this
+        member this.ActivateEvent = EventsInverse.ActivateEvent --> this
+        member this.DropEvent = EventsInverse.DropEvent --> this
