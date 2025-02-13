@@ -133,7 +133,7 @@ type GameplayDispatcher () =
         | TrackPlayer ->
 
             // update eye to look at player
-            let player = Simulants.GameplayPlayer.GetCharacter world
+            let player = Simulants.GameplayPlayer.GetPlayer world
             let position = Simulants.GameplayPlayer.GetPosition world
             let rotation = Simulants.GameplayPlayer.GetRotation world
             let positionInterp = player.PositionInterp position
@@ -170,6 +170,10 @@ type GameplayDispatcher () =
                     Entity.DieEvent => Die Simulants.GameplayPlayer
                 ] [
 
+                ]
+
+                Content.entity<BoxDispatcher> "TestBox" [
+                    Entity.PositionLocal == v3 5.5f 1.8f 2.6f
                 ]
             ]
 

@@ -40,30 +40,41 @@ type CameraFacet () =
     static member Properties =
         [define Entity.AlwaysUpdate true]
 
+
+[<AutoOpen>]
+module MouseRelativeModeFacetExtensions =
+    type Entity with
+        member this.MouseMoveEvent = Events.MouseMoveEvent --> this
+
 /// Augments an entity with a wrapper for SDL relative mouse mode, convenient for FPS games.
 type MouseRelativeModeFacet () =
     inherit Facet (false, false, false)
 
-    static let synchronize evt (world : World) =
-        let entity = evt.Subscriber : Entity
-
-        if world.Advancing && entity.GetEnabled world then
-
-            SDL.SDL_WarpMouseInWindow (IntPtr.Zero, 960, 540) |> ignore
-
-            Cascade, world
-        else
-            Cascade, world
-
     override this.Register (entity, world) =
         world
-        |> World.sense synchronize Nu.Game.Handle.MouseMoveEvent entity (nameof MouseRelativeModeFacet)
+//        |> World.sense synchronize Nu.Game.Handle.MouseMoveEvent entity (nameof MouseRelativeModeFacet)
 
     override this.Update (entity, world) =
         if world.Advancing && entity.GetEnabled world then
             SDL.SDL_SetRelativeMouseMode (SDL.SDL_bool.SDL_TRUE) |> ignore
         else
             SDL.SDL_SetRelativeMouseMode (SDL.SDL_bool.SDL_FALSE) |> ignore
+
+        let world =
+            if world.Advancing && entity.GetEnabled world then
+                let mousePosition = World.getMousePosition2dScreen world
+                let world =
+                    if mousePosition <> Vector2.Zero then
+                        let mouseMoveData : MouseMoveData = { Position = mousePosition }
+                        let eventTrace = EventTrace.debug "MouseRelativeModeFacet" "handleMouseMove" "" EventTrace.empty
+                        World.publishPlus mouseMoveData entity.MouseMoveEvent eventTrace entity true false world
+                    else
+                        world
+                SDL.SDL_WarpMouseInWindow (IntPtr.Zero, 960, 540)
+                world
+            else
+                world
+
         world
 
     static member Properties =
@@ -99,7 +110,7 @@ type CursorFacet () =
 
     override this.Register (entity, world) =
         world
-        |> World.sense mouseMove Nu.Game.Handle.MouseMoveEvent entity (nameof CursorFacet)
+//        |> World.sense mouseMove Nu.Game.Handle.MouseMoveEvent entity (nameof CursorFacet)
 
     override this.Update (entity, world) =
 
@@ -107,6 +118,17 @@ type CursorFacet () =
             SDL.SDL_ShowCursor 0 |> ignore
         else
             SDL.SDL_ShowCursor 1 |> ignore
+
+        let world =
+            if world.Advancing && entity.GetEnabled world then
+
+                let position = World.getMousePosition2dScreen world
+
+                let world = entity.SetPosition position.V3 world
+
+                world
+            else
+                world
 
         world
 

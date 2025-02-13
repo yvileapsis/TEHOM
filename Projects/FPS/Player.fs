@@ -57,7 +57,9 @@ module Player =
           WalkSpeed : single
           TurnSpeed : single
           JumpSpeed : single
-          WeaponModel : StaticModel AssetTag }
+
+          List : List<String>
+          InventoryOpen : Boolean }
 
         member this.PositionInterp position =
             if not (FQueue.isEmpty this.PositionPrevious) then
@@ -277,20 +279,21 @@ module Player =
                 (false, character)
             else (false, character)
 
-        static member initial =
-            {
-              Position = Vector3.Zero
-              Rotation = Quaternion.Identity
-              PositionPrevious = FQueue.empty
-              RotationPrevious = FQueue.empty
-              LinearVelocityPrevious = FQueue.empty
-              AngularVelocityPrevious = FQueue.empty
-              HitPoints = 5
-              ActionState = NormalState
-              JumpState = JumpState.initial
-              CharacterCollisions = Set.empty
-              WeaponCollisions = Set.empty
-              WalkSpeed = 0.08f
-              TurnSpeed = 0.07f
-              JumpSpeed = 5.0f
-              WeaponModel = Assets.Gameplay.GreatSwordModel }
+        static member initial = {
+            Position = Vector3.Zero
+            Rotation = Quaternion.Identity
+            PositionPrevious = FQueue.empty
+            RotationPrevious = FQueue.empty
+            LinearVelocityPrevious = FQueue.empty
+            AngularVelocityPrevious = FQueue.empty
+            HitPoints = 5
+            ActionState = NormalState
+            JumpState = JumpState.initial
+            CharacterCollisions = Set.empty
+            WeaponCollisions = Set.empty
+            WalkSpeed = 0.08f
+            TurnSpeed = 0.07f
+            JumpSpeed = 5.0f
+            InventoryOpen = false
+            List = [ "Whatever1"; "Whatever2"; "Whatever3"; "Whatever4" ]
+        }

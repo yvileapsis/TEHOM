@@ -13,7 +13,7 @@ type BulletCommand =
 type BulletDispatcher () =
     inherit Entity3dDispatcher<int64, Message, BulletCommand> (true, false, false, fun world -> world.UpdateTime)
 
-    static let [<Literal>] BulletLifeTime = 127L
+    static let [<Literal>] BulletLifeTime = 256L
 
     static member Facets =
         [typeof<RigidBodyFacet>

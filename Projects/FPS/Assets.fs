@@ -13,6 +13,9 @@ module Assets =
 
         let PackageName = "Gui"
         let GuiSong = { FadeInTime = 0L; FadeOutTime = Constants.Audio.FadeOutTimeDefault; StartTime = 0L; RepeatLimitOpt = None; Volume = Constants.Audio.SongVolumeDefault; Song = asset<Song> PackageName "Gui" }
+        let Crosshair = asset<Image> PackageName "Crosshair"
+        let CrosshairPrompt = asset<Image> PackageName "CrosshairPrompt"
+
 
     [<RequireQualifiedAccess>]
     module Gameplay =

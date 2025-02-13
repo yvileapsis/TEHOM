@@ -16,7 +16,7 @@ type PlayerMessage =
     | WeaponSeparationImplicit of BodySeparationImplicitData
     | UpdateInputKey of KeyboardKeyData
     | Update
-    | MouseMove of MouseMoveData
+    | TakeItem of Entity
     interface Message
 
 type PlayerCommand =
@@ -30,6 +30,7 @@ type PlayerCommand =
     | Jump
     | RotateMove of MouseMoveData
     | Shoot
+    | DropItem of Int32
     interface Command
 
 [<AutoOpen>]
@@ -49,7 +50,7 @@ type PlayerDispatcher () =
     static member Facets =
         [typeof<RigidBodyFacet>]
 
-    override this.Definitions (character, _) = [
+    override this.Definitions (character, entity) = [
         Entity.Size == v3Dup 2.0f
         Entity.Offset == v3 0.0f 1.0f 0.0f
         Entity.Static == false
@@ -66,15 +67,24 @@ type PlayerDispatcher () =
         Entity.BodySeparationExplicitEvent =|> fun evt -> CharacterSeparationExplicit evt.Data
         Entity.BodySeparationImplicitEvent =|> fun evt -> CharacterSeparationImplicit evt.Data
         Game.PostUpdateEvent => SyncWeaponTransform
-        Game.MouseMoveEvent =|> fun evt -> MouseMove evt.Data
+//        Events.TakeItemEvent --> Simulants.GameplayScene --> Address.Wildcard =|> fun evt -> TakeItem evt.Data
+        Entity.TakeItemEvent =|> fun evt -> TakeItem evt.Data
     ]
 
-    override this.Message (character, message, entity, world) =
+    override this.Message (model, message, entity, world) =
 
         match message with
         | UpdateInputKey keyboardKeyData ->
-            let (jump, character) = Player.updateInputKey world.UpdateTime keyboardKeyData character
-            withSignals (if jump then [Jump] else []) character
+            let (jump, model) = Player.updateInputKey world.UpdateTime keyboardKeyData model
+            
+            let model =
+                if keyboardKeyData.KeyboardKey = KeyboardKey.Tab
+                    && not keyboardKeyData.Repeated then
+                    { model with InventoryOpen = not model.InventoryOpen }
+                else
+                    model
+            
+            withSignals (if jump then [Jump] else []) model
 
         | Update ->
 
@@ -89,7 +99,7 @@ type PlayerDispatcher () =
             let grounded = World.getBodyGrounded bodyId world
             let playerPosition = Simulants.GameplayPlayer.GetPosition world
 
-            let character = Player.updateInterps position rotation linearVelocity angularVelocity character
+            let character = Player.updateInterps position rotation linearVelocity angularVelocity model
 
 
             // compute new rotation
@@ -132,7 +142,7 @@ type PlayerDispatcher () =
             let signals = [
                 UpdateTransform (position, rotation, rotationHead) :> Signal
                 UpdateAnimations (position, rotation, Array.ofList animations, invisible)
-                if World.isMouseButtonDown MouseLeft world then Shoot
+                if World.isMouseButtonDown MouseLeft world && not model.InventoryOpen then Shoot
             ]
             let signals = match character.ActionState with WoundState wound when wound.WoundTime = world.UpdateTime - 60L -> PublishDie :> Signal :: signals | _ -> signals
             let signals = if attackedCharacters.Count > 0 then PublishAttacks attackedCharacters :> Signal :: signals else signals
@@ -142,50 +152,53 @@ type PlayerDispatcher () =
             match penetrationData.BodyShapePenetratee.BodyId.BodySource with
             | :? Entity as penetratee when penetratee.Is<CharacterDispatcher> world ->
                 let characterPenetratee = penetratee.GetCharacter world
-                just character
-            | _ -> just character
+                just model
+            | _ -> just model
 
         | CharacterSeparationExplicit separationData ->
             match separationData.BodyShapeSeparatee.BodyId.BodySource with
             | :? Entity as separatee when separatee.Is<CharacterDispatcher> world && separatee <> entity ->
-                let character = { character with CharacterCollisions = Set.remove separatee character.CharacterCollisions }
+                let character = { model with CharacterCollisions = Set.remove separatee model.CharacterCollisions }
                 just character
-            | _ -> just character
+            | _ -> just model
 
         | CharacterSeparationImplicit separationData ->
             match separationData.BodyId.BodySource with
             | :? Entity as separatee when separatee.Is<CharacterDispatcher> world && separatee <> entity ->
-                let character = { character with CharacterCollisions = Set.remove separatee character.CharacterCollisions }
+                let character = { model with CharacterCollisions = Set.remove separatee model.CharacterCollisions }
                 just character
-            | _ -> just character
+            | _ -> just model
 
         | WeaponPenetration penetrationData ->
             match penetrationData.BodyShapePenetratee.BodyId.BodySource with
             | :? Entity as penetratee when penetratee.Is<CharacterDispatcher> world && penetratee <> entity ->
                 let characterPenetratee = penetratee.GetCharacter world
                 if characterPenetratee.CharacterType = Character.Enemy then
-                    let character = { character with WeaponCollisions = Set.add penetratee character.WeaponCollisions }
+                    let character = { model with WeaponCollisions = Set.add penetratee model.WeaponCollisions }
                     just character
-                else just character
-            | _ -> just character
+                else just model
+            | _ -> just model
 
         | WeaponSeparationExplicit separationData ->
             match separationData.BodyShapeSeparatee.BodyId.BodySource with
             | :? Entity as separatee when separatee.Is<CharacterDispatcher> world && separatee <> entity ->
-                let character = { character with WeaponCollisions = Set.remove separatee character.WeaponCollisions }
+                let character = { model with WeaponCollisions = Set.remove separatee model.WeaponCollisions }
                 just character
-            | _ -> just character
+            | _ -> just model
 
         | WeaponSeparationImplicit separationData ->
             match separationData.BodyId.BodySource with
             | :? Entity as separatee when separatee.Is<CharacterDispatcher> world ->
-                let character = { character with WeaponCollisions = Set.remove separatee character.WeaponCollisions }
+                let character = { model with WeaponCollisions = Set.remove separatee model.WeaponCollisions }
                 just character
-            | _ -> just character
-        | MouseMove mouseMoveData ->
-            withSignals [RotateMove mouseMoveData] character
+            | _ -> just model
 
-    override this.Command (character, command, entity, world) =
+        | TakeItem s ->
+            let boxModel = s.GetModelGeneric<Box> world
+            let model = { model with List = List.append [boxModel.Name] model.List }
+            just model
+
+    override this.Command (model, command, entity, world) =
 
         match command with
         | Register ->
@@ -241,56 +254,50 @@ type PlayerDispatcher () =
 
         | Jump ->
             let bodyId = entity.GetBodyId world
-            let world = World.jumpBody true character.JumpSpeed bodyId world
+            let world = World.jumpBody true model.JumpSpeed bodyId world
             just world
 
-        | RotateMove _ ->
+        | RotateMove { Position = mousePosition } ->
 
-            if world.Advancing && entity.GetEnabled world then
+            let position = entity.GetPosition world
+            let rotation = entity.GetRotation world
+            let linearVelocity = entity.GetLinearVelocity world
+            let angularVelocity = entity.GetAngularVelocity world
+            let bodyId = entity.GetBodyId world
+            let grounded = World.getBodyGrounded bodyId world
 
-                let position = entity.GetPosition world
-                let rotation = entity.GetRotation world
-                let linearVelocity = entity.GetLinearVelocity world
-                let angularVelocity = entity.GetAngularVelocity world
-                let bodyId = entity.GetBodyId world
-                let grounded = World.getBodyGrounded bodyId world
+            let character = Player.updateInterps position rotation linearVelocity angularVelocity model
 
-                let character = Player.updateInterps position rotation linearVelocity angularVelocity character
+            // compute new rotation
+            let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
 
-                // compute new rotation
-                let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
+            let turnVelocity =
+                (- mousePosition.X) * turnSpeed * 0.1f
 
-                let mousePosition = World.getMousePosition2dScreen world
+            let rotation =
+                if turnVelocity <> 0.0f then
+                    rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity)
+                else
+                    rotation
 
-                let turnVelocity =
-                    (- mousePosition.X) * turnSpeed * 0.1f
+            let head = entity / "Head"
 
-                let rotation =
-                    if turnVelocity <> 0.0f then
-                        rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity)
-                    else
-                        rotation
+            // compute new rotation
+            let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
+            let turnVelocity =
+                (mousePosition.Y) * turnSpeed * 0.1f
 
-                let head = entity / "Head"
-
-                // compute new rotation
-                let turnSpeed = character.TurnSpeed * if grounded then 1.0f else 0.75f
-                let turnVelocity =
-                    (mousePosition.Y) * turnSpeed * 0.1f
-
-                let rotationHead = head.GetRotationLocal world
-                let rotationHead =
-                    if turnVelocity <> 0.0f then
-                        rotationHead * Quaternion.CreateFromYawPitchRoll (0f, turnVelocity, 0f)
-                    else
-                        rotationHead
+            let rotationHead = head.GetRotationLocal world
+            let rotationHead =
+                if turnVelocity <> 0.0f then
+                    rotationHead * Quaternion.CreateFromYawPitchRoll (0f, turnVelocity, 0f)
+                else
+                    rotationHead
 
 //                let rotation = if turnVelocity <> 0.0f then rotation * Quaternion.CreateFromAxisAngle (v3Up, turnVelocity) else rotation
 
-                withSignals [UpdateTransform (position, rotation, rotationHead)] world
-            else
+            withSignals [UpdateTransform (position, rotation, rotationHead)] world
 
-                just world
 
         | Shoot ->
 
@@ -302,9 +309,36 @@ type PlayerDispatcher () =
             let forward = rotation.Forward
 
             let world = bullet.SetPosition position world
-            let world = World.applyBodyLinearImpulse (2f * forward) None (bullet.GetBodyId world) world
+            let world = World.applyBodyLinearImpulse (16f * forward) None (bullet.GetBodyId world) world
 
             World.playSound Constants.Audio.SoundVolumeDefault Assets.Gameplay.ShotSound world
+            just world
+
+        | UpdateEyeTransform quaternion ->
+            failwith "todo"
+
+        | DropItem s ->
+
+            let name = List.item s model.List
+
+            let (box, world) = World.createEntity<BoxDispatcher> NoOverlay None entity.Group world // OPTIMIZATION: NoOverlay to avoid reflection.
+
+            let boxModel = { Box.empty with Name = name }
+
+            let world = box.SetModelGeneric<Box> boxModel world
+
+            let position = entity.GetPosition world
+            let rotation = entity.GetRotation world
+
+            let world = box.SetPosition position world
+            let world = box.SetRotation rotation world
+
+            let model = entity.GetPlayer world
+
+            let model = { model with List = List.removeAt s model.List }
+
+            let world = entity.SetPlayer model world
+
             just world
 
     override this.RayCast (ray, entity, world) =
@@ -315,13 +349,13 @@ type PlayerDispatcher () =
             weapon.RayCast ray world
         | intersections -> intersections
 
-    override this.Content (character, _) = [
+    override this.Content (model, _) = [
          // hearts
         for i in 0 .. dec 5 do
             Content.staticSprite ("Heart+" + string i) [
                 Entity.Position == v3 (-284.0f + single i * 32.0f) -144.0f 0.0f
                 Entity.Size == v3 32.0f 32.0f 0.0f
-                Entity.StaticImage := if character.HitPoints >= inc i then Assets.Gameplay.HeartFull else Assets.Gameplay.HeartEmpty
+                Entity.StaticImage := if model.HitPoints >= inc i then Assets.Gameplay.HeartFull else Assets.Gameplay.HeartEmpty
                 Entity.MountOpt == None
             ]
 
@@ -336,19 +370,6 @@ type PlayerDispatcher () =
                 Entity.Pickable == false
             ]
 
-            // weapon
-            Content.entity<RigidModelDispatcher> Constants.Gameplay.CharacterWeaponName [
-                Entity.Offset == v3 0.0f 0.5f 0.0f
-                Entity.StaticModel := character.WeaponModel
-                Entity.BodyType == Static
-                Entity.BodyShape == BoxShape { Size = v3 0.3f 1.2f 0.3f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.6f 0.0f)); PropertiesOpt = None }
-                Entity.Sensor == true
-                Entity.NavShape == EmptyNavShape
-                Entity.Pickable == false
-                Entity.BodyPenetrationEvent =|> fun evt -> WeaponPenetration evt.Data
-                Entity.BodySeparationExplicitEvent =|> fun evt -> WeaponSeparationExplicit evt.Data
-                Entity.BodySeparationImplicitEvent =|> fun evt -> WeaponSeparationImplicit evt.Data
-            ]
 
         Content.composite "Head" [
             Entity.PositionLocal == v3 0.0f 1.65f 0.0f
@@ -365,12 +386,55 @@ type PlayerDispatcher () =
 
             Content.entity "Barrel" [
 //                Entity.PositionLocal == v3 0.1f -0.1f -0.3f
-                Entity.PositionLocal == v3 0.15f -0.15f -0.25f
+                Entity.PositionLocal == v3 0.15f -0.15f -0.45f
             ]
 
-            let followPlayer = true
-
-            if followPlayer then
-                ContentEx.cameraFirstPerson "Camera" []
+            ContentEx.cameraFirstPerson "Camera1st" [
+                Entity.EnabledLocal := not model.InventoryOpen
+                Entity.MouseMoveEvent =|> fun evt -> RotateMove evt.Data
+            ]
+            ContentEx.camera "CameraInventory" [
+                Entity.EnabledLocal := model.InventoryOpen
+            ]
         ]
+
+        Content.staticSprite "Crosshair1st" [
+            Entity.EnabledLocal := not model.InventoryOpen
+            Entity.VisibleLocal := not model.InventoryOpen
+            Entity.Size == v3 16f 16f 0f
+            Entity.StaticImage == Assets.Gui.Crosshair
+            Entity.MountOpt == None
+        ]
+
+        ContentEx.cursor "CrosshairInventory" [
+            Entity.EnabledLocal := model.InventoryOpen
+            Entity.VisibleLocal := model.InventoryOpen
+            Entity.Size == v3 16f 16f 0f
+            Entity.StaticImage == Assets.Gui.Crosshair
+            Entity.MountOpt == None
+        ]
+
+        if model.InventoryOpen then
+            Content.composite "InventoryMenu" [
+                Entity.MountOpt == None
+            ] [
+                Content.staticSprite "Background" [
+                    Entity.Size == Constants.Render.DisplayVirtualResolution.V3 / 2f
+                    Entity.StaticImage == Assets.Default.Black
+                    Entity.Color == Color.Black.WithA 0.5f
+                ]
+
+                Content.association "List" [
+                    Entity.PositionLocal == v3 -100f 60f 0f
+                    Entity.Layout == Flow (FlowDownward, FlowUnlimited)
+                ] [
+                    for (i, name) in List.indexed model.List do
+                        Content.button $"Item{i}" [
+                            Entity.Text := $"{name}"
+                            Entity.ClickEvent => DropItem i
+                        ]
+                ]
+
+            ]
+
     ]

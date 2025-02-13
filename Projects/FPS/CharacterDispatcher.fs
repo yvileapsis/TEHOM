@@ -83,7 +83,11 @@ type CharacterDispatcher (character : Character) =
 
             // deploy signals from update
             let signals = [UpdateTransform (position, rotation) :> Signal; UpdateAnimations (position, rotation, Array.ofList animations, invisible)]
-            let signals = match character.ActionState with WoundState wound when wound.WoundTime = world.UpdateTime - 60L -> PublishDie :> Signal :: signals | _ -> signals
+            let signals =
+                match character.ActionState with
+                WoundState wound when wound.WoundTime = world.UpdateTime - 60L ->
+                    PublishDie :> Signal :: signals
+                | _ -> signals
             let signals = if attackedCharacters.Count > 0 then PublishAttacks attackedCharacters :> Signal :: signals else signals
             withSignals signals character
 
@@ -96,6 +100,16 @@ type CharacterDispatcher (character : Character) =
                     let character = { character with CharacterCollisions = Set.add penetratee character.CharacterCollisions }
                     just character
                 | (_, _) -> just character
+            | :? Entity as penetratee when penetratee.Is<BulletDispatcher> world ->
+
+                World.playSound Constants.Audio.SoundVolumeDefault Assets.Gameplay.InjureSound world
+
+                let character = { character with HitPoints = max (character.HitPoints - 1) 0 }
+
+                let signals : Signal list =
+                    [ if character.HitPoints <= 0 then PublishDie ]
+
+                withSignals signals character
             | _ -> just character
 
         | CharacterSeparationExplicit separationData ->
@@ -120,6 +134,8 @@ type CharacterDispatcher (character : Character) =
                     let character = { character with WeaponCollisions = Set.add penetratee character.WeaponCollisions }
                     just character
                 else just character
+            | :? Entity as penetratee when penetratee.Is<BulletDispatcher> world ->
+                just character
             | _ -> just character
 
         | WeaponSeparationExplicit separationData ->
@@ -220,7 +236,7 @@ type CharacterDispatcher (character : Character) =
              Entity.Pickable == false] [
                 ContentEx.text3d "HP" [
                     Entity.PositionLocal == v3 0f 2f 0f
-                    Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians 90f, 0f, 0f)
+                    Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (Math.DegreesToRadians -180f, 0f, 0f)
                     Entity.Size == v3 5f 1f 1f
                     Entity.ScaleLocal == v3 0.5f -0.5f 0.5f
                     Entity.Text := string character.ActionState
