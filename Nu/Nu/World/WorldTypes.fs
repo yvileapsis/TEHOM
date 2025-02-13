@@ -71,8 +71,11 @@ and SnapshotType =
     | ChangeProperty of int64 option * string
     | Evaluate of string
     | RestorePoint
+    | NormalizeAttenuation
     | RencenterInProbeBounds
     | ResetProbeBounds
+    | FreezeEntities
+    | ThawEntities
     | ReregisterPhysics
     | SynchronizeNav
     | SetEditMode of int
@@ -106,8 +109,11 @@ and SnapshotType =
         | ChangeProperty (_, propertyName) -> "Change Property " + propertyName
         | Evaluate _ -> "Evaluate F# Expression"
         | RestorePoint -> (scstringMemo this).Spaced
+        | NormalizeAttenuation -> (scstringMemo this).Spaced
         | RencenterInProbeBounds -> (scstringMemo this).Spaced
         | ResetProbeBounds -> (scstringMemo this).Spaced
+        | FreezeEntities -> (scstringMemo this).Spaced
+        | ThawEntities -> (scstringMemo this).Spaced
         | ReregisterPhysics -> (scstringMemo this).Spaced
         | SynchronizeNav -> (scstringMemo this).Spaced
         | SetEditMode i -> (scstringMemo this).Spaced + " (" + string (inc i) + " of 2)"
@@ -414,7 +420,7 @@ and [<ReferenceEquality; NoComparison>] Nav3d =
       Nav3dMeshOpt : (NavBuilderResultData * DtNavMesh * DtNavMeshQuery) option }
 
     // Make an empty 3d navigation service.
-    static member make () =
+    static member makeEmpty () =
         { Nav3dContext = RcContext ()
           Nav3dBodies = Map.empty
           Nav3dBodiesOldOpt = None
@@ -500,8 +506,8 @@ and ScreenDispatcher () =
     default this.Unregister (_, world) = world
 
     /// Attempt to ImNui process a screen.
-    abstract TryProcess : Screen * World -> World
-    default this.TryProcess (_, world) = world
+    abstract TryProcess : bool * Screen * World -> World
+    default this.TryProcess (_, _, world) = world
 
     /// Pre-update a screen.
     abstract PreUpdate : Screen * World -> World
@@ -1056,7 +1062,7 @@ and [<ReferenceEquality; CLIMutable>] ScreenState =
           Outgoing = Transition.make Outgoing
           RequestedSong = RequestIgnore
           SlideOpt = None
-          Nav3d = Nav3d.make ()
+          Nav3d = Nav3d.makeEmpty ()
           Protected = false
           Persistent = true
           Order = Core.getTimeStampUnique ()

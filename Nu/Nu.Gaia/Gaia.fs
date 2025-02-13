@@ -629,6 +629,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         | (false, world) -> (false, world)
 
     let private freezeEntities world =
+        let world = snapshot FreezeEntities world
         let groups = World.getGroups SelectedScreen world
         groups |>
         Seq.map (fun group -> World.getEntities group world) |>
@@ -637,6 +638,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         Seq.fold (fun world freezer -> freezer.SetFrozen true world) world
 
     let private thawEntities world =
+        let world = snapshot ThawEntities world
         let groups = World.getGroups SelectedScreen world
         groups |>
         Seq.map (fun group -> World.getEntities group world) |>
@@ -881,7 +883,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
     let private trySaveSelectedEntity filePath world =
         match SelectedEntityOpt with
         | Some entity when entity.GetExists world ->
-            try World.writeEntityToFile false filePath entity world
+            try World.writeEntityToFile false false filePath entity world
                 try let deploymentPath = PathF.Combine (TargetDir, PathF.GetRelativePath(TargetDir, filePath).Replace("../", ""))
                     if Directory.Exists (PathF.GetDirectoryName deploymentPath) then
                         File.Copy (filePath, deploymentPath, true)
@@ -936,7 +938,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                             let elevation = entity.GetElevation world
                             let propagatedDescriptorOpt = entity.GetPropagatedDescriptorOpt world
                             let world = World.destroyEntityImmediate entity world
-                            let (entity, world) = World.readEntity entityDescriptor (Some entity.Name) entity.Parent world
+                            let (entity, world) = World.readEntity false true entityDescriptor (Some entity.Name) entity.Parent world
                             let world = entity.SetOrder order world
                             let world = entity.SetPosition position world
                             let world = entity.SetRotation rotation world
@@ -945,7 +947,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                             world
                         else
                             let world = snapshot LoadEntity world
-                            let (entity, world) = World.readEntity entityDescriptor (Some entity.Name) entity.Parent world
+                            let (entity, world) = World.readEntity false true entityDescriptor (Some entity.Name) entity.Parent world
                             let world = inductEntity false entity world
                             world
                     SelectedEntityOpt <- Some entity
@@ -1083,7 +1085,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         | Some _ | None -> world
 
     let private trySaveSelectedGroup filePath world =
-        try World.writeGroupToFile true filePath SelectedGroup world
+        try World.writeGroupToFile filePath SelectedGroup world
             try let deploymentPath = PathF.Combine (TargetDir, PathF.GetRelativePath(TargetDir, filePath).Replace("../", ""))
                 if Directory.Exists (PathF.GetDirectoryName deploymentPath) then
                     File.Copy (filePath, deploymentPath, true)
@@ -1338,7 +1340,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             let world = World.setEventFilter Constants.Gaia.EventFilter world
 
             // attempt to process ImNui once to make sure initial simulants are created
-            let world = World.tryProcessSimulants world
+            let world = World.tryProcessSimulants true world
 
             // apply any selected mode
             let world =
@@ -1350,7 +1352,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 | None -> world
 
             // attempt to process ImNui again to ensure simulants in new mode are created
-            let world = World.tryProcessSimulants world
+            let world = World.tryProcessSimulants false world
 
             // figure out which screen to use
             let (screen, world) =
@@ -1424,10 +1426,10 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                     let (entity, world) =
                                         if ImGui.IsCtrlDown () && not (entity.GetProtected world) then
                                             let world = snapshot DuplicateEntity world
-                                            let entityDescriptor = World.writeEntity false EntityDescriptor.empty entity world
+                                            let entityDescriptor = World.writeEntity false false EntityDescriptor.empty entity world
                                             let entityName = World.generateEntitySequentialName entityDescriptor.EntityDispatcherName entity.Group world
                                             let parent = NewEntityParentOpt |> Option.map cast |> Option.defaultValue entity.Group
-                                            let (duplicate, world) = World.readEntity entityDescriptor (Some entityName) parent world
+                                            let (duplicate, world) = World.readEntity false false entityDescriptor (Some entityName) parent world
                                             let world =
                                                 if ImGui.IsShiftDown () then
                                                     duplicate.SetPropagationSourceOpt None world
@@ -1479,7 +1481,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                             let entityPosition = (entityDragOffset - mousePositionWorldOriginal) + (mousePositionWorld - mousePositionWorldOriginal)
                             let entityPositionSnapped =
                                 if Snaps2dSelected && ImGui.IsCtrlUp ()
-                                then Math.SnapF3d (Triple.fst (getSnaps ())) entityPosition.V3
+                                then Math.SnapF3d (Triple.fst (getSnaps ()), entityPosition.V3)
                                 else entityPosition.V3
                             let entityPosition = entity.GetPosition world
                             let entityPositionDelta = entityPositionSnapped - entityPosition
@@ -1512,7 +1514,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                             let entityDegree = (entityDragOffset - mousePositionWorldOriginal.Y) + (mousePositionWorld.Y - mousePositionWorldOriginal.Y)
                             let entityDegreeSnapped =
                                 if Snaps2dSelected && ImGui.IsCtrlUp ()
-                                then Math.SnapF (Triple.snd (getSnaps ())) entityDegree
+                                then Math.SnapF (Triple.snd (getSnaps ()), entityDegree)
                                 else entityDegree
                             let entityDegree = (entity.GetDegreesLocal world).Z
                             let world =
@@ -1618,8 +1620,8 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             elif ImGui.IsKeyPressed ImGuiKey.F7 then createRestorePoint world
             elif ImGui.IsKeyPressed ImGuiKey.F8 then ReloadAssetsRequested <- 1; world
             elif ImGui.IsKeyPressed ImGuiKey.F9 then ReloadCodeRequested <- 1; world
+            elif ImGui.IsKeyPressed ImGuiKey.F10 then setCaptureMode (not CaptureMode); world
             elif ImGui.IsKeyPressed ImGuiKey.F11 then setFullScreen (not FullScreen); world
-            elif ImGui.IsKeyPressed ImGuiKey.F12 then setCaptureMode (not CaptureMode); world
             elif ImGui.IsKeyPressed ImGuiKey.Enter && ImGui.IsCtrlUp () && ImGui.IsShiftUp () && ImGui.IsAltDown () then World.tryToggleWindowFullScreen world
             elif ImGui.IsKeyPressed ImGuiKey.UpArrow && ImGui.IsCtrlUp () && ImGui.IsShiftUp () && ImGui.IsAltDown () then tryReorderSelectedEntity true world
             elif ImGui.IsKeyPressed ImGuiKey.DownArrow && ImGui.IsCtrlUp () && ImGui.IsShiftUp () && ImGui.IsAltDown () then tryReorderSelectedEntity false world
@@ -1628,6 +1630,8 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             elif ImGui.IsKeyPressed ImGuiKey.O && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then ShowOpenGroupDialog <- true; world
             elif ImGui.IsKeyPressed ImGuiKey.S && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then ShowSaveGroupDialog <- true; world
             elif ImGui.IsKeyPressed ImGuiKey.B && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then tryAutoBoundsSelectedEntity world |> snd
+            elif ImGui.IsKeyPressed ImGuiKey.P && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then NewEntityParentOpt <- SelectedEntityOpt; world
+            elif ImGui.IsKeyPressed ImGuiKey.P && ImGui.IsCtrlDown () && ImGui.IsShiftDown () && ImGui.IsAltUp () then NewEntityParentOpt <- None; world
             elif ImGui.IsKeyPressed ImGuiKey.O && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltDown () then ShowOpenEntityDialog <- true; world
             elif ImGui.IsKeyPressed ImGuiKey.S && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltDown () then ShowSaveEntityDialog <- true; world
             elif ImGui.IsKeyPressed ImGuiKey.R && ImGui.IsCtrlDown () && ImGui.IsShiftUp () && ImGui.IsAltUp () then ReloadAllRequested <- 1; world
@@ -1715,11 +1719,11 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                     | Some _ | None -> ()
                 ImGui.Separator ()
                 if NewEntityParentOpt = Some entity then
-                    if ImGui.MenuItem "Reset Creation Parent" then
+                    if ImGui.MenuItem ("Reset Creation Parent", "Ctrl+Shift+P") then
                         NewEntityParentOpt <- None
                         ShowEntityContextMenu <- false
                 else
-                    if ImGui.MenuItem "Set as Creation Parent" then
+                    if ImGui.MenuItem ("Set as Creation Parent", "Ctrl+P") then
                         NewEntityParentOpt <- SelectedEntityOpt
                         ShowEntityContextMenu <- false
                 let world = if ImGui.MenuItem ("Auto Bounds Entity", "Ctrl+B") then tryAutoBoundsSelectedEntity world |> snd else world
@@ -1756,10 +1760,10 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                             let sourceEntity = Nu.Entity sourceEntityAddressStr
                             if not (sourceEntity.GetProtected world) then
                                 if ImGui.IsCtrlDown () then
-                                    let entityDescriptor = World.writeEntity false EntityDescriptor.empty sourceEntity world
+                                    let entityDescriptor = World.writeEntity false false EntityDescriptor.empty sourceEntity world
                                     let entityName = World.generateEntitySequentialName entityDescriptor.EntityDispatcherName sourceEntity.Group world
                                     let parent = Nu.Entity (SelectedGroup.GroupAddress <-- Address.makeFromArray entity.Surnames)
-                                    let (duplicate, world) = World.readEntity entityDescriptor (Some entityName) parent world
+                                    let (duplicate, world) = World.readEntity false false entityDescriptor (Some entityName) parent world
                                     let world =
                                         if ImGui.IsShiftDown () then
                                             duplicate.SetPropagationSourceOpt None world
@@ -2044,7 +2048,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                 match pd.PropertyName with
                                 | Constants.Engine.NamePropertyName -> "!00" // put Name first
                                 | Constants.Engine.MountOptPropertyName -> "!01" // and so on...
-                                | Constants.Engine.PropagationSourceOptPropertyName -> "!02"
+                                | nameof Entity.PropagationSourceOpt -> "!02"
                                 | Constants.Engine.ModelPropertyName -> "!03"
                                 | nameof Entity.Position -> "!04"
                                 | nameof Entity.PositionLocal -> "!05"
@@ -2253,11 +2257,11 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                             match ManipulationOperation with
                             | OPERATION.ROTATE | OPERATION.ROTATE_X | OPERATION.ROTATE_Y | OPERATION.ROTATE_Z -> r
                             | _ -> 0.0f // NOTE: doing other snapping ourselves since I don't like guizmo's implementation.
-                        let deltaMatrix = m4Identity.ToArray ()
+                        let delta = m4Identity.ToArray ()
                         let manipulationResult =
                             if snap = 0.0f
-                            then ImGuizmo.Manipulate (&view.[0], &projection.[0], ManipulationOperation, MODE.WORLD, &affine.[0], &deltaMatrix.[0])
-                            else ImGuizmo.Manipulate (&view.[0], &projection.[0], ManipulationOperation, MODE.WORLD, &affine.[0], &deltaMatrix.[0], &snap)
+                            then ImGuizmo.Manipulate (&view.[0], &projection.[0], ManipulationOperation, MODE.WORLD, &affine.[0], &delta.[0])
+                            else ImGuizmo.Manipulate (&view.[0], &projection.[0], ManipulationOperation, MODE.WORLD, &affine.[0], &delta.[0], &snap)
                         let world =
                             if manipulationResult then
                                 let (manipulationAwaken, world) =
@@ -2268,7 +2272,12 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                 let affine' = Matrix4x4.CreateFromArray affine
                                 let mutable (position, rotation, degrees, scale) = (v3Zero, quatIdentity, v3Zero, v3One)
                                 if Matrix4x4.Decompose (affine', &scale, &rotation, &position) then
-                                    position <- Math.SnapF3d p position
+                                    let delta = Matrix4x4.CreateFromArray delta
+                                    let translation = delta.Translation
+                                    let epsilon = 0.0001f // NOTE: making this any higher can create false negatives and leave entities positioned at random offsets.
+                                    if not (Math.ApproximatelyEqual (translation.X, 0.0f, epsilon)) then position.X <- Math.SnapF (p, position.X)
+                                    if not (Math.ApproximatelyEqual (translation.Y, 0.0f, epsilon)) then position.Y <- Math.SnapF (p, position.Y)
+                                    if not (Math.ApproximatelyEqual (translation.Z, 0.0f, epsilon)) then position.Z <- Math.SnapF (p, position.Z)
                                     rotation <- rotation.Normalized // try to avoid weird angle combinations
                                     let rollPitchYaw = rotation.RollPitchYaw
                                     degrees.X <- Math.RadiansToDegrees rollPitchYaw.X
@@ -2277,17 +2286,20 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                     degrees <- if degrees.X = 180.0f && degrees.Z = 180.0f then v3 0.0f (180.0f - degrees.Y) 0.0f else degrees
                                     degrees <- v3 degrees.X (if degrees.Y > 180.0f then degrees.Y - 360.0f else degrees.Y) degrees.Z
                                     degrees <- v3 degrees.X (if degrees.Y < -180.0f then degrees.Y + 360.0f else degrees.Y) degrees.Z
-                                    scale <- Math.SnapF3d s scale
+                                    let scaling = delta.Scale
+                                    if not (Math.ApproximatelyEqual (scaling.X, 0.0f, epsilon)) then scale.X <- Math.SnapF (s, scale.X)
+                                    if not (Math.ApproximatelyEqual (scaling.Y, 0.0f, epsilon)) then scale.Y <- Math.SnapF (s, scale.Y)
+                                    if not (Math.ApproximatelyEqual (scaling.Z, 0.0f, epsilon)) then scale.Z <- Math.SnapF (s, scale.Z)
                                     if scale.X < 0.01f then scale.X <- 0.01f
                                     if scale.Y < 0.01f then scale.Y <- 0.01f
                                     if scale.Z < 0.01f then scale.Z <- 0.01f
                                 let (entity, world) =
                                     if copying then
                                         let world = if manipulationAwaken then snapshot DuplicateEntity world else world
-                                        let entityDescriptor = World.writeEntity false EntityDescriptor.empty entity world
+                                        let entityDescriptor = World.writeEntity false false EntityDescriptor.empty entity world
                                         let entityName = World.generateEntitySequentialName entityDescriptor.EntityDispatcherName entity.Group world
                                         let parent = NewEntityParentOpt |> Option.map cast<Simulant> |> Option.defaultValue entity.Group
-                                        let (duplicate, world) = World.readEntity entityDescriptor (Some entityName) parent world
+                                        let (duplicate, world) = World.readEntity false false entityDescriptor (Some entityName) parent world
                                         let world =
                                             if ImGui.IsShiftDown () then
                                                 duplicate.SetPropagationSourceOpt None world
@@ -2370,13 +2382,13 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                     | Some _ ->
                                         match ManipulationOperation with
                                         | OPERATION.ROTATE | OPERATION.ROTATE_X | OPERATION.ROTATE_Y | OPERATION.ROTATE_Z when r <> 0.0f ->
-                                            let degreesLocal = Math.SnapDegree3d r (entity.GetDegreesLocal world)
+                                            let degreesLocal = Math.SnapDegree3d (r, entity.GetDegreesLocal world)
                                             entity.SetDegreesLocal degreesLocal world
                                         | _ -> world
                                     | None ->
                                         match ManipulationOperation with
                                         | OPERATION.ROTATE | OPERATION.ROTATE_X | OPERATION.ROTATE_Y | OPERATION.ROTATE_Z when r <> 0.0f ->
-                                            let degrees = Math.SnapDegree3d r (entity.GetDegrees world)
+                                            let degrees = Math.SnapDegree3d (r, entity.GetDegrees world)
                                             entity.SetDegrees degrees world
                                         | _ -> world
                                 ManipulationOperation <- OPERATION.TRANSLATE
@@ -2392,7 +2404,9 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                     let eyeRotationArray = Matrix4x4.CreateFromQuaternion(eyeRotationOld).Transposed.ToArray()
                     ImGuizmo.ViewManipulate (&eyeRotationArray.[0], 1.0f, v2 (single rasterViewport.Bounds.Size.X - 525.0f) 100.0f, v2 128.0f 128.0f, uint 0x00000000)
                     let eyeRotation = Matrix4x4.CreateFromArray(eyeRotationArray).Transposed.Rotation
-                    if not io.WantCaptureMouseGlobal && eyeRotationOld.Up.Dot eyeRotation.Up >= 0.0f then DesiredEye3dRotation <- eyeRotation
+                    let eyeDiv = eyeRotation.RollPitchYaw.Z / MathF.PI_OVER_2 // NOTE: this and the eyeUpright variable mitigate #932.
+                    let eyeUpright = Math.ApproximatelyEqual (eyeDiv, round eyeDiv, 0.01f)
+                    if not io.WantCaptureMouseGlobal && eyeRotationOld.Up.Dot eyeRotation.Up >= 0.0f && eyeUpright then DesiredEye3dRotation <- eyeRotation
                     if ImGuizmo.IsUsingViewManipulate () then io.SwallowMouse ()
 
                 // fin
@@ -2404,6 +2418,14 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
     let private imGuiFullScreenWindow () =
         if not CaptureMode then
             if ImGui.Begin ("Full Screen Enabled", ImGuiWindowFlags.NoNav) then
+                ImGui.Text "Capture Mode (F10)"
+                ImGui.SameLine ()
+                let mutable captureMode = CaptureMode
+                ImGui.Checkbox ("##captureMode", &captureMode) |> ignore<bool>
+                setCaptureMode captureMode
+                if ImGui.IsItemHovered ImGuiHoveredFlags.DelayNormal && ImGui.BeginTooltip () then
+                    ImGui.Text "Toggle capture mode (F10 to toggle)."
+                    ImGui.EndTooltip ()
                 ImGui.Text "Full Screen (F11)"
                 ImGui.SameLine ()
                 let mutable fullScreen = FullScreen
@@ -2411,14 +2433,6 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 setFullScreen fullScreen
                 if ImGui.IsItemHovered ImGuiHoveredFlags.DelayNormal && ImGui.BeginTooltip () then
                     ImGui.Text "Toggle full screen view (F11 to toggle)."
-                    ImGui.EndTooltip ()
-                ImGui.Text "Capture Mode (F12)"
-                ImGui.SameLine ()
-                let mutable captureMode = CaptureMode
-                ImGui.Checkbox ("##captureMode", &captureMode) |> ignore<bool>
-                setCaptureMode captureMode
-                if ImGui.IsItemHovered ImGuiHoveredFlags.DelayNormal && ImGui.BeginTooltip () then
-                    ImGui.Text "Toggle capture mode (F12 to toggle)."
                     ImGui.EndTooltip ()
             ImGui.End ()
 
@@ -2525,11 +2539,11 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                     | Some _ | None -> ()
                                 ImGui.Separator ()
                                 if SelectedEntityOpt.IsSome && NewEntityParentOpt = SelectedEntityOpt then
-                                    if ImGui.MenuItem "Reset Creation Parent" then
+                                    if ImGui.MenuItem ("Reset Creation Parent", "Ctrl+Shift+P") then
                                         NewEntityParentOpt <- None
                                         ShowEntityContextMenu <- false
                                 else
-                                    if ImGui.MenuItem "Set as Creation Parent" then
+                                    if ImGui.MenuItem ("Set as Creation Parent", "Ctrl+P") then
                                         NewEntityParentOpt <- SelectedEntityOpt
                                         ShowEntityContextMenu <- false
                                 let world = if ImGui.MenuItem ("Auto Bounds Entity", "Ctrl+B") then tryAutoBoundsSelectedEntity world |> snd else world
@@ -2627,7 +2641,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                         let world = snapshot (SetEditMode 0) world // snapshot before mode change
                                         selectEntityOpt None world
                                         let world = editModeFn world
-                                        let world = World.tryProcessSimulants world
+                                        let world = World.tryProcessSimulants false world
                                         let world = snapshot (SetEditMode 1) world // snapshot before after change
                                         world
                                     else world
@@ -2664,6 +2678,15 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 ImGui.SameLine ()
                 ImGui.Text "|"
                 ImGui.SameLine ()
+                ImGui.Text "Capture Mode"
+                ImGui.SameLine ()
+                let mutable captureMode = CaptureMode
+                ImGui.Checkbox ("##captureMode", &captureMode) |> ignore<bool>
+                setCaptureMode captureMode
+                if ImGui.IsItemHovered ImGuiHoveredFlags.DelayNormal && ImGui.BeginTooltip () then
+                    ImGui.Text "Toggle capture mode view (F10 to toggle)."
+                    ImGui.EndTooltip ()
+                ImGui.SameLine ()
                 ImGui.Text "Full Screen"
                 ImGui.SameLine ()
                 let mutable fullScreen = FullScreen
@@ -2671,15 +2694,6 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 setFullScreen fullScreen
                 if ImGui.IsItemHovered ImGuiHoveredFlags.DelayNormal && ImGui.BeginTooltip () then
                     ImGui.Text "Toggle full screen view (F11 to toggle)."
-                    ImGui.EndTooltip ()
-                ImGui.SameLine ()
-                ImGui.Text "Capture Mode (F12)"
-                ImGui.SameLine ()
-                let mutable captureMode = CaptureMode
-                ImGui.Checkbox ("##captureMode", &captureMode) |> ignore<bool>
-                setCaptureMode captureMode
-                if ImGui.IsItemHovered ImGuiHoveredFlags.DelayNormal && ImGui.BeginTooltip () then
-                    ImGui.Text "Toggle capture mode view (F12 to toggle)."
                     ImGui.EndTooltip ()
                 ImGui.SameLine ()
                 world
@@ -2760,10 +2774,10 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                     let sourceEntity = Nu.Entity sourceEntityAddressStr
                                     if not (sourceEntity.GetProtected world) then
                                         if ImGui.IsCtrlDown () then
-                                            let entityDescriptor = World.writeEntity false EntityDescriptor.empty sourceEntity world
+                                            let entityDescriptor = World.writeEntity false false EntityDescriptor.empty sourceEntity world
                                             let entityName = World.generateEntitySequentialName entityDescriptor.EntityDispatcherName sourceEntity.Group world
                                             let parent = sourceEntity.Group
-                                            let (duplicate, world) = World.readEntity entityDescriptor (Some entityName) parent world
+                                            let (duplicate, world) = World.readEntity false false entityDescriptor (Some entityName) parent world
                                             let world =
                                                 if ImGui.IsShiftDown () then
                                                     duplicate.SetPropagationSourceOpt None world

@@ -74,7 +74,7 @@ type Nu () =
             WorldModule.register <- fun simulant world -> World.register simulant world
             WorldModule.unregister <- fun simulant world -> World.unregister simulant world
             WorldModule.tryProcessGame <- fun game world -> World.tryProcessGame game world
-            WorldModule.tryProcessScreen <- fun screen world -> World.tryProcessScreen screen world
+            WorldModule.tryProcessScreen <- fun firstFrame screen world -> World.tryProcessScreen firstFrame screen world
             WorldModule.tryProcessGroup <- fun group world -> World.tryProcessGroup group world
             WorldModule.tryProcessEntity <- fun entity world -> World.tryProcessEntity entity world
             WorldModule.signal <- Nu.worldModuleSignal
@@ -89,12 +89,7 @@ type Nu () =
             Vsync.Init Constants.Engine.RunSynchronously
 
             // init OpenGL assert mechanism
-            OpenGL.Hl.InitAssert
-#if DEBUG
-                Constants.OpenGL.HlAssert
-#else
-                false
-#endif
+            OpenGL.Hl.InitAssert Constants.OpenGL.HlDebug
 
             // mark init flag
             Initialized <- true

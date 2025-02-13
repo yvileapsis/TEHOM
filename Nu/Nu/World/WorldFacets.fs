@@ -440,7 +440,7 @@ type TextFacet () =
          define Entity.TextColor Color.White
          define Entity.TextColorDisabled Constants.Gui.ColorDisabledDefault
          define Entity.TextOffset v2Zero
-         define Entity.TextShift 0.5f]
+         define Entity.TextShift Constants.Gui.TextShiftDefault]
 
     override this.Render (_, entity, world) =
         let mutable transform = entity.GetTransform world
@@ -1090,7 +1090,7 @@ type TextBoxFacet () =
          define Entity.TextColor Color.White
          define Entity.TextColorDisabled Constants.Gui.ColorDisabledDefault
          define Entity.TextOffset v2Zero
-         define Entity.TextShift 0.5f
+         define Entity.TextShift Constants.Gui.TextShiftDefault
          define Entity.TextCapacity 14
          define Entity.Focused false
          nonPersistent Entity.Cursor 0]
@@ -1436,8 +1436,7 @@ type RigidBodyFacet () =
         (Cascade, world)
 
     static member Properties =
-        [define Entity.Static true
-         define Entity.BodyEnabled true
+        [define Entity.BodyEnabled true
          define Entity.BodyType Static
          define Entity.BodyShape (BoxShape { Size = v3One; TransformOpt = None; PropertiesOpt = None })
          define Entity.SleepingAllowed true
@@ -2454,8 +2453,9 @@ type Light3dFacet () =
 
     override this.Edit (op, entity, world) =
         match op with
-        | AppendProperties _ ->
+        | AppendProperties ap ->
             if ImGuiNET.ImGui.Button "Normalize Attenutation" then
+                let world = ap.EditContext.Snapshot NormalizeAttenuation world
                 let brightness = entity.GetBrightness world
                 let lightCutoff = entity.GetLightCutoff world
                 let world = entity.SetAttenuationLinear (1.0f / (brightness * lightCutoff)) world
@@ -2934,6 +2934,9 @@ module AnimatedModelFacetExtensions =
         member this.GetBoneTransformsOpt world : Matrix4x4 array option = this.Get (nameof this.BoneTransformsOpt) world
         member this.SetBoneTransformsOpt (value : Matrix4x4 array option) world = this.Set (nameof this.BoneTransformsOpt) value world
         member this.BoneTransformsOpt = lens (nameof this.BoneTransformsOpt) this this.GetBoneTransformsOpt this.SetBoneTransformsOpt
+        member this.GetUseJobGraph world : bool = this.Get (nameof this.UseJobGraph) world
+        member this.SetUseJobGraph (value : bool) world = this.Set (nameof this.UseJobGraph) value world
+        member this.UseJobGraph = lens (nameof this.UseJobGraph) this this.GetUseJobGraph this.SetUseJobGraph
 
         /// Attempt to get the bone ids, offsets, and transforms from an entity that supports boned models.
         member this.TryGetBoneTransformByName boneName world =
@@ -2955,6 +2958,7 @@ module AnimatedModelFacetExtensions =
                 Some transform
             | (_, _) -> None
 
+        ///
         member this.TryComputeBoneTransforms time animations (sceneOpt : Assimp.Scene option) =
             match sceneOpt with
             | Some scene when scene.Meshes.Count > 0 ->
@@ -2962,6 +2966,7 @@ module AnimatedModelFacetExtensions =
                 Some (boneIds, boneOffsets, boneTransforms)
             | Some _ | None -> None
 
+        ///
         member this.AnimateBones (world : World) =
             let time = world.GameTime
             let animations = this.GetAnimations world
@@ -2987,7 +2992,8 @@ type AnimatedModelFacet () =
          define Entity.AnimatedModel Assets.Default.AnimatedModel
          nonPersistent Entity.BoneIdsOpt None
          nonPersistent Entity.BoneOffsetsOpt None
-         nonPersistent Entity.BoneTransformsOpt None]
+         nonPersistent Entity.BoneTransformsOpt None
+         define Entity.UseJobGraph true]
 
     override this.Register (entity, world) =
         let world = entity.AnimateBones world
@@ -3015,20 +3021,22 @@ type AnimatedModelFacet () =
         let animatedModel = entity.GetAnimatedModel world
         let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with ValueSome model -> model.SceneOpt | ValueNone -> None
         let resultOpt =
-            match World.tryAwaitJob (world.DateTime + TimeSpan.FromSeconds 0.001) (entity, nameof AnimatedModelFacet) world with
-            | Some (JobCompletion (_, _, (:? ((Dictionary<string, int> * Matrix4x4 array * Matrix4x4 array) option) as boneOffsetsAndTransformsOpt))) -> boneOffsetsAndTransformsOpt
-            | _ -> None
-        let world =
-            match resultOpt with
-            | Some (boneIds, boneOffsets, boneTransforms) ->
-                let world = entity.SetBoneIdsOpt (Some boneIds) world
-                let world = entity.SetBoneOffsetsOpt (Some boneOffsets) world
-                let world = entity.SetBoneTransformsOpt (Some boneTransforms) world
-                world
-            | None -> world
-        let job = Job.make (entity, nameof AnimatedModelFacet) (fun () -> entity.TryComputeBoneTransforms time animations sceneOpt)
-        World.enqueueJob 1.0f job world
-        world
+            if entity.GetUseJobGraph world then
+                let resultOpt =
+                    match World.tryAwaitJob (world.DateTime + TimeSpan.FromSeconds 0.001) (entity, nameof AnimatedModelFacet) world with
+                    | Some (JobCompletion (_, _, (:? ((Dictionary<string, int> * Matrix4x4 array * Matrix4x4 array) option) as boneOffsetsAndTransformsOpt))) -> boneOffsetsAndTransformsOpt
+                    | _ -> None
+                let job = Job.make (entity, nameof AnimatedModelFacet) (fun () -> entity.TryComputeBoneTransforms time animations sceneOpt)
+                World.enqueueJob 1.0f job world
+                resultOpt
+            else entity.TryComputeBoneTransforms time animations sceneOpt
+        match resultOpt with
+        | Some (boneIds, boneOffsets, boneTransforms) ->
+            let world = entity.SetBoneIdsOpt (Some boneIds) world
+            let world = entity.SetBoneOffsetsOpt (Some boneOffsets) world
+            let world = entity.SetBoneTransformsOpt (Some boneTransforms) world
+            world
+        | None -> world
 
     override this.Render (renderPass, entity, world) =
         let mutable transform = entity.GetTransform world
@@ -3353,20 +3361,19 @@ type FollowerFacet () =
 
     static member Properties =
         [define Entity.Following true
-         define Entity.FollowMoveSpeed 2.0f
+         define Entity.FollowMoveSpeed 1.0f
          define Entity.FollowTurnSpeed 3.0f
          define Entity.FollowDistanceMinOpt None
          define Entity.FollowDistanceMaxOpt None
          define Entity.FollowTargetOpt None]
 
     override this.Update (entity, world) =
-        let following = entity.GetFollowing world
-        if following then
+        if entity.GetFollowing world then
             let targetOpt = entity.GetFollowTargetOpt world
             match targetOpt with
             | Some target when target.GetExists world ->
-                let moveSpeed = entity.GetFollowMoveSpeed world * (let gd = world.GameDelta in gd.Seconds)
-                let turnSpeed = entity.GetFollowTurnSpeed world * (let gd = world.GameDelta in gd.Seconds)
+                let moveSpeed = entity.GetFollowMoveSpeed world
+                let turnSpeed = entity.GetFollowTurnSpeed world
                 let distanceMinOpt = entity.GetFollowDistanceMinOpt world
                 let distanceMaxOpt = entity.GetFollowDistanceMaxOpt world
                 let position = entity.GetPosition world
@@ -3375,18 +3382,31 @@ type FollowerFacet () =
                 let rotation = entity.GetRotation world
                 if  (distanceMinOpt.IsNone || distance > distanceMinOpt.Value) &&
                     (distanceMaxOpt.IsNone || distance <= distanceMaxOpt.Value) then
-                    if entity.GetIs2d world
-                    then world // TODO: implement for 2d navigation when it's available.
+                    if entity.GetIs2d world then
+                        // TODO: implement for 2d navigation when it's available.
+                        world
                     else
                         // TODO: consider doing an offset physics ray cast to align nav position with near
                         // ground. Additionally, consider removing the CellHeight offset in the above query so
                         // that we don't need to do an offset here at all.
                         let followOutput = World.nav3dFollow distanceMinOpt distanceMaxOpt moveSpeed turnSpeed position rotation destination entity.Screen world
-                        let world = entity.SetPosition followOutput.NavPosition world
-                        let world = entity.SetRotation followOutput.NavRotation world
-                        let world = entity.SetLinearVelocity followOutput.NavLinearVelocity world
-                        let world = entity.SetAngularVelocity followOutput.NavAngularVelocity world
-                        world
+                        let hasLinearVelocity =
+                            match entity.TryGetProperty (nameof entity.LinearVelocity) world with
+                            | Some property -> property.PropertyType = typeof<Vector3>
+                            | None -> false
+                        let hasAngularVelocity =
+                            match entity.TryGetProperty (nameof entity.AngularVelocity) world with
+                            | Some property -> property.PropertyType = typeof<Vector3>
+                            | None -> false
+                        if hasLinearVelocity && hasAngularVelocity then
+                            let world = entity.SetLinearVelocity followOutput.NavLinearVelocity world
+                            let world = entity.SetAngularVelocity followOutput.NavAngularVelocity world
+                            let world = entity.SetRotation followOutput.NavRotation world
+                            world
+                        else
+                            let world = entity.SetPosition followOutput.NavPosition world
+                            let world = entity.SetRotation followOutput.NavRotation world
+                            world
                 else world
             | _ -> world
         else world
