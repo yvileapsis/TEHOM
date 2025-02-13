@@ -7,9 +7,6 @@ open MyGame
 
 module Character =
 
-    type CharacterType =
-        | Enemy
-
     type JumpState =
         { LastTime : int64
           LastTimeOnGround : int64 }
@@ -46,8 +43,7 @@ module Character =
 
 
     type [<ReferenceEquality; SymbolicExpansion>] Character =
-        { CharacterType : CharacterType
-          PositionPrevious : Vector3 FQueue
+        { PositionPrevious : Vector3 FQueue
           RotationPrevious : Quaternion FQueue
           LinearVelocityPrevious : Vector3 FQueue
           AngularVelocityPrevious : Vector3 FQueue
@@ -89,8 +85,7 @@ module Character =
             else angularVelocity
 
         member this.CharacterProperties =
-            match this.CharacterType with
-            | Enemy -> { CharacterProperties.defaultProperties with CollisionTolerance = 0.005f }
+            { CharacterProperties.defaultProperties with CollisionTolerance = 0.005f }
 
         static member private computeTraversalAnimations rotation linearVelocity angularVelocity character =
             match character.ActionState with
@@ -174,65 +169,59 @@ module Character =
             let lastTimeOnGround = if grounded then time else character.JumpState.LastTimeOnGround
             let character = { character with Character.JumpState.LastTimeOnGround = lastTimeOnGround }
 
-            // update traversal
-            match character.CharacterType with
-            | Enemy ->
-
-                // enemy traversal
-                let (navSpeedsOpt, character) =
-                    match character.ActionState with
-                    | NormalState | ObstructedState _ ->
-                        let order =
-                            character.CharacterCollisions |>
-                            Array.ofSeq |>
-                            Array.map (fun character -> (false, character.GetPosition world)) |>
-                            Array.cons (true, position) |>
-                            Array.sortBy (fun (_, position) -> Vector3.DistanceSquared (position, playerPosition)) |>
-                            Array.findIndex fst
-                        let canUnobstruct =
-                            match character.ActionState with
-                            | ObstructedState obstructed ->
-                                let localTime = time - obstructed.ObstructedTime
-                                order = 0 && localTime >= 10L
-                            | _ -> order = 0
-                        let character =
-                            if canUnobstruct then { character with ActionState = NormalState }
-                            elif character.ActionState = NormalState then { character with ActionState = ObstructedState { ObstructedTime = time }}
-                            else character
-                        let navSpeed = if character.ActionState = NormalState then (0.04f, 0.1f) else (0.0f, 0.3f)
-                        (Some navSpeed, character)
-                    | _ -> (None, character)
-                match navSpeedsOpt with
-                | Some (moveSpeed, turnSpeed) ->
-                    let sphere =
-                        if position.Y - playerPosition.Y >= 0.25f
-                        then Sphere (playerPosition, 0.1f) // when above player
-                        else Sphere (playerPosition, 0.7f) // when at or below player
-                    let nearest = sphere.Nearest position
-                    let followOutput = World.nav3dFollow (Some 1.0f) (Some 10.0f) moveSpeed turnSpeed position rotation nearest Simulants.Gameplay world
-                    (followOutput.NavPosition, followOutput.NavRotation, followOutput.NavLinearVelocity, followOutput.NavAngularVelocity, character)
-                | None -> (position, rotation, v3Zero, v3Zero, character)
+            // enemy traversal
+            let (navSpeedsOpt, character) =
+                match character.ActionState with
+                | NormalState | ObstructedState _ ->
+                    let order =
+                        character.CharacterCollisions |>
+                        Array.ofSeq |>
+                        Array.map (fun character -> (false, character.GetPosition world)) |>
+                        Array.cons (true, position) |>
+                        Array.sortBy (fun (_, position) -> Vector3.DistanceSquared (position, playerPosition)) |>
+                        Array.findIndex fst
+                    let canUnobstruct =
+                        match character.ActionState with
+                        | ObstructedState obstructed ->
+                            let localTime = time - obstructed.ObstructedTime
+                            order = 0 && localTime >= 10L
+                        | _ -> order = 0
+                    let character =
+                        if canUnobstruct then { character with ActionState = NormalState }
+                        elif character.ActionState = NormalState then { character with ActionState = ObstructedState { ObstructedTime = time }}
+                        else character
+                    let navSpeed = if character.ActionState = NormalState then (0.04f, 0.1f) else (0.0f, 0.3f)
+                    (Some navSpeed, character)
+                | _ -> (None, character)
+            match navSpeedsOpt with
+            | Some (moveSpeed, turnSpeed) ->
+                let sphere =
+                    if position.Y - playerPosition.Y >= 0.25f
+                    then Sphere (playerPosition, 0.1f) // when above player
+                    else Sphere (playerPosition, 0.7f) // when at or below player
+                let nearest = sphere.Nearest position
+                let followOutput = World.nav3dFollow (Some 1.0f) (Some 10.0f) moveSpeed turnSpeed position rotation nearest Simulants.Gameplay world
+                (followOutput.NavPosition, followOutput.NavRotation, followOutput.NavLinearVelocity, followOutput.NavAngularVelocity, character)
+            | None -> (position, rotation, v3Zero, v3Zero, character)
 
         static member private updateAction time (position : Vector3) (rotation : Quaternion) (playerPosition : Vector3) character =
-            match character.CharacterType with
-            | Enemy ->
-                match character.ActionState with
-                | NormalState ->
-                    let rotationForwardFlat = rotation.Forward.WithY(0.0f).Normalized
-                    let positionFlat = position.WithY 0.0f
-                    let playerPositionFlat = playerPosition.WithY 0.0f
-                    if position.Y - playerPosition.Y >= 0.25f then // above player
-                        if  Vector3.Distance (playerPositionFlat, positionFlat) < 1.0f &&
-                            rotationForwardFlat.AngleBetween (playerPositionFlat - positionFlat) < 0.1f then
-                            { character with ActionState = AttackState (AttackState.make time) }
-                        else character
-                    elif playerPosition.Y - position.Y < 1.3f then // at or a bit below player
-                        if  Vector3.Distance (playerPositionFlat, positionFlat) < 1.75f &&
-                            rotationForwardFlat.AngleBetween (playerPositionFlat - positionFlat) < 0.15f then
-                            { character with ActionState = AttackState (AttackState.make time) }
-                        else character
+            match character.ActionState with
+            | NormalState ->
+                let rotationForwardFlat = rotation.Forward.WithY(0.0f).Normalized
+                let positionFlat = position.WithY 0.0f
+                let playerPositionFlat = playerPosition.WithY 0.0f
+                if position.Y - playerPosition.Y >= 0.25f then // above player
+                    if  Vector3.Distance (playerPositionFlat, positionFlat) < 1.0f &&
+                        rotationForwardFlat.AngleBetween (playerPositionFlat - positionFlat) < 0.1f then
+                        { character with ActionState = AttackState (AttackState.make time) }
                     else character
-                | _ -> character
+                elif playerPosition.Y - position.Y < 1.3f then // at or a bit below player
+                    if  Vector3.Distance (playerPositionFlat, positionFlat) < 1.75f &&
+                        rotationForwardFlat.AngleBetween (playerPositionFlat - positionFlat) < 0.15f then
+                        { character with ActionState = AttackState (AttackState.make time) }
+                    else character
+                else character
+            | _ -> character
 
         static member private updateState time character =
             match character.ActionState with
@@ -248,7 +237,7 @@ module Character =
             | InjuryState injury ->
                 let actionState =
                     let localTime = time - injury.InjuryTime
-                    let injuryTime = match character.CharacterType with Enemy -> 40
+                    let injuryTime = 40
                     if localTime < injuryTime
                     then InjuryState injury
                     else NormalState
@@ -280,8 +269,7 @@ module Character =
             | _ -> (Set.empty, character)
 
         static member updateInputKey time keyboardKeyData character =
-            match character.CharacterType with
-            | Enemy -> (false, character)
+            false, character
 
         static member update time position rotation linearVelocity angularVelocity grounded playerPosition character world =
             let character = Character.updateInterps position rotation linearVelocity angularVelocity character
@@ -292,9 +280,8 @@ module Character =
             let (animations, invisible) = Character.updateAnimations time position rotation linearVelocity angularVelocity character world
             (animations, invisible, attackedCharacters, position, rotation, character)
 
-        static member initial characterType =
-            { CharacterType = characterType
-              PositionPrevious = FQueue.empty
+        static member initial =
+            { PositionPrevious = FQueue.empty
               RotationPrevious = FQueue.empty
               LinearVelocityPrevious = FQueue.empty
               AngularVelocityPrevious = FQueue.empty
@@ -309,4 +296,4 @@ module Character =
               WeaponModel = Assets.Gameplay.GreatSwordModel }
 
         static member initialEnemy =
-            { Character.initial Enemy with HitPoints = 3 }
+            { Character.initial with HitPoints = 3 }

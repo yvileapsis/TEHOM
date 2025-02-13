@@ -83,11 +83,8 @@ type GameplayDispatcher () =
             just gameplay
 
         | Die deadCharacter ->
-            let character = deadCharacter.GetCharacter world
-            match character.CharacterType with
-            | Enemy ->
-                let gameplay = { gameplay with Score = gameplay.Score + 100 }
-                withSignal (DestroyEnemy deadCharacter) gameplay
+            let gameplay = { gameplay with Score = gameplay.Score + 100 }
+            withSignal (DestroyEnemy deadCharacter) gameplay
 
     // here we handle the gameplay commands
     // notice how in here we handle events from characters to implement intra-character interactions rather than

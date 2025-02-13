@@ -51,7 +51,7 @@ type CharacterDispatcher (character : Character) =
          Entity.CharacterProperties == character.CharacterProperties
          Entity.BodyShape == CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None }
          Entity.Observable == true
-         Entity.FollowTargetOpt := match character.CharacterType with Enemy -> Some Simulants.GameplayPlayer
+         Entity.FollowTargetOpt := Some Simulants.GameplayPlayer
          Entity.RegisterEvent => Register
          Game.KeyboardKeyDownEvent =|> fun evt -> UpdateInputKey evt.Data
          Entity.UpdateEvent => Update
@@ -95,10 +95,9 @@ type CharacterDispatcher (character : Character) =
             match penetrationData.BodyShapePenetratee.BodyId.BodySource with
             | :? Entity as penetratee when penetratee.Is<CharacterDispatcher> world ->
                 let characterPenetratee = penetratee.GetCharacter world
-                match (character.CharacterType, characterPenetratee.CharacterType) with
-                | (Enemy, Enemy) ->
-                    let character = { character with CharacterCollisions = Set.add penetratee character.CharacterCollisions }
-                    just character
+                let character = { character with CharacterCollisions = Set.add penetratee character.CharacterCollisions }
+                just character
+
             | :? Entity as penetratee when penetratee.Is<BulletDispatcher> world ->
 
                 World.playSound Constants.Audio.SoundVolumeDefault Assets.Gameplay.InjureSound world
@@ -129,12 +128,12 @@ type CharacterDispatcher (character : Character) =
             match penetrationData.BodyShapePenetratee.BodyId.BodySource with
             | :? Entity as penetratee when penetratee.Is<CharacterDispatcher> world && penetratee <> entity ->
                 let characterPenetratee = penetratee.GetCharacter world
-                if character.CharacterType <> characterPenetratee.CharacterType then
-                    let character = { character with WeaponCollisions = Set.add penetratee character.WeaponCollisions }
-                    just character
-                else just character
+                let character = { character with WeaponCollisions = Set.add penetratee character.WeaponCollisions }
+                just character
+
             | :? Entity as penetratee when penetratee.Is<BulletDispatcher> world ->
                 just character
+
             | _ -> just character
 
         | WeaponSeparationExplicit separationData ->

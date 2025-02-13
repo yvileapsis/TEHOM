@@ -236,11 +236,8 @@ type PlayerDispatcher () =
         | WeaponPenetration penetrationData ->
             match penetrationData.BodyShapePenetratee.BodyId.BodySource with
             | :? Entity as penetratee when penetratee.Is<CharacterDispatcher> world && penetratee <> entity ->
-                let characterPenetratee = penetratee.GetCharacter world
-                if characterPenetratee.CharacterType = Character.Enemy then
-                    let character = { model with WeaponCollisions = Set.add penetratee model.WeaponCollisions }
-                    just character
-                else just model
+                let character = { model with WeaponCollisions = Set.add penetratee model.WeaponCollisions }
+                just character
             | _ -> just model
 
         | WeaponSeparationExplicit separationData ->
