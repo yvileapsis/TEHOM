@@ -26,3 +26,4 @@ module Assets =
     module Gameplay =
 
         let PackageName = "Gameplay"
+        let CursorSprite = asset<Image> PackageName "Cursor"

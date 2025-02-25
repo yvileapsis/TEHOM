@@ -193,6 +193,16 @@ type GameplayDispatcher () =
             Content.entity<GraphDispatcher> "Graph" [
 
             ]
+
+            Content.entity<MenuDispatcher> "Menu" [
+
+            ]
+
+            // TODO: make it so cursor switches between hardware cursor and software cursor between regular operation and drag and drop
+            ContentEx.cursor "Cursor" [
+                Entity.StaticImage == Assets.Gameplay.CursorSprite
+                Entity.Size == v3 16f 16f 0f
+            ]
         ]
 
         match model.GameplayState with

@@ -58,6 +58,7 @@
 		<Compile Include="Gameplay\Combat.fs" />
 		<Compile Include="Gameplay\CombatDispatcher.fs" />
 		<Compile Include="Gameplay\GraphDispatcher.fs" />
+		<Compile Include="Gameplay\MenuDispatcher.fs" />
 		<Compile Include="Gameplay\GameplayDispatcher.fs" />
 		<Compile Include="Tehom.fs" />
 		<Compile Include="TehomPlugin.fs" />
