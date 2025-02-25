@@ -16,6 +16,7 @@ type [<SymbolicExpansion>] Gameplay = {
     Positions : List<Vector3 * Quaternion>
     PositionOld : Option<Vector3 * Quaternion>
     LerpStepsLeft : Int32
+    HoldingMouse : Boolean
 }
 with
     static member empty = {
@@ -28,6 +29,7 @@ with
         ]
         PositionOld = None
         LerpStepsLeft = 0
+        HoldingMouse = false
     }
 
     static member initial = {
@@ -99,6 +101,11 @@ type GameplayDispatcher () =
             just model
 
         | Update ->
+
+            let model = {
+                model with
+                    HoldingMouse = World.isMouseButtonDown MouseLeft world
+            }
 
             let model =
                 if model.LerpStepsLeft > 0 then
@@ -198,9 +205,12 @@ type GameplayDispatcher () =
 
             ]
 
-            // TODO: make it so cursor switches between hardware cursor and software cursor between regular operation and drag and drop
             ContentEx.cursor "Cursor" [
-                Entity.StaticImage == Assets.Gameplay.CursorSprite
+                Entity.CursorType :=
+                    if model.HoldingMouse then
+                        SoftwareImageCursor Assets.Gameplay.CursorSprite
+                    else
+                        HardwareImageCursor Assets.Gameplay.CursorSprite
                 Entity.Size == v3 16f 16f 0f
             ]
         ]

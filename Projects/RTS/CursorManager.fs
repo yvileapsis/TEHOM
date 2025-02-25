@@ -6,8 +6,8 @@ open Prime
 open Nu
 
 type [<ReferenceEquality; SymbolicExpansion>] CursorManager = {
-      Cursor : CursorType
-      CursorPriority : Map<CursorType, int>
+      Cursor : CursorDirectionType
+      CursorPriority : Map<CursorDirectionType, int>
 }
 with
     static member initial = {
@@ -39,7 +39,7 @@ with
 
 type CursorManagerMessage =
     | Update
-    | SetCursor of (CursorType * int) list
+    | SetCursor of (CursorDirectionType * int) list
     interface Message
 
 type CursorManagerCommand =

@@ -83,7 +83,7 @@ type CameraManagerMessage =
 
 type CameraManagerCommand =
     | Register
-    | PublishEvent of (CursorType * int) list
+    | PublishEvent of (CursorDirectionType * int) list
     interface Command
 
 [<AutoOpen>]

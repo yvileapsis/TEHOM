@@ -6,6 +6,7 @@ open System.Collections.Generic
 open System.Diagnostics
 open System.IO
 open System.Numerics
+open System.Runtime.InteropServices
 open System.Threading
 open SDL2
 open ImGuiNET
@@ -80,71 +81,142 @@ type MouseRelativeModeFacet () =
     static member Properties =
         [define Entity.AlwaysUpdate true]
 
+// TODO: Drop this down lower into the engine, to a special cursor render pathway
+type CursorType =
+    | DefaultCursor
+    | HardwareImageCursor of Image AssetTag
+    | SoftwareImageCursor of Image AssetTag
+
+type CursorState = {
+    Type : CursorType
+    DefaultCursor : IntPtr
+    ImageCursor : Map<Image AssetTag, IntPtr>
+}
+with
+    static member makeCursor image =
+        match Metadata.tryGetFilePath image with
+        | Some filePath ->
+            let cursorPtr =
+                let format = SDL.SDL_PIXELFORMAT_ARGB8888
+                let unconvertedPtr = SDL_image.IMG_Load filePath
+                if unconvertedPtr <> nativeint 0 then
+                    let unconverted = Marshal.PtrToStructure<SDL.SDL_Surface> unconvertedPtr
+                    let unconvertedFormat = Marshal.PtrToStructure<SDL.SDL_PixelFormat> unconverted.format
+                    if unconvertedFormat.format <> format then
+                        let convertedPtr = SDL.SDL_ConvertSurfaceFormat (unconvertedPtr, format, 0u)
+                        SDL.SDL_FreeSurface unconvertedPtr // no longer need this
+                        convertedPtr
+                    else
+                        unconvertedPtr
+                else
+                    IntPtr.Zero
+
+            SDL.SDL_CreateColorCursor (cursorPtr, 0, 0)
+        | None ->
+            IntPtr.Zero
+
+    static member register image cursorState =
+        let cursor = SDL.SDL_GetCursor ()
+        { cursorState with DefaultCursor = cursor }
+
+    static member updateType newType cursorState =
+        match cursorState.Type, newType with
+        | l, r when l = r ->
+            cursorState
+        | _, DefaultCursor ->
+            SDL.SDL_SetCursor cursorState.DefaultCursor
+            SDL.SDL_ShowCursor 1 |> ignore
+            { cursorState with Type = newType }
+        | _, HardwareImageCursor image ->
+
+            let cursor, cursorState =
+                if Map.containsKey image cursorState.ImageCursor then
+                    cursorState.ImageCursor[image], cursorState
+                else
+                    let cursor = CursorState.makeCursor image
+                    cursor, { cursorState with ImageCursor = Map.add image cursor cursorState.ImageCursor }
+
+            SDL.SDL_SetCursor cursor
+            SDL.SDL_ShowCursor 1 |> ignore
+            { cursorState with Type = newType }
+        | _, SoftwareImageCursor _ ->
+            SDL.SDL_ShowCursor 0 |> ignore
+            { cursorState with Type = newType }
+
+    static member empty = {
+        Type = DefaultCursor
+        DefaultCursor = IntPtr.Zero
+        ImageCursor = Map.empty
+    }
+
+[<AutoOpen>]
+module CursorFacetExtensions =
+    type Entity with
+        member this.GetCursorState world : CursorState = this.Get (nameof this.CursorState) world
+        member this.SetCursorState (value : CursorState) world = this.Set (nameof this.CursorState) value world
+        member this.CursorState = lens (nameof this.CursorState) this this.GetCursorState this.SetCursorState
+        member this.GetCursorType world : CursorType = this.Get (nameof this.CursorType) world
+        member this.SetCursorType (value : CursorType) world = this.Set (nameof this.CursorType) value world
+        member this.CursorType = lens (nameof this.CursorType) this this.GetCursorType this.SetCursorType
+
 /// Augments an entity with a custom cursor.
 type CursorFacet () =
     inherit Facet (false, false, false)
 
-    static let mouseMove evt (world : World) =
-        let entity = evt.Subscriber : Entity
-
-        if world.Advancing && entity.GetEnabled world then
-
-            let position = World.getMousePosition2dScreen world
-
-            let world = entity.SetPosition position.V3 world
-
-            Cascade, world
-        else
-            Cascade, world
-
     static member Properties =
         [define Entity.AlwaysUpdate true
          define Entity.InsetOpt None
-         // TODO: add default cursor
-         define Entity.StaticImage Assets.Default.StaticSprite
          define Entity.Color Color.One
          define Entity.Blend Transparent
          define Entity.Emission Color.Zero
          define Entity.Flip FlipNone
-         define Entity.Elevation 100f]
+         define Entity.Elevation 100f
+         define Entity.CursorType DefaultCursor
+         define Entity.CursorState CursorState.empty
+         define Entity.Pickable false
+         // TODO: remove
+         define Entity.StaticImage Assets.Default.StaticSprite]
 
     override this.Register (entity, world) =
+        let image = entity.GetStaticImage world
+        let state = entity.GetCursorState world
+        let state = CursorState.register image state
+        let world = entity.SetCursorState state world
         world
 //        |> World.sense mouseMove Nu.Game.Handle.MouseMoveEvent entity (nameof CursorFacet)
 
     override this.Update (entity, world) =
-
-        if world.Advancing && entity.GetEnabled world then
-            SDL.SDL_ShowCursor 0 |> ignore
-        else
-            SDL.SDL_ShowCursor 1 |> ignore
-
-        let world =
+        let cursorType =
             if world.Advancing && entity.GetEnabled world then
-
-                let position = World.getMousePosition2dScreen world
-
-                let world = entity.SetPosition position.V3 world
-
-                world
+                entity.GetCursorType world
             else
-                world
+                DefaultCursor
 
+        let cursorState = entity.GetCursorState world
+        let cursorState = CursorState.updateType cursorType cursorState
+        let world = entity.SetCursorState cursorState world
+
+        let position = World.getMousePosition2dScreen world
+        let world = entity.SetPosition position.V3 world
         world
 
     override this.Render (_, entity, world) =
-        let mutable transform = entity.GetTransform world
-        let staticImage = entity.GetStaticImage world
-        let insetOpt = match entity.GetInsetOpt world with Some inset -> ValueSome inset | None -> ValueNone
-        let clipOpt = ValueNone : Box2 voption
-        let color = entity.GetColor world
-        let blend = entity.GetBlend world
-        let emission = entity.GetEmission world
-        let flip = entity.GetFlip world
-        // TODO: replace with special operation for cursor
-        let perimeter = transform.Perimeter
-        transform.Position <- perimeter.BottomRight
-        World.renderLayeredSpriteFast (transform.Elevation, transform.Horizon, staticImage, &transform, &insetOpt, &clipOpt, staticImage, &color, blend, &emission, flip, world)
+        let state = entity.GetCursorState world
+        match state.Type with
+        | SoftwareImageCursor image ->
+            let mutable transform = entity.GetTransform world
+            let insetOpt = match entity.GetInsetOpt world with Some inset -> ValueSome inset | None -> ValueNone
+            let clipOpt = ValueNone : Box2 voption
+            let color = entity.GetColor world
+            let blend = entity.GetBlend world
+            let emission = entity.GetEmission world
+            let flip = entity.GetFlip world
+            // TODO: replace with special operation for cursor
+            let perimeter = transform.Perimeter
+            transform.Position <- perimeter.BottomRight
+            World.renderLayeredSpriteFast (transform.Elevation, transform.Horizon, image, &transform, &insetOpt, &clipOpt, image, &color, blend, &emission, flip, world)
+        | _ ->
+            ()
 
 [<AutoOpen>]
 module HoverFacetExtensions =

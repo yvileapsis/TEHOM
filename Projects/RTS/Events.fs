@@ -2,7 +2,7 @@ namespace MyGame
 open System
 open Nu
 
-type CursorType =
+type CursorDirectionType =
     | CursorNormal
     | CursorUp
     | CursorDown
@@ -17,4 +17,4 @@ module Events =
     let QuitEvent = stoa<unit> "Quit/Event"
     let SelectionEvent = stoa<Entity list> "Select/Event"
     let BeginSelectingEvent = stoa<Entity list> "BeginSelect/Event"
-    let SetCursorEvent = stoa<(CursorType * int) list> "SetCursor/Event"
+    let SetCursorEvent = stoa<(CursorDirectionType * int) list> "SetCursor/Event"
