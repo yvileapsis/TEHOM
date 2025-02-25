@@ -399,6 +399,7 @@ type RenderText3d =
       MaterialProperties : MaterialProperties
       Material : Material
       ShadowOffset : single
+      DepthTest : DepthTest
       RenderType : RenderType
       RenderPass : RenderPass
       Typeset : TextTypeset }
@@ -1811,6 +1812,7 @@ type [<ReferenceEquality>] GlRenderer3d =
          orientUp,
          shadowOffset,
          billboardSurface,
+         depthTest,
          renderType,
          renderPass,
          renderer) =
@@ -1833,7 +1835,7 @@ type [<ReferenceEquality>] GlRenderer3d =
             then renderOps.Add struct (model, castShadow, presence, texCoordsOffset, properties)
             else renderTasks.DeferredStatic.Add (billboardSurface, List ([struct (model, castShadow, presence, texCoordsOffset, properties)]))
         | ForwardRenderType (subsort, sort) ->
-            renderTasks.ForwardStatic.Add struct (subsort, sort, model, presence, texCoordsOffset, properties, billboardSurface)
+            renderTasks.Forward.Add struct (subsort, sort, model, presence, texCoordsOffset, properties, ValueNone, billboardSurface, depthTest)
 
     static member private categorizeStaticModelSurface
         (model : Matrix4x4 inref,
@@ -3458,11 +3460,10 @@ type [<ReferenceEquality>] GlRenderer3d =
                     let billboardProperties = { billboardProperties with Albedo = billboardProperties.Albedo * particle.Color; Emission = particle.Emission.R }
                     let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, m4Identity, box3Zero, billboardProperties, billboardMaterial, -1, Assimp.Node.Empty, renderer.BillboardGeometry)
                     GlRenderer3d.categorizeBillboardSurface (eyeRotation, billboardMatrix, rbps.CastShadow, rbps.Presence, Option.ofValueOption particle.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rbps.MaterialProperties, false, rbps.ShadowOffset, billboardSurface, rbps.DepthTest, rbps.RenderType, rbps.RenderPass, renderer)
-                    GlRenderer3d.categorizeBillboardSurface (eyeRotation, billboardMatrix, rbps.CastShadow, rbps.Presence, Option.ofValueOption particle.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rbps.MaterialProperties, false, rbps.ShadowOffset, billboardSurface, rbps.RenderType, rbps.RenderPass, renderer)
             | RenderText3d rt ->
                 let struct (billboardProperties, billboardMaterial) = GlRenderer3d.makeTypesetMaterial (&rt.Typeset, &rt.MaterialProperties, &rt.Material, renderer)
                 let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, m4Identity, box3 (v3 -0.5f 0.5f -0.5f) v3One, billboardProperties, billboardMaterial, -1, Assimp.Node.Empty, renderer.BillboardGeometry)
-                GlRenderer3d.categorizeStaticSpriteSurface (eyeRotation, rt.ModelMatrix, rt.CastShadow, rt.Presence, rt.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rt.MaterialProperties, true, rt.ShadowOffset, billboardSurface, rt.RenderType, rt.RenderPass, renderer)
+                GlRenderer3d.categorizeStaticSpriteSurface (eyeRotation, rt.ModelMatrix, rt.CastShadow, rt.Presence, rt.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rt.MaterialProperties, true, rt.ShadowOffset, billboardSurface, rt.DepthTest, rt.RenderType, rt.RenderPass, renderer)
             | RenderStaticModelSurface rsms ->
                 let insetOpt = Option.toValueOption rsms.InsetOpt
                 GlRenderer3d.categorizeStaticModelSurfaceByIndex (&rsms.ModelMatrix, rsms.CastShadow, rsms.Presence, &insetOpt, &rsms.MaterialProperties, &rsms.Material, rsms.StaticModel, rsms.SurfaceIndex, rsms.DepthTest, rsms.RenderType, rsms.RenderPass, renderer)

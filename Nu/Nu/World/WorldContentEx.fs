@@ -280,6 +280,7 @@ type Text3dFacet () =
         define Entity.Material Material.empty
         define Entity.RenderStyle Deferred
         define Entity.ShadowOffset Constants.Engine.BillboardShadowOffsetDefault
+        define Entity.DepthTest LessThanOrEqualTest
     ]
 
     override this.Render (renderPass, entity, world) =
@@ -303,6 +304,7 @@ type Text3dFacet () =
             let fontSizing = entity.GetFontSizing world
             let fontStyling = entity.GetFontStyling world
             let text = entity.GetText world
+            let depthTest = entity.GetDepthTest world
 
             let typeset = {
                 Text = text
@@ -321,6 +323,7 @@ type Text3dFacet () =
                       MaterialProperties = properties
                       Material = material
                       ShadowOffset = shadowOffset
+                      DepthTest = depthTest
                       RenderType = renderType
                       RenderPass = renderPass
                       Typeset = typeset
