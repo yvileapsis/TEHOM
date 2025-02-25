@@ -23,6 +23,8 @@ module Vector2 =
         member inline this.Normalized = Vector2.Normalize this
         member inline this.Magnitude = this.Length ()
         member inline this.MagnitudeSquared = this.LengthSquared ()
+        member inline this.Distance that = Vector2.Distance (this, that)
+        member inline this.DistanceSquared that = Vector2.DistanceSquared (this, that)
         member inline this.Absolute = Vector2 (abs this.X, abs this.Y)
         member inline this.MapX mapper = Vector2 (mapper this.X, this.Y)
         member inline this.MapY mapper = Vector2 (this.X, mapper this.Y)
@@ -113,6 +115,8 @@ module Vector3 =
         member inline this.Normalized = Vector3.Normalize this
         member inline this.Magnitude = this.Length ()
         member inline this.MagnitudeSquared = this.LengthSquared ()
+        member inline this.Distance that = Vector3.Distance (this, that)
+        member inline this.DistanceSquared that = Vector3.DistanceSquared (this, that)
         member inline this.Absolute = Vector3 (abs this.X, abs this.Y, abs this.Z)
         member inline this.MapX mapper = Vector3 (mapper this.X, this.Y, this.Z)
         member inline this.MapY mapper = Vector3 (this.X, mapper this.Y, this.Z)
@@ -243,6 +247,8 @@ module Vector4 =
         member inline this.V4i = Vector4i (int this.X, int this.Y, int this.Z, int this.W)
         member inline this.Magnitude = this.Length ()
         member inline this.MagnitudeSquared = this.LengthSquared ()
+        member inline this.Distance that = Vector4.Distance (this, that)
+        member inline this.DistanceSquared that = Vector4.DistanceSquared (this, that)
         member inline this.Absolute = Vector4 (abs this.X, abs this.Y, abs this.Z, abs this.W)
         member inline this.MapX mapper = Vector4 (mapper this.X, this.Y, this.Z, this.W)
         member inline this.MapY mapper = Vector4 (this.X, mapper this.Y, this.Z, this.W)
@@ -1511,7 +1517,8 @@ module Math =
     let SnapDegree3d (offset, v3 : Vector3) =
         Vector3 (SnapDegree (offset, v3.X), SnapDegree (offset, v3.Y), SnapDegree (offset, v3.Z))
 
-    /// Find the the union of a line segment and a frustum if one exists.
+    /// Find the union of a line segment and a frustum if one exists.
+    /// NOTE: there is a bug in here (https://github.com/bryanedds/Nu/issues/570) that keeps this from being usable on long segments.
     let TryUnionSegmentAndFrustum (start : Vector3, stop : Vector3, frustum : Frustum) =
         let startContained = frustum.Contains start <> ContainmentType.Disjoint
         let stopContained = frustum.Contains stop <> ContainmentType.Disjoint
@@ -1532,5 +1539,21 @@ module Math =
                     then Vector3.Lerp (stop, start', tOpt.Value / (start' - stop).Magnitude)
                     else stop // TODO: figure out why intersection could fail here.
                 else stop
-            Some (start', stop')
+            Some struct (start', stop')
         else None
+
+    /// Find the the union of a line segment and a frustum if one exists.
+    /// NOTE: this returns the union in parts in order to mostly workaround the bug in TryUnionSegmentAndFrustum.
+    let TryUnionSegmentAndFrustum' (start : Vector3, stop : Vector3, frustum : Frustum) : struct (Vector3 * Vector3) array =
+        let extent = stop - start
+        let extentMagnitude = extent.Magnitude
+        let partMagnitude = 1.0f // NOTE: magic value that looks good enough in editor for most purposes but doesn't bog down perf TOO much...
+        if extentMagnitude > partMagnitude then
+            let partCount = int (ceil (extentMagnitude / partMagnitude))
+            let partExtent = extent / single partCount
+            [|for i in 0 .. dec partCount do
+                let start' = start + partExtent * single i
+                let stop' = start' + partExtent
+                TryUnionSegmentAndFrustum (start', stop', frustum)|] |>
+            Array.definitize
+        else Array.definitize [|TryUnionSegmentAndFrustum (start, stop, frustum)|]

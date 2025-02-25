@@ -110,7 +110,7 @@ type GameplayDispatcher () =
                  Entity.Size .= v3 64.0f 16.0f 0.0f
                  Entity.Sensor .= true
                  Entity.StaticImage .= Assets.Default.Paddle] world
-        let paddle = world.RecentEntity
+        let paddle = world.DeclaredEntity
 
         // process paddle movement
         let world =
@@ -137,7 +137,7 @@ type GameplayDispatcher () =
                  Entity.CollisionDetection .= Continuous
                  Entity.Observable .= true
                  Entity.StaticImage .= Assets.Default.Ball] world
-        let ball = world.RecentEntity
+        let ball = world.DeclaredEntity
 
         // process ball life cycle
         let world =
@@ -237,7 +237,3 @@ type GameplayDispatcher () =
         // end gui declaration
         let world = World.endGroup world
         world
-
-    // this is a semantic fix-up that allows the editor to avoid creating an unused group. This is specific to the
-    // ImNui API that is needed to patch a little semantic hole inherent in the immediate-mode programming idiom.
-    override this.CreateDefaultGroup (screen, world) = World.createGroup (Some "Gui") screen world

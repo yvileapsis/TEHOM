@@ -37,7 +37,6 @@ module internal WorldTypes =
     let mutable internal handleSubscribeAndUnsubscribeEvent : bool -> Address -> Simulant -> obj -> obj = Unchecked.defaultof<_>
 
     // Simulant F# reach-arounds.
-    let mutable internal createDefaultGroup : obj -> obj -> obj * obj = Unchecked.defaultof<_>
     let mutable internal getEntityIs2d : obj -> obj -> bool = Unchecked.defaultof<_>
 
 /// The type of a subscription callback.
@@ -53,6 +52,7 @@ and SnapshotType =
     | RotateEntity
     | ScaleEntity
     | AutoBoundsEntity
+    | MoveEntityToOrigin
     | PropagateEntity
     | ReorderEntities
     | SetEntityFrozen of bool
@@ -91,6 +91,7 @@ and SnapshotType =
         | RotateEntity -> (scstringMemo this).Spaced
         | ScaleEntity -> (scstringMemo this).Spaced
         | AutoBoundsEntity -> (scstringMemo this).Spaced
+        | MoveEntityToOrigin -> (scstringMemo this).Spaced
         | PropagateEntity -> (scstringMemo this).Spaced
         | ReorderEntities -> (scstringMemo this).Spaced
         | SetEntityFrozen frozen -> if frozen then "Freeze Entity" else "Thaw Entity"
@@ -549,12 +550,6 @@ and ScreenDispatcher () =
     abstract TryUntruncateModel<'a> : 'a * Screen * World -> 'a option
     default this.TryUntruncateModel (_, _, _) = None
 
-    /// Create the default group in the context of this screen dispatcher.
-    abstract CreateDefaultGroup : Screen * World -> Group * World
-    default this.CreateDefaultGroup (screen, world) =
-        let (groupObj, worldObj) = WorldTypes.createDefaultGroup screen world
-        (groupObj :?> Group, worldObj :?> World)
-
 /// The default dispatcher for groups.
 and GroupDispatcher () =
     inherit SimulantDispatcher ()
@@ -652,6 +647,10 @@ and EntityDispatcher (is2d, physical, lightProbe, light) =
          Define? Persistent true
          Define? PropagatedDescriptorOpt Option<EntityDescriptor>.None]
 
+    /// The presence override, if any.
+    abstract PresenceOverride : Presence voption
+    default this.PresenceOverride = ValueNone
+
     /// Register an entity when adding it to a group.
     abstract Register : Entity * World -> World
     default this.Register (_, world) = world
@@ -728,6 +727,10 @@ and EntityDispatcher (is2d, physical, lightProbe, light) =
 
 /// Dynamically augments an entity's behavior in a composable way.
 and Facet (physical, lightProbe, light) =
+
+    /// The presence override, if any.-
+    abstract PresenceOverride : Presence voption
+    default this.PresenceOverride = ValueNone
 
     /// Register a facet when adding it to an entity.
     abstract Register : Entity * World -> World
@@ -1160,11 +1163,11 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     member this.PerimeterBottomLeft with get () = this.Transform.PerimeterBottomLeft and set value = this.Transform.PerimeterBottomLeft <- value
     member this.PerimeterMin with get () = this.Transform.PerimeterMin and set value = this.Transform.PerimeterMin <- value
     member this.PerimeterMax with get () = this.Transform.PerimeterMax and set value = this.Transform.PerimeterMax <- value
-    member this.PerimeterCenterLocal with get () = this.PositionLocal + (this.Transform.PerimeterCenter - this.Transform.Position)
-    member this.PerimeterBottomLocal with get () = this.PositionLocal + (this.Transform.PerimeterBottom - this.Transform.Position)
-    member this.PerimeterBottomLeftLocal with get () = this.PositionLocal + (this.Transform.PerimeterBottomLeft - this.Transform.Position)
-    member this.PerimeterMinLocal with get () = this.PositionLocal + (this.Transform.PerimeterMin - this.Transform.Position)
-    member this.PerimeterMaxLocal with get () = this.PositionLocal + (this.Transform.PerimeterMax - this.Transform.Position)
+    member this.PerimeterCenterLocal = this.PositionLocal + (this.Transform.PerimeterCenter - this.Transform.Position)
+    member this.PerimeterBottomLocal = this.PositionLocal + (this.Transform.PerimeterBottom - this.Transform.Position)
+    member this.PerimeterBottomLeftLocal = this.PositionLocal + (this.Transform.PerimeterBottomLeft - this.Transform.Position)
+    member this.PerimeterMinLocal = this.PositionLocal + (this.Transform.PerimeterMin - this.Transform.Position)
+    member this.PerimeterMaxLocal = this.PositionLocal + (this.Transform.PerimeterMax - this.Transform.Position)
     member this.Position with get () = this.Transform.Position and set value = this.Transform.Position <- value
     member this.Rotation with get () = this.Transform.Rotation and set value = this.Transform.Rotation <- value
     member this.Scale with get () = this.Transform.Scale and set value = this.Transform.Scale <- value
@@ -1173,14 +1176,15 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     member this.Degrees with get () = this.Transform.Degrees and set value = this.Transform.Degrees <- value
     member this.DegreesLocal with get () = Math.RadiansToDegrees3d this.AnglesLocal and set value = this.AnglesLocal <- Math.DegreesToRadians3d value
     member this.Size with get () = this.Transform.Size and set value = this.Transform.Size <- value
-    member this.RotationMatrix with get () = this.Transform.RotationMatrix
+    member this.RotationMatrix = this.Transform.RotationMatrix
     member this.Elevation with get () = this.Transform.Elevation and set value = this.Transform.Elevation <- value
     member this.Overflow with get () = this.Transform.Overflow and set value = this.Transform.Overflow <- value
-    member this.AffineMatrix with get () = this.Transform.AffineMatrix
+    member this.AffineMatrix = this.Transform.AffineMatrix
     member this.PerimeterUnscaled with get () = this.Transform.PerimeterUnscaled and set value = this.Transform.PerimeterUnscaled <- value
     member this.Perimeter with get () = this.Transform.Perimeter and set value = this.Transform.Perimeter <- value
-    member this.Bounds with get () = if this.Is2d then this.Transform.Bounds2d else this.Transform.Bounds3d
+    member this.Bounds = if this.Is2d then this.Transform.Bounds2d else this.Transform.Bounds3d
     member this.Presence with get () = this.Transform.Presence and set value = this.Transform.Presence <- value
+    member this.PresenceOverride = if this.Absolute then ValueSome Omnipresent else match this.Dispatcher.PresenceOverride with ValueSome _ as override_ -> override_ | _ -> ValueNone
     member internal this.Active with get () = this.Transform.Active and set value = this.Transform.Active <- value
     member internal this.Dirty with get () = this.Transform.Dirty and set value = this.Transform.Dirty <- value
     member internal this.Invalidated with get () = this.Transform.Invalidated and set value = this.Transform.Invalidated <- value
@@ -1199,16 +1203,18 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     member this.Protected with get () = this.Transform.Protected and internal set value = this.Transform.Protected <- value
     member this.Persistent with get () = this.Transform.Persistent and set value = this.Transform.Persistent <- value
     member this.Mounted with get () = this.Transform.Mounted and set value = this.Transform.Mounted <- value
-    member this.Is2d with get () = this.Dispatcher.Is2d
-    member this.Is3d with get () = this.Dispatcher.Is3d
-    member this.Physical with get () = this.Dispatcher.Physical || Array.exists (fun (facet : Facet) -> facet.Physical) this.Facets
-    member this.LightProbe with get () = this.Dispatcher.LightProbe || Array.exists (fun (facet : Facet) -> facet.LightProbe) this.Facets
-    member this.Light with get () = this.Dispatcher.Light || Array.exists (fun (facet : Facet) -> facet.Light) this.Facets
+    member this.Is2d = this.Dispatcher.Is2d
+    member this.Is3d = this.Dispatcher.Is3d
+    member this.Physical = this.Dispatcher.Physical || Array.exists (fun (facet : Facet) -> facet.Physical) this.Facets
+    member this.LightProbe = this.Dispatcher.LightProbe || Array.exists (fun (facet : Facet) -> facet.LightProbe) this.Facets
+    member this.Light = this.Dispatcher.Light || Array.exists (fun (facet : Facet) -> facet.Light) this.Facets
     member this.Static with get () = this.Transform.Static and set value = this.Transform.Static <- value
-    member this.Optimized with get () = this.Transform.Optimized
-    member internal this.VisibleSpatial with get () = this.Visible || this.AlwaysRender
-    member internal this.StaticSpatial with get () = this.Static && not this.AlwaysUpdate
-    member internal this.PresenceSpatial with get () = if this.Absolute then Omnipresent else this.Presence
+    member this.Optimized = this.Transform.Optimized
+    member internal this.VisibleSpatial = this.Visible || this.AlwaysRender
+    member internal this.StaticSpatial = this.Static && not this.AlwaysUpdate
+    /// NOTE: there is a minor semantic hole here where an entity's facets may have higher PresenceOverrides, but for
+    /// basic efficiency reasons, this often invoked property doesn't take those into consideration.
+    member internal this.PresenceSpatial = match this.PresenceOverride with ValueSome presence -> presence | ValueNone -> this.Presence
 
     /// Copy an entity state.
     /// This is used when we want to retain an old version of an entity state in face of mutation.
@@ -1354,7 +1360,7 @@ and [<TypeConverter (typeof<GameConverter>)>] Game (gameAddress : Game Address) 
     /// Derive a screen from the game.
     static member (/) (game : Game, screenName) = let _ = game in Screen (rtoa [|Constants.Engine.GameName; screenName|])
 
-    /// Concatenate an address with a game's address, taking the type of first address.
+    /// Concatenate an address with a game's address.
     static member (-->) (address : 'a Address, game : Game) =
         // HACK: anonymizes address when entity is null due to internal engine trickery.
         if isNull (game :> obj) then Address.anonymize address else acatf address game.GameAddress
@@ -1453,7 +1459,7 @@ and [<TypeConverter (typeof<ScreenConverter>)>] Screen (screenAddress) =
     /// Derive a group from its screen.
     static member (/) (screen : Screen, groupName) = Group (atoa<Screen, Group> screen.ScreenAddress --> ntoa groupName)
 
-    /// Concatenate an address with a screen's address, taking the type of first address.
+    /// Concatenate an address with a screen's address.
     static member (-->) (address : 'a Address, screen : Screen) =
         // HACK: anonymizes address when screen is null due to internal engine trickery.
         if isNull (screen :> obj) then Address.anonymize address else acatf address screen.ScreenAddress
@@ -1554,7 +1560,7 @@ and [<TypeConverter (typeof<GroupConverter>)>] Group (groupAddress) =
     /// Derive an entity from its group.
     static member (/) (group : Group, entityName) = Entity (atoa<Group, Entity> group.GroupAddress --> ntoa entityName)
 
-    /// Concatenate an address with a group's address, taking the type of first address.
+    /// Concatenate an address with a group's address.
     static member (-->) (address : 'a Address, group : Group) =
         // HACK: anonymizes address when group is null due to internal engine trickery.
         if isNull (group :> obj) then Address.anonymize address else acatf address group.GroupAddress
@@ -1678,7 +1684,7 @@ and [<TypeConverter (typeof<EntityConverter>)>] Entity (entityAddress) =
     /// Derive an entity from its parent entity.
     static member (/) (parentEntity : Entity, entityName) = Entity (parentEntity.EntityAddress --> ntoa entityName)
 
-    /// Concatenate an address with an entity, taking the type of first address.
+    /// Concatenate an address with an entity.
     static member (-->) (address : 'a Address, entity : Entity) =
         // HACK: anonymizes address when entity is null due to internal engine trickery.
         if isNull (entity :> obj) then Address.anonymize address else acatf address entity.EntityAddress
@@ -1833,7 +1839,7 @@ and [<ReferenceEquality>] internal Subsystems =
 and [<ReferenceEquality>] internal WorldExtension =
     { // cache line 1 (assuming 16 byte header)
       mutable ContextImNui : Address
-      mutable RecentImNui : Address
+      mutable DeclaredImNui : Address
       mutable SimulantImNuis : SUMap<Address, SimulantImNui>
       mutable SubscriptionImNuis : SUMap<string * Address * Address, SubscriptionImNui>
       GeometryViewport : Viewport
@@ -1893,6 +1899,10 @@ and [<ReferenceEquality>] World =
     /// Check the the world's frame rate is being explicitly paced based on clock progression.
     member this.FramePacing =
         this.AmbientState.FramePacing
+
+    /// Get the number of updates that have transpired between this and the previous frame.
+    member this.UpdateDelta =
+        AmbientState.getUpdateDelta this.AmbientState
 
     /// Get the number of updates that have transpired.
     member this.UpdateTime =
@@ -1971,40 +1981,40 @@ and [<ReferenceEquality>] World =
         | (true, simulantImNui) -> simulantImNui.SimulantInitializing
         | (false, _) -> false
 
-    /// Get the most recent ImNui context.
-    member this.RecentImNui =
-        this.WorldExtension.RecentImNui
+    /// Get the recent ImNui declaration.
+    member this.DeclaredImNui =
+        this.WorldExtension.DeclaredImNui
 
-    /// Get the most recent ImNui Game context (throwing upon failure).
-    member this.RecentGame =
-        if this.WorldExtension.RecentImNui.Names.Length > 0
+    /// Get the recent ImNui Game declaration (throwing upon failure).
+    member this.DeclaredGame =
+        if this.WorldExtension.DeclaredImNui.Names.Length > 0
         then Game.Handle
-        else raise (InvalidOperationException "Recent ImNui context not of type needed to construct requested handle.")
+        else raise (InvalidOperationException "ImNui declaration not of type needed to construct requested handle.")
 
-    /// Get the most recent ImNui Screen context (throwing upon failure).
-    member this.RecentScreen =
-        match this.WorldExtension.RecentImNui with
+    /// Get the recent ImNui Screen declaration (throwing upon failure).
+    member this.DeclaredScreen =
+        match this.WorldExtension.DeclaredImNui with
         | :? (Screen Address) as screenAddress -> Screen screenAddress
         | :? (Group Address) as groupAddress -> Screen (Array.take 2 groupAddress.Names)
         | :? (Entity Address) as entityAddress -> Screen (Array.take 2 entityAddress.Names)
-        | _ -> raise (InvalidOperationException "Recent ImNui context not of type needed to construct requested handle.")
+        | _ -> raise (InvalidOperationException "ImNui declaration not of type needed to construct requested handle.")
 
-    /// Get the most recent ImNui Group context (throwing upon failure).
-    member this.RecentGroup =
-        match this.WorldExtension.RecentImNui with
+    /// Get the recent ImNui Group declaration (throwing upon failure).
+    member this.DeclaredGroup =
+        match this.WorldExtension.DeclaredImNui with
         | :? (Group Address) as groupAddress -> Group (Array.take 3 groupAddress.Names)
         | :? (Entity Address) as entityAddress -> Group (Array.take 3 entityAddress.Names)
-        | _ -> raise (InvalidOperationException "Recent ImNui context not of type needed to construct requested handle.")
+        | _ -> raise (InvalidOperationException "ImNui declaration not of type needed to construct requested handle.")
 
-    /// Get the most recent ImNui Entity context (throwing upon failure).
-    member this.RecentEntity =
-        match this.WorldExtension.RecentImNui with
+    /// Get the recent ImNui Entity declaration (throwing upon failure).
+    member this.DeclaredEntity =
+        match this.WorldExtension.DeclaredImNui with
         | :? (Entity Address) as entityAddress -> Entity entityAddress
-        | _ -> raise (InvalidOperationException "Recent ImNui context not of type needed to construct requested handle.")
+        | _ -> raise (InvalidOperationException "ImNui declaration not of type needed to construct requested handle.")
 
-    /// Check that the recent ImNui context is initializing this frame.
-    member this.RecentInitializing =
-        match this.WorldExtension.SimulantImNuis.TryGetValue this.WorldExtension.RecentImNui with
+    /// Check that the recent ImNui declaration is initializing this frame.
+    member this.DeclaredInitializing =
+        match this.WorldExtension.SimulantImNuis.TryGetValue this.WorldExtension.DeclaredImNui with
         | (true, simulantImNui) -> simulantImNui.SimulantInitializing
         | (false, _) -> false
 
@@ -2014,14 +2024,62 @@ and [<ReferenceEquality>] World =
     member internal this.SubscriptionImNuis =
         this.WorldExtension.SubscriptionImNuis
 
+    /// The viewport of the geometry buffer.
     member this.GeometryViewport =
         this.WorldExtension.GeometryViewport
 
+    /// The viewport of the rasterization buffer.
     member this.RasterViewport =
         this.WorldExtension.RasterViewport
 
+    /// The viewport of the outer (full screen) buffer.
     member this.OuterViewport =
         this.WorldExtension.OuterViewport
+
+    /// Get the center of the 2D eye.
+    member this.Eye2dCenter =
+        this.GameState.Eye2dCenter
+
+    /// Get the size of the 2D eye.
+    member this.Eye2dSize =
+        this.GameState.Eye2dSize
+
+    /// Get the bounds of the 2D eye.
+    member this.Eye2dBounds =
+        let eyeCenter = this.Eye2dCenter
+        let eyeSize = this.Eye2dSize
+        box2 (eyeCenter - eyeSize * 0.5f) eyeSize
+
+    /// Get the center of the 3D eye.
+    member this.Eye3dCenter =
+        this.GameState.Eye3dCenter
+
+    /// Get the rotation of the 3D eye.
+    member this.Eye3dRotation =
+        this.GameState.Eye3dRotation
+
+    /// Get the field of view of the 3D eye.
+    member this.Eye3dFieldOfView =
+        this.GameState.Eye3dFieldOfView
+
+    /// Get the interior frustum of the 3D eye.
+    member this.Eye3dFrustumInterior =
+        this.GameState.Eye3dFrustumInterior
+
+    /// Get the exterior frustum of the 3D eye.
+    member this.Eye3dFrustumExterior =
+        this.GameState.Eye3dFrustumExterior
+
+    /// Get the exterior frustum of the 3D eye.
+    member this.Eye3dFrustumImposter =
+        this.GameState.Eye3dFrustumImposter
+
+    /// Get the view frustum of the 3D eye.
+    member this.Eye3dFrustumView =
+        let eyeCenter = this.Eye3dCenter
+        let eyeRotation = this.Eye3dRotation
+        let eyeFieldOfView = this.Eye3dFieldOfView
+        Viewport.getFrustum eyeCenter eyeRotation eyeFieldOfView this.RasterViewport
 
 #if DEBUG
     member internal this.Choose () =

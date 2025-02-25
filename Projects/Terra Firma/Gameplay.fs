@@ -30,10 +30,10 @@ type GameplayDispatcher () =
          define Screen.Score 0]
 
     // here we define the behavior of our gameplay
-    override this.Process (screenResults, gameplay, world) =
+    override this.Process (screenResults, screen, world) =
 
         // only process when selected
-        if gameplay.GetSelected world then
+        if screen.GetSelected world then
 
             // process scene initialization
             let initializing = FQueue.contains Select screenResults
@@ -44,7 +44,7 @@ type GameplayDispatcher () =
                     world
                 else world
 
-            // declare scene group
+            // begin scene declaration
             let world = World.beginGroupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] world
 
             // declare player
@@ -55,35 +55,35 @@ type GameplayDispatcher () =
                     world
 
             // process attacks
-            let (attacks, world) = World.doSubscription "Attack" (Events.AttackEvent --> Simulants.GameplayScene --> Address.Wildcard) world
+            let (attacks, world) = World.doSubscription "Attacks" (Events.AttackEvent --> Simulants.GameplayScene --> Address.Wildcard) world
             let world =
-                FQueue.fold (fun world (attacked : Entity) ->
-                    let world = attacked.HitPoints.Map (dec >> max 0) world
-                    if attacked.GetHitPoints world > 0 then
-                        if not (attacked.GetActionState world).IsInjuryState then
-                            let world = attacked.SetActionState (InjuryState { InjuryTime = world.UpdateTime }) world
-                            let world = attacked.SetLinearVelocity (v3Up * attacked.GetLinearVelocity world) world
+                FQueue.fold (fun world (attack : Entity) ->
+                    let world = attack.HitPoints.Map (dec >> max 0) world
+                    if attack.GetHitPoints world > 0 then
+                        if not (attack.GetActionState world).IsInjuryState then
+                            let world = attack.SetActionState (InjuryState { InjuryTime = world.UpdateTime }) world
+                            let world = attack.SetLinearVelocity (v3Up * attack.GetLinearVelocity world) world
                             World.playSound Constants.Audio.SoundVolumeDefault Assets.Gameplay.InjureSound world
                             world
                         else world
                     else
-                        if not (attacked.GetActionState world).IsWoundState then
-                            let world = attacked.SetActionState (WoundState { WoundTime = world.UpdateTime }) world
-                            let world = attacked.SetLinearVelocity (v3Up * attacked.GetLinearVelocity world) world
+                        if not (attack.GetActionState world).IsWoundState then
+                            let world = attack.SetActionState (WoundState { WoundTime = world.UpdateTime }) world
+                            let world = attack.SetLinearVelocity (v3Up * attack.GetLinearVelocity world) world
                             World.playSound Constants.Audio.SoundVolumeDefault Assets.Gameplay.InjureSound world
                             world
                         else world)
                     world attacks
 
             // process enemy deaths
-            let (deaths, world) = World.doSubscription "Die" (Events.DieEvent --> Simulants.GameplayScene --> Address.Wildcard) world
+            let (deaths, world) = World.doSubscription "Deaths" (Events.DeathEvent --> Simulants.GameplayScene --> Address.Wildcard) world
             let enemyDeaths = FQueue.filter (fun (death : Entity) -> death.GetCharacterType world = Enemy) deaths
             let world = FQueue.fold (fun world death -> World.destroyEntity death world) world enemyDeaths
-            let world = gameplay.Score.Map (fun score -> score + enemyDeaths.Length * 100) world
+            let world = screen.Score.Map (fun score -> score + enemyDeaths.Length * 100) world
         
-            // process player death
+            // process player deaths
             let playerDeaths = FQueue.filter (fun (death : Entity) -> death.GetCharacterType world = Player) deaths
-            let world = if FQueue.notEmpty playerDeaths then gameplay.SetGameplayState Quit world else world
+            let world = if FQueue.notEmpty playerDeaths then screen.SetGameplayState Quit world else world
 
             // update sun to shine over player as snapped to shadow map's texel grid in shadow space. This is similar
             // in concept to - https://learn.microsoft.com/en-us/windows/win32/dxtecharts/common-techniques-to-improve-shadow-depth-maps?redirectedfrom=MSDN#moving-the-light-in-texel-sized-increments
@@ -94,7 +94,7 @@ type GameplayDispatcher () =
             let shadowWidth = sun.GetLightCutoff world * 2.0f
             let shadowResolution = Viewport.getShadowTextureBufferResolution 0 world.GeometryViewport
             let shadowTexelSize = shadowWidth / single shadowResolution.X // assuming square, of course
-            let position = Simulants.GameplayPlayer.GetPosition world
+            let position = Simulants.GameplayPlayer.GetPositionInterpolated world
             let positionShadow = position.Transform shadowView + v3Up * 12.0f // position of player + offset in shadow space
             let positionSnapped =
                 v3
@@ -103,34 +103,30 @@ type GameplayDispatcher () =
                     (floor (positionShadow.Z / shadowTexelSize) * shadowTexelSize)
             let position = positionSnapped.Transform shadowViewInverse
             let world = sun.SetPosition position world
-        
+
             // update eye to look at player while game is advancing
             let world =
                 if world.Advancing then
-                    let position = Simulants.GameplayPlayer.GetPosition world
-                    let rotation = Simulants.GameplayPlayer.GetRotation world * Quaternion.CreateFromAxisAngle (v3Right, -0.1f)
+                    let position = Simulants.GameplayPlayer.GetPositionInterpolated world
+                    let rotation = Simulants.GameplayPlayer.GetRotationInterpolated world * Quaternion.CreateFromAxisAngle (v3Right, -0.1f)
                     let world = World.setEye3dCenter (position + v3Up * 1.75f - rotation.Forward * 3.0f) world
                     let world = World.setEye3dRotation rotation world
                     world
                 else world
 
             // process nav sync
-            let world = if initializing then World.synchronizeNav3d gameplay world else world
+            let world = if initializing then World.synchronizeNav3d screen world else world
 
             // end scene declaration
             let world = World.endGroup world
 
             // declare gui group
             let world = World.beginGroup "Gui" [] world
-            let world = World.doText "Score" [Entity.Position .= v3 260.0f 155.0f 0.0f; Entity.Elevation .= 10.0f; Entity.Text @= "Score: " + string (gameplay.GetScore world)] world
+            let world = World.doText "Score" [Entity.Position .= v3 260.0f 155.0f 0.0f; Entity.Elevation .= 10.0f; Entity.Text @= "Score: " + string (screen.GetScore world)] world
             let (clicked, world) = World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Elevation .= 10.0f; Entity.Text .= "Quit"] world
-            let world = if clicked then gameplay.SetGameplayState Quit world else world
+            let world = if clicked then screen.SetGameplayState Quit world else world
             let world = World.endGroup world
             world
 
         // otherwise, no processing
         else world
-
-    // this is a semantic fix-up that allows the editor to avoid creating an unused group. This is specific to the
-    // ImNui API that is needed to patch a little semantic hole inherent in the immediate-mode programming idiom.
-    override this.CreateDefaultGroup (screen, world) = World.createGroup (Some "Gui") screen world

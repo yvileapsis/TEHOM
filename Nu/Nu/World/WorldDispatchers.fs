@@ -26,7 +26,6 @@ type GuiDispatcher () =
          define Entity.Size Constants.Engine.EntityGuiSizeDefault
          define Entity.Elevation 1.0f
          define Entity.ElevationLocal 1.0f
-         define Entity.Presence Omnipresent
          define Entity.ColorDisabled Constants.Gui.ColorDisabledDefault]
 
 /// A 3d entity dispatcher.
@@ -219,8 +218,7 @@ type Box2dDispatcher () =
          typeof<StaticSpriteFacet>]
 
     static member Properties =
-        [define Entity.Static false
-         define Entity.BodyType Dynamic
+        [define Entity.BodyType Dynamic
          define Entity.BodyShape (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })]
 
 /// Gives an entity the base behavior of a rigid 2d sphere using static physics.
@@ -244,8 +242,7 @@ type Ball2dDispatcher () =
          typeof<StaticSpriteFacet>]
 
     static member Properties =
-        [define Entity.Static false
-         define Entity.BodyType Dynamic
+        [define Entity.BodyType Dynamic
          define Entity.BodyShape (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
          define Entity.StaticImage Assets.Default.Ball]
 
@@ -285,8 +282,7 @@ type Character2dDispatcher () =
         [typeof<RigidBodyFacet>]
 
     static member Properties =
-        [define Entity.Static false
-         define Entity.CelSize (v2 28.0f 28.0f)
+        [define Entity.CelSize (v2 28.0f 28.0f)
          define Entity.CelRun 8
          define Entity.AnimationDelay (GameTime.ofSeconds (1.0f / 15.0f))
          define Entity.BodyType Dynamic
@@ -380,6 +376,9 @@ type SpineSkeletonDispatcher () =
 type SkyBoxDispatcher () =
     inherit Entity3dDispatcher (false, false, false)
 
+    override this.PresenceOverride =
+        ValueSome Omnipresent
+
     static member Facets =
         [typeof<SkyBoxFacet>]
 
@@ -394,9 +393,11 @@ type Lighting3dConfigDispatcher () =
     inherit Entity3dDispatcher (false, false, false)
 
     static member Properties =
-        [define Entity.Lighting3dConfig Lighting3dConfig.defaultConfig
-         define Entity.Presence Omnipresent
-         define Entity.AlwaysUpdate true]
+        [define Entity.AlwaysUpdate true
+         define Entity.Lighting3dConfig Lighting3dConfig.defaultConfig]
+
+    override this.PresenceOverride =
+        ValueSome Omnipresent
 
     override this.Update (entity, world) =
         let config = entity.GetLighting3dConfig world
@@ -409,6 +410,9 @@ type LightProbe3dDispatcher () =
 
     static member Facets =
         [typeof<LightProbe3dFacet>]
+
+    override this.PresenceOverride =
+        ValueSome Omnipresent
 
     override this.GetAttributesInferred (_, _) =
         AttributesInferred.important (v3Dup 0.25f) v3Zero
@@ -429,6 +433,13 @@ type StaticBillboardDispatcher () =
 
     static member Facets =
         [typeof<StaticBillboardFacet>]
+
+/// Gives an entity the base behavior of an animated billboard.
+type AnimatedBillboardDispatcher () =
+    inherit Entity3dDispatcher (false, false, false)
+
+    static member Facets =
+        [typeof<AnimatedBillboardFacet>]
 
 /// Gives an entity the base behavior of a static model.
 type StaticModelDispatcher () =
@@ -554,8 +565,7 @@ type Box3dDispatcher () =
          typeof<NavBodyFacet>]
 
     static member Properties =
-        [define Entity.Static false
-         define Entity.BodyType Dynamic]
+        [define Entity.BodyType Dynamic]
 
 /// Gives an entity the base behavior of a rigid 3d sphere using static physics.
 type Sphere3dDispatcher () =
@@ -580,8 +590,7 @@ type Ball3dDispatcher () =
          typeof<NavBodyFacet>]
 
     static member Properties =
-        [define Entity.Static false
-         define Entity.BodyType Dynamic
+        [define Entity.BodyType Dynamic
          define Entity.BodyShape (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
          define Entity.StaticModel Assets.Default.BallModel]
 
@@ -594,8 +603,7 @@ type Character3dDispatcher () =
          typeof<AnimatedModelFacet>]
 
     static member Properties =
-        [define Entity.Static false
-         define Entity.BodyType KinematicCharacter
+        [define Entity.BodyType KinematicCharacter
          define Entity.BodyShape (CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None })]
 
     override this.Update (entity, world) =
@@ -646,6 +654,9 @@ type TerrainDispatcher () =
 
     static member Facets =
         [typeof<TerrainFacet>]
+
+    override this.PresenceOverride =
+        ValueSome Omnipresent
 
 [<AutoOpen>]
 module Nav3dConfigDispatcherExtensions =

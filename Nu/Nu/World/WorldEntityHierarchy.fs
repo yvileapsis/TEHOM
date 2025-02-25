@@ -141,11 +141,14 @@ module WorldEntityHierarchy =
         /// into a manually renderable array.
         static member freezeEntityHierarchy surfaceMaterialsPopulated (parent : Entity) wtemp =
             let mutable (world, boundsOpt) = (wtemp, Option<Box3>.None) // using mutation because I was in a big hurry when I wrote this
+            let frozenEntities = List ()
             let frozenSurfaces = List ()
             let rec getFrozenArtifacts (entity : Entity) =
                 if entity <> parent then
                     if entity.GetFreezable world then // NOTE: shouldn't matter in practice, but there are O(n^2) calls to GetFreezable implicated here.
-                        if entity.Has<StaticModelSurfaceFacet> world then
+                        if getType (entity.GetDispatcher world) = typeof<Entity3dDispatcher> then
+                            frozenEntities.Add entity
+                        elif entity.Has<StaticModelSurfaceFacet> world then
                             let mutable transform = entity.GetTransform world
                             let castShadow = transform.CastShadow
                             let affineMatrix = transform.AffineMatrix
@@ -156,11 +159,12 @@ module WorldEntityHierarchy =
                             let material = entity.GetMaterial world
                             let staticModel = entity.GetStaticModel world
                             let surfaceIndex = entity.GetSurfaceIndex world
+                            let depthTest = entity.GetDepthTest world
                             let renderType = match entity.GetRenderStyle world with Deferred -> DeferredRenderType | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-                            let surface = { CastShadow = castShadow; ModelMatrix = affineMatrix; Presence = presence; InsetOpt = insetOpt; MaterialProperties = properties; Material = material; SurfaceIndex = surfaceIndex; StaticModel = staticModel; RenderType = renderType }
+                            let surface = { CastShadow = castShadow; ModelMatrix = affineMatrix; Presence = presence; InsetOpt = insetOpt; MaterialProperties = properties; Material = material; SurfaceIndex = surfaceIndex; StaticModel = staticModel; DepthTest = depthTest; RenderType = renderType }
                             let frozenSurface = StructPair.make entityBounds surface
                             boundsOpt <- match boundsOpt with Some bounds -> Some (bounds.Combine entityBounds) | None -> Some entityBounds
-                            world <- entity.SetVisibleLocal false world
+                            frozenEntities.Add entity
                             frozenSurfaces.Add frozenSurface
                         elif
                             entity.Has<StaticModelFacet> world &&
@@ -173,6 +177,7 @@ module WorldEntityHierarchy =
                             let insetOpt = match entity.GetInsetOpt world with Some inset -> Some inset | None -> None // OPTIMIZATION: localize boxed value in memory.
                             let properties = entity.GetMaterialProperties world
                             let staticModel = entity.GetStaticModel world
+                            let depthTest = entity.GetDepthTest world
                             let metadata = Metadata.getStaticModelMetadata (entity.GetStaticModel world)
                             let mutable surfaceIndex = 0
                             while surfaceIndex < metadata.Surfaces.Length do
@@ -195,16 +200,17 @@ module WorldEntityHierarchy =
                                           HeightImageOpt = Metadata.tryGetStaticModelHeightImage surface.SurfaceMaterialIndex staticModel
                                           TwoSidedOpt = Metadata.tryGetStaticModelTwoSided surface.SurfaceMaterialIndex staticModel }
                                     else Material.empty
-                                let surface = { CastShadow = castShadow; ModelMatrix = surfaceMatrix; Presence = presence; InsetOpt = insetOpt; MaterialProperties = properties; Material = material; SurfaceIndex = surfaceIndex; StaticModel = staticModel; RenderType = renderType }
+                                let surface = { CastShadow = castShadow; ModelMatrix = surfaceMatrix; Presence = presence; InsetOpt = insetOpt; MaterialProperties = properties; Material = material; SurfaceIndex = surfaceIndex; StaticModel = staticModel; DepthTest = depthTest; RenderType = renderType }
                                 let frozenSurface = StructPair.make surfaceBounds surface                                
                                 boundsOpt <- match boundsOpt with Some bounds -> Some (bounds.Combine surfaceBounds) | None -> Some surfaceBounds
-                                world <- entity.SetVisibleLocal false world
                                 frozenSurfaces.Add frozenSurface
                                 surfaceIndex <- inc surfaceIndex
-                            world <- entity.SetVisibleLocal false world
+                            frozenEntities.Add entity
                 for child in entity.GetChildren world do
                     getFrozenArtifacts child
             getFrozenArtifacts parent
+            for entity in frozenEntities do
+                world <- entity.SetVisibleLocal false world
             world <- parent.SetPresence Omnipresent world
             world <- parent.SetPickable false world
             match boundsOpt with
@@ -279,7 +285,7 @@ module FreezerFacetModule =
 
         override this.Register (entity, world) =
             let world = entity.SetOffset v3Zero world
-            let world = World.frame (entity.UpdateFrozenHierarchy) entity world // children not loaded yet, so freeze at end of frame
+            let world = World.defer (entity.UpdateFrozenHierarchy) entity world // children not loaded yet, so freeze at end of frame
             let world = World.monitor handleUpdateFrozenHierarchy (entity.ChangeEvent (nameof entity.Frozen)) entity world
             world
 
@@ -308,7 +314,7 @@ module FreezerFacetModule =
                     let bounds = &boundsAndSurface.Fst
                     let surface = &boundsAndSurface.Snd
                     if (not renderPass.IsShadowPass || surface.CastShadow) && intersects false false surface.Presence bounds then
-                        World.renderStaticModelSurfaceFast (&surface.ModelMatrix, surface.CastShadow, surface.Presence, Option.toValueOption surface.InsetOpt, &surface.MaterialProperties, &surface.Material, surface.StaticModel, surface.SurfaceIndex, surface.RenderType, renderPass, world)
+                        World.renderStaticModelSurfaceFast (&surface.ModelMatrix, surface.CastShadow, surface.Presence, Option.toValueOption surface.InsetOpt, &surface.MaterialProperties, &surface.Material, surface.StaticModel, surface.SurfaceIndex, surface.DepthTest, surface.RenderType, renderPass, world)
 
 [<AutoOpen>]
 module StaticModelHierarchyDispatcherModule =

@@ -67,7 +67,7 @@ type GameplayDispatcher () =
          Screen.DeselectingEvent => FinishQuitting
          Screen.PostUpdateEvent => UpdateEye
          for i in 0 .. dec SectionCount do
-            Events.DieEvent --> Simulants.GameplaySection i --> Address.Wildcard => Score 100]
+            Events.DeathEvent --> Simulants.GameplaySection i --> Address.Wildcard => Score 100]
 
     // here we handle the above messages
     override this.Message (gameplay, message, _, _) =
@@ -129,8 +129,8 @@ type GameplayDispatcher () =
             if world.Advancing then
                 let playerPosition = Simulants.GameplayPlayer.GetPosition world
                 let playerSize = Simulants.GameplayPlayer.GetSize world
-                let eyeCenter = World.getEye2dCenter world
-                let eyeSize = World.getEye2dSize world
+                let eyeCenter = world.Eye2dCenter
+                let eyeSize = world.Eye2dSize
                 let eyeCenter = v2 (playerPosition.X + playerSize.X * 0.5f + eyeSize.X * 0.33f) eyeCenter.Y
                 let world = World.setEye2dCenter eyeCenter world
                 just world
@@ -145,7 +145,7 @@ type GameplayDispatcher () =
                 [Content.entity<PlayerDispatcher> Simulants.GameplayPlayer.Name
                     [Entity.Position == v3 -390.0f -50.0f 0.0f
                      Entity.Elevation == 1.0f
-                     Entity.DieEvent => StartQuitting]]
+                     Entity.DeathEvent => StartQuitting]]
             
          // the gui group
          Content.group Simulants.GameplayGui.Name []

@@ -21,7 +21,6 @@ type BulletDispatcher () =
 
     static member Properties =
         [define Entity.Size (v3 16.0f 16.0f 0.0f)
-         define Entity.Static false
          define Entity.BodyType Dynamic
          define Entity.BodyShape (SphereShape { Radius = 0.5f; TransformOpt = None; PropertiesOpt = None })
          define Entity.Restitution 0.5f
@@ -36,7 +35,7 @@ type BulletDispatcher () =
 
         // process impact
         let localTime = world.UpdateTime - entity.GetCreationTime world
-        let (penetrations, world) = World.doSubscription "Penetration" entity.BodyPenetrationEvent world
+        let (penetrations, world) = World.doSubscription "Penetrations" entity.BodyPenetrationEvent world
         if localTime = Constants.Gameplay.BulletLifeTime || FQueue.notEmpty penetrations
         then World.destroyEntity entity world
         else world

@@ -151,7 +151,7 @@ module WorldGroupModule =
             | (false, _) -> Seq.empty
 
         /// Create a group and add it to the world.
-        static member createGroup4 dispatcherName nameOpt (screen : Screen) world =
+        static member createGroup5 skipProcessing dispatcherName nameOpt (screen : Screen) world =
             let dispatchers = World.getGroupDispatchers world
             let dispatcher =
                 match Map.tryFind dispatcherName dispatchers with
@@ -168,8 +168,8 @@ module WorldGroupModule =
                 else world
             let world = World.addGroup false groupState group world
             let world =
-                if WorldModule.UpdatingSimulants && group.GetSelected world
-                then WorldModule.tryProcessGroup group world
+                if not skipProcessing && WorldModule.UpdatingSimulants && group.GetSelected world
+                then WorldModule.tryProcessGroup true group world
                 else world
             (group, world)
 
@@ -181,7 +181,7 @@ module WorldGroupModule =
                     | None -> None
                     | Some [|name|] -> Some name
                     | Some _ -> failwith "Group cannot have multiple names."
-                World.createGroup4 descriptor.SimulantDispatcherName groupNameOpt screen world
+                World.createGroup5 false descriptor.SimulantDispatcherName groupNameOpt screen world
             let world =
                 List.fold (fun world (propertyName, property) ->
                     World.setGroupProperty propertyName property group world |> snd')
@@ -197,7 +197,7 @@ module WorldGroupModule =
 
         /// Create a group and add it to the world.
         static member createGroup<'d when 'd :> GroupDispatcher> nameOpt screen world =
-            World.createGroup4 typeof<'d>.Name nameOpt screen world
+            World.createGroup5 false typeof<'d>.Name nameOpt screen world
 
         /// Destroy a group in the world immediately. Can be dangerous if existing in-flight publishing depends on the
         /// group's existence. Consider using World.destroyGroup instead.
@@ -208,6 +208,7 @@ module WorldGroupModule =
                 let entities = World.getEntitiesSovereign group world
                 let world = World.unregisterGroup group world
                 let world = World.removeTasklets group world
+                let world = World.removeSimulantImNui group world
                 let world = World.destroyEntitiesImmediate entities world
                 World.removeGroupState group world
             else world
@@ -226,7 +227,7 @@ module WorldGroupModule =
 
         /// Destroy multiple groups from the world at the end of the current update.
         static member destroyGroups groups world =
-            World.frame (World.destroyGroupsImmediate groups) Game.Handle world
+            World.defer (World.destroyGroupsImmediate groups) Game.Handle world
 
         /// Rename a group. Note that since this destroys the renamed group immediately, you should not call this
         /// inside an event handler that involves the reassigned group itself. Note this also renames all of its
@@ -246,14 +247,14 @@ module WorldGroupModule =
                 let world = World.destroyGroupImmediate source world
                 let world =
                     if WorldModule.UpdatingSimulants && source.GetSelected world
-                    then WorldModule.tryProcessGroup destination world
+                    then WorldModule.tryProcessGroup true destination world
                     else world
                 world
             | None -> world
 
         /// Rename a group.
         static member renameGroup source destination world =
-            World.frame (World.renameGroupImmediate source destination) Game.Handle world
+            World.defer (World.renameGroupImmediate source destination) Game.Handle world
 
         /// Write a group to a group descriptor.
         static member writeGroup (groupDescriptor : GroupDescriptor) group world =
@@ -317,7 +318,7 @@ module WorldGroupModule =
             // try to process ImNui group first time if in the middle of simulant update phase
             let world =
                 if WorldModule.UpdatingSimulants && group.GetSelected world
-                then WorldModule.tryProcessGroup group world
+                then WorldModule.tryProcessGroup true group world
                 else world
             (group, world)
 

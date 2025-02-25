@@ -75,16 +75,16 @@ module WorldModule =
     let mutable internal unregister : Simulant -> World -> World =
         Unchecked.defaultof<_>
         
-    let mutable internal tryProcessGame : Game -> World -> World =
+    let mutable internal tryProcessGame : bool -> Game -> World -> World =
         Unchecked.defaultof<_>
         
-    let mutable internal tryProcessScreen : bool -> Screen -> World -> World =
+    let mutable internal tryProcessScreen : bool -> bool -> Screen -> World -> World =
         Unchecked.defaultof<_>
         
-    let mutable internal tryProcessGroup : Group -> World -> World =
+    let mutable internal tryProcessGroup : bool -> Group -> World -> World =
         Unchecked.defaultof<_>
         
-    let mutable internal tryProcessEntity : Entity -> World -> World =
+    let mutable internal tryProcessEntity : bool -> Entity -> World -> World =
         Unchecked.defaultof<_>
 
     let mutable internal signal : obj -> Simulant -> World -> World =
@@ -182,7 +182,7 @@ module WorldModule =
 
         /// Set whether the world state is advancing.
         static member setAdvancing advancing world =
-            World.frame (World.mapAmbientState (AmbientState.setAdvancing advancing)) Game.Handle world
+            World.defer (World.mapAmbientState (AmbientState.setAdvancing advancing)) Game.Handle world
 
         /// Set whether the world's frame rate is being explicitly paced based on clock progression.
         static member setFramePacing clockPacing world =
@@ -214,6 +214,10 @@ module WorldModule =
 
         static member internal updateTime world =
             World.mapAmbientState AmbientState.updateTime world
+
+        /// Get the world's update delta time.
+        static member getUpdateDelta world =
+            World.getAmbientStateBy AmbientState.getUpdateDelta world
 
         /// Get the world's update time.
         static member getUpdateTime world =
@@ -259,46 +263,46 @@ module WorldModule =
         static member getContextInitializing (world : World) =
             world.ContextInitializing
 
-        /// Get the most recent ImNui context.
-        static member getRecentImNui (world : World) =
-            world.RecentImNui
+        /// Get the recent ImNui declaration.
+        static member getDeclaredImNui (world : World) =
+            world.DeclaredImNui
 
-        /// Get the most recent ImNui context translated to a Game handle (throwing upon failure).
-        static member getRecentGame (world : World) =
-            world.RecentGame
+        /// Get the recent ImNui declaration translated to a Game handle (throwing upon failure).
+        static member getDeclaredGame (world : World) =
+            world.DeclaredGame
 
-        /// Get the most recent ImNui context translated to a Screen handle (throwing upon failure).
-        static member getRecentScreen (world : World) =
-            world.RecentScreen
+        /// Get the recent ImNui declaration translated to a Screen handle (throwing upon failure).
+        static member getDeclaredScreen (world : World) =
+            world.DeclaredScreen
 
-        /// Get the most recent ImNui context translated to a Group handle (throwing upon failure).
-        static member getRecentGroup (world : World) =
-            world.RecentGroup
+        /// Get the recent ImNui declaration translated to a Group handle (throwing upon failure).
+        static member getDeclaredGroup (world : World) =
+            world.DeclaredGroup
 
-        /// Get the most recent ImNui context translated to a Entity handle (throwing upon failure).
-        static member getRecentEntity (world : World) =
-            world.RecentEntity
+        /// Get the recent ImNui declaration translated to a Entity handle (throwing upon failure).
+        static member getDeclaredEntity (world : World) =
+            world.DeclaredEntity
 
-        /// Check that the recent ImNui context is initializing this frame.
-        static member getRecentInitializing (world : World) =
-            world.RecentInitializing
+        /// Check that the recent ImNui declaration is initializing this frame.
+        static member getDeclaredInitializing (world : World) =
+            world.DeclaredInitializing
 
         static member internal setContext context (world : World) =
             if world.Imperative then
-                world.WorldExtension.RecentImNui <- world.WorldExtension.ContextImNui
+                world.WorldExtension.DeclaredImNui <- world.WorldExtension.ContextImNui
                 world.WorldExtension.ContextImNui <- context
                 world
             else
-                let worldExtension = { world.WorldExtension with RecentImNui = world.WorldExtension.ContextImNui; ContextImNui = context }
+                let worldExtension = { world.WorldExtension with DeclaredImNui = world.WorldExtension.ContextImNui; ContextImNui = context }
                 World.choose { world with WorldExtension = worldExtension }
 
-        static member internal advanceContext recent context (world : World) =
+        static member internal advanceContext declared context (world : World) =
             if world.Imperative then
-                world.WorldExtension.RecentImNui <- recent
+                world.WorldExtension.DeclaredImNui <- declared
                 world.WorldExtension.ContextImNui <- context
                 world
             else
-                let worldExtension = { world.WorldExtension with RecentImNui = recent; ContextImNui = context }
+                let worldExtension = { world.WorldExtension with DeclaredImNui = declared; ContextImNui = context }
                 World.choose { world with WorldExtension = worldExtension }
 
         static member internal getSimulantImNuis (world : World) =
@@ -318,6 +322,9 @@ module WorldModule =
         static member internal addSimulantImNui simulant simulantImNui (world : World) =
             let simulantImNuis = SUMap.add simulant simulantImNui world.SimulantImNuis
             World.setSimulantImNuis simulantImNuis world
+
+        static member internal removeSimulantImNui (simulant : Simulant) (world : World) =
+            World.setSimulantImNuis (SUMap.remove simulant.SimulantAddress world.SimulantImNuis) world
 
         static member internal tryMapSimulantImNui mapper simulant (world : World) =
             match world.SimulantImNuis.TryGetValue simulant with
@@ -413,7 +420,7 @@ module WorldModule =
             World.addTasklet simulant tasklet world
 
         /// Schedule an operation to be executed by the engine at the end of the current frame or the next frame if we've already started processing tasklets.
-        static member frame operation (simulant : Simulant) (world : World) =
+        static member defer operation (simulant : Simulant) (world : World) =
             let time = if TaskletProcessingStarted && world.Advancing then UpdateTime 1L else UpdateTime 0L
             World.schedule time operation simulant world
 

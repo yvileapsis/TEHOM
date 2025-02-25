@@ -61,7 +61,6 @@ type Nu () =
             WorldTypes.getSelectedScreenIdling <- fun worldObj -> World.getSelectedScreenIdling (worldObj :?> World)
             WorldTypes.getSelectedScreenTransitioning <- fun worldObj -> World.getSelectedScreenTransitioning (worldObj :?> World)
             WorldTypes.handleSubscribeAndUnsubscribeEvent <- fun subscribing eventAddress subscriber worldObj -> World.handleSubscribeAndUnsubscribeEvent subscribing eventAddress subscriber (worldObj :?> World)
-            WorldTypes.createDefaultGroup <- fun screenObj worldObj -> let (screen, world) = World.createGroup (Some "Group") (screenObj :?> Screen) (worldObj :?> World) in (screen, world)
             WorldTypes.getEntityIs2d <- fun entityObj worldObj -> World.getEntityIs2d (entityObj :?> Entity) (worldObj :?> World)
 
             // init WorldModule F# reach-arounds
@@ -156,10 +155,11 @@ module WorldModule3 =
                  Light3dDispatcher ()
                  SkyBoxDispatcher ()
                  StaticBillboardDispatcher ()
-                 StaticModelSurfaceDispatcher ()
-                 RigidModelSurfaceDispatcher ()
+                 AnimatedBillboardDispatcher ()
                  StaticModelDispatcher ()
                  AnimatedModelDispatcher ()
+                 StaticModelSurfaceDispatcher ()
+                 RigidModelSurfaceDispatcher ()
                  RigidModelDispatcher ()
                  BasicStaticBillboardEmitterDispatcher ()
                  Effect3dDispatcher ()
@@ -212,11 +212,13 @@ module WorldModule3 =
                  Light3dFacet ()
                  SkyBoxFacet ()
                  StaticBillboardFacet ()
+                 AnimatedBillboardFacet ()
                  BasicStaticBillboardEmitterFacet ()
-                 StaticModelSurfaceFacet ()
                  StaticModelFacet ()
+                 StaticModelSurfaceFacet ()
                  AnimatedModelFacet ()
                  TerrainFacet ()
+                 TraversalInterpoledFacet ()
                  NavBodyFacet ()
                  FollowerFacet ()
                  FreezerFacet ()
@@ -302,7 +304,7 @@ module WorldModule3 =
             let simulants = UMap.singleton HashIdentity.Structural config (Game :> Simulant) None
             let worldExtension =
                 { ContextImNui = Address.empty
-                  RecentImNui = Address.empty
+                  DeclaredImNui = Address.empty
                   SimulantImNuis = SUMap.makeEmpty HashIdentity.Structural config
                   SubscriptionImNuis = SUMap.makeEmpty HashIdentity.Structural config
                   DestructionListRev = []

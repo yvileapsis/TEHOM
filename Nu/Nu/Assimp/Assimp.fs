@@ -45,6 +45,16 @@ type [<SymbolicExpansion; DefaultValue "[[StartTime 0] [LifeTimeOpt None] [Name 
     static member bounce startTime lifeTimeOpt name =
         Animation.make startTime lifeTimeOpt name Bounce 1.0f 1.0f None
 
+/// Specifies the type of desired fragment depth testing.
+type [<Struct>] DepthTest =
+    | LessThanTest
+    | LessThanOrEqualTest
+    | EqualTest
+    | GreaterThanOrEqualTest
+    | GreaterThanTest
+    | NeverPassTest
+    | AlwaysPassTest
+
 /// The type of rendering used on a surface (for use by the higher-level engine API).
 type RenderStyle =
     | Deferred
@@ -255,9 +265,6 @@ module AssimpExtensions =
               Rotation = rotation
               Scaling = scaling
               Weight = weight }
-
-    let private CreateAnimationDecompositionList =
-        Func<_> (fun () -> List<AnimationDecomposition> ())
 
     let private AnimationChannelsCached =
         ConcurrentDictionary<_, _> HashIdentity.Reference
@@ -478,7 +485,7 @@ module AssimpExtensions =
 
             // compute animation decompositions of the current node.
             let mutable nodeTransform = node.Transform // NOTE: if the node is animated, its transform is replaced by that animation entirely.
-            use decompositions = new PooledCollection<_, _> (CreateAnimationDecompositionList)
+            let decompositions = List ()
             for animation in animations do
                 let animationStartTime = animation.StartTime.Seconds
                 let animationLifeTimeOpt = Option.map (fun (lifeTime : GameTime) -> lifeTime.Seconds) animation.LifeTimeOpt
@@ -515,7 +522,7 @@ module AssimpExtensions =
                 let mutable rotationAccumulated = Assimp.Quaternion (0.0f, 0.0f, 0.0f, 0.0f)
                 let mutable scalingAccumulated = Assimp.Vector3D 0.0f
                 let mutable weightAccumulated = 0.0f
-                for decomposition in decompositions.Deref do
+                for decomposition in decompositions do
                     translationAccumulated <- translationAccumulated + decomposition.Translation * decomposition.Weight
                     rotationAccumulated <-
                         if rotationAccumulated.Dot decomposition.Rotation < 0.0f
@@ -562,7 +569,7 @@ module AssimpExtensions =
 
             // log if there are more bones than we currently support
             if mesh.Bones.Count >= Constants.Render.BonesMax then
-                Log.info ("Assimp mesh bone count exceeded currently supported number of bones in scene '" + this.Name + "'.")
+                Log.warn ("Assimp mesh bone count exceeded currently supported number of bones in scene '" + this.Name + "'.")
 
             // pre-compute bone id dict and bone info storage (these should probably persist outside of this function and be reused)
             let boneIds = dictPlus StringComparer.Ordinal []

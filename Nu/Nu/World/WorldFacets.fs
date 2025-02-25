@@ -1308,6 +1308,7 @@ type EffectFacet () =
                               Material = descriptor.Material
                               ShadowOffset = descriptor.ShadowOffset
                               Particles = descriptor.Particles
+                              DepthTest =  LessThanOrEqualTest
                               RenderType = descriptor.RenderType
                               RenderPass = renderPass }
                     World.enqueueRenderMessage3d message world
@@ -2260,13 +2261,15 @@ type SkyBoxFacet () =
     inherit Facet (false, false, false)
 
     static member Properties =
-        [define Entity.Presence Omnipresent
-         define Entity.Static true
+        [define Entity.Static true
          define Entity.AmbientColor Color.White
          define Entity.AmbientBrightness 0.5f
          define Entity.Color Color.White
          define Entity.Brightness 1.0f
          define Entity.CubeMap Assets.Default.SkyBoxMap]
+
+    override this.PresenceOverride =
+        ValueSome Omnipresent
 
     override this.Render (renderPass, entity, world) =
         World.enqueueRenderMessage3d
@@ -2327,12 +2330,14 @@ type LightProbe3dFacet () =
     static member Properties =
         [define Entity.Size (v3Dup 0.25f)
          define Entity.LightProbe true
-         define Entity.Presence Omnipresent
          define Entity.Static true
          define Entity.AmbientColor Color.White
          define Entity.AmbientBrightness 0.5f
          define Entity.ProbeBounds (box3 (v3Dup Constants.Render.LightProbeSizeDefault * -0.5f) (v3Dup Constants.Render.LightProbeSizeDefault))
          nonPersistent Entity.ProbeStale false]
+
+    override this.PresenceOverride =
+        ValueSome Omnipresent
 
     override this.Register (entity, world) =
         let world = World.sense handleProbeVisibleChange entity.Group.Visible.ChangeEvent entity (nameof LightProbe3dFacet) world
@@ -2473,6 +2478,9 @@ module StaticBillboardFacetExtensions =
         member this.GetMaterial world : Material = this.Get (nameof this.Material) world
         member this.SetMaterial (value : Material) world = this.Set (nameof this.Material) value world
         member this.Material = lens (nameof this.Material) this this.GetMaterial this.SetMaterial
+        member this.GetDepthTest world : DepthTest = this.Get (nameof this.DepthTest) world
+        member this.SetDepthTest (value : DepthTest) world = this.Set (nameof this.DepthTest) value world
+        member this.DepthTest = lens (nameof this.DepthTest) this this.GetDepthTest this.SetDepthTest
         member this.GetRenderStyle world : RenderStyle = this.Get (nameof this.RenderStyle) world
         member this.SetRenderStyle (value : RenderStyle) world = this.Set (nameof this.RenderStyle) value world
         member this.RenderStyle = lens (nameof this.RenderStyle) this this.GetRenderStyle this.SetRenderStyle
@@ -2488,6 +2496,7 @@ type StaticBillboardFacet () =
         [define Entity.InsetOpt None
          define Entity.MaterialProperties MaterialProperties.defaultProperties
          define Entity.Material Material.defaultMaterial
+         define Entity.DepthTest LessThanOrEqualTest
          define Entity.RenderStyle Deferred
          define Entity.ShadowOffset Constants.Engine.BillboardShadowOffsetDefault]
 
@@ -2501,6 +2510,7 @@ type StaticBillboardFacet () =
             let properties = entity.GetMaterialProperties world
             let material = entity.GetMaterial world
             let shadowOffset = entity.GetShadowOffset world
+            let depthTest = entity.GetDepthTest world
             let renderType =
                 match entity.GetRenderStyle world with
                 | Deferred -> DeferredRenderType
@@ -2508,7 +2518,68 @@ type StaticBillboardFacet () =
             World.enqueueRenderMessage3d
                 (RenderBillboard
                     { CastShadow = castShadow; Presence = presence; ModelMatrix = affineMatrix; InsetOpt = insetOpt
-                      MaterialProperties = properties; Material = material; ShadowOffset = shadowOffset; RenderType = renderType; RenderPass = renderPass })
+                      MaterialProperties = properties; Material = material; ShadowOffset = shadowOffset; DepthTest = depthTest; RenderType = renderType; RenderPass = renderPass })
+                world
+
+    override this.RayCast (ray, entity, world) =
+        // TODO: P1: intersect against oriented quad rather than bounds.
+        let bounds = entity.GetBounds world
+        let intersectionOpt = ray.Intersects bounds
+        if intersectionOpt.HasValue then [|intersectionOpt.Value|]
+        else [||]
+
+/// Augments an entity with an animated billboard.
+type AnimatedBillboardFacet () =
+    inherit Facet (false, false, false)
+
+    static let getSpriteInsetOpt (entity : Entity) world =
+        let startTime = entity.GetStartTime world
+        let celCount = entity.GetCelCount world
+        let celRun = entity.GetCelRun world
+        if celCount <> 0 && celRun <> 0 then
+            let localTime = world.GameTime - startTime
+            let cel = int (localTime / entity.GetAnimationDelay world) % celCount * entity.GetAnimationStride world
+            let celSize = entity.GetCelSize world
+            let celI = cel % celRun
+            let celJ = cel / celRun
+            let celX = single celI * celSize.X
+            let celY = single celJ * celSize.Y
+            let inset = box2 (v2 celX celY) celSize
+            Some inset
+        else None
+
+    static member Properties =
+        [define Entity.StartTime GameTime.zero
+         define Entity.CelSize (Vector2 (32.0f, 32.0f))
+         define Entity.CelCount 16
+         define Entity.CelRun 4
+         define Entity.AnimationDelay (GameTime.ofSeconds (1.0f / 15.0f))
+         define Entity.AnimationStride 1
+         define Entity.MaterialProperties MaterialProperties.defaultProperties
+         define Entity.Material Material.defaultMaterial
+         define Entity.DepthTest LessThanOrEqualTest
+         define Entity.RenderStyle Deferred
+         define Entity.ShadowOffset Constants.Engine.BillboardShadowOffsetDefault]
+
+    override this.Render (renderPass, entity, world) =
+        let mutable transform = entity.GetTransform world
+        let castShadow = transform.CastShadow
+        if not renderPass.IsShadowPass || castShadow then
+            let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
+            let insetOpt = getSpriteInsetOpt entity world
+            let properties = entity.GetMaterialProperties world
+            let material = entity.GetMaterial world
+            let shadowOffset = entity.GetShadowOffset world
+            let depthTest = entity.GetDepthTest world
+            let renderType =
+                match entity.GetRenderStyle world with
+                | Deferred -> DeferredRenderType
+                | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
+            World.enqueueRenderMessage3d
+                (RenderBillboard
+                    { CastShadow = castShadow; Presence = presence; ModelMatrix = affineMatrix; InsetOpt = insetOpt
+                      MaterialProperties = properties; Material = material; ShadowOffset = shadowOffset; DepthTest = depthTest; RenderType = renderType; RenderPass = renderPass })
                 world
 
     override this.RayCast (ray, entity, world) =
@@ -2778,6 +2849,7 @@ type BasicStaticBillboardEmitterFacet () =
                                   Material = material
                                   ShadowOffset = descriptor.ShadowOffset
                                   Particles = descriptor.Particles
+                                  DepthTest =  LessThanOrEqualTest
                                   RenderType = descriptor.RenderType
                                   RenderPass = renderPass })
                     | _ -> None) |>
@@ -2803,6 +2875,7 @@ type StaticModelFacet () =
     static member Properties =
         [define Entity.InsetOpt None
          define Entity.MaterialProperties MaterialProperties.empty
+         define Entity.DepthTest LessThanOrEqualTest
          define Entity.RenderStyle Deferred
          define Entity.StaticModel Assets.Default.StaticModel]
 
@@ -2815,11 +2888,12 @@ type StaticModelFacet () =
             let insetOpt = ValueOption.ofOption (entity.GetInsetOpt world)
             let properties = entity.GetMaterialProperties world
             let staticModel = entity.GetStaticModel world
+            let depthTest = entity.GetDepthTest world
             let renderType =
                 match entity.GetRenderStyle world with
                 | Deferred -> DeferredRenderType
                 | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-            World.renderStaticModelFast (&affineMatrix, castShadow, presence, insetOpt, &properties, staticModel, renderType, renderPass, world)
+            World.renderStaticModelFast (&affineMatrix, castShadow, presence, insetOpt, &properties, staticModel, depthTest, renderType, renderPass, world)
 
     override this.GetAttributesInferred (entity, world) =
         let staticModel = entity.GetStaticModel world
@@ -2868,6 +2942,7 @@ type StaticModelSurfaceFacet () =
         [define Entity.InsetOpt None
          define Entity.MaterialProperties MaterialProperties.defaultProperties
          define Entity.Material Material.empty
+         define Entity.DepthTest LessThanOrEqualTest
          define Entity.RenderStyle Deferred
          define Entity.StaticModel Assets.Default.StaticModel
          define Entity.SurfaceIndex 0]
@@ -2883,11 +2958,12 @@ type StaticModelSurfaceFacet () =
             let material = entity.GetMaterial world
             let staticModel = entity.GetStaticModel world
             let surfaceIndex = entity.GetSurfaceIndex world
+            let depthTest = entity.GetDepthTest world
             let renderType =
                 match entity.GetRenderStyle world with
                 | Deferred -> DeferredRenderType
                 | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
-            World.renderStaticModelSurfaceFast (&affineMatrix, castShadow, presence, insetOpt, &properties, &material, staticModel, surfaceIndex, renderType, renderPass, world)
+            World.renderStaticModelSurfaceFast (&affineMatrix, castShadow, presence, insetOpt, &properties, &material, staticModel, surfaceIndex, depthTest, renderType, renderPass, world)
 
     override this.GetAttributesInferred (entity, world) =
         match Metadata.tryGetStaticModelMetadata (entity.GetStaticModel world) with
@@ -2925,6 +3001,12 @@ module AnimatedModelFacetExtensions =
         member this.GetAnimatedModel world : AnimatedModel AssetTag = this.Get (nameof this.AnimatedModel) world
         member this.SetAnimatedModel (value : AnimatedModel AssetTag) world = this.Set (nameof this.AnimatedModel) value world
         member this.AnimatedModel = lens (nameof this.AnimatedModel) this this.GetAnimatedModel this.SetAnimatedModel
+        member this.GetSubsortOffsets world : Map<int, single> = this.Get (nameof this.SubsortOffsets) world
+        member this.SetSubsortOffsets (value : Map<int, single>) world = this.Set (nameof this.SubsortOffsets) value world
+        member this.SubsortOffsets = lens (nameof this.SubsortOffsets) this this.GetSubsortOffsets this.SetSubsortOffsets
+        member this.GetDualRenderedSurfaceIndices world : int Set = this.Get (nameof this.DualRenderedSurfaceIndices) world
+        member this.SetDualRenderedSurfaceIndices (value : int Set) world = this.Set (nameof this.DualRenderedSurfaceIndices) value world
+        member this.DualRenderedSurfaceIndices = lens (nameof this.DualRenderedSurfaceIndices) this this.GetDualRenderedSurfaceIndices this.SetDualRenderedSurfaceIndices
         member this.GetBoneIdsOpt world : Dictionary<string, int> option = this.Get (nameof this.BoneIdsOpt) world
         member this.SetBoneIdsOpt (value : Dictionary<string, int> option) world = this.Set (nameof this.BoneIdsOpt) value world
         member this.BoneIdsOpt = lens (nameof this.BoneIdsOpt) this this.GetBoneIdsOpt this.SetBoneIdsOpt
@@ -2937,6 +3019,17 @@ module AnimatedModelFacetExtensions =
         member this.GetUseJobGraph world : bool = this.Get (nameof this.UseJobGraph) world
         member this.SetUseJobGraph (value : bool) world = this.Set (nameof this.UseJobGraph) value world
         member this.UseJobGraph = lens (nameof this.UseJobGraph) this this.GetUseJobGraph this.SetUseJobGraph
+
+        /// Set the bone transforms via a fast path.
+        /// OPTIMIZATION: this function sets these properties without comparison or events. Unfortunately, F# forces
+        /// array value equality on us. Because this function elides change detection and thus the equality check, it
+        /// runs much faster than setting the BoneOffsets and BoneTransform properties normally.
+        member this.SetBoneTransformsFast boneIds boneOffsets boneTransforms world =
+            let entityState = World.getEntityState this world
+            let entityState = EntityState.setProperty (nameof Entity.BoneIdsOpt) { PropertyType = typeof<Dictionary<string, int> option>; PropertyValue = Some boneIds } entityState
+            let entityState = EntityState.setProperty (nameof Entity.BoneOffsetsOpt) { PropertyType = typeof<Matrix4x4 array option>; PropertyValue = Some boneOffsets } entityState
+            let entityState = EntityState.setProperty (nameof Entity.BoneTransformsOpt) { PropertyType = typeof<Matrix4x4 array option>; PropertyValue = Some boneTransforms } entityState
+            World.setEntityState entityState this world
 
         /// Attempt to get the bone ids, offsets, and transforms from an entity that supports boned models.
         member this.TryGetBoneTransformByName boneName world =
@@ -2958,7 +3051,7 @@ module AnimatedModelFacetExtensions =
                 Some transform
             | (_, _) -> None
 
-        ///
+        /// Attempt to compute the bone transforms (and related data) using the given time and animation data.
         member this.TryComputeBoneTransforms time animations (sceneOpt : Assimp.Scene option) =
             match sceneOpt with
             | Some scene when scene.Meshes.Count > 0 ->
@@ -2973,11 +3066,7 @@ module AnimatedModelFacetExtensions =
             let animatedModel = this.GetAnimatedModel world
             let sceneOpt = match Metadata.tryGetAnimatedModelMetadata animatedModel with ValueSome model -> model.SceneOpt | ValueNone -> None
             match this.TryComputeBoneTransforms time animations sceneOpt with
-            | Some (boneIds, boneOffsets, boneTransforms) ->
-                let world = this.SetBoneIdsOpt (Some boneIds) world
-                let world = this.SetBoneOffsetsOpt (Some boneOffsets) world
-                let world = this.SetBoneTransformsOpt (Some boneTransforms) world
-                world
+            | Some (boneIds, boneOffsets, boneTransforms) -> this.SetBoneTransformsFast boneIds boneOffsets boneTransforms world
             | None -> world
 
 /// Augments an entity with an animated model.
@@ -2990,6 +3079,10 @@ type AnimatedModelFacet () =
          define Entity.MaterialProperties MaterialProperties.empty
          define Entity.Animations [|{ StartTime = GameTime.zero; LifeTimeOpt = None; Name = ""; Playback = Loop; Rate = 1.0f; Weight = 1.0f; BoneFilterOpt = None }|]
          define Entity.AnimatedModel Assets.Default.AnimatedModel
+         define Entity.SubsortOffsets Map.empty
+         define Entity.DualRenderedSurfaceIndices Set.empty
+         define Entity.DepthTest LessThanOrEqualTest
+         define Entity.RenderStyle Deferred
          nonPersistent Entity.BoneIdsOpt None
          nonPersistent Entity.BoneOffsetsOpt None
          nonPersistent Entity.BoneTransformsOpt None
@@ -3031,11 +3124,7 @@ type AnimatedModelFacet () =
                 resultOpt
             else entity.TryComputeBoneTransforms time animations sceneOpt
         match resultOpt with
-        | Some (boneIds, boneOffsets, boneTransforms) ->
-            let world = entity.SetBoneIdsOpt (Some boneIds) world
-            let world = entity.SetBoneOffsetsOpt (Some boneOffsets) world
-            let world = entity.SetBoneTransformsOpt (Some boneTransforms) world
-            world
+        | Some (boneIds, boneOffsets, boneTransforms) -> entity.SetBoneTransformsFast boneIds boneOffsets boneTransforms world
         | None -> world
 
     override this.Render (renderPass, entity, world) =
@@ -3047,8 +3136,15 @@ type AnimatedModelFacet () =
             let insetOpt = Option.toValueOption (entity.GetInsetOpt world)
             let properties = entity.GetMaterialProperties world
             let animatedModel = entity.GetAnimatedModel world
+            let subsortOffsets = entity.GetSubsortOffsets world
+            let drsIndices = entity.GetDualRenderedSurfaceIndices world
+            let depthTest = entity.GetDepthTest world
+            let renderType =
+                match entity.GetRenderStyle world with
+                | Deferred -> DeferredRenderType
+                | Forward (subsort, sort) -> ForwardRenderType (subsort, sort)
             match entity.GetBoneTransformsOpt world with
-            | Some boneTransforms -> World.renderAnimatedModelFast (&affineMatrix, castShadow, presence, insetOpt, &properties, boneTransforms, animatedModel, renderPass, world)
+            | Some boneTransforms -> World.renderAnimatedModelFast (&affineMatrix, castShadow, presence, insetOpt, &properties, boneTransforms, animatedModel, subsortOffsets, drsIndices, depthTest, renderType, renderPass, world)
             | None -> ()
 
     override this.GetAttributesInferred (entity, world) =
@@ -3145,7 +3241,6 @@ type TerrainFacet () =
 
     static member Properties =
         [define Entity.Size (v3 512.0f 128.0f 512.0f)
-         define Entity.Presence Omnipresent
          define Entity.Static true
          define Entity.AlwaysRender true
          define Entity.BodyEnabled true
@@ -3181,6 +3276,9 @@ type TerrainFacet () =
          nonPersistent Entity.AwakeTimeStamp 0L
          computed Entity.Awake (fun (entity : Entity) world -> entity.GetAwakeTimeStamp world = world.UpdateTime) None
          computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = 0 }) None]
+
+    override this.PresenceOverride =
+        ValueSome Omnipresent
 
     override this.Register (entity, world) =
         let world = World.sense (fun _ world -> (Cascade, entity.PropagatePhysics world)) (entity.ChangeEvent (nameof entity.BodyEnabled)) entity (nameof TerrainFacet) world
@@ -3260,6 +3358,97 @@ type TerrainFacet () =
         match entity.TryGetTerrainResolution world with
         | Some resolution -> AttributesInferred.important (v3 (single (dec resolution.X)) 128.0f (single (dec resolution.Y))) v3Zero
         | None -> AttributesInferred.important (v3 512.0f 128.0f 512.0f) v3Zero
+
+[<AutoOpen>]
+module TraversalInterpolatedFacetExtensions =
+    type Entity with
+        member this.GetPositionHistory world : Vector3 FQueue = this.Get (nameof this.PositionHistory) world
+        member this.SetPositionHistory (value : Vector3 FQueue) world = this.Set (nameof this.PositionHistory) value world
+        member this.PositionHistory = lens (nameof this.PositionHistory) this this.GetPositionHistory this.SetPositionHistory
+        member this.GetRotationHistory world : Quaternion FQueue = this.Get (nameof this.RotationHistory) world
+        member this.SetRotationHistory (value : Quaternion FQueue) world = this.Set (nameof this.RotationHistory) value world
+        member this.RotationHistory = lens (nameof this.RotationHistory) this this.GetRotationHistory this.SetRotationHistory
+        member this.GetLinearVelocityHistory world : Vector3 FQueue = this.Get (nameof this.LinearVelocityHistory) world
+        member this.SetLinearVelocityHistory (value : Vector3 FQueue) world = this.Set (nameof this.LinearVelocityHistory) value world
+        member this.LinearVelocityHistory = lens (nameof this.LinearVelocityHistory) this this.GetLinearVelocityHistory this.SetLinearVelocityHistory
+        member this.GetAngularVelocityHistory world : Vector3 FQueue = this.Get (nameof this.AngularVelocityHistory) world
+        member this.SetAngularVelocityHistory (value : Vector3 FQueue) world = this.Set (nameof this.AngularVelocityHistory) value world
+        member this.AngularVelocityHistory = lens (nameof this.AngularVelocityHistory) this this.GetAngularVelocityHistory this.SetAngularVelocityHistory
+        member this.GetPositionHistoryResetThreshold world : single = this.Get (nameof this.PositionHistoryResetThreshold) world
+        member this.SetPositionHistoryResetThreshold (value : single) world = this.Set (nameof this.PositionHistoryResetThreshold) value world
+        member this.PositionHistoryResetThreshold = lens (nameof this.PositionHistoryResetThreshold) this this.GetPositionHistoryResetThreshold this.SetPositionHistoryResetThreshold
+        member this.GetTraversalHistoryMax world : int = this.Get (nameof this.TraversalHistoryMax) world
+        member this.SetTraversalHistoryMax (value : int) world = this.Set (nameof this.TraversalHistoryMax) value world
+        member this.TraversalHistoryMax = lens (nameof this.TraversalHistoryMax) this this.GetTraversalHistoryMax this.SetTraversalHistoryMax
+
+        member this.GetPositionInterpolated world =
+            let position = this.GetPosition world
+            let positionHistory = this.GetPositionHistory world
+            if FQueue.notEmpty positionHistory then
+                let positions = FQueue.conj position positionHistory
+                Seq.sum positions / single positions.Length
+            else position
+
+        member this.GetRotationInterpolated world =
+            let rotation = this.GetRotation world
+            let rotationHistory = this.GetRotationHistory world
+            if FQueue.notEmpty rotationHistory then
+                let rotations = FQueue.conj rotation rotationHistory
+                if rotations.Length > 1 then
+                    let unnormalized = Quaternion.Slerp (Seq.head rotations, Seq.last rotations, 0.5f) // HACK: we just interpolate the first and last rotations...
+                    unnormalized.Normalized
+                else rotation
+            else rotation
+
+        member this.GetLinearVelocityInterpolated world =
+            let linearVelocity = this.GetLinearVelocity world
+            let linearVelocityHistory = this.GetLinearVelocityHistory world
+            if FQueue.notEmpty linearVelocityHistory then
+                let linearVelocities = FQueue.conj linearVelocity linearVelocityHistory
+                Seq.sum linearVelocities / single linearVelocities.Length
+            else linearVelocity
+
+        member this.GetAngularVelocityInterpolated world =
+            let angularVelocity = this.GetAngularVelocity world
+            let angularVelocityHistory = this.GetAngularVelocityHistory world
+            if FQueue.notEmpty angularVelocityHistory then
+                let angularVelocities = FQueue.conj angularVelocity angularVelocityHistory
+                Seq.sum angularVelocities / single angularVelocities.Length
+            else angularVelocity
+            
+/// Tracks interpolated values typically used for traversal.
+/// TODO: P1: make this GameTime-based rather than frame-based!
+type TraversalInterpoledFacet () =
+    inherit Facet (false, false, false)
+
+    static member Properties =
+        [nonPersistent Entity.PositionHistory FQueue.empty
+         nonPersistent Entity.RotationHistory FQueue.empty
+         nonPersistent Entity.LinearVelocityHistory FQueue.empty
+         nonPersistent Entity.AngularVelocityHistory FQueue.empty
+         define Entity.PositionHistoryResetThreshold 1.0f
+         define Entity.TraversalHistoryMax 4]
+
+    override this.Update (entity, world) =
+
+        // process history for the frame
+        let historyMax = entity.GetTraversalHistoryMax world
+        let world = entity.PositionHistory.Map (fun history -> (if history.Length >= historyMax then FQueue.tail history else history) |> FQueue.conj (entity.GetPosition world)) world
+        let world = entity.RotationHistory.Map (fun history -> (if history.Length >= historyMax then FQueue.tail history else history) |> FQueue.conj (entity.GetRotation world)) world
+        let world = entity.LinearVelocityHistory.Map (fun history -> (if history.Length >= historyMax then FQueue.tail history else history) |> FQueue.conj (entity.GetLinearVelocity world)) world
+        let world = entity.AngularVelocityHistory.Map (fun history -> (if history.Length >= historyMax then FQueue.tail history else history) |> FQueue.conj (entity.GetAngularVelocity world)) world
+
+        // ensure position history isn't stale (such as when an entity is moved in the editor)
+        let world =
+            let position = entity.GetPosition world
+            let positionInterp = entity.GetPositionInterpolated world
+            if Vector3.Distance (positionInterp, position) >= entity.GetPositionHistoryResetThreshold world then
+                let positionHistory = List.init historyMax (fun _ -> position) |> FQueue.ofList
+                entity.SetPositionHistory positionHistory world
+            else world
+
+        // fin
+        world
 
 [<AutoOpen>]
 module NavBodyFacetExtensions =
