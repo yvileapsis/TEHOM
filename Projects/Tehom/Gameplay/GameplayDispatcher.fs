@@ -205,6 +205,10 @@ type GameplayDispatcher () =
 
             ]
 
+            Content.entity<PromptDispatcher> "Prompt" [
+
+            ]
+
             ContentEx.cursor "Cursor" [
                 Entity.CursorType :=
                     if model.HoldingMouse then

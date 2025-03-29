@@ -448,10 +448,13 @@ module Area =
             // actors inside the room
             |> Area.roomPart "room1walls" "room1barricadedWindow1" IsOnEdge
             |> Area.roomPart "room1walls" "room1barricadedWindow2" IsOnEdge
+            |> Area.furniture "room1ceiling" "room1camera" LiesAbove
+            |> Area.furniture "room1walls" "room1payphone" IsOnEdge
             |> Area.roomPart "room1walls" "room1windowroom3" IsOnEdge
             |> Area.roomPart "room1walls" "room1windowroom6" IsOnEdge
             |> Area.furniture "room1floor" "room1gurney" LiesAbove
             |> Area.furniture "room1floor" "room1chairs" LiesAbove
+            |> Area.furniture "room1floor" "room1vendingmachine" LiesAbove
 
         // * Main hall, chairs, first rat attacks
         static member room2mainhall : Sites =
