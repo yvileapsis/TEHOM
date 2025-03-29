@@ -84,6 +84,7 @@ module Engine =
     let [<Uniform>] OctreeSize = Vector3 (OctnodeSize * single (pown 2 OctreeDepth))
     let [<Uniform>] mutable EventTracing = match ConfigurationManager.AppSettings.["EventTracing"] with null -> false | value -> scvalue value
     let [<Uniform>] mutable EventFilter = match ConfigurationManager.AppSettings.["EventFilter"] with null -> Pass | value -> scvalue value
+    let [<Uniform>] EnvironmentMagnitudeThreshold = 48.0f // sqrt (32^2 + 32^2 + 16^2) = more likely an environment that a static prop
 
 [<RequireQualifiedAccess>]
 module Render =
@@ -145,8 +146,8 @@ module Render =
     let [<Literal>] LightShadowSamplesDefault = 3
     let [<Literal>] LightShadowBiasDefault = 0.005f
     let [<Literal>] LightShadowSampleScalarDefault = 0.01f
-    let [<Literal>] LightShadowExponentDefault = 80.0f
-    let [<Literal>] LightShadowDensityDefault = 12.0f
+    let [<Literal>] LightShadowExponentDefault = 24.0f
+    let [<Literal>] LightShadowDensityDefault = 4.0f
     let [<Literal>] SsaoEnabledDefault = true
     let [<Literal>] SsaoSampleCountDefault = 16
     let [<Literal>] SsaoSampleCountMax = 128
@@ -156,14 +157,14 @@ module Render =
     let [<Literal>] SsaoDistanceMaxDefault = 0.125f
     let [<Literal>] SsvfEnabledGlobalDefault = false
     let [<Literal>] SsvfEnabledLocalDefault = true
-    let [<Literal>] SsvfStepsDefault = 24
-    let [<Literal>] SsvfAsymmetryDefault = 0.5f
-    let [<Literal>] SsvfIntensityDefault = 0.5f
+    let [<Literal>] SsvfStepsDefault = 16
+    let [<Literal>] SsvfAsymmetryDefault = 0.25f
+    let [<Literal>] SsvfIntensityDefault = 1.0f
     let [<Literal>] SsrEnabledGlobalDefault = false
     let [<Literal>] SsrEnabledLocalDefault = true
     let [<Literal>] SsrDetailDefault = 0.21f
     let [<Literal>] SsrRefinementsMaxDefault = 24
-    let [<Literal>] SsrRayThicknessDefault = 0.05f
+    let [<Literal>] SsrRayThicknessDefault = 0.025f
     let [<Literal>] SsrTowardEyeCutoffDefault = 0.9f
     let [<Literal>] SsrDepthCutoffDefault = 24.0f
     let [<Literal>] SsrDepthCutoffMarginDefault = 0.2f
@@ -192,6 +193,9 @@ module Render =
     let [<Literal>] IgnoreLightMapsDefault = false
     let [<Literal>] OpaqueDistanceDefault = 100000.0f
     let [<Literal>] FontSizeDefault = 14
+    let [<Literal>] Body3dSegmentRenderMagnitudeMax = 48.0f
+    let [<Literal>] Body3dSegmentRenderDistanceMax = 40.0f
+    let [<Literal>] Body3dRenderDistanceMax = 32.0f
 
 [<RequireQualifiedAccess>]
 module Audio =
@@ -211,12 +215,13 @@ module Audio =
 module Physics =
 
     let [<Uniform>] GravityDefault = Vector3 (0.0f, -9.80665f, 0.0f)
-    let [<Uniform>] mutable AlwaysObserve = match ConfigurationManager.AppSettings.["AlwaysObserve"] with null -> true | observe -> scvalue observe
+    let [<Literal>] FrictionDefault = 0.5f
+    let [<Literal>] AngularDampingDefault = 0.2f
     let [<Literal>] BreakingPointDefault = 100000.0f
     let [<Literal>] CollisionWildcard = "*"
-    let [<Uniform>] mutable Collision3dBodiesMax = match ConfigurationManager.AppSettings.["Collision3dBodiesMax"] with null -> 10240 | value -> scvalue value
-    let [<Uniform>] mutable Collision3dBodyPairsMax = match ConfigurationManager.AppSettings.["Collision3dBodyPairsMax"] with null -> 65536 | value -> scvalue value
-    let [<Uniform>] mutable Collision3dContactConstraintsMax = match ConfigurationManager.AppSettings.["Collision3dContactConstraintsMax"] with null -> 10240 | value -> scvalue value
+    let [<Uniform>] mutable Collision3dBodiesMax = match ConfigurationManager.AppSettings.["Collision3dBodiesMax"] with null -> 65536 | value -> scvalue value
+    let [<Uniform>] mutable Collision3dBodyPairsMax = match ConfigurationManager.AppSettings.["Collision3dBodyPairsMax"] with null -> 32768 | value -> scvalue value
+    let [<Uniform>] mutable Collision3dContactConstraintsMax = match ConfigurationManager.AppSettings.["Collision3dContactConstraintsMax"] with null -> 8192 | value -> scvalue value
     let [<Uniform>] mutable Collision3dSteps = match ConfigurationManager.AppSettings.["Collision3dSteps"] with null -> 1 | value -> scvalue value
     let [<Uniform>] mutable Collision3dThreads = match ConfigurationManager.AppSettings.["Collision3dThreads"] with null -> max 1 (Environment.ProcessorCount - 2) | value -> scvalue value
     let [<Uniform>] mutable Collision3dBarriersMax = match ConfigurationManager.AppSettings.["Collision3dBarriersMax"] with null -> max 1 (Environment.ProcessorCount - 2) | value -> scvalue value
@@ -229,6 +234,11 @@ module Physics =
     let [<Uniform>] internal ObjectLayerMoving = JoltPhysicsSharp.ObjectLayer 1us
     let [<Uniform>] internal ObjectLayerDisabled = JoltPhysicsSharp.ObjectLayer 2us
     let [<Literal>] internal InternalIndex = -1
+
+[<RequireQualifiedAccess>]
+module Nav =
+    
+    let [<Literal>] Bounds3dMagnitudeMax = 256.0f
 
 [<RequireQualifiedAccess>]
 module Lens =

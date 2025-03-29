@@ -78,7 +78,7 @@ module WorldModule =
     let mutable internal tryProcessGame : bool -> Game -> World -> World =
         Unchecked.defaultof<_>
         
-    let mutable internal tryProcessScreen : bool -> bool -> Screen -> World -> World =
+    let mutable internal tryProcessScreen : bool -> Screen -> World -> World =
         Unchecked.defaultof<_>
         
     let mutable internal tryProcessGroup : bool -> Group -> World -> World =
@@ -305,29 +305,29 @@ module WorldModule =
                 let worldExtension = { world.WorldExtension with DeclaredImNui = declared; ContextImNui = context }
                 World.choose { world with WorldExtension = worldExtension }
 
-        static member internal getSimulantImNuis (world : World) =
-            world.SimulantImNuis
+        static member internal getSimulantsImNui (world : World) =
+            world.SimulantsImNui
 
-        static member internal setSimulantImNuis simulantImNuis (world : World) =
+        static member internal setSimulantsImNui simulantsImNui (world : World) =
             if world.Imperative then
-                world.WorldExtension.SimulantImNuis <- simulantImNuis
+                world.WorldExtension.SimulantsImNui <- simulantsImNui
                 world
             else
-                let worldExtension = { world.WorldExtension with SimulantImNuis = simulantImNuis }
+                let worldExtension = { world.WorldExtension with SimulantsImNui = simulantsImNui }
                 World.choose { world with WorldExtension = worldExtension }
 
         static member internal getSimulantImNui simulant (world : World) =
-            world.SimulantImNuis.[simulant]
+            world.SimulantsImNui.[simulant]
 
         static member internal addSimulantImNui simulant simulantImNui (world : World) =
-            let simulantImNuis = SUMap.add simulant simulantImNui world.SimulantImNuis
-            World.setSimulantImNuis simulantImNuis world
+            let simulantsImNui = SUMap.add simulant simulantImNui world.SimulantsImNui
+            World.setSimulantsImNui simulantsImNui world
 
         static member internal removeSimulantImNui (simulant : Simulant) (world : World) =
-            World.setSimulantImNuis (SUMap.remove simulant.SimulantAddress world.SimulantImNuis) world
+            World.setSimulantsImNui (SUMap.remove simulant.SimulantAddress world.SimulantsImNui) world
 
         static member internal tryMapSimulantImNui mapper simulant (world : World) =
-            match world.SimulantImNuis.TryGetValue simulant with
+            match world.SimulantsImNui.TryGetValue simulant with
             | (true, simulantImNui) ->
                 let simulantImNui = mapper simulantImNui
                 World.addSimulantImNui simulant simulantImNui world
@@ -344,29 +344,29 @@ module WorldModule =
                 world
             else
                 let simulantImNui = { simulantImNui with SimulantUtilized = true }
-                let simulantImNuis = SUMap.add simulant simulantImNui world.SimulantImNuis
-                World.setSimulantImNuis simulantImNuis world
+                let simulantsImNui = SUMap.add simulant simulantImNui world.SimulantsImNui
+                World.setSimulantsImNui simulantsImNui world
 
-        static member internal getSubscriptionImNuis (world : World) =
-            world.SubscriptionImNuis
+        static member internal getSubscriptionsImNui (world : World) =
+            world.SubscriptionsImNui
 
-        static member internal setSubscriptionImNuis subscriptionImNuis (world : World) =
+        static member internal setSubscriptionsImNui subscriptionsImNui (world : World) =
             if world.Imperative then
-                world.WorldExtension.SubscriptionImNuis <- subscriptionImNuis
+                world.WorldExtension.SubscriptionsImNui <- subscriptionsImNui
                 world
             else
-                let worldExtension = { world.WorldExtension with SubscriptionImNuis = subscriptionImNuis }
+                let worldExtension = { world.WorldExtension with SubscriptionsImNui = subscriptionsImNui }
                 World.choose { world with WorldExtension = worldExtension }
 
         static member internal getSubscriptionImNui subscription (world : World) =
-            world.SubscriptionImNuis.[subscription]
+            world.SubscriptionsImNui.[subscription]
 
         static member internal addSubscriptionImNui subscription subscriptionImNui (world : World) =
-            let subscriptionImNuis = SUMap.add subscription subscriptionImNui world.SubscriptionImNuis
-            World.setSubscriptionImNuis subscriptionImNuis world
+            let subscriptionsImNui = SUMap.add subscription subscriptionImNui world.SubscriptionsImNui
+            World.setSubscriptionsImNui subscriptionsImNui world
 
         static member internal tryMapSubscriptionImNui mapper subscription (world : World) =
-            match world.SubscriptionImNuis.TryGetValue subscription with
+            match world.SubscriptionsImNui.TryGetValue subscription with
             | (true, subscriptionImNui) ->
                 let subscriptionImNui = mapper subscriptionImNui
                 World.addSubscriptionImNui subscription subscriptionImNui world
@@ -383,8 +383,8 @@ module WorldModule =
                 world
             else
                 let subscriptionImNui = { subscriptionImNui with SubscriptionUtilized = true }
-                let subscriptionImNuis = SUMap.add subscription subscriptionImNui world.SubscriptionImNuis
-                World.setSubscriptionImNuis subscriptionImNuis world
+                let subscriptionsImNui = SUMap.add subscription subscriptionImNui world.SubscriptionsImNui
+                World.setSubscriptionsImNui subscriptionsImNui world
 
         /// Switch simulation to use this ambient state.
         static member internal switchAmbientState world =
@@ -415,7 +415,7 @@ module WorldModule =
             let time =
                 match delay with
                 | UpdateTime delay -> UpdateTime (world.UpdateTime + delay)
-                | ClockTime delay -> ClockTime (world.ClockTime + delay)
+                | TickTime delay -> TickTime (world.TickTime + delay)
             let tasklet = { ScheduledTime = time; ScheduledOp = operation }
             World.addTasklet simulant tasklet world
 
@@ -586,6 +586,8 @@ module WorldModule =
 
         static member internal cleanUpSubsystems world =
             World.mapSubsystems (fun subsystems ->
+                subsystems.AudioPlayer.CleanUp ()
+                subsystems.RendererPhysics3d.Dispose ()
                 subsystems.RendererProcess.Terminate ()
                 subsystems.PhysicsEngine3d.CleanUp ()
                 subsystems.PhysicsEngine2d.CleanUp ()
@@ -658,19 +660,24 @@ module WorldModule =
             hierarchical
             selectedOnly
             (world : World) =
+
+            // OPTIMIZATION: generalize only once
+            let eventAddressObj = Address.generalize eventAddress
+
 #if DEBUG
             // log event based on event filter
-            EventGraph.logEvent eventAddress eventTrace world.EventGraph
+            EventGraph.logEvent eventAddressObj eventTrace world.EventGraph
 #endif
+
             // get subscriptions the fastest way possible
             // OPTIMIZATION: subscriptions nullable to elide allocation via Seq.empty.
             let subscriptionsOpt =
                 if hierarchical then
                     EventGraph.getSubscriptionsSorted
-                        sortSubscriptionsByElevation eventAddress world.EventGraph world
+                        sortSubscriptionsByElevation eventAddressObj world.EventGraph world
                 else
                     let subscriptions = EventGraph.getSubscriptions world.EventGraph
-                    match UMap.tryFind (eventAddress :> Address) subscriptions with
+                    match UMap.tryFind eventAddressObj subscriptions with
                     | Some subscriptions -> OMap.toSeq subscriptions
                     | None -> null
 
@@ -748,26 +755,27 @@ module WorldModule =
             (subscriber : 's)
             (world : World) =
             if not (Address.isEmpty eventAddress) then
+                let eventAddressObj = atooa eventAddress
                 let (subscriptions, unsubscriptions) = (World.getSubscriptions world, World.getUnsubscriptions world)
                 let subscriptions =
-                    match UMap.tryFind (eventAddress :> Address) subscriptions with
+                    match UMap.tryFind eventAddressObj subscriptions with
                     | Some subscriptionEntries ->
                         match OMap.tryFind subscriptionId subscriptionEntries with
                         | Some subscriptionEntry ->
                             let subscriptionEntry = { subscriptionEntry with SubscriptionCallback = World.boxCallback callback }
                             let subscriptionEntries = OMap.add subscriptionId subscriptionEntry subscriptionEntries
-                            UMap.add (eventAddress :> Address) subscriptionEntries subscriptions
+                            UMap.add eventAddressObj subscriptionEntries subscriptions
                         | None ->
                             let subscriptionEntry = { SubscriptionCallback = World.boxCallback callback; SubscriptionSubscriber = subscriber }
                             let subscriptionEntries = OMap.add subscriptionId subscriptionEntry subscriptionEntries
-                            UMap.add eventAddress subscriptionEntries subscriptions
+                            UMap.add eventAddressObj subscriptionEntries subscriptions
                     | None ->
                         let subscriptionEntry = { SubscriptionCallback = World.boxCallback callback; SubscriptionSubscriber = subscriber }
-                        UMap.add eventAddress (OMap.singleton HashIdentity.Structural (World.getCollectionConfig world) subscriptionId subscriptionEntry) subscriptions
-                let unsubscriptions = UMap.add subscriptionId struct (eventAddress :> Address, subscriber :> Simulant) unsubscriptions
+                        UMap.add eventAddressObj (OMap.singleton HashIdentity.Structural (World.getCollectionConfig world) subscriptionId subscriptionEntry) subscriptions
+                let unsubscriptions = UMap.add subscriptionId struct (eventAddressObj, subscriber :> Simulant) unsubscriptions
                 let world = World.setSubscriptions subscriptions world
                 let world = World.setUnsubscriptions unsubscriptions world
-                let world = WorldTypes.handleSubscribeAndUnsubscribeEvent true eventAddress Game.Handle world :?> World
+                let world = WorldTypes.handleSubscribeAndUnsubscribeEvent true eventAddressObj Game.Handle world :?> World
                 (World.unsubscribe subscriptionId, world)
             else failwith "Event name cannot be empty."
 

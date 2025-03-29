@@ -30,10 +30,10 @@ type GameplayDispatcher () =
          define Screen.Score 0]
 
     // here we define the behavior of our gameplay
-    override this.Process (screenResults, screen, world) =
+    override this.Process (selectionResults, screen, world) =
 
         // process initialization
-        let initializing = FQueue.contains Select screenResults
+        let initializing = FQueue.contains Select selectionResults
         let world =
             if initializing then
 
@@ -41,7 +41,7 @@ type GameplayDispatcher () =
                 let world = Simulants.Gameplay.SetScore 0 world
 
                 // create stage sections from random section files
-                (world, [0 .. dec Constants.Gameplay.SectionCount]) ||> List.fold (fun world sectionIndex ->
+                List.fold (fun world sectionIndex ->
 
                     // load a random section from file (except the first section which is always 0)
                     let section = Simulants.GameplaySection sectionIndex
@@ -55,16 +55,19 @@ type GameplayDispatcher () =
                         sectionEntity.SetPosition (sectionEntity.GetPosition world + v3 sectionXShift 0.0f 0.0f) world)
                         world sectionEntities)
 
+                    world [0 .. dec Constants.Gameplay.SectionCount]
+
             else world
 
         // process clean-up
         let world =
-            if FQueue.contains Deselecting screenResults then
+            if FQueue.contains Deselecting selectionResults then
 
                 // destroy stage sections that were created from section files
-                (world, [0 .. dec Constants.Gameplay.SectionCount]) ||> List.fold (fun world sectionIndex ->
+                List.fold (fun world sectionIndex ->
                     let section = Simulants.GameplaySection sectionIndex
                     World.destroyGroup section world)
+                    world [0 .. dec Constants.Gameplay.SectionCount]
 
             else world
 
@@ -77,7 +80,7 @@ type GameplayDispatcher () =
             // declare player
             let world =
                 World.doEntity<PlayerDispatcher> "Player"
-                    [if initializing then Entity.Position .= v3 -390.0f -50.0f 0.0f
+                    [if initializing then Entity.Position @= v3 -390.0f -50.0f 0.0f
                      Entity.Elevation .= 1.0f]
                     world
             let player = world.DeclaredEntity
@@ -109,16 +112,15 @@ type GameplayDispatcher () =
                     World.setEye2dCenter eyeCenter world
                 else world
 
-            // end scene declaration
-            let world = World.endGroup world
-
-            // declare gui group
-            let world = World.beginGroup "Gui" [] world
+            // declare score text
             let world = World.doText "Score" [Entity.Position .= v3 260.0f 155.0f 0.0f; Entity.Elevation .= 10.0f; Entity.Text @= "Score: " + string (screen.GetScore world)] world
+
+            // declare quit button
             let (clicked, world) = World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Elevation .= 10.0f; Entity.Text .= "Quit"] world
             let world = if clicked then screen.SetGameplayState Quit world else world
-            let world = World.endGroup world
-            world
+
+            // end scene declaration
+            World.endGroup world
 
         // otherwise, no gameplay
         else world

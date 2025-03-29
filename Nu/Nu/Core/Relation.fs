@@ -23,6 +23,9 @@ type Link =
     | Parent
     | Name of string
 
+// TODO: P1: create a RelationState algebra that provides a high-level description of a relationship, as well as a function
+// to compute it. Idea modelled after OverlayState.
+
 /// Converts Relation types.
 type RelationConverter (pointType : Type) =
     inherit TypeConverter ()
@@ -67,12 +70,6 @@ type RelationConverter (pointType : Type) =
             if pointType.IsInstanceOfType source then source
             else failconv "Invalid RelationConverter conversion from source." None
 
-/// A generalized address.
-type Relation =
-    interface
-        abstract Links : Link array
-        end
-
 /// A relation that can be resolved to an address via contextual resolution.
 type [<CustomEquality; NoComparison; TypeConverter (typeof<RelationConverter>)>] 'a Relation =
     { Links : Link array }
@@ -104,11 +101,11 @@ type [<CustomEquality; NoComparison; TypeConverter (typeof<RelationConverter>)>]
         Relation.makeFromArray<'a> names
 
     /// Hash a Relation.
-    static member hash (relation : Relation) =
+    static member hash<'a> (relation : 'a Relation) =
         Array.hash relation.Links
 
     /// Equate Relations.
-    static member equals (relation : Relation) (relation2 : Relation) =
+    static member equals<'a> (relation : 'a Relation) (relation2 : 'a Relation) =
         refEq relation relation2 || // OPTIMIZATION: first check ref equality
         seqEq relation.Links relation2.Links
 
@@ -157,11 +154,11 @@ type [<CustomEquality; NoComparison; TypeConverter (typeof<RelationConverter>)>]
 
     interface 'a Relation IEquatable with
         member this.Equals that =
-            Relation<'a>.equals this that
+            Relation<'a>.equals<'a> this that
 
     override this.Equals that =
         match that with
-        | :? Relation as that -> Relation<'a>.equals this that
+        | :? ('a Relation) as that -> Relation<'a>.equals this that
         | _ -> false
 
     override this.GetHashCode () =
@@ -176,9 +173,6 @@ type [<CustomEquality; NoComparison; TypeConverter (typeof<RelationConverter>)>]
                 | Name name -> name)
                 this.Links
         String.concat Constants.Address.SeparatorName names
-
-    interface Relation with
-        member this.Links = this.Links
 
 [<RequireQualifiedAccess>]
 module Relation =
@@ -197,22 +191,22 @@ module Relation =
 
     /// Make a relation from a '/' delimited string.
     let makeFromString<'a> relationStr =
-        Relation<'a>.makeFromString relationStr
+        Relation<'a>.makeFromString<'a> relationStr
 
     /// Make a current relation.
-    let makeCurrent () =
-        Relation.makeFromArray [|Constants.Relation.CurrentName|]
+    let makeCurrent<'a> () =
+        Relation<'a>.makeFromArray<'a> [|Constants.Relation.CurrentName|]
 
     /// Make a parent relation.
-    let makeParent () =
-        Relation.makeFromArray [|Constants.Relation.ParentName|]
+    let makeParent<'a> () =
+        Relation<'a>.makeFromArray<'a> [|Constants.Relation.ParentName|]
 
     /// Test relation equality.
-    let equals (left : Relation) (right : Relation) =
-        Relation<obj>.equals left right
+    let equals<'a> (left : 'a Relation) (right : 'a Relation) =
+        Relation<'a>.equals<'a> left right
 
     /// Get the links of a relation.
-    let getLinks relation =
+    let getLinks<'a> (relation : 'a Relation) =
         relation.Links
 
     /// Change the type of an address.

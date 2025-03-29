@@ -3,12 +3,14 @@
 
 namespace Nu
 open System
+open System.Collections.Generic
 open System.Numerics
 open System.Reflection
 open FSharp.NativeInterop
 open FSharp.Reflection
 open DotRecast.Recast
 open ImGuiNET
+open JoltPhysicsSharp
 open Prime
 
 [<AutoOpen>]
@@ -106,6 +108,19 @@ module WorldImGui =
         /// Render a segment via ImGui in the current eye 3d space.
         static member imGuiSegment3d segment thickness color world =
             World.imGuiSegments3d (SArray.singleton segment) thickness color world
+
+        /// Edit a Box3 via ImGui in the current eye 3d space.
+        static member imGuiEditBox3d snap box (world : World) =
+            let mutable box = box
+            let manipulationResult =
+                ImGuizmo.ManipulateBox3
+                    (world.Eye3dCenter,
+                     world.Eye3dRotation,
+                     world.Eye3dFieldOfView,
+                     world.RasterViewport,
+                     snap,
+                     &box)
+            (manipulationResult, box)
 
         /// Edit an array value via ImGui.
         static member imGuiEditPropertyArray<'a> (editItem : string -> 'a -> bool * bool * 'a) (defaultItemValue : 'a) itemsName (items : 'a array) context =
@@ -409,7 +424,7 @@ module WorldImGui =
                             let animatedModel = property.PropertyValue :?> AnimatedModel AssetTag
                             match Metadata.tryGetAnimatedModelMetadata animatedModel with
                             | ValueSome metadata when metadata.SceneOpt.IsSome ->
-                                let animationNames = metadata.SceneOpt.Value.Animations |> Seq.map _.Name
+                                let animationNames = metadata.SceneOpt.Value.Animations |> Seq.rev |> Seq.map _.Name // NOTE: for some reason, Assimp seems to store animations in reverse order.
                                 let mutable animationName = field :?> string
                                 let mutable animationNameEdited = false
                                 if ImGui.BeginCombo (name, animationName) then
@@ -671,6 +686,11 @@ module WorldImGui =
                         name animations context
                 ImGui.PopID ()
                 (promoted, edited, animations)
+            | :? CharacterProperties when
+                (match context.SelectedEntityOpt with
+                 | Some entity -> match entity.TryGet<Nu.BodyType> "BodyType" world with ValueSome bodyType -> not bodyType.IsCharacter | ValueNone -> false
+                 | None -> false) ->
+                (false, false, value) // hides character properties unless is character body type
             | _ ->
                 let mutable combo = false
                 let (edited, value) =
@@ -923,3 +943,50 @@ module WorldImGui =
                         if ImGui.IsItemFocused () then context.FocusProperty ()
                         (promoted, edited || edited2, value)
                 else (promoted, edited, value)
+
+/// Renders 3D physics via ImGui.
+/// NOTE: there's no need for this to be stubbable since it merely makes calls to ImGui which are themselves stubbable.
+type RendererPhysics3d () =
+    inherit DebugRenderer ()
+
+    let segments = Dictionary<Color, Segment3 List> ()
+
+    override this.DrawLine (start, stop, color) =
+        let color = Color (color.ToVector4 ())
+        let segment = Segment3 (start, stop)
+        let magMaxSquared =
+            Constants.Render.Body3dSegmentRenderMagnitudeMax *
+            Constants.Render.Body3dSegmentRenderMagnitudeMax
+        if segment.MagnitudeSquared < magMaxSquared then
+            match segments.TryGetValue color with
+            | (true, segmentList) -> segmentList.Add segment
+            | (false, _) ->
+                let segmentList = List ()
+                segmentList.Add segment
+                segments.Add (color, segmentList)
+
+    override this.DrawText3D (_, _, _, _) =
+        () // TODO: implement.
+
+    /// Actually render all the stored drawing commands.
+    member this.Flush (world : World) =
+        let distanceMaxSquared =
+            Constants.Render.Body3dSegmentRenderDistanceMax *
+            Constants.Render.Body3dSegmentRenderDistanceMax
+        for struct (color, segmentList) in segments.Pairs' do
+            let segmentsNear = segmentList |> Seq.filter (fun segment -> ((segment.A + segment.Vector * 0.5f) - world.Eye3dCenter).MagnitudeSquared < distanceMaxSquared)
+            World.imGuiSegments3d segmentsNear 1.0f color world
+            segmentList.Clear ()
+        this.NextFrame ()
+
+[<AutoOpen>]
+module WorldImGui2 =
+    
+    type World with
+
+        // Render the 3D physics via ImGui using the given settings.
+        static member imGuiRenderPhysics3d (settings : DrawSettings) world =
+            let physicsEngine3d = World.getPhysicsEngine3d world
+            let renderer = World.getRendererPhysics3d world :?> RendererPhysics3d
+            physicsEngine3d.TryRender (world.Eye3dCenter,  settings, renderer)
+            renderer.Flush world

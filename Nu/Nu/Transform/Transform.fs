@@ -50,6 +50,7 @@ type [<NoEquality; NoComparison>] Transform =
         val mutable private Elevation_ : single
         val mutable private Overflow_ : single
         val mutable private Presence_ : Presence
+        val mutable private PresenceOverride_ : Presence voption
         end
 
     member this.Active                  with get () = this.Flags_ &&& ActiveMask <> 0u                  and set value = this.Flags_ <- if value then this.Flags_ ||| ActiveMask else this.Flags_ &&& ~~~ActiveMask
@@ -80,10 +81,12 @@ type [<NoEquality; NoComparison>] Transform =
     member this.Elevation               with get () = this.Elevation_                                   and set value = this.Elevation_ <- value
     member this.Overflow                with get () = this.Overflow_                                    and set value = this.Overflow_ <- value
     member this.Presence                with get () = this.Presence_                                    and set value = this.Presence_ <- value
+    member this.PresenceOverride        with get () = this.PresenceOverride_                            and set value = this.PresenceOverride_ <- value
 
     member this.Optimized =
+        let presence = ValueOption.defaultValue this.Presence_ this.PresenceOverride
         this.Imperative &&
-        this.Presence_.IsOmnipresent &&
+        presence.IsOmnipresent &&
         not this.PublishChangeEvents
 
     member this.Rotation
@@ -358,7 +361,7 @@ type [<NoEquality; NoComparison>] Transform =
         transform.Overflow_ <- 1.0f
         transform
 
-    /// Make a transform based on human-intuited values.
+    /// Make a transform based on human-intuitive values.
     static member makeIntuitive absolute position scale offset size angles elevation =
         let mutable transform = Transform.makeDefault ()
         transform.Flags_ <- FlagsDefault ||| if absolute then AbsoluteMask else 0u

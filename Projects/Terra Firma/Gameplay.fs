@@ -30,13 +30,13 @@ type GameplayDispatcher () =
          define Screen.Score 0]
 
     // here we define the behavior of our gameplay
-    override this.Process (screenResults, screen, world) =
+    override this.Process (selectionResults, screen, world) =
 
         // only process when selected
         if screen.GetSelected world then
 
             // process scene initialization
-            let initializing = FQueue.contains Select screenResults
+            let initializing = FQueue.contains Select selectionResults
             let world =
                 if initializing then
                     let world = Simulants.Gameplay.SetGameplayState Playing world
@@ -91,18 +91,18 @@ type GameplayDispatcher () =
             let mutable shadowViewInverse = Matrix4x4.CreateFromYawPitchRoll (0.0f, -MathF.PI_OVER_2, 0.0f) * Matrix4x4.CreateFromQuaternion (sun.GetRotation world)
             shadowViewInverse.Translation <- sun.GetPosition world
             let shadowView = shadowViewInverse.Inverted
-            let shadowWidth = sun.GetLightCutoff world * 2.0f
+            let shadowWidth = max (sun.GetLightCutoff world * 2.0f) (Constants.Render.NearPlaneDistanceInterior * 2.0f)
             let shadowResolution = Viewport.getShadowTextureBufferResolution 0 world.GeometryViewport
             let shadowTexelSize = shadowWidth / single shadowResolution.X // assuming square, of course
             let position = Simulants.GameplayPlayer.GetPositionInterpolated world
-            let positionShadow = position.Transform shadowView + v3Up * 12.0f // position of player + offset in shadow space
+            let positionShadow = position.Transform shadowView
             let positionSnapped =
                 v3
                     (floor (positionShadow.X / shadowTexelSize) * shadowTexelSize)
                     (floor (positionShadow.Y / shadowTexelSize) * shadowTexelSize)
                     (floor (positionShadow.Z / shadowTexelSize) * shadowTexelSize)
             let position = positionSnapped.Transform shadowViewInverse
-            let world = sun.SetPosition position world
+            let world = sun.SetPositionLocal position world
 
             // update eye to look at player while game is advancing
             let world =
@@ -117,16 +117,15 @@ type GameplayDispatcher () =
             // process nav sync
             let world = if initializing then World.synchronizeNav3d screen world else world
 
-            // end scene declaration
-            let world = World.endGroup world
-
-            // declare gui group
-            let world = World.beginGroup "Gui" [] world
+            // declare score text
             let world = World.doText "Score" [Entity.Position .= v3 260.0f 155.0f 0.0f; Entity.Elevation .= 10.0f; Entity.Text @= "Score: " + string (screen.GetScore world)] world
+
+            // declare quit button
             let (clicked, world) = World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Elevation .= 10.0f; Entity.Text .= "Quit"] world
             let world = if clicked then screen.SetGameplayState Quit world else world
-            let world = World.endGroup world
-            world
+
+            // end scene declaration
+            World.endGroup world
 
         // otherwise, no processing
         else world

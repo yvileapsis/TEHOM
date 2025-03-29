@@ -10,6 +10,7 @@ open System.Numerics
 open System.Reflection
 open DotRecast.Core
 open DotRecast.Detour
+open JoltPhysicsSharp
 open Prime
 
 [<RequireQualifiedAccess>]
@@ -34,7 +35,7 @@ module internal WorldTypes =
     // EventGraph F# reach-arounds.
     let mutable internal getSelectedScreenIdling : obj -> bool = Unchecked.defaultof<_>
     let mutable internal getSelectedScreenTransitioning : obj -> bool = Unchecked.defaultof<_>
-    let mutable internal handleSubscribeAndUnsubscribeEvent : bool -> Address -> Simulant -> obj -> obj = Unchecked.defaultof<_>
+    let mutable internal handleSubscribeAndUnsubscribeEvent : bool -> obj Address -> Simulant -> obj -> obj = Unchecked.defaultof<_>
 
     // Simulant F# reach-arounds.
     let mutable internal getEntityIs2d : obj -> obj -> bool = Unchecked.defaultof<_>
@@ -65,6 +66,7 @@ and SnapshotType =
     | PasteEntity
     | LoadEntity
     | DuplicateEntity
+    | CreateGroup
     | RenameGroup
     | OpenGroup
     | CloseGroup
@@ -74,8 +76,10 @@ and SnapshotType =
     | NormalizeAttenuation
     | RencenterInProbeBounds
     | ResetProbeBounds
+    | VolumeEdit of string
     | FreezeEntities
     | ThawEntities
+    | Permafreeze
     | ReregisterPhysics
     | SynchronizeNav
     | SetEditMode of int
@@ -105,6 +109,7 @@ and SnapshotType =
         | LoadEntity -> (scstringMemo this).Spaced
         | DuplicateEntity -> (scstringMemo this).Spaced
         | RenameGroup -> (scstringMemo this).Spaced
+        | CreateGroup -> (scstringMemo this).Spaced
         | OpenGroup -> (scstringMemo this).Spaced
         | CloseGroup -> (scstringMemo this).Spaced
         | ChangeProperty (_, propertyName) -> "Change Property " + propertyName
@@ -113,8 +118,10 @@ and SnapshotType =
         | NormalizeAttenuation -> (scstringMemo this).Spaced
         | RencenterInProbeBounds -> (scstringMemo this).Spaced
         | ResetProbeBounds -> (scstringMemo this).Spaced
+        | VolumeEdit volumeEditType -> "Volume Edit " + volumeEditType
         | FreezeEntities -> (scstringMemo this).Spaced
         | ThawEntities -> (scstringMemo this).Spaced
+        | Permafreeze -> (scstringMemo this).Spaced
         | ReregisterPhysics -> (scstringMemo this).Spaced
         | SynchronizeNav -> (scstringMemo this).Spaced
         | SetEditMode i -> (scstringMemo this).Spaced + " (" + string (inc i) + " of 2)"
@@ -187,11 +194,11 @@ and Lens =
         /// The simulant whose property is accessed by the lens.
         abstract This : Simulant
         /// Get the value of the property accessed by the lens.
-        abstract Get : World -> obj
+        abstract Get : world : World -> obj
         /// Get an optional setter function that updates the property accessed by the lens.
         abstract SetOpt : (obj -> World -> World) voption
         /// Attempt to set the lensed property to the given value.
-        abstract TrySet : obj -> World -> struct (bool * World)
+        abstract TrySet : value : obj -> world : World -> struct (bool * World)
         /// The change event associated with the lensed property.
         abstract ChangeEvent : ChangeData Address
         /// The type of the lensed property.
@@ -207,82 +214,82 @@ and [<ReferenceEquality>] Lens<'a, 's when 's :> Simulant> =
       SetOpt : ('a -> World -> World) voption }
 
     /// Get the lensed value mapped by the `by` function.
-    member this.GetBy by world =
-        by (this.Get world)
+    member lens.GetBy by world =
+        by (lens.Get world)
 
     /// Get the lensed value mapped by the `by` function that includes the world value in its input.
-    member this.GetByWorld by world =
-        by (this.Get world) world
+    member lens.GetByWorld by world =
+        by (lens.Get world) world
 
     /// Attempt to set the property in the world to the given value.
-    member this.TrySet value world =
-        match this.SetOpt with
+    member lens.TrySet value world =
+        match lens.SetOpt with
         | ValueSome setter -> (true, setter value world)
         | ValueNone -> (false, world)
 
     /// Set the lensed property to the given value.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    member this.Set value world =
-        match this.SetOpt with
+    member lens.Set value world =
+        match lens.SetOpt with
         | ValueSome setter -> setter value world
-        | ValueNone -> failwith ("Lens for '" + this.Name + "' is readonly.")
+        | ValueNone -> failwith ("Lens for '" + lens.Name + "' is readonly.")
 
     /// Attempt to transform the lensed property's value using the given updater function that also receives the world as input.
-    member this.TryMapWorld (mapper : 'a -> World -> 'a) world =
-        match this.SetOpt with
-        | ValueSome setter -> struct (true, setter (mapper (this.Get world) world) world)
+    member lens.TryMapWorld (mapper : 'a -> World -> 'a) world =
+        match lens.SetOpt with
+        | ValueSome setter -> struct (true, setter (mapper (lens.Get world) world) world)
         | ValueNone -> struct (false, world)
 
     /// Attempt to transform the lensed property's value using the given updater function, optionally updating the world value in the process.
-    member this.TryMapEffect (mapper : 'a -> World -> ('a * World)) (world : World) =
-        match this.SetOpt with
+    member lens.TryMapEffect (mapper : 'a -> World -> ('a * World)) (world : World) =
+        match lens.SetOpt with
         | ValueSome setter ->
-            let (value, world) = mapper (this.Get world) world
+            let (value, world) = mapper (lens.Get world) world
             struct (true, setter value world)
         | ValueNone -> struct (false, world)
 
     /// Attempt to transform the lensed property's value using the given updater function.
-    member this.TryMap (mapper : 'a -> 'a) world =
-        match this.SetOpt with
-        | ValueSome setter -> struct (true, setter (mapper (this.Get world)) world)
+    member lens.TryMap (mapper : 'a -> 'a) world =
+        match lens.SetOpt with
+        | ValueSome setter -> struct (true, setter (mapper (lens.Get world)) world)
         | ValueNone -> struct (false, world)
 
     /// Update the lensed property's value using the given updater function that also receives the world as input.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    member this.MapWorld mapper world =
-        match this.SetOpt with
-        | ValueSome setter -> setter (mapper (this.Get world) world) world
+    member lens.MapWorld mapper world =
+        match lens.SetOpt with
+        | ValueSome setter -> setter (mapper (lens.Get world) world) world
         | ValueNone -> failwithumf ()
 
     /// Update the lensed property's value using the given updater function, optionally updating the world value in the process.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    member this.MapEffect mapper world =
-        match this.SetOpt with
+    member lens.MapEffect mapper world =
+        match lens.SetOpt with
         | ValueSome setter ->
-            let (value, world) = mapper (this.Get world) world
+            let (value, world) = mapper (lens.Get world) world
             setter value world
         | ValueNone -> failwithumf ()
 
     /// Update the lensed property's value using the given updater function.
     /// Returns the updated world or throws an exception if the lens is readonly.
-    member this.Map mapper world =
-        match this.SetOpt with
-        | ValueSome setter -> setter (mapper (this.Get world)) world
+    member lens.Map mapper world =
+        match lens.SetOpt with
+        | ValueSome setter -> setter (mapper (lens.Get world)) world
         | ValueNone -> failwithumf ()
 
     /// The change event associated with the lensed property.
-    member this.ChangeEvent : ChangeData Address =
-        let names = [|Constants.Lens.ChangeName; this.Name; Constants.Lens.EventName|]
-        match box this.This with
+    member lens.ChangeEvent : ChangeData Address =
+        let names = [|Constants.Lens.ChangeName; lens.Name; Constants.Lens.EventName|]
+        match box lens.This with
         | null ->
             // HACK: this case is a hack to allow Nu to resolve events contextually.
-            let hashCode = Constants.Lens.ChangeNameHash ^^^ hash this.Name ^^^ Constants.Lens.EventNameHash
+            let hashCode = Constants.Lens.ChangeNameHash ^^^ hash lens.Name ^^^ Constants.Lens.EventNameHash
             let changeEventAddress = { Names = names; HashCode = hashCode; Anonymous = true }
             changeEventAddress
-        | _ -> rtoa (Array.append names this.This.SimulantAddress.Names)
+        | _ -> rtoa (Array.append names lens.This.SimulantAddress.Names)
 
     /// The type of the lensed property.
-    member inline this.Type = typeof<'a>
+    member inline lens.Type = typeof<'a>
 
     /// Adds the specified value to the lensed property's value.
     /// Returns the updated world or throws an exception if the lens is readonly.
@@ -328,13 +335,13 @@ and [<ReferenceEquality>] Lens<'a, 's when 's :> Simulant> =
     static member inline ( !. ) (lens : Lens<_, _>) = fun world -> lens.Get world
 
     interface Lens with
-        member this.Name = this.Name
-        member this.This = this.This :> Simulant
-        member this.Get world = this.Get world :> obj
-        member this.SetOpt = ValueOption.map (fun set -> fun (value : obj) world -> set (value :?> 'a) world) this.SetOpt
-        member this.TrySet value world = match this.SetOpt with ValueSome set -> (true, set (value :?> 'a) world) | ValueNone -> (false, world)
-        member this.ChangeEvent = this.ChangeEvent
-        member this.Type = typeof<'a>
+        member lens.Name = lens.Name
+        member lens.This = lens.This :> Simulant
+        member lens.Get world = lens.Get world :> obj
+        member lens.SetOpt = ValueOption.map (fun set -> fun (value : obj) world -> set (value :?> 'a) world) lens.SetOpt
+        member lens.TrySet value world = match lens.SetOpt with ValueSome set -> (true, set (value :?> 'a) world) | ValueNone -> (false, world)
+        member lens.ChangeEvent = lens.ChangeEvent
+        member lens.Type = typeof<'a>
 
 /// A model-message-command-content (MMCC) signal tag type.
 and Signal = interface end
@@ -410,12 +417,17 @@ and Slide =
     { IdlingTime : GameTime
       Destination : Screen }
 
+/// Identifies a navigation entry.
+and NavId =
+    { NavEntity : Entity
+      NavIndex : int }
+
 /// Represents 3d navigation capabilies for a screen.
 /// NOTE: this type is intended only for internal engine use.
 and [<ReferenceEquality; NoComparison>] Nav3d =
     { Nav3dContext : RcContext
-      Nav3dBodies : Map<Entity, Box3 * Matrix4x4 * StaticModel AssetTag * int * NavShape>
-      Nav3dBodiesOldOpt : Map<Entity, Box3 * Matrix4x4 * StaticModel AssetTag * int * NavShape> option
+      Nav3dBodies : Map<NavId, Box3 * Matrix4x4 * StaticModel AssetTag * int * NavShape>
+      Nav3dBodiesOldOpt : Map<NavId, Box3 * Matrix4x4 * StaticModel AssetTag * int * NavShape> option
       Nav3dConfig : Nav3dConfig
       Nav3dConfigOldOpt : Nav3dConfig option
       Nav3dMeshOpt : (NavBuilderResultData * DtNavMesh * DtNavMeshQuery) option }
@@ -443,55 +455,55 @@ and GameDispatcher () =
     inherit SimulantDispatcher ()
 
     /// Register a game when adding it to the world.
-    abstract Register : Game * World -> World
+    abstract Register : game : Game * world : World -> World
     default this.Register (_, world) = world
 
     /// Unregister a game when finished with the world.
-    abstract Unregister : Game * World -> World
+    abstract Unregister : game : Game * world : World -> World
     default this.Unregister (_, world) = world
 
     /// Attempt to ImNui process a game.
-    abstract TryProcess : Game * World -> World
-    default this.TryProcess (_, world) = world
+    abstract TryProcess : zeroDelta : bool * game : Game * world : World -> World
+    default this.TryProcess (_, _, world) = world
 
     /// Pre-update a game.
-    abstract PreUpdate : Game * World -> World
+    abstract PreUpdate : game : Game * world : World -> World
     default this.PreUpdate (_, world) = world
 
     /// Update a game.
-    abstract Update : Game * World -> World
+    abstract Update : game : Game * world : World -> World
     default this.Update (_, world) = world
 
     /// Post-update a game.
-    abstract PostUpdate : Game * World -> World
+    abstract PostUpdate : game : Game * world : World -> World
     default this.PostUpdate (_, world) = world
 
     /// Render a game.
-    abstract Render : RenderPass * Game * World -> unit
+    abstract Render : renderPass : RenderPass * game : Game * world : World -> unit
     default this.Render (_, _, _) = ()
 
     /// Send a signal to a game.
-    abstract Signal : obj * Game * World -> World
+    abstract Signal : signalObj : obj * game : Game * world : World -> World
     default this.Signal (_, _, world) = world
 
     /// Attempt to get the fallback model value if the dispatcher defines one.
-    abstract TryGetFallbackModel<'a> : Symbol * Game * World -> 'a option
+    abstract TryGetFallbackModel<'a> : modelSymbol : Symbol * game : Game * world : World -> 'a option
     default this.TryGetFallbackModel (_, _, _) = None
 
     /// Attempt to synchronize the content of a game.
-    abstract TrySynchronize : bool * Game * World -> World
+    abstract TrySynchronize : initializing : bool * game : Game * world : World -> World
     default this.TrySynchronize (_, _, world) = world
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
-    abstract Edit : EditOperation * Game * World -> World
+    abstract Edit : op : EditOperation * game : Game * world : World -> World
     default this.Edit (_, _, world) = world
 
     /// Attempt to truncate a game model.
-    abstract TryTruncateModel<'a> : 'a -> 'a option
+    abstract TryTruncateModel<'a> : model : 'a -> 'a option
     default this.TryTruncateModel _ = None
 
     /// Attempt to untruncate a game model.
-    abstract TryUntruncateModel<'a> : 'a * Game * World -> 'a option
+    abstract TryUntruncateModel<'a> : model : 'a * game : Game * world : World -> 'a option
     default this.TryUntruncateModel (_, _, _) = None
 
 /// The default dispatcher for screens.
@@ -499,55 +511,55 @@ and ScreenDispatcher () =
     inherit SimulantDispatcher ()
 
     /// Register a screen when adding it to the world.
-    abstract Register : Screen * World -> World
+    abstract Register : screen : Screen * world : World -> World
     default this.Register (_, world) = world
 
     /// Unregister a screen when removing it from the world.
-    abstract Unregister : Screen * World -> World
+    abstract Unregister : screen : Screen * world : World -> World
     default this.Unregister (_, world) = world
 
     /// Attempt to ImNui process a screen.
-    abstract TryProcess : bool * Screen * World -> World
+    abstract TryProcess : zeroDelta : bool * screen : Screen * world : World -> World
     default this.TryProcess (_, _, world) = world
 
     /// Pre-update a screen.
-    abstract PreUpdate : Screen * World -> World
+    abstract PreUpdate : screen : Screen * world : World -> World
     default this.PreUpdate (_, world) = world
 
     /// Update a screen.
-    abstract Update : Screen * World -> World
+    abstract Update : screen : Screen * world : World -> World
     default this.Update (_, world) = world
 
     /// Post-update a screen.
-    abstract PostUpdate : Screen * World -> World
+    abstract PostUpdate : screen : Screen * world : World -> World
     default this.PostUpdate (_, world) = world
 
     /// Render a screen.
-    abstract Render : RenderPass * Screen * World -> unit
+    abstract Render : renderPass : RenderPass * screen : Screen * world : World -> unit
     default this.Render (_, _, _) = ()
 
     /// Send a signal to a screen.
-    abstract Signal : obj * Screen * World -> World
+    abstract Signal : signalObj : obj * screen : Screen * world : World -> World
     default this.Signal (_, _, world) = world
 
     /// Attempt to get the fallback model value if the dispatcher defines one.
-    abstract TryGetFallbackModel<'a> : Symbol * Screen * World -> 'a option
+    abstract TryGetFallbackModel<'a> : modelSymbol : Symbol * screen : Screen * world : World -> 'a option
     default this.TryGetFallbackModel (_, _, _) = None
 
     /// Attempt to synchronize the content of a screen.
-    abstract TrySynchronize : bool * Screen * World -> World
+    abstract TrySynchronize : initializing : bool * screen : Screen * world : World -> World
     default this.TrySynchronize (_, _, world) = world
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
-    abstract Edit : EditOperation * Screen * World -> World
+    abstract Edit : op : EditOperation * screen : Screen * world : World -> World
     default this.Edit (_, _, world) = world
 
     /// Attempt to truncate a screen model.
-    abstract TryTruncateModel<'a> : 'a -> 'a option
+    abstract TryTruncateModel<'a> : model : 'a -> 'a option
     default this.TryTruncateModel _ = None
 
     /// Attempt to untruncate a screen model.
-    abstract TryUntruncateModel<'a> : 'a * Screen * World -> 'a option
+    abstract TryUntruncateModel<'a> : model : 'a * screen : Screen * world : World -> 'a option
     default this.TryUntruncateModel (_, _, _) = None
 
 /// The default dispatcher for groups.
@@ -555,55 +567,55 @@ and GroupDispatcher () =
     inherit SimulantDispatcher ()
 
     /// Register a group when adding it to a screen.
-    abstract Register : Group * World -> World
+    abstract Register : group : Group * world : World -> World
     default this.Register (_, world) = world
 
     /// Unregister a group when removing it from a screen.
-    abstract Unregister : Group * World -> World
+    abstract Unregister : group : Group * world : World -> World
     default this.Unregister (_, world) = world
 
     /// Attempt to ImNui process a group.
-    abstract TryProcess : Group * World -> World
-    default this.TryProcess (_, world) = world
+    abstract TryProcess : zeroDelta : bool * group : Group * world : World -> World
+    default this.TryProcess (_, _, world) = world
 
     /// Pre-update a group.
-    abstract PreUpdate : Group * World -> World
+    abstract PreUpdate : group : Group * world : World -> World
     default this.PreUpdate (_, world) = world
 
     /// Update a group.
-    abstract Update : Group * World -> World
+    abstract Update : group : Group * world : World -> World
     default this.Update (_, world) = world
 
     /// Post-update a group.
-    abstract PostUpdate : Group * World -> World
+    abstract PostUpdate : group : Group * world : World -> World
     default this.PostUpdate (_, world) = world
 
     /// Render a group.
-    abstract Render : RenderPass * Group * World -> unit
+    abstract Render : renderPass : RenderPass * group : Group * world : World -> unit
     default this.Render (_, _, _) = ()
 
     /// Send a signal to a group.
-    abstract Signal : obj * Group * World -> World
+    abstract Signal : signalObj : obj * group : Group * world : World -> World
     default this.Signal (_, _, world) = world
 
     /// Attempt to get the fallback model value if the dispatcher defines one.
-    abstract TryGetFallbackModel<'a> : Symbol * Group * World -> 'a option
+    abstract TryGetFallbackModel<'a> : modelSymbol : Symbol * group : Group * world : World -> 'a option
     default this.TryGetFallbackModel (_, _, _) = None
 
     /// Attempt to synchronize the content of a group.
-    abstract TrySynchronize : bool * Group * World -> World
+    abstract TrySynchronize : initializing : bool * group : Group * world : World -> World
     default this.TrySynchronize (_, _, world) = world
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
-    abstract Edit : EditOperation * Group * World -> World
+    abstract Edit : op : EditOperation * group : Group * world : World -> World
     default this.Edit (_, _, world) = world
 
     /// Attempt to truncate a group model.
-    abstract TryTruncateModel<'a> : 'a -> 'a option
+    abstract TryTruncateModel<'a> : model : 'a -> 'a option
     default this.TryTruncateModel _ = None
 
     /// Attempt to untruncate a group model.
-    abstract TryUntruncateModel<'a> : 'a * Group * World -> 'a option
+    abstract TryUntruncateModel<'a> : model : 'a * group : Group * world : World -> 'a option
     default this.TryUntruncateModel (_, _, _) = None
 
 /// The default dispatcher for entities.
@@ -652,62 +664,62 @@ and EntityDispatcher (is2d, physical, lightProbe, light) =
     default this.PresenceOverride = ValueNone
 
     /// Register an entity when adding it to a group.
-    abstract Register : Entity * World -> World
+    abstract Register : entity : Entity * world : World -> World
     default this.Register (_, world) = world
 
     /// Unregister an entity when removing it from a group.
-    abstract Unregister : Entity * World -> World
+    abstract Unregister : entity : Entity * world : World -> World
     default this.Unregister (_, world) = world
 
     /// Attempt to ImNui process an entity.
-    abstract TryProcess : Entity * World -> World
-    default this.TryProcess (_, world) = world
+    abstract TryProcess : zeroDelta : bool * entity : Entity * world : World -> World
+    default this.TryProcess (_, _, world) = world
 
     /// Update an entity.
-    abstract Update : Entity * World -> World
+    abstract Update : entity : Entity * world : World -> World
     default this.Update (_, world) = world
 
     /// Render an entity.
-    abstract Render : RenderPass * Entity * World -> unit
+    abstract Render : renderPass : RenderPass * entity : Entity * world : World -> unit
     default this.Render (_, _, _) = ()
 
     /// Apply physics changes from a physics engine to an entity.
-    abstract ApplyPhysics : Vector3 * Quaternion * Vector3 * Vector3 * Entity * World -> World
+    abstract ApplyPhysics : center : Vector3 * rotation : Quaternion * linearVelocity : Vector3 * angularVelocity : Vector3 * entity : Entity * world : World -> World
     default this.ApplyPhysics (_, _, _, _, _, world) = world
 
     /// Send a signal to an entity.
-    abstract Signal : obj * Entity * World -> World
+    abstract Signal : signalObj : obj * entity : Entity * world : World -> World
     default this.Signal (_, _, world) = world
 
     /// Attempt to get the fallback model value if the dispatcher defines one.
-    abstract TryGetFallbackModel<'a> : Symbol * Entity * World -> 'a option
+    abstract TryGetFallbackModel<'a> : modelSymbol : Symbol * entity : Entity * world : World -> 'a option
     default this.TryGetFallbackModel (_, _, _) = None
 
     /// Attempt to synchronize content of an entity.
-    abstract TrySynchronize : bool * Entity * World -> World
+    abstract TrySynchronize : initializing : bool * entity : Entity * world : World -> World
     default this.TrySynchronize (_, _, world) = world
 
     /// Get the default size of an entity.
-    abstract GetAttributesInferred : Entity * World -> AttributesInferred
+    abstract GetAttributesInferred : entity : Entity * world : World -> AttributesInferred
     default this.GetAttributesInferred (_, _) =
         if this.Is2d
         then AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
         else AttributesInferred.important Constants.Engine.Entity3dSizeDefault v3Zero
 
     /// Attempt to pick an entity with a ray.
-    abstract RayCast : Ray3 * Entity * World -> single array
+    abstract RayCast : ray : Ray3 * entity : Entity * world : World -> Intersection array
     default this.RayCast (_, _, _) = [||]
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
-    abstract Edit : EditOperation * Entity * World -> World
+    abstract Edit : op : EditOperation * entity : Entity * world : World -> World
     default this.Edit (_, _, world) = world
 
     /// Attempt to truncate an entity model.
-    abstract TryTruncateModel<'a> : 'a -> 'a option
+    abstract TryTruncateModel<'a> : model : 'a -> 'a option
     default this.TryTruncateModel _ = None
 
     /// Attempt to untruncate an entity model.
-    abstract TryUntruncateModel<'a> : 'a * Entity * World -> 'a option
+    abstract TryUntruncateModel<'a> : model : 'a * Entity : Entity * world : World -> 'a option
     default this.TryUntruncateModel (_, _, _) = None
 
     /// Whether the dispatcher has a 2-dimensional transform interpretation.
@@ -733,42 +745,39 @@ and Facet (physical, lightProbe, light) =
     default this.PresenceOverride = ValueNone
 
     /// Register a facet when adding it to an entity.
-    abstract Register : Entity * World -> World
+    abstract Register : entity : Entity * world : World -> World
     default this.Register (_, world) = world
 
     /// Unregister a facet when removing it from an entity.
-    abstract Unregister : Entity * World -> World
+    abstract Unregister : entity : Entity * world : World -> World
     default this.Unregister (_, world) = world
 
     /// Participate in the registration of an entity's physics with the physics subsystem.
-    abstract RegisterPhysics : Entity * World -> World
+    abstract RegisterPhysics : entity : Entity * world : World -> World
     default this.RegisterPhysics (_, world) = world
 
     /// Participate in the unregistration of an entity's physics from the physics subsystem.
-    abstract UnregisterPhysics : Entity * World -> World
+    abstract UnregisterPhysics : entity : Entity * world : World -> World
     default this.UnregisterPhysics (_, world) = world
 
     /// Update a facet.
-    abstract Update : Entity * World -> World
+    abstract Update : entity : Entity * world : World -> World
     default this.Update (_, world) = world
 
     /// Render a facet.
-    abstract Render : RenderPass * Entity * World -> unit
+    abstract Render : renderPass : RenderPass * entity : Entity * world : World -> unit
     default this.Render (_, _, _) = ()
 
     /// Participate in attempting to pick an entity with a ray.
-    abstract RayCast : Ray3 * Entity * World -> single array
+    abstract RayCast : ray : Ray3 * entity : Entity * world : World -> Intersection array
     default this.RayCast (_, _, _) = [||]
 
     /// Participate in getting the default size of an entity.
-    abstract GetAttributesInferred : Entity * World -> AttributesInferred
-    default this.GetAttributesInferred (entity, world) =
-        if WorldTypes.getEntityIs2d entity world
-        then AttributesInferred.important Constants.Engine.Entity2dSizeDefault v3Zero
-        else AttributesInferred.important Constants.Engine.Entity3dSizeDefault v3Zero
+    abstract GetAttributesInferred : entity : Entity * world : World -> AttributesInferred
+    default this.GetAttributesInferred (_, _) = AttributesInferred.unimportant
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
-    abstract Edit : EditOperation * Entity * World -> World
+    abstract Edit : op : EditOperation * entity : Entity * world : World -> World
     default this.Edit (_, _, world) = world
 
     /// Whether a facet participates in a physics system.
@@ -1184,7 +1193,7 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     member this.Perimeter with get () = this.Transform.Perimeter and set value = this.Transform.Perimeter <- value
     member this.Bounds = if this.Is2d then this.Transform.Bounds2d else this.Transform.Bounds3d
     member this.Presence with get () = this.Transform.Presence and set value = this.Transform.Presence <- value
-    member this.PresenceOverride = if this.Absolute then ValueSome Omnipresent else match this.Dispatcher.PresenceOverride with ValueSome _ as override_ -> override_ | _ -> ValueNone
+    member this.PresenceOverride with get () = this.Transform.PresenceOverride and set value = this.Transform.PresenceOverride <- value
     member internal this.Active with get () = this.Transform.Active and set value = this.Transform.Active <- value
     member internal this.Dirty with get () = this.Transform.Dirty and set value = this.Transform.Dirty <- value
     member internal this.Invalidated with get () = this.Transform.Invalidated and set value = this.Transform.Invalidated <- value
@@ -1210,11 +1219,9 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
     member this.Light = this.Dispatcher.Light || Array.exists (fun (facet : Facet) -> facet.Light) this.Facets
     member this.Static with get () = this.Transform.Static and set value = this.Transform.Static <- value
     member this.Optimized = this.Transform.Optimized
-    member internal this.VisibleSpatial = this.Visible || this.AlwaysRender
-    member internal this.StaticSpatial = this.Static && not this.AlwaysUpdate
-    /// NOTE: there is a minor semantic hole here where an entity's facets may have higher PresenceOverrides, but for
-    /// basic efficiency reasons, this often invoked property doesn't take those into consideration.
-    member internal this.PresenceSpatial = match this.PresenceOverride with ValueSome presence -> presence | ValueNone -> this.Presence
+    member internal this.VisibleInView = this.Visible || this.AlwaysRender
+    member internal this.StaticInPlay = this.Static && not this.AlwaysUpdate
+    member internal this.PresenceInPlay = match this.PresenceOverride with ValueSome presence -> presence | ValueNone -> this.Presence
 
     /// Copy an entity state.
     /// This is used when we want to retain an old version of an entity state in face of mutation.
@@ -1475,15 +1482,15 @@ and [<TypeConverter (typeof<ScreenConverter>)>] Screen (screenAddress) =
     override this.GetHashCode () =
         Address.hash this.ScreenAddress
 
+    interface Screen IComparable with
+        member this.CompareTo that =
+            Address.compare this.ScreenAddress that.ScreenAddress
+
     interface IComparable with
         member this.CompareTo that =
             match that with
             | :? Screen as that -> (this :> Screen IComparable).CompareTo that
             | _ -> failwith "Invalid Screen comparison (comparee not of type Screen)."
-
-    interface Screen IComparable with
-        member this.CompareTo that =
-            Address.compare this.ScreenAddress that.ScreenAddress
 
     interface Simulant with
         member this.SimulantAddress = screenAddress
@@ -1833,6 +1840,7 @@ and [<ReferenceEquality>] internal Subsystems =
       PhysicsEngine2d : PhysicsEngine
       PhysicsEngine3d : PhysicsEngine
       RendererProcess : RendererProcess
+      RendererPhysics3d : DebugRenderer
       AudioPlayer : AudioPlayer }
 
 /// Keeps the World from occupying more than two cache lines.
@@ -1840,8 +1848,8 @@ and [<ReferenceEquality>] internal WorldExtension =
     { // cache line 1 (assuming 16 byte header)
       mutable ContextImNui : Address
       mutable DeclaredImNui : Address
-      mutable SimulantImNuis : SUMap<Address, SimulantImNui>
-      mutable SubscriptionImNuis : SUMap<string * Address * Address, SubscriptionImNui>
+      mutable SimulantsImNui : SUMap<Address, SimulantImNui>
+      mutable SubscriptionsImNui : SUMap<string * Address * Address, SubscriptionImNui>
       GeometryViewport : Viewport
       RasterViewport : Viewport
       // cache line 2
@@ -1896,9 +1904,12 @@ and [<ReferenceEquality>] World =
     member this.Halted =
         not this.AmbientState.Advancing
 
-    /// Check the the world's frame rate is being explicitly paced based on clock progression.
+    /// Check that the world's frame rate is being explicitly paced based on clock progression.
     member this.FramePacing =
         this.AmbientState.FramePacing
+
+    member internal this.AdvancementCleared =
+        this.AmbientState.AdvancementCleared
 
     /// Get the number of updates that have transpired between this and the previous frame.
     member this.UpdateDelta =
@@ -1977,7 +1988,7 @@ and [<ReferenceEquality>] World =
 
     /// Check that the current ImNui context is initializing this frame.
     member this.ContextInitializing =
-        match this.WorldExtension.SimulantImNuis.TryGetValue this.WorldExtension.ContextImNui with
+        match this.WorldExtension.SimulantsImNui.TryGetValue this.WorldExtension.ContextImNui with
         | (true, simulantImNui) -> simulantImNui.SimulantInitializing
         | (false, _) -> false
 
@@ -2014,15 +2025,23 @@ and [<ReferenceEquality>] World =
 
     /// Check that the recent ImNui declaration is initializing this frame.
     member this.DeclaredInitializing =
-        match this.WorldExtension.SimulantImNuis.TryGetValue this.WorldExtension.DeclaredImNui with
+        match this.WorldExtension.SimulantsImNui.TryGetValue this.WorldExtension.DeclaredImNui with
         | (true, simulantImNui) -> simulantImNui.SimulantInitializing
         | (false, _) -> false
 
-    member internal this.SimulantImNuis =
-        this.WorldExtension.SimulantImNuis
+    member internal this.SimulantsImNui =
+        this.WorldExtension.SimulantsImNui
 
-    member internal this.SubscriptionImNuis =
-        this.WorldExtension.SubscriptionImNuis
+    member internal this.SubscriptionsImNui =
+        this.WorldExtension.SubscriptionsImNui
+
+    /// Get the currently selected screen, if any.
+    member this.SelectedScreenOpt =
+        this.GameState.SelectedScreenOpt
+
+    /// Get the desired selected screen, if any.
+    member this.DesiredScreen =
+        this.GameState.DesiredScreen
 
     /// The viewport of the geometry buffer.
     member this.GeometryViewport =
@@ -2122,15 +2141,15 @@ and [<AbstractClass>] NuPlugin () =
     default this.CleanUp () = ()
 
     /// Invoke a user-defined callback.
-    abstract Invoke : string -> obj list -> World -> World
+    abstract Invoke : callbackName : string -> callbackArgs : obj list -> world : World -> World
     default this.Invoke _ _ world = world
 
     /// Make a list of keyed values to hook into the engine.
-    abstract MakeKeyedValues : World -> ((string * obj) list) * World
+    abstract MakeKeyedValues : world : World -> ((string * obj) list) * World
     default this.MakeKeyedValues world = ([], world)
 
     /// Attempt to make an emitter of the given name.
-    abstract TryMakeEmitter : GameTime -> GameTime -> GameTime -> single -> int -> string -> Particles.Emitter option
+    abstract TryMakeEmitter : time : GameTime -> lifeTimeOpt : GameTime -> particleLifeTimeOpt : GameTime -> particleRate : single -> particleMax : int -> emitterName : string -> Particles.Emitter option
     default this.TryMakeEmitter time lifeTimeOpt particleLifeTimeOpt particleRate particleMax emitterName =
         match emitterName with
         | "BasicStaticSpriteEmitter" -> Particles.BasicStaticSpriteEmitter.makeDefault time lifeTimeOpt particleLifeTimeOpt particleRate particleMax :> Particles.Emitter |> Some
@@ -2138,23 +2157,23 @@ and [<AbstractClass>] NuPlugin () =
         | _ -> None
 
     /// A call-back at the beginning of each frame.
-    abstract PreProcess : World -> World
+    abstract PreProcess : world : World -> World
     default this.PreProcess world = world
 
     /// A call-back during each frame.
-    abstract PerProcess : World -> World
+    abstract PerProcess : world : World -> World
     default this.PerProcess world = world
 
     /// A call-back at the end of each frame.
-    abstract PostProcess : World -> World
+    abstract PostProcess : world : World -> World
     default this.PostProcess world = world
 
     /// A call-back for imgui processing.
-    abstract ImGuiProcess : World -> World
+    abstract ImGuiProcess : world : World -> World
     default this.ImGuiProcess world = world
 
     /// A call-back for imgui post-processing.
-    abstract ImGuiPostProcess : World -> World
+    abstract ImGuiPostProcess : world : World -> World
     default this.ImGuiPostProcess world = world
 
     /// Birth facets / dispatchers of type 'a from plugin.

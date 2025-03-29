@@ -135,7 +135,6 @@ type GameplayDispatcher () =
                  Entity.AngularFactor .= v3Zero
                  Entity.GravityOverride .= Some v3Zero
                  Entity.CollisionDetection .= Continuous
-                 Entity.Observable .= true
                  Entity.StaticImage .= Assets.Default.Ball] world
         let ball = world.DeclaredEntity
 
@@ -157,7 +156,7 @@ type GameplayDispatcher () =
         let world =
             FQueue.fold (fun world result ->
                 match result with
-                | BodyPenetration penetration ->
+                | BodyPenetrationData penetration ->
                     let penetrateeId = penetration.BodyShapePenetratee.BodyId
                     if penetrateeId = paddleBodyId then
 
@@ -207,12 +206,6 @@ type GameplayDispatcher () =
                      Entity.StaticImage .= Assets.Default.Brick] world |> __c)
                 world (gameplay.GetBricks world).Pairs
 
-        // end scene declaration
-        let world = World.endGroup world
-
-        // declare gui group
-        let world = World.beginGroup "Gui" [] world
-
         // declare score
         let world = World.doText "Score" [Entity.Position .= v3 248.0f 136.0f 0.0f; Entity.Text @= "Score: " + string (gameplay.GetScore world)] world
 
@@ -234,6 +227,5 @@ type GameplayDispatcher () =
         let (clicked, world) = World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Text .= "Quit"] world
         let world = if clicked then gameplay.SetGameplayState Quit world else world
 
-        // end gui declaration
-        let world = World.endGroup world
-        world
+        // end scene declaration
+        World.endGroup world

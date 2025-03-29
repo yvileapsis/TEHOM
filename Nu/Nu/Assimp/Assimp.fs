@@ -7,6 +7,7 @@ open System.Collections.Concurrent
 open System.Collections.Generic
 open System.Numerics
 open Prime
+open System.Reflection
 
 /// Determines how an animated behavior is executed.
 type [<Struct>] Playback =
@@ -457,6 +458,15 @@ module AssimpExtensions =
                 mesh.Faces.Clear ()
                 mesh.Faces.Capacity <- 0
 
+        member this.ClearColorData () =
+            for i in 0 .. dec this.Meshes.Count do
+                let mesh = this.Meshes.[i]
+                let m_colorsField = (getType mesh).GetField ("m_colors", BindingFlags.Instance ||| BindingFlags.NonPublic)
+                m_colorsField.SetValue (mesh, Array.empty<Assimp.Color4D List>)
+                for attachment in mesh.MeshAnimationAttachments do
+                    let m_colorsField = (getType attachment).GetField ("m_colors", BindingFlags.Instance ||| BindingFlags.NonPublic)
+                    m_colorsField.SetValue (attachment, Array.empty<Assimp.Color4D List>)
+
         member this.TryFindNode (meshIndex, node : Assimp.Node) =
             let nodes =
                 [for i in 0 .. dec node.MeshCount do
@@ -491,9 +501,8 @@ module AssimpExtensions =
                 let animationLifeTimeOpt = Option.map (fun (lifeTime : GameTime) -> lifeTime.Seconds) animation.LifeTimeOpt
                 let mutable animationChannel = Unchecked.defaultof<_>
                 if animationChannels.TryGetValue (AnimationChannelKey.make animation.Name node.Name, &animationChannel) then
-                    let localTime = time - animationStartTime
-                    if  localTime >= 0.0f &&
-                        (match animationLifeTimeOpt with Some lifeTime -> localTime < animationStartTime + lifeTime | None -> true) &&
+                    let localTime = max 0.0f (time - animationStartTime)
+                    if  (match animationLifeTimeOpt with Some lifeTime -> localTime < animationStartTime + lifeTime | None -> true) &&
                         (match animation.BoneFilterOpt with Some boneFilter -> boneFilter.Contains node.Name | None -> true) then
                         let localTimeScaled =
                             match animation.Playback with

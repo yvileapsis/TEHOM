@@ -73,7 +73,7 @@ type Nu () =
             WorldModule.register <- fun simulant world -> World.register simulant world
             WorldModule.unregister <- fun simulant world -> World.unregister simulant world
             WorldModule.tryProcessGame <- fun game world -> World.tryProcessGame game world
-            WorldModule.tryProcessScreen <- fun firstFrame screen world -> World.tryProcessScreen firstFrame screen world
+            WorldModule.tryProcessScreen <- fun screen world -> World.tryProcessScreen screen world
             WorldModule.tryProcessGroup <- fun group world -> World.tryProcessGroup group world
             WorldModule.tryProcessEntity <- fun entity world -> World.tryProcessEntity entity world
             WorldModule.signal <- Nu.worldModuleSignal
@@ -158,9 +158,11 @@ module WorldModule3 =
                  AnimatedBillboardDispatcher ()
                  StaticModelDispatcher ()
                  AnimatedModelDispatcher ()
-                 StaticModelSurfaceDispatcher ()
-                 RigidModelSurfaceDispatcher ()
+                 SensorModelDispatcher ()
                  RigidModelDispatcher ()
+                 StaticModelSurfaceDispatcher ()
+                 SensorModelSurfaceDispatcher ()
+                 RigidModelSurfaceDispatcher ()
                  BasicStaticBillboardEmitterDispatcher ()
                  Effect3dDispatcher ()
                  Block3dDispatcher ()
@@ -171,6 +173,7 @@ module WorldModule3 =
                  BodyJoint3dDispatcher ()
                  TerrainDispatcher ()
                  Nav3dConfigDispatcher ()
+                 EditVolumeDispatcher ()
                  StaticModelHierarchyDispatcher ()
                  RigidModelHierarchyDispatcher ()
                  // Extensions
@@ -218,10 +221,11 @@ module WorldModule3 =
                  StaticModelSurfaceFacet ()
                  AnimatedModelFacet ()
                  TerrainFacet ()
+                 EditVolumeFacet ()
                  TraversalInterpoledFacet ()
                  NavBodyFacet ()
                  FollowerFacet ()
-                 FreezerFacet ()
+                 Freezer3dFacet ()
                  // Extensions
                  CameraFacet ()
                  MouseRelativeModeFacet ()
@@ -300,13 +304,20 @@ module WorldModule3 =
             let groupStates = UMap.makeEmpty HashIdentity.Structural config
             let screenStates = UMap.makeEmpty HashIdentity.Structural config
             let gameState = GameState.make activeGameDispatcher
-            let subsystems = { ImGui = imGui; PhysicsEngine2d = physicsEngine2d; PhysicsEngine3d = physicsEngine3d; RendererProcess = rendererProcess; AudioPlayer = audioPlayer }
+            let rendererPhysics3d = new RendererPhysics3d ()
+            let subsystems =
+                { ImGui = imGui
+                  PhysicsEngine2d = physicsEngine2d
+                  PhysicsEngine3d = physicsEngine3d
+                  RendererProcess = rendererProcess
+                  RendererPhysics3d = rendererPhysics3d
+                  AudioPlayer = audioPlayer }
             let simulants = UMap.singleton HashIdentity.Structural config (Game :> Simulant) None
             let worldExtension =
                 { ContextImNui = Address.empty
                   DeclaredImNui = Address.empty
-                  SimulantImNuis = SUMap.makeEmpty HashIdentity.Structural config
-                  SubscriptionImNuis = SUMap.makeEmpty HashIdentity.Structural config
+                  SimulantsImNui = SUMap.makeEmpty HashIdentity.Structural config
+                  SubscriptionsImNui = SUMap.makeEmpty HashIdentity.Structural config
                   DestructionListRev = []
                   GeometryViewport = geometryViewport
                   RasterViewport = rasterViewport

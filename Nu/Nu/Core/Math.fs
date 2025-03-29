@@ -545,6 +545,10 @@ module Quaternion =
 
     type Quaternion with
 
+        /// Create a look-at rotation.
+        static member CreateLookAt (source, destination, up) =
+            Quaternion.CreateFromRotationMatrix (Matrix4x4.CreateLookAt (source, destination, up))
+
         /// The right vector of the quaternion.
         member inline this.Right =
             v3Right.Transform this
@@ -658,6 +662,7 @@ module Box2 =
         member this.TopRight = v2 (this.Min.X + this.Size.X) (this.Min.Y + this.Size.Y)
         member this.BottomLeft = this.Min
         member this.BottomRight = v2 (this.Min.X + this.Size.X) this.Min.Y
+        member this.Corners = [|this.TopLeft; this.TopRight; this.BottomLeft; this.BottomRight|] // TODO: move this into C# like Box3.
         member this.IsEmpty = this.Equals Box2.Zero
         member this.Translate translation = Box2 (this.Min + translation, this.Size)
         member this.WithMin min = Box2 (min, this.Size)
@@ -1547,13 +1552,16 @@ module Math =
     let TryUnionSegmentAndFrustum' (start : Vector3, stop : Vector3, frustum : Frustum) : struct (Vector3 * Vector3) array =
         let extent = stop - start
         let extentMagnitude = extent.Magnitude
-        let partMagnitude = 1.0f // NOTE: magic value that looks good enough in editor for most purposes but doesn't bog down perf TOO much...
+        let partMagnitude = 2.0f // NOTE: magic value that looks good enough in editor for most purposes but doesn't bog down perf TOO much...
         if extentMagnitude > partMagnitude then
-            let partCount = int (ceil (extentMagnitude / partMagnitude))
+            let partMax = 8 // NOTE: magic value that keeps too many operations from occurring, again for perf reasons...
+            let partCount = min partMax (int (ceil (extentMagnitude / partMagnitude)))
             let partExtent = extent / single partCount
             [|for i in 0 .. dec partCount do
                 let start' = start + partExtent * single i
                 let stop' = start' + partExtent
-                TryUnionSegmentAndFrustum (start', stop', frustum)|] |>
-            Array.definitize
-        else Array.definitize [|TryUnionSegmentAndFrustum (start, stop, frustum)|]
+                if frustum.Contains ((start' + stop') * 0.5f) <> ContainmentType.Disjoint then
+                    struct (start', stop')|]
+        elif frustum.Contains ((start + stop) * 0.5f) <> ContainmentType.Disjoint then
+            [|struct (start, stop)|]
+        else [||]

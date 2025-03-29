@@ -81,6 +81,7 @@ module WorldGameModule =
         member this.GamepadButtonUpEvent index = Events.GamepadButtonUpEvent index --> Game.Handle
         member this.TextInputEvent = Events.TextInputEvent --> Game.Handle
         member this.AssetsReloadEvent = Events.AssetsReloadEvent --> Game.Handle
+        member this.CodeReloadEvent = Events.CodeReloadEvent --> Game.Handle
         member this.ExitRequestEvent = Events.ExitRequestEvent --> Game.Handle
         member this.BodyAddingEvent = Events.BodyAddingEvent --> Game.Handle
         member this.BodyRemovingEvent = Events.BodyRemovingEvent --> Game.Handle
@@ -96,6 +97,10 @@ module WorldGameModule =
         member this.GetProperty propertyName world =
             World.getGameProperty propertyName this world
 
+        /// Try to get an xtension property value.
+        member this.TryGet<'a> propertyName world : 'a voption =
+            World.tryGetGameXtensionValue<'a> propertyName this world
+
         /// Get an xtension property value.
         member this.Get<'a> propertyName world : 'a =
             World.getGameXtensionValue<'a> propertyName this world
@@ -110,8 +115,7 @@ module WorldGameModule =
 
         /// To try set an xtension property value.
         member this.TrySet<'a> propertyName (value : 'a) world =
-            let property = { PropertyType = typeof<'a>; PropertyValue = value }
-            World.trySetGameXtensionProperty propertyName property this world
+            World.trySetGameXtensionValue propertyName value this world
 
         /// Set an xtension property value.
         member this.Set<'a> propertyName (value : 'a) world =
@@ -203,11 +207,27 @@ module WorldGameModule =
             Seq.map (fun group -> World.getEntities group world) |>
             Seq.concat
 
+        /// Get all the entities in the selected screen, if any.
+        static member getSelectedEntities world =
+            World.getSelectedGroups world |>
+            Seq.map (fun selectedGroup -> World.getEntities selectedGroup world)
+
+        /// Get all the entities directly parented by a group in the selected screen, if any.
+        static member getSelectedSovereignEntities world =
+            World.getSelectedGroups world |>
+            Seq.map (fun selectedGroup -> World.getSovereignEntities selectedGroup world)
+
         /// Get all the groups in the world.
         static member getGroups1 world =
             World.getScreens world |>
             Seq.map (fun screen -> World.getGroups screen world) |>
             Seq.concat
+
+        /// Get all the groups in the selected screen, if any.
+        static member getSelectedGroups world =
+            match World.getSelectedScreenOpt world with
+            | Some selectedScreen -> World.getGroups selectedScreen world
+            | None -> []
 
         /// Write a game to a game descriptor.
         static member writeGame gameDescriptor game world =

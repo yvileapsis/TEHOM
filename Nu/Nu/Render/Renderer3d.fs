@@ -179,7 +179,8 @@ type [<Struct>] Light3dValue =
       mutable AttenuationQuadratic : single
       mutable LightCutoff : single
       mutable LightType : LightType
-      mutable DesireShadows : bool }
+      mutable DesireShadows : bool
+      mutable Bounds : Box3 }
 
 /// A mutable billboard value.
 type [<Struct>] BillboardValue =
@@ -377,6 +378,7 @@ type RenderLight3d =
       LightCutoff : single
       LightType : LightType
       DesireShadows : bool
+      Bounds : Box3
       RenderPass : RenderPass }
 
 type RenderBillboard =
@@ -694,11 +696,13 @@ type private SortableLight =
       SortableLightConeInner : single
       SortableLightConeOuter : single
       SortableLightDesireShadows : int
+      SortableLightBounds : Box3
       mutable SortableLightDistanceSquared : single }
 
     static member private project light =
         let directionalWeight = match light.SortableLightType with 2 -> -1 | _ -> 0
-        struct (directionalWeight, light.SortableLightDistanceSquared)
+        let desiredShadowsWeight = -light.SortableLightDesireShadows
+        struct (directionalWeight, desiredShadowsWeight, light.SortableLightDistanceSquared)
 
     /// Sort shadowing point lights.
     /// TODO: see if we can get rid of allocation here.
@@ -709,7 +713,7 @@ type private SortableLight =
         for i in 0 .. dec lightsMax do
             if i < lightsSorted.Length then
                 let light = lightsSorted.[i]
-                lightsArray.[i] <- struct (light.SortableLightId, light.SortableLightOrigin, light.SortableLightCutoff, light.SortableLightConeOuter, light.SortableLightDesireShadows)
+                lightsArray.[i] <- struct (light.SortableLightId, light.SortableLightOrigin, light.SortableLightCutoff, light.SortableLightConeOuter, light.SortableLightDesireShadows, light.SortableLightBounds)
         lightsArray
 
     /// Sort shadowing spot and directional lights.
@@ -721,7 +725,7 @@ type private SortableLight =
         for i in 0 .. dec lightsMax do
             if i < lightsSorted.Length then
                 let light = lightsSorted.[i]
-                lightsArray.[i] <- struct (light.SortableLightId, light.SortableLightOrigin, light.SortableLightCutoff, light.SortableLightConeOuter, light.SortableLightDesireShadows)
+                lightsArray.[i] <- struct (light.SortableLightId, light.SortableLightOrigin, light.SortableLightCutoff, light.SortableLightConeOuter, light.SortableLightDesireShadows, light.SortableLightBounds)
         lightsArray
 
     /// Sort lights into float array for uploading to OpenGL.
@@ -910,10 +914,23 @@ type [<ReferenceEquality>] private RenderTasks =
 
 /// The 3d renderer. Represents a 3d rendering subsystem in Nu generally.
 type Renderer3d =
+
     /// The current renderer configuration.
     abstract RendererConfig : Renderer3dConfig
+
     /// Render a frame of the game.
-    abstract Render : Frustum -> Frustum -> Frustum -> Box3 -> Vector3 -> Quaternion -> single -> Viewport -> Viewport -> RenderMessage3d List -> unit
+    abstract Render :
+        frustumInterior : Frustum ->
+        frustumExterior : Frustum ->
+        frustumImposter : Frustum ->
+        lightBox : Box3 ->
+        eyeCenter : Vector3 ->
+        eyeRotation : Quaternion ->
+        eyeFieldOfView : single ->
+        geometryViewport : Viewport ->
+        rasterViewport : Viewport ->
+        renderMessages : RenderMessage3d List -> unit
+
     /// Handle render clean up by freeing all loaded render assets.
     abstract CleanUp : unit -> unit
 
@@ -1743,7 +1760,8 @@ type [<ReferenceEquality>] GlRenderer3d =
             renderTasks
 
     static member private categorizeBillboardSurface
-        (eyeRotation : Quaternion,
+        (eyeCenter : Vector3,
+         eyeRotation : Quaternion,
          model : Matrix4x4,
          castShadow : bool,
          presence : Presence,
@@ -1781,8 +1799,15 @@ type [<ReferenceEquality>] GlRenderer3d =
             match renderPass with
             | ShadowPass (_, _, _, _) -> Matrix4x4.CreateFromQuaternion lookRotation
             | _ ->
-                if orientUp
-                then Quaternion.CreateFromAxisAngle (lookRotation.Right, lookRotation.Up.AngleBetween v3Up) * lookRotation |> Matrix4x4.CreateFromQuaternion
+                if orientUp then
+                    let eyeFlat = eyeCenter.WithY 0.0f
+                    let positionFlat = model.Translation.WithY 0.0f
+                    let eyeToPositionFlat = positionFlat - eyeFlat
+                    if eyeToPositionFlat.MagnitudeSquared > 0.0f then
+                        let forward = eyeToPositionFlat.Normalized
+                        let yaw = MathF.Atan2 (forward.X, forward.Z) - MathF.PI
+                        Matrix4x4.CreateRotationY yaw
+                    else m4Identity
                 else Matrix4x4.CreateFromQuaternion lookRotation
         let mutable affineRotation = model
         affineRotation.Translation <- v3Zero
@@ -1926,7 +1951,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                 for light in modelAsset.Lights do
                     let lightMatrix = light.LightMatrix * model
                     let lightBounds = Box3 (lightMatrix.Translation - v3Dup light.LightCutoff, v3Dup light.LightCutoff * 2.0f)
-                    let lightDirection = lightMatrix.Rotation.Down
+                    let direction = lightMatrix.Rotation.Down
                     let unculled =
                         match renderPass with
                         | NormalPass -> Presence.intersects3d (ValueSome frustumInterior) frustumExterior frustumImposter (ValueSome lightBox) false true presence lightBounds
@@ -1939,7 +1964,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                             { SortableLightId = 0UL
                               SortableLightOrigin = lightMatrix.Translation
                               SortableLightRotation = lightMatrix.Rotation
-                              SortableLightDirection = lightDirection
+                              SortableLightDirection = direction
                               SortableLightColor = light.LightColor
                               SortableLightBrightness = light.LightBrightness
                               SortableLightAttenuationLinear = light.LightAttenuationLinear
@@ -1949,6 +1974,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                               SortableLightConeInner = coneInner
                               SortableLightConeOuter = coneOuter
                               SortableLightDesireShadows = 0
+                              SortableLightBounds = lightBounds
                               SortableLightDistanceSquared = Single.MaxValue }
                         renderTasks.Lights.Add light
                 for surface in modelAsset.Surfaces do
@@ -2077,11 +2103,8 @@ type [<ReferenceEquality>] GlRenderer3d =
                                 Box2 (px, py, sx, sy)
                             | None -> box2 v2Zero v2Zero
 
-                        // check if dual rendering needed
-                        let dualRendering = drsIndices.Contains i
-
                         // deferred render animated surface when needed
-                        if renderType = DeferredRenderType || dualRendering then
+                        if renderType = DeferredRenderType then
                             let animatedModelSurfaceKey = { BoneTransforms = boneTransforms; AnimatedSurface = surface }
                             match renderTasks.DeferredAnimated.TryGetValue animatedModelSurfaceKey with
                             | (true, renderOps) -> renderOps.Add struct (model, castShadow, presence, texCoordsOffset, properties)
@@ -2095,7 +2118,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                         let sortsOpt =
                             match renderType with
                             | ForwardRenderType (subsort, sort) -> ValueSome struct (subsort + subsortOffset, sort)
-                            | _ -> if dualRendering then ValueSome struct (subsortOffset, 0.0f) else ValueNone
+                            | _ -> if drsIndices.Contains i then ValueSome struct (subsortOffset, 0.0f) else ValueNone
                         match sortsOpt with
                         | ValueSome struct (subsort, sort) ->
                             renderTasks.Forward.Add struct (subsort, sort, model, presence, texCoordsOffset, properties, ValueSome boneTransforms, surface, depthTest)
@@ -2815,13 +2838,10 @@ type [<ReferenceEquality>] GlRenderer3d =
         for struct (model, presence, texCoordsOffset, properties, boneTransformsOpt, surface, _) in renderTasks.ForwardSorted do
             match boneTransformsOpt with
             | ValueSome boneTransforms ->
-                let boneArrays = List ()
                 let bonesArrays = Array.zeroCreate boneTransforms.Length
                 for i in 0 .. dec boneTransforms.Length do
-                    let boneArray = new PooledArray<single> (16, false)
-                    boneTransforms.[i].ToArray (boneArray.Deref, 0)
-                    boneArrays.Add boneArray
-                    bonesArrays.[i] <- boneArray.Deref
+                    let boneArray = boneTransforms.[i].ToArray ()
+                    bonesArrays.[i] <- boneArray
                 let shadowShader =
                     match lightType with
                     | PointLight -> renderer.PhysicallyBasedShadowAnimatedPointShader
@@ -3097,18 +3117,14 @@ type [<ReferenceEquality>] GlRenderer3d =
         for entry in renderTasks.DeferredAnimated do
             let surfaceKey = entry.Key
             let parameters = entry.Value
-            let boneArrays = List ()
             let bonesArrays = Array.zeroCreate surfaceKey.BoneTransforms.Length
             for i in 0 .. dec surfaceKey.BoneTransforms.Length do
-                let boneArray = new PooledArray<single> (16, false)
-                surfaceKey.BoneTransforms.[i].ToArray (boneArray.Deref, 0)
-                boneArrays.Add boneArray
-                bonesArrays.[i] <- boneArray.Deref
+                let boneArray = surfaceKey.BoneTransforms.[i].ToArray ()
+                bonesArrays.[i] <- boneArray
             GlRenderer3d.renderPhysicallyBasedDeferredSurfaces
                 SingletonPhase viewArray geometryProjectionArray bonesArrays eyeCenter parameters
                 renderer.LightingConfig.LightShadowSamples renderer.LightingConfig.LightShadowBias renderer.LightingConfig.LightShadowSampleScalar renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
                 surfaceKey.AnimatedSurface renderer.PhysicallyBasedDeferredAnimatedShader renderer
-            for boneArray in boneArrays do boneArray.Dispose ()
             OpenGL.Hl.Assert ()
 
         // render terrains deferred
@@ -3387,7 +3403,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                     renderer.PhysicallyBasedTerrainGeometries.Remove geometry.Key |> ignore<bool>
 
     /// Render 3d surfaces.
-    static member render frustumInterior frustumExterior frustumImposter lightBox eyeCenter (eyeRotation : Quaternion) eyeFieldOfView geometryViewport (rasterViewport : Viewport) renderbuffer framebuffer renderMessages renderer =
+    static member render (frustumInterior : Frustum) frustumExterior frustumImposter lightBox eyeCenter (eyeRotation : Quaternion) eyeFieldOfView geometryViewport (rasterViewport : Viewport) renderbuffer framebuffer renderMessages renderer =
 
         // updates viewports, recreating buffers as needed
         if renderer.GeometryViewport <> geometryViewport then
@@ -3436,6 +3452,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                       SortableLightConeInner = coneInner
                       SortableLightConeOuter = coneOuter
                       SortableLightDesireShadows = if rl.DesireShadows then 1 else 0
+                      SortableLightBounds = rl.Bounds
                       SortableLightDistanceSquared = Single.MaxValue }
                 renderTasks.Lights.Add light
                 if rl.DesireShadows then
@@ -3443,12 +3460,12 @@ type [<ReferenceEquality>] GlRenderer3d =
             | RenderBillboard rb ->
                 let struct (billboardProperties, billboardMaterial) = GlRenderer3d.makeBillboardMaterial (&rb.MaterialProperties, &rb.Material, renderer)
                 let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, m4Identity, box3 (v3 -0.5f 0.5f -0.5f) v3One, billboardProperties, billboardMaterial, -1, Assimp.Node.Empty, renderer.BillboardGeometry)
-                GlRenderer3d.categorizeBillboardSurface (eyeRotation, rb.ModelMatrix, rb.CastShadow, rb.Presence, rb.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rb.MaterialProperties, true, rb.ShadowOffset, billboardSurface, rb.DepthTest, rb.RenderType, rb.RenderPass, renderer)
+                GlRenderer3d.categorizeBillboardSurface (eyeCenter, eyeRotation, rb.ModelMatrix, rb.CastShadow, rb.Presence, rb.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rb.MaterialProperties, true, rb.ShadowOffset, billboardSurface, rb.DepthTest, rb.RenderType, rb.RenderPass, renderer)
             | RenderBillboards rbs ->
                 let struct (billboardProperties, billboardMaterial) = GlRenderer3d.makeBillboardMaterial (&rbs.MaterialProperties, &rbs.Material, renderer)
                 let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, m4Identity, box3 (v3 -0.5f -0.5f -0.5f) v3One, billboardProperties, billboardMaterial, -1, Assimp.Node.Empty, renderer.BillboardGeometry)
                 for (model, castShadow, presence, insetOpt) in rbs.Billboards do
-                    GlRenderer3d.categorizeBillboardSurface (eyeRotation, model, castShadow, presence, insetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rbs.MaterialProperties, true, rbs.ShadowOffset, billboardSurface, rbs.DepthTest, rbs.RenderType, rbs.RenderPass, renderer)
+                    GlRenderer3d.categorizeBillboardSurface (eyeCenter, eyeRotation, model, castShadow, presence, insetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rbs.MaterialProperties, true, rbs.ShadowOffset, billboardSurface, rbs.DepthTest, rbs.RenderType, rbs.RenderPass, renderer)
             | RenderBillboardParticles rbps ->
                 let struct (billboardProperties, billboardMaterial) = GlRenderer3d.makeBillboardMaterial (&rbps.MaterialProperties, &rbps.Material, renderer)
                 for particle in rbps.Particles do
@@ -3459,7 +3476,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                              particle.Transform.Size * particle.Transform.Scale)
                     let billboardProperties = { billboardProperties with Albedo = billboardProperties.Albedo * particle.Color; Emission = particle.Emission.R }
                     let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, m4Identity, box3Zero, billboardProperties, billboardMaterial, -1, Assimp.Node.Empty, renderer.BillboardGeometry)
-                    GlRenderer3d.categorizeBillboardSurface (eyeRotation, billboardMatrix, rbps.CastShadow, rbps.Presence, Option.ofValueOption particle.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rbps.MaterialProperties, false, rbps.ShadowOffset, billboardSurface, rbps.DepthTest, rbps.RenderType, rbps.RenderPass, renderer)
+                    GlRenderer3d.categorizeBillboardSurface (eyeCenter, eyeRotation, billboardMatrix, rbps.CastShadow, rbps.Presence, Option.ofValueOption particle.InsetOpt, billboardMaterial.AlbedoTexture.TextureMetadata, rbps.MaterialProperties, false, rbps.ShadowOffset, billboardSurface, rbps.DepthTest, rbps.RenderType, rbps.RenderPass, renderer)
             | RenderText3d rt ->
                 let struct (billboardProperties, billboardMaterial) = GlRenderer3d.makeTypesetMaterial (&rt.Typeset, &rt.MaterialProperties, &rt.Material, renderer)
                 let billboardSurface = OpenGL.PhysicallyBased.CreatePhysicallyBasedSurface (Array.empty, m4Identity, box3 (v3 -0.5f 0.5f -0.5f) v3One, billboardProperties, billboardMaterial, -1, Assimp.Node.Empty, renderer.BillboardGeometry)
@@ -3496,7 +3513,7 @@ type [<ReferenceEquality>] GlRenderer3d =
             | RenderVoxel rt ->
                 GlRenderer3d.categorizeVoxel (rt.Visible, rt.VoxelDescriptor, rt.RenderPass, renderer)
             | ConfigureLighting3d l3c ->
-                renderer.LightingConfigChanged <- renderer.LightingConfig <> l3c
+                if renderer.LightingConfig <> l3c then renderer.LightingConfigChanged <- true
                 renderer.LightingConfig <- l3c
             | ConfigureRenderer3d r3c ->
                 renderer.RendererConfig <- r3c
@@ -3601,7 +3618,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         // sort spot and directional lights so that shadows that have the possibility of cache reuse come to the front
         // NOTE: this approach has O(n^2) complexity altho perhaps it could be optimized.
         let spotAndDirectionalLightsArray =
-            Array.sortBy (fun struct (id, _, _, _, _) ->
+            Array.sortBy (fun struct (id, _, _, _, _, _) ->
                 renderer.RenderPasses2.Pairs |>
                 Seq.choose (fun (renderPass, renderTasks) -> match renderPass with ShadowPass (id2, _, _, _) when id2 = id -> renderTasks.ShadowBufferIndexOpt | _ -> None) |>
                 Seq.headOrDefault Int32.MaxValue)
@@ -3609,8 +3626,8 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // shadow texture pre-passes
         let mutable shadowTextureBufferIndex = 0
-        for struct (lightId, lightOrigin, lightCutoff, lightConeOuter, lightDesireShadows) in spotAndDirectionalLightsArray do
-            if lightDesireShadows = 1 then
+        for struct (lightId, lightOrigin, lightCutoff, lightConeOuter, lightDesireShadows, lightBounds) in spotAndDirectionalLightsArray do
+            if lightDesireShadows = 1 && lightBox.Intersects lightBounds then
                 for (renderPass, renderTasks) in renderer.RenderPasses.Pairs do
                     if renderTasks.Populated then
                         match renderPass with
@@ -3686,7 +3703,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         // sort point lights so that shadows that have the possibility of cache reuse come to the front
         // NOTE: this approach has O(n^2) complexity altho perhaps it could be optimized.
         let pointLightsArray =
-            Array.sortBy (fun struct (id, _, _, _, _) ->
+            Array.sortBy (fun struct (id, _, _, _, _, _) ->
                 renderer.RenderPasses2.Pairs |>
                 Seq.choose (fun (renderPass, renderTasks) -> match renderPass with ShadowPass (id2, _, _, _) when id2 = id -> renderTasks.ShadowBufferIndexOpt | _ -> None) |>
                 Seq.headOrDefault Int32.MaxValue)
@@ -3694,8 +3711,8 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // shadow map pre-passes
         let mutable shadowMapBufferIndex = 0
-        for struct (lightId, lightOrigin, _, _, lightDesireShadows) in pointLightsArray do
-            if lightDesireShadows = 1 then
+        for struct (lightId, lightOrigin, _, _, lightDesireShadows, lightBounds) in pointLightsArray do
+            if lightDesireShadows = 1 && lightBox.Intersects lightBounds then
                 for (renderPass, renderTasks) in renderer.RenderPasses.Pairs do
                     if renderTasks.Populated then
                         match renderPass with

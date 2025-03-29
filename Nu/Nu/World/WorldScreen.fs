@@ -77,6 +77,10 @@ module WorldScreenModule =
         member this.GetProperty propertyName world =
             World.getScreenProperty propertyName this world
 
+        /// Try to get an xtension property value.
+        member this.TryGet<'a> propertyName world : 'a voption =
+            World.tryGetScreenXtensionValue<'a> propertyName this world
+
         /// Get an xtension property value.
         member this.Get<'a> propertyName world : 'a =
             World.getScreenXtensionValue<'a> propertyName this world
@@ -91,8 +95,7 @@ module WorldScreenModule =
 
         /// To try set an xtension property value.
         member this.TrySet<'a> propertyName (value : 'a) world =
-            let property = { PropertyType = typeof<'a>; PropertyValue = value }
-            World.trySetScreenXtensionProperty propertyName property this world
+            World.trySetScreenXtensionValue propertyName value this world
 
         /// Set an xtension property value.
         member this.Set<'a> propertyName (value : 'a) world =
@@ -210,12 +213,16 @@ module WorldScreenModule =
             World.addSimulantToDestruction screen world
 
         /// Create a screen and add it to the world.
-        static member createScreen4 skipProcessing dispatcherName nameOpt world =
+        static member createScreen4 dispatcherName nameOpt world =
+
+            // make the dispatcher
             let dispatchers = World.getScreenDispatchers world
             let dispatcher =
                 match Map.tryFind dispatcherName dispatchers with
                 | Some dispatcher -> dispatcher
                 | None -> failwith ("Could not find ScreenDispatcher named '" + dispatcherName + "'.")
+
+            // make the screen state and populate its properties
             let screenState = ScreenState.make world.GameTime nameOpt dispatcher
             let screenState = Reflection.attachProperties ScreenState.copy screenState.Dispatcher screenState world
             let screen = Game.Handle / screenState.Name
@@ -225,11 +232,12 @@ module WorldScreenModule =
                     then World.destroyScreenImmediate screen world
                     else failwith ("Screen '" + scstring screen + "' already exists and cannot be created."); world
                 else world
+
+            // add the screen's state to the world
             let world = World.addScreen false screenState screen world
-            let world =
-                if not skipProcessing && WorldModule.UpdatingSimulants && screen.GetSelected world
-                then WorldModule.tryProcessScreen true true screen world
-                else world
+
+            // unconditionally zero-process ImNui screen first time
+            let world = WorldModule.tryProcessScreen true screen world
             (screen, world)
 
         /// Create a screen from a simulant descriptor.
@@ -240,7 +248,7 @@ module WorldScreenModule =
                     | None -> None
                     | Some [|name|] -> Some name
                     | Some _ -> failwith "Screen cannot have multiple names."
-                World.createScreen4 false descriptor.SimulantDispatcherName screenNameOpt world
+                World.createScreen4 descriptor.SimulantDispatcherName screenNameOpt world
             let world =
                 List.fold (fun world (propertyName, property) ->
                     World.setScreenProperty propertyName property screen world |> snd')
@@ -253,11 +261,11 @@ module WorldScreenModule =
 
         /// Create a screen and add it to the world.
         static member createScreen<'d when 'd :> ScreenDispatcher> nameOpt world =
-            World.createScreen4 false typeof<'d>.Name nameOpt world
+            World.createScreen4 typeof<'d>.Name nameOpt world
 
         /// Create a screen with a dissolving transition, and add it to the world.
         static member createDissolveScreen5 dispatcherName nameOpt dissolveDescriptor songOpt world =
-            let (screen, world) = World.createScreen4 false dispatcherName nameOpt world
+            let (screen, world) = World.createScreen4 dispatcherName nameOpt world
             let world = World.setScreenDissolve dissolveDescriptor songOpt screen world
             (screen, world)
         
@@ -324,11 +332,8 @@ module WorldScreenModule =
             // read the screen's groups
             let world = World.readGroups screenDescriptor.GroupDescriptors screen world |> snd
 
-            // attempt to process ImNui screen first time if in the middle of simulant update phase
-            let world =
-                if WorldModule.UpdatingSimulants && screen.GetSelected world
-                then WorldModule.tryProcessScreen true true screen world
-                else world
+            // unconditionally zero-process ImNui screen first time
+            let world = WorldModule.tryProcessScreen true screen world
             (screen, world)
 
         /// Read multiple screens from a game descriptor.
@@ -361,7 +366,7 @@ module WorldScreenModule =
                 setScreenSlide slideDescriptor destination screen world
 
         static member internal getNav3dDescriptors contents =
-            [for (bounds, affineMatrix, staticModel, surfaceIndex, content) in contents do
+            [for (bounds : Box3, affineMatrix, staticModel, surfaceIndex, content) in contents do
                 match content with
                 | NavShape.EmptyNavShape -> ()
                 | NavShape.BoundsNavShape -> Left bounds
@@ -369,13 +374,19 @@ module WorldScreenModule =
                     match Metadata.tryGetStaticModelMetadata staticModel with
                     | ValueSome physicallyBasedModel ->
                         if surfaceIndex >= 0 && surfaceIndex < physicallyBasedModel.Surfaces.Length then
-                            Right (bounds, affineMatrix, physicallyBasedModel.Surfaces.[surfaceIndex])
+                            if bounds.Size.Magnitude < Constants.Nav.Bounds3dMagnitudeMax then
+                                Right (bounds, affineMatrix, physicallyBasedModel.Surfaces.[surfaceIndex])
+                            else
+                                Log.warn "Navigation shape bounds magnitude exceeded maximum; ignoring."
                     | ValueNone -> ()
                 | NavShape.StaticModelNavShape ->
                     match Metadata.tryGetStaticModelMetadata staticModel with
                     | ValueSome physicallyBasedModel ->
                         for surface in physicallyBasedModel.Surfaces do
-                            Right (bounds, affineMatrix, surface)
+                            if bounds.Size.Magnitude < Constants.Nav.Bounds3dMagnitudeMax then
+                                Right (bounds, affineMatrix, surface)
+                            else
+                                Log.warn "Navigation shape bounds magnitude exceeded maximum; ignoring."
                     | ValueNone -> ()]
 
         static member internal tryBuildNav3dMesh contents config =
@@ -485,20 +496,20 @@ module WorldScreenModule =
             // geometry not found
             | None -> None
 
-        static member internal setNav3dBodyOpt contentOpt (source : Entity) world =
-            let screen = source.Screen
+        static member internal setNav3dBodyOpt contentOpt (navId : NavId) world =
+            let screen = navId.NavEntity.Screen
             let nav3d = World.getScreenNav3d screen world
-            match (nav3d.Nav3dBodies.TryFind source, contentOpt) with
+            match (nav3d.Nav3dBodies.TryFind navId, contentOpt) with
             | (Some body, Some body') ->
                 if body' <> body then // OPTIMIZATION: preserve map reference if no content changes detected.
-                    let nav3d = { nav3d with Nav3dBodies = Map.add source body' nav3d.Nav3dBodies }
+                    let nav3d = { nav3d with Nav3dBodies = Map.add navId body' nav3d.Nav3dBodies }
                     World.setScreenNav3d nav3d screen world |> snd'
                 else world
             | (None, Some body) ->
-                let nav3d = { nav3d with Nav3dBodies = Map.add source body nav3d.Nav3dBodies }
+                let nav3d = { nav3d with Nav3dBodies = Map.add navId body nav3d.Nav3dBodies }
                 World.setScreenNav3d nav3d screen world |> snd'
             | (Some _, None) ->
-                let nav3d = { nav3d with Nav3dBodies = Map.remove source nav3d.Nav3dBodies }
+                let nav3d = { nav3d with Nav3dBodies = Map.remove navId nav3d.Nav3dBodies }
                 World.setScreenNav3d nav3d screen world |> snd'
             | (None, None) -> world
 
