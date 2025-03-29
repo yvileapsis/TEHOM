@@ -1623,6 +1623,7 @@ module PhysicallyBased =
               ElementCount = count
               Vertices = vertices
               Indices = indices
+              TrianglesCached = None
               VertexBuffer = vertexBuffer
               InstanceBuffer = instanceBuffer
               IndexBuffer = indexBuffer

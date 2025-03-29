@@ -44,7 +44,6 @@ module BoxInteractableDispatcher =
             define Entity.LinearDamping 0.0f
             define Entity.Substance (Density 0.1f)
             define Entity.GravityOverride None
-            define Entity.Observable true
             define Entity.StaticModel Assets.Default.StaticModel
         ]
 

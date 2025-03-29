@@ -833,7 +833,8 @@ type VoxelFacet () =
             (Cascade, World.setBodyAngularVelocity angularVelocity bodyId world)
         else (Cascade, world)
 
-    static let propagatePhysics (entity : Entity) (_ : Event<ChangeData, Entity>) world =
+    static let propagatePhysicsAffected (entity : Entity) (evt : Event<ChangeData, Entity>) world =
+        let world = if evt.Data.Name = nameof Entity.BodyType && not (evt.Data.Value :?> BodyType).IsStatic then entity.SetStatic false world else world
         let world = entity.PropagatePhysics world
         (Cascade, world)
 
@@ -845,7 +846,6 @@ type VoxelFacet () =
          define Entity.BodyEnabled true
          define Entity.BodyType Static
          define Entity.BodyShape (BoxShape { Size = v3One; TransformOpt = None; PropertiesOpt = None })
-
 
          define Entity.InsetOpt None
          define Entity.TerrainMaterialProperties TerrainMaterialProperties.defaultProperties
@@ -871,17 +871,16 @@ type VoxelFacet () =
          // TODO: implement
          define Entity.VoxelChunk (SlicesVoxel Assets.Default.Black)
          define Entity.Segments v2iOne
-         define Entity.Observable false
          nonPersistent Entity.AwakeTimeStamp 0L
 
 
          define Entity.SleepingAllowed true
-         define Entity.Friction 0.5f
+         define Entity.Friction Constants.Physics.FrictionDefault
          define Entity.Restitution 0.0f
          define Entity.LinearVelocity v3Zero
          define Entity.LinearDamping 0.0f
          define Entity.AngularVelocity v3Zero
-         define Entity.AngularDamping 0.2f
+         define Entity.AngularDamping Constants.Physics.AngularDampingDefault
          define Entity.AngularFactor v3One
          define Entity.Substance (Mass 1.0f)
          define Entity.GravityOverride None
@@ -891,20 +890,21 @@ type VoxelFacet () =
          define Entity.CollisionMask Constants.Physics.CollisionWildcard
          define Entity.PhysicsMotion SynchronizedMotion
          define Entity.Sensor false
-         define Entity.Observable false
          nonPersistent Entity.AwakeTimeStamp 0L
          computed Entity.Awake (fun (entity : Entity) world -> entity.GetAwakeTimeStamp world = world.UpdateTime) None
          computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = Constants.Physics.InternalIndex }) None
-
          ]
 
     override this.Register (entity, world) =
+        // OPTIMIZATION: using manual unsubscription in order to use less live objects for subscriptions.
+        // OPTIMIZATION: share lambdas to reduce live object count.
+        // OPTIMIZATION: using special BodyPropertiesAffecting change event to reduce subscription count.
         let subIds = Array.init 5 (fun _ -> Gen.id64)
         let world = World.subscribePlus subIds.[0] (propagatePhysicsCenter entity) (entity.ChangeEvent (nameof entity.Transform)) entity world |> snd
         let world = World.subscribePlus subIds.[1] (propagatePhysicsRotation entity) (entity.ChangeEvent (nameof entity.Rotation)) entity world |> snd
         let world = World.subscribePlus subIds.[2] (propagatePhysicsLinearVelocity entity) (entity.ChangeEvent (nameof entity.LinearVelocity)) entity world |> snd
         let world = World.subscribePlus subIds.[3] (propagatePhysicsAngularVelocity entity) (entity.ChangeEvent (nameof entity.AngularVelocity)) entity world |> snd
-        let world = World.subscribePlus subIds.[4] (propagatePhysics entity) (entity.ChangeEvent "BodyPropertiesAffecting") entity world |> snd
+        let world = World.subscribePlus subIds.[4] (propagatePhysicsAffected entity) (entity.ChangeEvent "BodyPropertiesAffecting") entity world |> snd
         let unsubscribe = fun world ->
             Array.fold (fun world subId -> World.unsubscribe subId world) world subIds
         let callback = fun evt world ->
@@ -943,7 +943,6 @@ type VoxelFacet () =
               CollisionCategories = Physics.categorizeCollisionMask (entity.GetCollisionCategories world)
               CollisionMask = Physics.categorizeCollisionMask (entity.GetCollisionMask world)
               Sensor = entity.GetSensor world
-              Observable = entity.GetObservable world
               Awake = entity.GetAwake world
               BodyIndex = (entity.GetBodyId world).BodyIndex }
         World.createBody (entity.GetIs2d world) (entity.GetBodyId world) bodyProperties world
@@ -958,7 +957,7 @@ type VoxelFacet () =
             let interiorOpt = ValueSome (World.getGameEye3dFrustumInterior Game world)
             let exterior = World.getGameEye3dFrustumExterior Game world
             let imposter = World.getGameEye3dFrustumImposter Game world
-            let lightBoxOpt = ValueSome (World.getLight3dBox world)
+            let lightBoxOpt = ValueSome (World.getLight3dViewBox world)
             fun probe light presence bounds ->
                 match renderPass with
                 | NormalPass -> Presence.intersects3d interiorOpt exterior imposter lightBoxOpt probe light presence bounds

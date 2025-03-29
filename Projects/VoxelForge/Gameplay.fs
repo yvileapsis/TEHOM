@@ -184,9 +184,7 @@ type GameplayDispatcher () =
         | RightClick ->
             let firstIntersection =
                 let ray = World.getMouseRay3dWorld world
-                let origin = ray.Origin
-                let finale = ray.Origin + 100f * ray.Direction
-                let segment = segment3 origin finale
+                let segment = ray3 ray.Origin (100f * ray.Direction)
                 let array = World.rayCast3dBodies segment 0xFFFFFFFF false world
                 Array.tryHead array
 
@@ -270,6 +268,7 @@ type GameplayDispatcher () =
                             |]
                             TransformOpt = None
                             PropertiesOpt = None
+                            Profile = Profile.Convex
                         }
                     ]
             ]

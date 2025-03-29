@@ -49,7 +49,6 @@ type CharacterDispatcher (character : Character) =
          Entity.SleepingAllowed == true
          Entity.CharacterProperties == character.CharacterProperties
          Entity.BodyShape == CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None }
-         Entity.Observable == true
          Entity.FollowTargetOpt := Some Simulants.GameplayMarker
          Entity.RegisterEvent => Register
          Game.KeyboardKeyDownEvent =|> fun evt -> UpdateInputKey evt.Data

@@ -60,7 +60,6 @@ type PlayerDispatcher () =
         Entity.SleepingAllowed == true
         Entity.CharacterProperties == character.CharacterProperties
         Entity.BodyShape == CapsuleShape { Height = 1.0f; Radius = 0.35f; TransformOpt = Some (Affine.makeTranslation (v3 0.0f 0.85f 0.0f)); PropertiesOpt = None }
-        Entity.Observable == true
         Entity.RegisterEvent => Register
         Game.KeyboardKeyDownEvent =|> fun evt -> UpdateInputKey evt.Data
         Entity.UpdateEvent => Update
@@ -175,9 +174,7 @@ type PlayerDispatcher () =
 
             let intersections =
                 let ray = screenCenterRay
-                let origin = ray.Origin
-                let finale = ray.Origin + 100f * ray.Direction
-                let segment = segment3 origin finale
+                let segment = ray3 ray.Origin (100f * ray.Direction)
                 let array = World.rayCast3dBodies segment 0xFFFFFFFF false world
                 let array =
                     array

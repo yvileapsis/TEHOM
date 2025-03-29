@@ -30,7 +30,6 @@ type BulletDispatcher () =
          Entity.LinearDamping == 0.0f
          Entity.Substance == Density 0.1f
          Entity.GravityOverride == Some v3Zero
-         Entity.Observable == true
          Entity.StaticModel == Assets.Default.BallModel
          Entity.UpdateEvent => Update
          Entity.BodyPenetrationEvent => Penetration]
