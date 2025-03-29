@@ -31,4 +31,5 @@ module Assets =
         let GreatSwordModel = asset<StaticModel> PackageName "GreatSword"
         let MakarovModel = asset<StaticModel> PackageName "makarov"
         let MakarovMagModel = asset<StaticModel> PackageName "makarov_std_cap_mag"
+        let TrialGrounds2 = asset<StaticModel> PackageName "trial_grounds_2"
         let ShotSound = asset<Sound> PackageName "Shot"
