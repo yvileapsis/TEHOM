@@ -71,6 +71,7 @@ module Hl =
     let CreateSglContextInitial window =
         Gl.Initialize ()
         let glContext = SDL.SDL_GL_CreateContext window
+        if glContext = 0 then Log.error $"Could not make OpenGL context when required, error: {SDL.SDL_GetError ()}"
         let swapInterval = if Constants.Render.Vsync then 1 else 0
         SDL.SDL_GL_SetSwapInterval swapInterval |> ignore<int>
         SDL.SDL_GL_MakeCurrent (window, glContext) |> ignore<int>
