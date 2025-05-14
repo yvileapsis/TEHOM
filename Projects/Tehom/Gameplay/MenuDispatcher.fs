@@ -14,6 +14,7 @@ Intensity is limited
 *)
 
 type Menu = {
+    GameplayTime : Int64
     State : String
     LastMousePosition : Vector2 option
     LastPosition : Vector3 option
@@ -22,6 +23,7 @@ type Menu = {
 }
 with
     static member empty = {
+        GameplayTime = 0
         State = "Test"
         LastMousePosition = None
         LastPosition = None
@@ -50,7 +52,7 @@ type MenuDispatcher () =
         Screen.DeselectingEvent => FinishQuitting
         Game.UpdateEvent => Update
         Game.PostUpdateEvent => UpdatePosition
-        Screen.TimeUpdateEvent => TimeUpdate
+        Game.TimeUpdateEvent => TimeUpdate
         Entity.AlwaysUpdate == true
         Entity.RegisterEvent => ResetCombatants
     ]
@@ -72,6 +74,13 @@ type MenuDispatcher () =
             withSignals signals model
 
         | TimeUpdate ->
+            let gameDelta = world.GameDelta
+            let model = { model with GameplayTime = model.GameplayTime + gameDelta.Updates }
+            let model =
+                if model.GameplayTime % 10L = 0L then
+                    { model with Limiter = model.Limiter + 10 }
+                else
+                    model
             just model
 
         | ClickDown ->

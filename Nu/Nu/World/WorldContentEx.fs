@@ -41,7 +41,6 @@ type CameraFacet () =
     static member Properties =
         [define Entity.AlwaysUpdate true]
 
-
 [<AutoOpen>]
 module MouseRelativeModeFacetExtensions =
     type Entity with

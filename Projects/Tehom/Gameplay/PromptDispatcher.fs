@@ -6,6 +6,7 @@ open Prime
 open Nu
 
 type Prompt = {
+    GameplayTime : Int64
     State : String
     LastMousePosition : Vector2 option
     LastPosition : Vector3 option
@@ -13,6 +14,7 @@ type Prompt = {
 }
 with
     static member empty = {
+        GameplayTime = 0
         State = "Test"
         LastMousePosition = None
         LastPosition = None
@@ -40,7 +42,7 @@ type PromptDispatcher () =
         Screen.DeselectingEvent => FinishQuitting
         Game.UpdateEvent => Update
         Game.PostUpdateEvent => UpdatePosition
-        Screen.TimeUpdateEvent => TimeUpdate
+        Game.TimeUpdateEvent => TimeUpdate
         Entity.AlwaysUpdate == true
         Entity.RegisterEvent => ResetCombatants
     ]
@@ -62,6 +64,8 @@ type PromptDispatcher () =
             withSignals signals model
 
         | TimeUpdate ->
+            let gameDelta = world.GameDelta
+            let model = { model with GameplayTime = model.GameplayTime + gameDelta.Updates }
             just model
 
         | ClickDown ->
@@ -113,4 +117,5 @@ type PromptDispatcher () =
             Entity.TextColor == Color.FloralWhite
             Entity.Text == ""
         ]
+
     ]
