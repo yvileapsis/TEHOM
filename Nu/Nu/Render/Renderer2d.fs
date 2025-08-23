@@ -108,6 +108,208 @@ type RichTextDescriptor =
       ClipOpt : Box2 voption
       Entries : RichTextParagraph list }
 
+type FontDescriptor =
+    { Font : Font AssetTag
+      FontSizing : Option<Int32>
+      FontStyling : Set<FontStyle> }
+with
+    static member makeFontDescriptor fontAsset fontSizing (fontStyling: Set<FontStyle>) =
+        { Font = fontAsset
+          FontSizing = fontSizing
+          FontStyling = fontStyling }
+
+    static member makeFont tryGetRenderAsset displayScalar fontDescriptor =
+        // get font pointer for point asset and set its styling and sizing
+        match tryGetRenderAsset fontDescriptor.Font with
+        | ValueSome renderAsset ->
+            match renderAsset with
+            | FontAsset (fontSizeDefault, font) ->
+                // attempt to configure sdl font size
+                let fontSize =
+                    match fontDescriptor.FontSizing with
+                    | Some fontSize -> fontSize * displayScalar
+                    | None -> fontSizeDefault * displayScalar
+
+                let errorCode = SDL_ttf.TTF_SetFontSize (font, fontSize)
+                if errorCode <> 0 then
+                    let error = SDL_ttf.TTF_GetError ()
+                    Log.infoOnce ("Failed to set font size for font '" + scstring font + "' due to: " + error)
+                    SDL_ttf.TTF_SetFontSize (font, fontSizeDefault * displayScalar) |> ignore<int>
+
+                // configure sdl font style
+                let styleSdl =
+                    if fontDescriptor.FontStyling.Count > 0 then // OPTIMIZATION: avoid set queries where possible.
+                        (if fontDescriptor.FontStyling.Contains Bold then SDL_ttf.TTF_STYLE_BOLD else 0) |||
+                        (if fontDescriptor.FontStyling.Contains Italic then SDL_ttf.TTF_STYLE_ITALIC else 0) |||
+                        (if fontDescriptor.FontStyling.Contains Underline then SDL_ttf.TTF_STYLE_UNDERLINE else 0) |||
+                        (if fontDescriptor.FontStyling.Contains Strikethrough then SDL_ttf.TTF_STYLE_STRIKETHROUGH else 0)
+                    else 0
+                SDL_ttf.TTF_SetFontStyle (font, styleSdl)
+                font
+            | _ ->
+                Log.infoOnce ("Cannot render text with a non-font asset for '" + scstring fontDescriptor.Font + "'.")
+                IntPtr.Zero
+        | _ ->
+            Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring fontDescriptor.Font + "'.")
+            IntPtr.Zero
+
+type FontAtlasAndMetrics =
+    { FontAtlas : OpenGL.Texture.Texture
+      FontMetrics : Map<Char, Vector2>
+      FontKerning : Map<Char * Char, Vector2> }
+with
+
+    static member makeFontAtlas font =
+
+        let textSurfaceWidth = 64 // NOTE: textSurface.w may be an innacurate representation of texture width in SDL2_ttf versions beyond v2.0.15 because... I don't know why.
+        let textSurfaceHeight = 64
+
+        // gather rendering resources
+        // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
+        // surface and texture one or more times a frame must be understood!
+        let renderSdlSurface font glyph =
+            if SDL_ttf.TTF_GlyphIsProvided32 (font, glyph) <> 0 then
+                // render only when color isn't fully transparent because SDL_TTF doesn't handle zero alpha text as expected.
+                // create sdl color
+                let mutable colorSdl = SDL.SDL_Color ()
+                colorSdl.r <- byte 255
+                colorSdl.g <- byte 255
+                colorSdl.b <- byte 255
+                colorSdl.a <- byte 255
+
+                SDL_ttf.TTF_RenderGlyph32_Blended (font, glyph, colorSdl)
+            else
+                IntPtr.Zero
+
+        let padSurface surfacePtr =
+            if surfacePtr <> IntPtr.Zero then
+                let surface = Marshal.PtrToStructure<SDL.SDL_Surface>(surfacePtr)
+                let format = Marshal.PtrToStructure<SDL.SDL_PixelFormat>(surface.format)
+
+                let surfacePaddedPtr = SDL.SDL_CreateRGBSurfaceWithFormat(
+                    0u, // flags
+                    textSurfaceWidth,
+                    textSurfaceHeight,
+                    32, // bits per pixel
+                    format.format
+                )
+
+                if surfacePaddedPtr = IntPtr.Zero then
+                    failwithf "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL.SDL_GetError())
+
+                // Fill it with transparent black (zero alpha)
+                SDL.SDL_FillRect(surfacePaddedPtr, IntPtr.Zero, SDL.SDL_MapRGBA(surface.format, 0uy, 0uy, 0uy, 0uy))
+                SDL.SDL_SetSurfaceBlendMode(surfacePtr, SDL.SDL_BlendMode.SDL_BLENDMODE_NONE)
+
+                // Blit the glyph onto the padded surface
+                if SDL.SDL_BlitSurface(surfacePtr, 0, surfacePaddedPtr, 0) <> 0 then
+                    failwithf "SDL_BlitSurface failed: %s" (SDL.SDL_GetError())
+
+                SDL.SDL_FreeSurface surfacePtr
+
+                surfacePaddedPtr
+            else
+                IntPtr.Zero
+
+        // upload texture data
+        let textTextureId = OpenGL.Gl.GenTexture ()
+        OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2dArray, textTextureId)
+        //OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, textTextureId)
+        OpenGL.Gl.TexImage3D (OpenGL.TextureTarget.Texture2dArray, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 256, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, IntPtr.Zero)
+        //OpenGL.Gl.TexImage2D (OpenGL.TextureTarget.Texture2d, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, textSurface.pixels)
+
+        for i in [0u .. 255u] do
+            let surfacePtr = renderSdlSurface font i
+            let surfacePtr = padSurface surfacePtr
+
+            if surfacePtr <> IntPtr.Zero then
+
+                // Now upload the padded surface to the correct layer in the 3D texture
+                let paddedSurface = Marshal.PtrToStructure<SDL.SDL_Surface>(surfacePtr)
+
+                OpenGL.Gl.TexSubImage3D (
+                    OpenGL.TextureTarget.Texture2dArray,
+                    0,
+                    0, 0, int i,
+                    textSurfaceWidth, textSurfaceHeight, 1,
+                    OpenGL.PixelFormat.Bgra,
+                    OpenGL.PixelType.UnsignedByte,
+                    paddedSurface.pixels
+                )
+
+                SDL.SDL_FreeSurface surfacePtr
+
+        OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2dArray, OpenGL.TextureParameterName.TextureMinFilter, int OpenGL.TextureMinFilter.Nearest)
+        OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2dArray, OpenGL.TextureParameterName.TextureMagFilter, int OpenGL.TextureMagFilter.Nearest)
+        OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2dArray, 0u)
+        OpenGL.Hl.Assert ()
+
+        // make texture drawable
+        let textTextureMetadata = OpenGL.Texture.TextureMetadata.make textSurfaceWidth textSurfaceHeight
+        let textTexture = OpenGL.Texture.EagerTexture { TextureMetadata = textTextureMetadata; TextureId = textTextureId }
+        OpenGL.Hl.Assert ()
+
+        textTexture
+
+    static member makeFontMetrics font =
+
+        // get line height for a font
+        let fontHeight font =
+            SDL_ttf.TTF_FontLineSkip font
+
+        // get single char width for a font
+        let glyphAdvance font (glyph : char) =
+            if SDL_ttf.TTF_GlyphIsProvided32 (font, uint32 glyph) <> 0 then
+                let mutable advance = 0
+                let mutable unused = 0
+                let errorCode = SDL_ttf.TTF_GlyphMetrics32 (font, uint32 glyph, &unused, &unused, &unused, &unused, &advance)
+                if errorCode <> 0 then
+                    let error = SDL_ttf.TTF_GetError ()
+                    Log.infoOnce $"Failed to get glyph metrics for '{glyph}' with font '{scstring font}' due to: {error}"
+                advance
+            else
+                0
+
+        let mutable metrics = Map.empty
+
+        for i in [0u .. 255u] do
+            let advance = glyphAdvance font (char i)
+            metrics <- Map.add (char i) (v2 (single advance) 0.0f) metrics
+
+        metrics
+
+    static member makeFontKerning font =
+
+        // get line height for a font
+        let fontHeight font =
+            SDL_ttf.TTF_FontLineSkip font
+
+        // get single char width for a font
+        let glyphAdvance font (glyph : char) (lastGlyph : char) =
+            SDL_ttf.TTF_GetFontKerningSizeGlyphs32 (font, uint16 lastGlyph, uint16 glyph)
+
+        let mutable metrics = Map.empty
+
+        for i in [0u .. 255u] do
+            for j in [0u .. 255u] do
+                let advance = glyphAdvance font (char i) (char j)
+                metrics <- Map.add (char i, char j) (v2 (single advance) 0.0f) metrics
+
+        metrics
+
+    static member make font =
+        { FontAtlas = FontAtlasAndMetrics.makeFontAtlas font
+          FontMetrics = FontAtlasAndMetrics.makeFontMetrics font
+          FontKerning = FontAtlasAndMetrics.makeFontKerning font }
+
+/// Describes a text batch environment.
+type TextBatchEnv =
+    { mutable FontAtlases : Map<FontDescriptor, FontAtlasAndMetrics>
+      mutable BatchedText : Map<FontDescriptor, (Vector2 * Char) list> }
+with
+    static member empty =
+        { FontAtlases = Map.empty
+          BatchedText = Map.empty }
 
 /// Describes a 2d rendering operation.
 type RenderOperation2d =
@@ -185,9 +387,9 @@ type [<ReferenceEquality>] GlRenderer2d =
         { mutable Viewport : Viewport
           SpriteShader : int * int * int * int * uint // TODO: P1: release these resources on clean-up.
           TextShader : int * int * int * int * uint
-          mutable FontAtlases : Map<Font AssetTag, OpenGL.Texture.Texture>
           TextQuad : uint * uint * uint // TODO: P1: release these resources on clean-up.
           SpriteBatchEnv : OpenGL.SpriteBatch.SpriteBatchEnv
+          TextBatchEnv : TextBatchEnv
           RenderPackages : Packages<RenderAsset, AssetClient>
           SpineSkeletonRenderers : Dictionary<uint64, bool ref * Spine.SkeletonRenderer>
           mutable RenderPackageCachedOpt : RenderPackageCached
@@ -799,149 +1001,19 @@ type [<ReferenceEquality>] GlRenderer2d =
                 | ValueNone -> Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring font + "'.")
             OpenGL.Hl.Assert ()
 
-    static member private processFontForBatchedText fontAsset fontSizing (fontStyling: Set<FontStyle>) renderer =
+    static member private getFontAtlas fontAsset fontSizing (fontStyling: Set<FontStyle>) renderer =
+        let fontDescriptor = FontDescriptor.makeFontDescriptor fontAsset fontSizing fontStyling
 
-        let textSurfaceWidth = 64 // NOTE: textSurface.w may be an innacurate representation of texture width in SDL2_ttf versions beyond v2.0.15 because... I don't know why.
-        let textSurfaceHeight = 64
-
-        // gather rendering resources
-        // NOTE: the resource implications (throughput and fragmentation?) of creating and destroying a
-        // surface and texture one or more times a frame must be understood!
-        let renderSdlSurface font glyph =
-            if SDL_ttf.TTF_GlyphIsProvided32 (font, glyph) <> 0 then
-                // render only when color isn't fully transparent because SDL_TTF doesn't handle zero alpha text as expected.
-                // create sdl color
-                let mutable colorSdl = SDL.SDL_Color ()
-                colorSdl.r <- byte 255
-                colorSdl.g <- byte 255
-                colorSdl.b <- byte 255
-                colorSdl.a <- byte 255
-
-                SDL_ttf.TTF_RenderGlyph32_Blended (font, glyph, colorSdl)
-
-            else
-                IntPtr.Zero
-
-        // get font pointer for point asset and set its styling and sizing
-        let getFont () =
-            match GlRenderer2d.tryGetRenderAsset fontAsset renderer with
-            | ValueSome renderAsset ->
-                match renderAsset with
-                | FontAsset (fontSizeDefault, font) ->
-                    // attempt to configure sdl font size
-                    let fontSize =
-                        match fontSizing with
-                        | Some fontSize -> fontSize * renderer.Viewport.DisplayScalar
-                        | None -> fontSizeDefault * renderer.Viewport.DisplayScalar
-
-                    let errorCode = SDL_ttf.TTF_SetFontSize (font, fontSize)
-                    if errorCode <> 0 then
-                        let error = SDL_ttf.TTF_GetError ()
-                        Log.infoOnce ("Failed to set font size for font '" + scstring font + "' due to: " + error)
-                        SDL_ttf.TTF_SetFontSize (font, fontSizeDefault * renderer.Viewport.DisplayScalar) |> ignore<int>
-
-                    // configure sdl font style
-                    let styleSdl =
-                        if fontStyling.Count > 0 then // OPTIMIZATION: avoid set queries where possible.
-                            (if fontStyling.Contains Bold then SDL_ttf.TTF_STYLE_BOLD else 0) |||
-                            (if fontStyling.Contains Italic then SDL_ttf.TTF_STYLE_ITALIC else 0) |||
-                            (if fontStyling.Contains Underline then SDL_ttf.TTF_STYLE_UNDERLINE else 0) |||
-                            (if fontStyling.Contains Strikethrough then SDL_ttf.TTF_STYLE_STRIKETHROUGH else 0)
-                        else 0
-                    SDL_ttf.TTF_SetFontStyle (font, styleSdl)
-                    font
-                | _ ->
-                    Log.infoOnce ("Cannot render text with a non-font asset for '" + scstring fontAsset + "'.")
-                    IntPtr.Zero
-            | _ ->
-                Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring fontAsset + "'.")
-                IntPtr.Zero
-
-        let makeAtlasTexture font =
-
-            // upload texture data
-            let textTextureId = OpenGL.Gl.GenTexture ()
-            OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2dArray, textTextureId)
-            //OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, textTextureId)
-            OpenGL.Gl.TexImage3D (OpenGL.TextureTarget.Texture2dArray, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 256, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, IntPtr.Zero)
-            //OpenGL.Gl.TexImage2D (OpenGL.TextureTarget.Texture2d, 0, Constants.OpenGL.UncompressedTextureFormat, textSurfaceWidth, textSurfaceHeight, 0, OpenGL.PixelFormat.Bgra, OpenGL.PixelType.UnsignedByte, textSurface.pixels)
-
-            for i in [0u .. 255u] do
-                let textSurfacePtr = renderSdlSurface font i
-                if textSurfacePtr <> IntPtr.Zero then
-                    let textSurface = Marshal.PtrToStructure<SDL.SDL_Surface>(textSurfacePtr)
-                    let format = Marshal.PtrToStructure<SDL.SDL_PixelFormat>(textSurface.format)
-
-                    let paddedSurfacePtr = SDL.SDL_CreateRGBSurfaceWithFormat(
-                        0u, // flags
-                        textSurfaceWidth,
-                        textSurfaceHeight,
-                        32, // bits per pixel
-                        format.format
-                    )
-
-                    if paddedSurfacePtr = IntPtr.Zero then
-                        failwithf "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL.SDL_GetError())
-
-                    // Fill it with transparent black (zero alpha)
-                    SDL.SDL_FillRect(paddedSurfacePtr, IntPtr.Zero, SDL.SDL_MapRGBA(textSurface.format, 0uy, 0uy, 0uy, 0uy))
-                    SDL.SDL_SetSurfaceBlendMode(textSurfacePtr, SDL.SDL_BlendMode.SDL_BLENDMODE_NONE)
-
-                    // Blit the glyph onto the padded surface
-                    if SDL.SDL_BlitSurface(textSurfacePtr, 0, paddedSurfacePtr, 0) <> 0 then
-                        failwithf "SDL_BlitSurface failed: %s" (SDL.SDL_GetError())
-
-                    // Now upload the padded surface to the correct layer in the 3D texture
-                    let paddedSurface = Marshal.PtrToStructure<SDL.SDL_Surface>(paddedSurfacePtr)
-
-                    OpenGL.Gl.TexSubImage3D (
-                        OpenGL.TextureTarget.Texture2dArray,
-                        0,
-                        0, 0, int i,
-                        textSurfaceWidth, textSurfaceHeight, 1,
-                        OpenGL.PixelFormat.Bgra,
-                        OpenGL.PixelType.UnsignedByte,
-                        paddedSurface.pixels
-                    )
-
-                    SDL.SDL_FreeSurface textSurfacePtr
-                    SDL.SDL_FreeSurface paddedSurfacePtr
-
-            OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2dArray, OpenGL.TextureParameterName.TextureMinFilter, int OpenGL.TextureMinFilter.Nearest)
-            OpenGL.Gl.TexParameter (OpenGL.TextureTarget.Texture2dArray, OpenGL.TextureParameterName.TextureMagFilter, int OpenGL.TextureMagFilter.Nearest)
-            OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2dArray, 0u)
-            OpenGL.Hl.Assert ()
-
-            textTextureId
-
-        let textTexture textTextureId =
-            // make texture drawable
-            let textTextureMetadata = OpenGL.Texture.TextureMetadata.make textSurfaceWidth textSurfaceHeight
-            let textTexture = OpenGL.Texture.EagerTexture { TextureMetadata = textTextureMetadata; TextureId = textTextureId }
-            OpenGL.Hl.Assert ()
-
-            textTexture
-
-        if not (Map.containsKey fontAsset renderer.FontAtlases) then
-
-            let font = getFont ()
-
+        if not (Map.containsKey fontDescriptor renderer.TextBatchEnv.FontAtlases) then
+            let font = FontDescriptor.makeFont (fun x -> GlRenderer2d.tryGetRenderAsset x renderer) renderer.Viewport.DisplayScalar fontDescriptor
             if font <> IntPtr.Zero then
-
-                let textureId = makeAtlasTexture font
-
-                let texture = textTexture textureId
-
-                renderer.FontAtlases <- Map.add fontAsset texture renderer.FontAtlases
-
-                texture
-
+                let atlas = FontAtlasAndMetrics.makeFontAtlas font
+                renderer.TextBatchEnv.FontAtlases <- Map.add fontDescriptor atlas renderer.TextBatchEnv.FontAtlases
+                atlas
             else
-
                 failwith "Could not get the font."
         else
-            let texture = Map.find fontAsset renderer.FontAtlases
-
+            let texture = Map.find fontDescriptor renderer.TextBatchEnv.FontAtlases
             texture
 
     /// Render rich text.
@@ -971,54 +1043,6 @@ type [<ReferenceEquality>] GlRenderer2d =
             let fontSizing = text.Head.Blocks.Head.FontSizing
             let fontStyling = text.Head.Blocks.Head.FontStyling
 
-            // get font pointer for point asset and set its styling and sizing
-            let getFont () =
-                match GlRenderer2d.tryGetRenderAsset fontAsset renderer with
-                | ValueSome renderAsset ->
-                    match renderAsset with
-                    | FontAsset (fontSizeDefault, font) ->
-                        // attempt to configure sdl font size
-                        let fontSize =
-                            match fontSizing with
-                            | Some fontSize -> fontSize * renderer.Viewport.DisplayScalar
-                            | None -> fontSizeDefault * renderer.Viewport.DisplayScalar
-
-                        let errorCode = SDL_ttf.TTF_SetFontSize (font, fontSize)
-                        if errorCode <> 0 then
-                            let error = SDL_ttf.TTF_GetError ()
-                            Log.infoOnce ("Failed to set font size for font '" + scstring font + "' due to: " + error)
-                            SDL_ttf.TTF_SetFontSize (font, fontSizeDefault * renderer.Viewport.DisplayScalar) |> ignore<int>
-
-                        // configure sdl font style
-                        let styleSdl =
-                            if fontStyling.Count > 0 then // OPTIMIZATION: avoid set queries where possible.
-                                (if fontStyling.Contains Bold then SDL_ttf.TTF_STYLE_BOLD else 0) |||
-                                (if fontStyling.Contains Italic then SDL_ttf.TTF_STYLE_ITALIC else 0) |||
-                                (if fontStyling.Contains Underline then SDL_ttf.TTF_STYLE_UNDERLINE else 0) |||
-                                (if fontStyling.Contains Strikethrough then SDL_ttf.TTF_STYLE_STRIKETHROUGH else 0)
-                            else 0
-                        SDL_ttf.TTF_SetFontStyle (font, styleSdl)
-                        font
-                    | _ ->
-                        Log.infoOnce ("Cannot render text with a non-font asset for '" + scstring fontAsset + "'.")
-                        IntPtr.Zero
-                | _ ->
-                    Log.infoOnce ("TextDescriptor failed due to unloadable asset for '" + scstring fontAsset + "'.")
-                    IntPtr.Zero
-
-            // get line height for a font
-            let fontHeight font =
-                SDL_ttf.TTF_FontLineSkip font
-
-            // get single char width for a font
-            let charWidth font (char : char) =
-                let mutable advance = 0
-                let mutable unused = 0
-                let errorCode = SDL_ttf.TTF_GlyphMetrics32 (font, uint32 char, &unused, &unused, &unused, &unused, &advance)
-                if errorCode <> 0 then
-                    let error = SDL_ttf.TTF_GetError ()
-                    Log.infoOnce $"Failed to get glyph metrics for '{char}' with font '{scstring font}' due to: {error}"
-                advance
 
             (*
             // reshape text into lines of concrete width and justification
@@ -1314,11 +1338,13 @@ type [<ReferenceEquality>] GlRenderer2d =
                 + "abcdefghijklmnopqrstuvwxyz"
                 + "abcdefghijklmnopqrstuvwxyz"
 
-            let textTexture = GlRenderer2d.processFontForBatchedText fontAsset fontSizing fontStyling renderer
+            let textTexture = GlRenderer2d.getFontAtlas fontAsset fontSizing fontStyling renderer
 
-            let font = getFont ()
+            let fontDescriptor = FontDescriptor.makeFontDescriptor fontAsset fontSizing fontStyling
 
-            let offset = v2 600f 0f
+            let font = FontDescriptor.makeFont (fun x -> GlRenderer2d.tryGetRenderAsset x renderer) renderer.Viewport.DisplayScalar fontDescriptor
+
+            let offset = v2 0f 0f
             let translation = (position + offset).V3
 
             let textSurfaceWidth = 64
@@ -1334,11 +1360,13 @@ type [<ReferenceEquality>] GlRenderer2d =
             let glyphsWithCoords =
                 text
                 |> String.toArray
-                |> Array.foldMap (fun c s ->
+                |> Array.foldMap (fun c (s, lastchar) ->
                     let advance = charWidth font c
+                    let kerning = SDL_ttf.TTF_GetFontKerningSizeGlyphs32 (font, uint16 lastchar, uint16 c)
+                    let advance = advance + kerning
 
-                    (c, s), s + (v2 (single advance) 0.0f)
-                ) v2Zero
+                    (c, s), (s + (v2 (single advance) 0.0f), c)
+                ) (v2Zero, ' ')
                 |> fst
 
             // draw text sprite
@@ -1353,6 +1381,23 @@ type [<ReferenceEquality>] GlRenderer2d =
             OpenGL.Hl.Assert ()
 
             // destroy texture
+            OpenGL.Hl.Assert ()
+
+    static member private renderTextBatch renderer =
+        for (font, text) in renderer.TextBatchEnv.BatchedText |> Map.toSeq do
+
+            let glyphsWithCoords =
+                text
+                |> List.toArray
+                |> Array.map (fun (char, pos) -> pos, char)
+
+            let (vertices, vao) = OpenGL.Text.CreateTextQuad glyphsWithCoords
+
+            let (modelViewProjectionUniform, texCoords4Uniform, colorUniform, textureUniform, shader) = renderer.TextShader
+
+            let insetOpt : Box2 voption = ValueNone
+
+            OpenGL.Text.DrawText (vertices, String.length text, vao, &viewProjection, modelViewProjection.ToArray (), &insetOpt, &clipOpt, &color, FlipNone, textSurfaceWidth, textSurfaceHeight, textTexture, renderer.Viewport, modelViewProjectionUniform, texCoords4Uniform, colorUniform, textureUniform, shader)
             OpenGL.Hl.Assert ()
 
     static member private renderDescriptor descriptor eyeCenter eyeSize renderer =
@@ -1427,6 +1472,8 @@ type [<ReferenceEquality>] GlRenderer2d =
         OpenGL.SpriteBatch.EndSpriteBatchFrame renderer.Viewport renderer.SpriteBatchEnv
         OpenGL.Hl.Assert ()
 
+        GlRenderer2d.renderTextBatch renderer
+
         // reload render assets upon request
         if renderer.ReloadAssetsRequested then
             GlRenderer2d.handleReloadRenderAssets renderer
@@ -1446,13 +1493,13 @@ type [<ReferenceEquality>] GlRenderer2d =
 
         // create one-off sprite and text resources
         let spriteShader = OpenGL.Sprite.CreateSpriteShader Constants.Paths.SpriteShaderFilePath
-        let fontAtlases = Map.empty
         let textShader = OpenGL.Text.CreateTextShader Constants.Paths.TextShaderFilePath
         let textQuad = OpenGL.Sprite.CreateSpriteQuad true
         OpenGL.Hl.Assert ()
 
         // create sprite batch env
         let spriteBatchEnv = OpenGL.SpriteBatch.CreateSpriteBatchEnv Constants.Paths.SpriteBatchShaderFilePath
+        let textBatchEnv = TextBatchEnv.empty
         OpenGL.Hl.Assert ()
 
         // make renderer
@@ -1460,9 +1507,9 @@ type [<ReferenceEquality>] GlRenderer2d =
             { Viewport = viewport
               SpriteShader = spriteShader
               TextShader = textShader
-              FontAtlases = fontAtlases
               TextQuad = textQuad
               SpriteBatchEnv = spriteBatchEnv
+              TextBatchEnv = textBatchEnv
               RenderPackages = dictPlus StringComparer.Ordinal []
               SpineSkeletonRenderers = dictPlus HashIdentity.Structural []
               RenderPackageCachedOpt = Unchecked.defaultof<_>
@@ -1485,5 +1532,5 @@ type [<ReferenceEquality>] GlRenderer2d =
             let renderPackages = renderer.RenderPackages |> Seq.map (fun entry -> entry.Value)
             let renderAssets = renderPackages |> Seq.map (fun package -> package.Assets.Values) |> Seq.concat
             for (_, _, renderAsset) in renderAssets do GlRenderer2d.freeRenderAsset renderAsset renderer
-            for texture in renderer.FontAtlases.Values do texture.Destroy ()
+            for texture in renderer.TextBatchEnv.FontAtlases.Values do texture.Destroy ()
             renderer.RenderPackages.Clear ()

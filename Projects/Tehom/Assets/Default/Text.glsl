@@ -31,7 +31,7 @@ void main()
     vec2 position = VERTEX_CONST[vertexId];
     vec4 filt = FILTERS[vertexId];
     test = index.x;
-    gl_Position = modelViewProjection * vec4(position.x, position.y, 0, 1) + vec4(index.y / 960.0, 0, 0, 0);
+    gl_Position = modelViewProjection * vec4(position.x + index.y / 64.0, position.y, 0, 1);
     texCoords = vec2(texCoords4.x * filt.x + texCoords4.z * filt.z, texCoords4.y * filt.y + texCoords4.w * filt.w);
 }
 
