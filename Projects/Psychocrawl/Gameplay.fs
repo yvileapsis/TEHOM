@@ -1,9 +1,9 @@
-﻿namespace MyGame
+﻿namespace Psychocrawl
 open System
 open System.Numerics
 open Prime
 open Nu
-open MyGame
+open Psychocrawl
 
 // this represents the state of gameplay simulation.
 type GameplayState =
@@ -12,9 +12,10 @@ type GameplayState =
 
 // this is our MMCC model type representing gameplay.
 // this model representation uses update time, that is, time based on number of engine updates.
-type Gameplay =
-    { GameplayTime : int64
-      GameplayState : GameplayState }
+type Gameplay = {
+    GameplayTime : int64
+    GameplayState : GameplayState }
+with
 
     // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
     static member empty =
@@ -58,10 +59,11 @@ type GameplayDispatcher () =
         else Gameplay.empty
 
     // here we define the screen's property values and event handling
-    override this.Definitions (_, _) =
-        [Screen.SelectEvent => StartPlaying
-         Screen.DeselectingEvent => FinishQuitting
-         Screen.TimeUpdateEvent => TimeUpdate]
+    override this.Definitions (_, _) = [
+        Screen.SelectEvent => StartPlaying
+        Screen.DeselectingEvent => FinishQuitting
+        Screen.TimeUpdateEvent => TimeUpdate
+    ]
 
     // here we handle the above messages
     override this.Message (gameplay, message, _, world) =
@@ -87,19 +89,16 @@ type GameplayDispatcher () =
             World.publish () screen.QuitEvent screen world
 
     // here we describe the content of the game including the scene and the hud
-    override this.Content (gameplay, _) =
+    override this.Content (gameplay, _) = [
+        // the scene group while playing
+        if gameplay.GameplayState = Playing then
+            Content.group Simulants.GameplayScene.Name [] [
 
-        [// the scene group while playing
-         if gameplay.GameplayState = Playing then
-            Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" []
-
-                [// decor
-                 Content.staticModel "StaticModel"
-                    [Entity.Position == v3 0.0f 0.0f -2.0f
-                     Entity.Rotation := Quaternion.CreateFromAxisAngle ((v3 1.0f 0.75f 0.5f).Normalized, gameplay.GameplayTime % 360L |> single |> Math.DegreesToRadians)]
-
-                 // quit
-                 Content.button Simulants.GameplayQuit.Name
-                    [Entity.Position == v3 232.0f -144.0f 0.0f
-                     Entity.Text == "Quit"
-                     Entity.ClickEvent => StartQuitting]]]
+                // quit
+                Content.button Simulants.GameplayQuit.Name [
+                    Entity.Position == v3 232.0f -144.0f 0.0f
+                    Entity.Text == "Quit"
+                    Entity.ClickEvent => StartQuitting
+                ]
+            ]
+    ]

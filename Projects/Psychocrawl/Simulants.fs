@@ -1,4 +1,4 @@
-﻿namespace MyGame
+﻿namespace Psychocrawl
 open System
 open Nu
 
