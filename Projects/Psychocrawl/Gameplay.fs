@@ -18,14 +18,16 @@ type Gameplay = {
 with
 
     // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
-    static member empty =
-        { GameplayTime = 0L
-          GameplayState = Quit }
+    static member empty = {
+        GameplayTime = 0L
+        GameplayState = Quit
+    }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
-    static member initial =
-        { Gameplay.empty with
-            GameplayState = Playing }
+    static member initial = {
+        Gameplay.empty with
+            GameplayState = Playing
+    }
 
 // this is our gameplay MMCC message type.
 type GameplayMessage =

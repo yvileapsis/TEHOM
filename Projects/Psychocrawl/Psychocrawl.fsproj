@@ -45,8 +45,8 @@
 		<Compile Include="Simulants.fs" />
 		<Compile Include="Events.fs" />
 		<Compile Include="Gameplay.fs" />
-		<Compile Include="MyGame.fs" />
-		<Compile Include="MyGamePlugin.fs" />
+		<Compile Include="Psychocrawl.fs" />
+		<Compile Include="PsychocrawlPlugin.fs" />
 		<Compile Include="Program.fs" />
 		<Content Include="AssetGraph.nuag">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
