@@ -29,12 +29,13 @@ module WorldImGui =
         /// Render circles via ImGui in the current eye 2d space, computing color as specified.
         static member imGuiCircles2dPlus absolute (positions : Vector2 seq) radius filled (computeColor : Vector2 -> Color) (world : World) =
             let drawList = ImGui.GetBackgroundDrawList ()
+            let radiusScaled = radius * single Globals.Render.DisplayScalar
             for position in positions do
                 let color = computeColor position
                 let positionWindow = ImGui.Position2dToWindow (absolute, world.Eye2dCenter, world.Eye2dSize, world.RasterViewport, position)
                 if filled
-                then drawList.AddCircleFilled (positionWindow, radius, color.Abgr)
-                else drawList.AddCircle (positionWindow, radius, color.Abgr)
+                then drawList.AddCircleFilled (positionWindow, radiusScaled, color.Abgr)
+                else drawList.AddCircle (positionWindow, radiusScaled, color.Abgr)
 
         /// Render circles via ImGui in the current eye 2d space.
         static member imGuiCircles2d absolute position radius filled color world =
@@ -96,10 +97,10 @@ module WorldImGui =
             let viewProjection = view * projection
             let frustumView = world.Eye3dFrustumView
             for segment in segments do
-                for (start, stop) in Math.TryUnionSegmentAndFrustum' (segment.A, segment.B, frustumView) do
-                    let color = computeColor segment
-                    let startWindow = ImGui.Position3dToWindow (windowPosition, windowSize, viewProjection, start)
-                    let stopWindow = ImGui.Position3dToWindow (windowPosition, windowSize, viewProjection, stop)
+                for segment' in Math.TryUnionSegmentAndFrustum' (segment, frustumView) do
+                    let color = computeColor segment'
+                    let startWindow = ImGui.Position3dToWindow (windowPosition, windowSize, viewProjection, segment'.A)
+                    let stopWindow = ImGui.Position3dToWindow (windowPosition, windowSize, viewProjection, segment'.B)
                     drawList.AddLine (startWindow, stopWindow, color.Abgr, thickness)
 
         /// Render segments via ImGui in the current eye 3d space.
@@ -109,6 +110,26 @@ module WorldImGui =
         /// Render a segment via ImGui in the current eye 3d space.
         static member imGuiSegment3d segment thickness color world =
             World.imGuiSegments3d (SArray.singleton segment) thickness color world
+
+        /// Render a box via ImGui in the current eye 3d space.
+        static member imGuiBox3d (box : Box3) (color : Color) (world : World) =
+            let drawList = ImGui.GetBackgroundDrawList ()
+            let windowPosition = ImGui.GetWindowPos ()
+            let windowSize = ImGui.GetWindowSize ()
+            let eyeCenter = world.Eye3dCenter
+            let eyeRotation = world.Eye3dRotation
+            let eyeFieldOfView = world.Eye3dFieldOfView
+            let viewport = world.RasterViewport
+            let frustum = Viewport.getFrustum eyeCenter eyeRotation eyeFieldOfView viewport
+            let view = Viewport.getView3d eyeCenter eyeRotation
+            let projection = Viewport.getProjection3d eyeFieldOfView viewport
+            let viewProjection = view * projection
+            let segments = box.Segments
+            for segment in segments do
+                for segment' in Math.TryUnionSegmentAndFrustum' (segment, frustum) do
+                    let aWindow = ImGui.Position3dToWindow (windowPosition, windowSize, viewProjection, segment'.A)
+                    let bWindow = ImGui.Position3dToWindow (windowPosition, windowSize, viewProjection, segment'.B)
+                    drawList.AddLine (aWindow, bWindow, color.Abgr)
 
         /// Edit a Box3 via ImGui in the current eye 3d space.
         static member imGuiEditBox3d snap box (world : World) =
@@ -378,20 +399,19 @@ module WorldImGui =
                     | _ -> failwithumf ()
                 (promoted, edited, style :> obj)
             | :? LightType as light ->
-                let mutable index = match light with PointLight -> 0 | DirectionalLight -> 1 | SpotLight _ -> 2
+                let mutable index = light.Enumerate
                 let (edited, light) =
-                    if ImGui.Combo (name, &index, [|nameof PointLight; nameof DirectionalLight; nameof SpotLight|], 3)
-                    then (true, match index with 0 -> PointLight | 1 -> DirectionalLight | 2 -> SpotLight (0.9f, 1.0f) | _ -> failwithumf ())
+                    let names = LightType.Names
+                    if ImGui.Combo (name, &index, names, names.Length)
+                    then (true, LightType.makeFromEnumeration index)
                     else (false, light)
                 if ImGui.IsItemFocused () then context.FocusProperty ()
                 let (edited, light) =
                     match index with
                     | 0 -> (edited, light)
-                    | 1 -> (edited, light)
-                    | 2 ->
+                    | 1 ->
                         match light with
                         | PointLight -> failwithumf ()
-                        | DirectionalLight -> failwithumf ()
                         | SpotLight (innerCone, outerCone) ->
                             let mutable (innerCone, outerCone) = (innerCone, outerCone)
                             ImGui.Indent ()
@@ -401,6 +421,10 @@ module WorldImGui =
                             if ImGui.IsItemFocused () then context.FocusProperty ()
                             ImGui.Unindent ()
                             (edited || innerConeEdited || outerConeEdited, SpotLight (innerCone, outerCone))
+                        | DirectionalLight -> failwithumf ()
+                        | CascadedLight -> failwithumf ()
+                    | 2 -> (edited, light)
+                    | 3 -> (edited, light)
                     | _ -> failwithumf ()
                 (promoted, edited, light :> obj)
             | :? Substance as substance ->
@@ -970,8 +994,8 @@ module WorldImGui =
                         (promoted, edited || edited2, value)
                 else (promoted, edited, value)
 
-/// Renders 3D physics via ImGui.
-type RendererPhysics3d () =
+/// Override of Jolt DebugRenderer to render to ImGui.
+type JoltDebugRendererImGui () =
     inherit DebugRenderer ()
 
     let segments = Dictionary<Color, Segment3 List> ()
@@ -1007,15 +1031,43 @@ type RendererPhysics3d () =
 /// More ImGui functions for the world.
 [<AutoOpen>]
 module WorldImGui2 =
-    
     type World with
 
-        // Render the 3D physics via ImGui using the given settings.
+        /// Render the 2D physics via ImGui.
+        static member imGuiRenderPhysics2d world =
+            let segments = Dictionary<Color, struct (Vector2 * Vector2) List> ()
+            let circles = Dictionary<struct (Color * float32), Vector2 List> ()
+            let physicsEngine2d = World.getPhysicsEngine2d world
+            let renderContext =
+                { new PhysicsEngine2dRenderContext with
+                    override this.DrawLine (start : Vector2, stop : Vector2, color) =
+                        match segments.TryGetValue color with
+                        | (true, segmentList) -> segmentList.Add (start, stop)
+                        | (false, _) -> segments.Add (color, List [struct (start, stop)])
+                    override this.DrawCircle (center : Vector2, radius, color) =
+                        match circles.TryGetValue struct (color, radius) with
+                        | (true, circleList) -> circleList.Add center
+                        | (false, _) -> circles.Add (struct (color, radius), List [center])
+                    override _.EyeBounds = world.Eye2dBounds }
+            physicsEngine2d.TryRender renderContext
+            for struct (color, segmentList) in segments.Pairs' do
+                World.imGuiSegments2d false segmentList 1.0f color world
+                segmentList.Clear ()
+            for struct (struct (color, radius), circleList) in circles.Pairs' do
+                World.imGuiCircles2d false circleList radius false color world
+                circleList.Clear ()
+
+        /// Render the 3D physics via ImGui using the given settings.
         static member imGuiRenderPhysics3d (settings : DrawSettings) world =
             match World.getRendererPhysics3dOpt world with
-            | Some renderer ->
-                let renderer = renderer :?> RendererPhysics3d
+            | Some debugRenderer ->
                 let physicsEngine3d = World.getPhysicsEngine3d world
-                physicsEngine3d.TryRender (world.Eye3dCenter, world.Eye3dFrustumView, settings, renderer)
-                renderer.Flush world
+                let joltRenderer = debugRenderer :?> JoltDebugRendererImGui
+                let renderContext =
+                    { DebugRenderer = joltRenderer
+                      DrawSettings = settings
+                      EyeCenter = world.Eye3dCenter
+                      EyeFrustum = world.Eye3dFrustumView }
+                physicsEngine3d.TryRender renderContext
+                joltRenderer.Flush world
             | None -> ()
