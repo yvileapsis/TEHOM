@@ -20,3 +20,6 @@ module Assets =
     module Gameplay =
 
         let PackageName = "Gameplay"
+        let FontSpaceMono = asset<Font> PackageName "SpaceMono-Regular"
+        let FontMonoSpacedFree = asset<Font> PackageName "FreeMonospaced-7ZXP"
+        let FontSquare = asset<Font> PackageName "Square"
