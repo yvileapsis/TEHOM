@@ -474,8 +474,8 @@ and GameDispatcher () =
     default this.TryGetFallbackModel (_, _, _) = None
 
     /// Attempt to synchronize the content of a game.
-    abstract TrySynchronize : initializing : bool * game : Game * world : World -> unit
-    default this.TrySynchronize (_, _, _) = ()
+    abstract TrySynchronize : initializing : bool * reinitializing : bool * game : Game * world : World -> unit
+    default this.TrySynchronize (_, _, _, _) = ()
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
     abstract Edit : op : EditOperation * game : Game * world : World -> unit
@@ -530,8 +530,8 @@ and ScreenDispatcher () =
     default this.TryGetFallbackModel (_, _, _) = None
 
     /// Attempt to synchronize the content of a screen.
-    abstract TrySynchronize : initializing : bool * screen : Screen * world : World -> unit
-    default this.TrySynchronize (_, _, _) = ()
+    abstract TrySynchronize : initializing : bool * reinitializing : bool * screen : Screen * world : World -> unit
+    default this.TrySynchronize (_, _, _, _) = ()
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
     abstract Edit : op : EditOperation * screen : Screen * world : World -> unit
@@ -586,8 +586,8 @@ and GroupDispatcher () =
     default this.TryGetFallbackModel (_, _, _) = None
 
     /// Attempt to synchronize the content of a group.
-    abstract TrySynchronize : initializing : bool * group : Group * world : World -> unit
-    default this.TrySynchronize (_, _, _) = ()
+    abstract TrySynchronize : initializing : bool * reinitializing : bool * group : Group * world : World -> unit
+    default this.TrySynchronize (_, _, _, _) = ()
 
     /// Participate in defining additional editing behavior for an entity via the ImGui API.
     abstract Edit : op : EditOperation * group : Group * world : World -> unit
@@ -624,7 +624,7 @@ and EntityDispatcher (is2d, physical, lightProbe, light) =
          Define? Presence Exterior
          Define? Absolute false
          Define? Model { DesignerType = typeof<unit>; DesignerValue = () }
-         Define? MountOpt (Some (Relation.makeParent<Entity> ()))
+         Define? MountOpt (Some (Address.makeParent<Entity> ()))
          Define? PropagationSourceOpt Option<Entity>.None
          Define? PublishChangeEvents false
          Define? Enabled true
@@ -686,9 +686,9 @@ and EntityDispatcher (is2d, physical, lightProbe, light) =
     abstract TryGetFallbackModel<'a> : modelSymbol : Symbol * entity : Entity * world : World -> 'a option
     default this.TryGetFallbackModel (_, _, _) = None
 
-    /// Attempt to synchronize content of an entity.
-    abstract TrySynchronize : initializing : bool * entity : Entity * world : World -> unit
-    default this.TrySynchronize (_, _, _) = ()
+    /// Attempt to synchronize that content of an entity.
+    abstract TrySynchronize : initializing : bool * reinitializing : bool * entity : Entity * world : World -> unit
+    default this.TrySynchronize (_, _, _, _) = ()
 
     /// Get the default size of an entity.
     abstract GetAttributesInferred : entity : Entity * world : World -> AttributesInferred
@@ -791,13 +791,19 @@ and Message = inherit Signal
 /// A model-message-command-content (MMCC) command tag type.
 and Command = inherit Signal
 
+/// Describes the type of property to the model-message-command-content (MMCC) content system.
+and [<Struct>] PropertyType =
+    | InitializingProperty
+    | ReinitializingProperty
+    | DynamicProperty
+
 /// Describes property content to the model-message-command-content (MMCC) content system.
 and [<ReferenceEquality>] PropertyContent =
-    { PropertyStatic : bool
+    { PropertyType : PropertyType
       PropertyLens : Lens
       PropertyValue : obj }
-    static member inline make static_ lens value =
-        { PropertyStatic = static_
+    static member inline make ty lens value =
+        { PropertyType = ty
           PropertyLens = lens
           PropertyValue = value }
 
@@ -1158,7 +1164,7 @@ and [<ReferenceEquality; CLIMutable>] EntityState =
       mutable ScaleLocal : Vector3
       mutable AnglesLocal : Vector3
       mutable ElevationLocal : single
-      mutable MountOpt : Entity Relation option
+      mutable MountOpt : Entity Address option
       mutable PropagationSourceOpt : Entity option
       mutable OverlayNameOpt : string option
       mutable FacetNames : string Set
@@ -1821,9 +1827,15 @@ and [<NoEquality; NoComparison>] internal SubscriptionImSim =
       SubscriptionId : uint64
       Results : obj }
 
+/// Describes the type of argument used with the ImSim API.
+and [<Struct>] ArgType =
+    | InitializingArg
+    | ReinitializingArg
+    | DynamicArg
+
 /// Describes an argument used with the ImSim API.
 and [<Struct>] ArgImSim<'s when 's :> Simulant> =
-    { ArgStatic : bool
+    { ArgType : ArgType
       ArgLens : Lens
       ArgValue : obj }
 
@@ -1986,39 +1998,43 @@ and [<NoEquality; NoComparison>] World =
     member this.UpdateDelta =
         AmbientState.getUpdateDelta this.AmbientState
 
-    /// Get the number of updates that have transpired.
+    /// Get the number of updates that have transpired since the game began advancing.
     member this.UpdateTime =
         AmbientState.getUpdateTime this.AmbientState
 
-    /// Get the amount of clock time that has transpired between this and the previous frame.
+    /// Get the amount of clock time (in seconds) between this and the previous frame. Clock time is the primary means
+    /// for scaling frame-based phenomena like speeds and impulses.
     member this.ClockDelta =
         AmbientState.getClockDelta this.AmbientState
 
-    /// Get the clock time as of when the current frame began.
+    /// Get the amount of clock time (in seconds) that has transpired since the world began advancing. Clock time is
+    /// the primary means for scaling frame-based phenomena like speeds and impulses.
     member this.ClockTime =
         AmbientState.getClockTime this.AmbientState
 
-    /// Get the tick delta as a number of environment ticks.
+    /// Get the tick delta as a number of environment ticks between this and the previous frame.
     member this.TickDelta =
         AmbientState.getTickDelta this.AmbientState
 
-    /// Get the tick time as a number of environment ticks.
+    /// Get the tick time as a number of environment ticks that have transpired since the world began advancing.
     member this.TickTime =
         AmbientState.getTickTime this.AmbientState
 
-    /// Get the polymorphic engine time delta.
+    /// Get the polymorphic engine time between this and the previous frame.
     member this.GameDelta =
         AmbientState.getGameDelta this.AmbientState
 
-    /// Get the polymorphic engine time.
+    /// Get the polymorphic engine time that has transpired since the world began advancing.
     member this.GameTime =
         AmbientState.getGameTime this.AmbientState
 
-    /// Get the amount of date time that has transpired between this and the previous frame.
+    /// Get the amount of date time that has transpired between this and the previous frame. This value is independent
+    /// of whether the world was or is advancing.
     member this.DateDelta =
         AmbientState.getDateDelta this.AmbientState
 
-    /// Get the date time as of when the current frame began.
+    /// Get the date time as of the start of this frame. This value is independent of whether the world was or is
+    /// advancing.
     member this.DateTime =
         AmbientState.getDateTime this.AmbientState
 

@@ -10,18 +10,19 @@ open Prime
 [<AutoOpen>]
 module WorldModuleOperators =
 
-    /// Attempt to resolve a relationship from a simulant.
-    let tryResolve<'t when 't :> Simulant> (simulant : Simulant) (relation : 't Relation) : 't option =
-        let simulant2 = Relation.resolve<Simulant, 't> (itoa simulant.SimulantAddress) relation
+    /// Attempt to resolve a simulant from the given relation and simulant.
+    let tryResolve<'t when 't :> Simulant> (relation : 't Address) (simulant : Simulant) : 't option =
+        let simulant2 = Address.resolve<Simulant, 't> relation (itoa simulant.SimulantAddress)
         if simulant2.Names.Length >= 4 && typeof<'t> = typeof<Entity> then Some (Entity (simulant2.Names) :> Simulant :?> 't)
         elif simulant2.Names.Length = 3 && typeof<'t> = typeof<Group> then Some (Group (simulant2.Names) :> Simulant :?> 't)
         elif simulant2.Names.Length = 2 && typeof<'t> = typeof<Screen> then Some (Screen (simulant2.Names) :> Simulant :?> 't)
         elif simulant2.Names.Length = 1 && typeof<'t> = typeof<Game> then Some (Game.Handle :> Simulant :?> 't)
         else None
-
-    /// Relate the second simulant to the first.
-    let relate<'t when 't :> Simulant> (simulant : Simulant) (simulant2 : 't) : 't Relation =
-        Relation.relate<Simulant, 't> (itoa simulant.SimulantAddress) (itoa simulant2.SimulantAddress)
+        
+    /// Relate the second simulant to the first. When the given simulants share common ancestors, the result is a
+    /// relative address. Otherwise, the result is an absolute address.
+    let relate<'t when 't :> Simulant> (simulant : Simulant) (simulant2 : 't) : 't Address =
+        Address.relate<Simulant, 't> (itoa simulant.SimulantAddress) (itoa simulant2.SimulantAddress)
 
 /// Universal function definitions for the world (1/4).
 [<AutoOpen>]
@@ -151,10 +152,6 @@ module WorldModule =
         static member getHalted (world : World) =
             world.Halted
 
-        /// Set whether the world state is advancing.
-        static member setAdvancing advancing (world : World) =
-            World.defer (World.mapAmbientState (AmbientState.setAdvancing advancing)) Game.Handle world
-
         /// Set whether the world's frame rate is being explicitly paced based on clock progression.
         static member setFramePacing clockPacing (world : World) =
             World.mapAmbientState (AmbientState.setFramePacing clockPacing) world
@@ -186,29 +183,49 @@ module WorldModule =
         static member internal updateTime world =
             World.mapAmbientState AmbientState.updateTime world
 
-        /// Get the world's update delta time.
+        /// Get the number of updates that have transpired between this and the previous frame.
         static member getUpdateDelta world =
             AmbientState.getUpdateDelta world.AmbientState
-
-        /// Get the world's update time.
+            
+        /// Get the number of updates that have transpired since the game began advancing.
         static member getUpdateTime world =
             AmbientState.getUpdateTime world.AmbientState
-
-        /// Get the world's clock delta time.
+            
+        /// Get the amount of clock time (in seconds) between this and the previous frame. Clock time is the primary means
+        /// for scaling frame-based phenomena like speeds and impulses.
         static member getClockDelta world =
             AmbientState.getClockDelta world.AmbientState
-
-        /// Get the world's clock time.
+            
+        /// Get the amount of clock time (in seconds) that has transpired since the world began advancing. Clock time is
+        /// the primary means for scaling frame-based phenomena like speeds and impulses.
         static member getClockTime world =
             AmbientState.getClockTime world.AmbientState
 
-        /// Get the world's game delta time.
+        /// Get the tick delta as a number of environment ticks between this and the previous frame.
+        static member getTickDelta world =
+            AmbientState.getTickDelta world.AmbientState
+
+        /// Get the tick time as a number of environment ticks that have transpired since the world began advancing.
+        static member getTickTime world =
+            AmbientState.getTickTime world.AmbientState
+
+        /// Get the polymorphic engine time between this and the previous frame.
         static member getGameDelta world =
             AmbientState.getGameDelta world.AmbientState
 
-        /// Get the world's game time.
+        /// Get the polymorphic engine time that has transpired since the world began advancing.
         static member getGameTime world =
             AmbientState.getGameTime world.AmbientState
+
+        /// Get the amount of date time that has transpired between this and the previous frame. This value is independent
+        /// of whether the world was or is advancing.
+        static member getDateDelta world =
+            AmbientState.getDateDelta world.AmbientState
+
+        /// Get the date time as of the start of this frame. This value is independent of whether the world was or is
+        /// advancing.
+        static member getDateTime world =
+            AmbientState.getDateTime world.AmbientState
 
         /// Get the current ImSim context.
         static member getContextImSim (world : World) =
@@ -378,7 +395,7 @@ module WorldModule =
             World.mapAmbientState (AmbientState.restoreTasklets tasklets) world
 
         /// Add a tasklet to be executed by the engine at the scheduled time.
-        static member addTasklet simulant tasklet world =
+        static member addTasklet (simulant : Simulant) tasklet world =
             World.mapAmbientState (AmbientState.addTasklet simulant tasklet) world
 
         /// Schedule an operation to be executed by the engine with the given delay.
@@ -421,12 +438,7 @@ module WorldModule =
         /// When called in an ImSim Process context, will provide the ImSim simulant context and declared values from
         /// World that were active in that Process context as well as time and advancement state.
         static member defer operation (simulant : Simulant) (world : World) =
-            let time =
-                if EndFrameProcessingStarted && world.Advancing then
-                    match Constants.GameTime.DesiredFrameRate with
-                    | StaticFrameRate _ -> UpdateTime 1L
-                    | DynamicFrameRate _ -> TickTime 1L
-                else GameTime.zero
+            let time = if EndFrameProcessingStarted && world.Advancing then GameTime.epsilon else GameTime.zero
             World.schedule time operation simulant world
 
         /// Attempt to get the window flags.

@@ -15,7 +15,7 @@ module WorldGroupModule =
         member this.GetDispatcher world = World.getGroupDispatcher this world
         member this.Dispatcher = lensReadOnly (nameof this.Dispatcher) this this.GetDispatcher
         member this.GetModelGeneric<'a> world = World.getGroupModelGeneric<'a> this world
-        member this.SetModelGeneric<'a> value world = World.setGroupModelGeneric<'a> false value this world |> ignore<bool>
+        member this.SetModelGeneric<'a> value world = World.setGroupModelGeneric<'a> false false value this world |> ignore<bool>
         member this.ModelGeneric<'a> () = lens Constants.Engine.ModelPropertyName this this.GetModelGeneric<'a> this.SetModelGeneric<'a>
         member this.GetVisible world = World.getGroupVisible this world
         member this.SetVisible value world = World.setGroupVisible value this world |> ignore<bool>
@@ -87,7 +87,7 @@ module WorldGroupModule =
         member this.Is<'a> world = this.Is (typeof<'a>, world)
 
         /// Send a signal to a group.
-        member this.Signal<'message, 'command> (signal : Signal) world = (this.GetDispatcher world).Signal (signal, this, world)
+        member this.Signal (signal : Signal) world = (this.GetDispatcher world).Signal (signal, this, world)
 
         /// Notify the engine that a group's MMCC model has changed in some automatically undetectable way (such as being mutated directly by user code).
         member this.NotifyModelChange world = World.notifyGroupModelChange this world

@@ -49,7 +49,7 @@ type GameplayDispatcher () =
 
             // declare player
             World.doEntity<PlayerDispatcher> Simulants.GameplayPlayer.Name
-                [if selecting then Entity.Position @= v3 0.0f 1.65f 0.0f
+                [Entity.Position |= v3 0.0f 1.65f 0.0f
                  Entity.Elevation .= 1.0f]
                 world
 
@@ -113,6 +113,10 @@ type GameplayDispatcher () =
             // declare score text
             let scoreText = "Score: " + string (screen.GetScore world)
             World.doText "Score" [Entity.Position .= v3 260.0f 155.0f 0.0f; Entity.Elevation .= 10.0f; Entity.Text @= scoreText] world
+
+            // declare pause button
+            if World.doButton "Pause" [Entity.Position .= v3 232.0f -104.0f 0.0f; Entity.Elevation .= 10.0f; Entity.Text .= "Pause"] world then
+                World.setAdvancing (not world.Advancing) world
 
             // declare quit button
             if World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Elevation .= 10.0f; Entity.Text .= "Quit"] world then
