@@ -489,7 +489,7 @@ module WorldModule2 =
             slideGroup.SetPersistent false world
 
             // create slide sprite
-            World.createEntity<StaticSpriteDispatcher> DefaultOverlay (Some slideSprite.Surnames) slideGroup world |> ignore<Entity>
+            World.createEntity<StaticSpriteDispatcher> None DefaultOverlay (Some slideSprite.Surnames) slideGroup world |> ignore<Entity>
             World.setEntityProtected true slideSprite world |> ignore<bool>
             slideSprite.SetPersistent false world
             slideSprite.SetSize world.Eye2dSize.V3 world
@@ -892,7 +892,7 @@ module WorldModule2 =
             let windowSize = World.getWindowSize world
             let outerViewport = Viewport.makeOuter windowSize
             World.setOuterViewport outerViewport world
-            World.setRasterViewport (Viewport.makeRaster outerViewport.Bounds) world
+            World.setRasterViewport (Viewport.makeRaster outerViewport.Inset outerViewport.Bounds) world
             World.setGeometryViewport (Viewport.makeGeometry windowSize) world
 
         /// Try to reload the overlayer currently in use by the world.

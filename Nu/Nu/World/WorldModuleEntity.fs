@@ -737,9 +737,6 @@ module WorldModuleEntity =
                     let entityState = { entityState with MountOpt = value }
                     World.setEntityState entityState entity world
 
-                // ensure recent entity state
-                let entityState = World.getEntityState entity world
-
                 // update mount hierarchy
                 World.removeEntityFromMounts previous entity world
                 World.addEntityToMounts value entity world
@@ -748,7 +745,7 @@ module WorldModuleEntity =
                 World.propagateEntityProperties3 value entity world
 
                 // publish change event unconditionally
-                World.publishEntityChange (nameof entityState.MountOpt) previous value true entity world
+                World.publishEntityChange Constants.Engine.MountOptPropertyName previous value true entity world
 
                 // publish life cycle event unconditionally
                 let eventTrace = EventTrace.debug "World" "setEntityMount" "" EventTrace.empty
@@ -2281,7 +2278,7 @@ module WorldModuleEntity =
             World.destroyEntityImmediateInternal true entity world
 
         /// Create an entity and add it to the world.
-        static member createEntity6 skipProcessing dispatcherName overlayDescriptor surnames (group : Group) world =
+        static member createEntity7 skipProcessing dispatcherName mountOpt overlayDescriptor surnames (group : Group) world =
 
             // find the entity's dispatcher
             let dispatcherMap = World.getEntityDispatchers world
@@ -2300,7 +2297,7 @@ module WorldModuleEntity =
                 | ExplicitOverlay overlayName -> Some overlayName
 
             // make the bare entity state (with name as id if none is provided)
-            let entityState = EntityState.make (World.getImperative world) surnames overlayNameOpt dispatcher
+            let entityState = EntityState.make (World.getImperative world) mountOpt surnames overlayNameOpt dispatcher
 
             // attach the entity state's intrinsic properties
             let facetMap = World.getFacets world
@@ -2328,14 +2325,14 @@ module WorldModuleEntity =
                     match World.trySynchronizeFacetsToNames Set.empty entityState None world with
                     | Right entityState -> entityState
                     | Left error -> Log.error error; entityState
+
                 | None -> entityState
 
             // apply the entity state's overlay if exists
             let entityState =
                 match entityState.OverlayNameOpt with
                 | Some overlayName ->
-                    // OPTIMIZATION: apply overlay only when it will change something
-                    if overlayNameDefault <> overlayName then
+                    if overlayNameDefault <> overlayName then // OPTIMIZATION: apply overlay only when it will change something.
                         let facetNames = World.getEntityFacetNamesReflectively entityState
                         Overlayer.applyOverlay id overlayNameDefault overlayName facetNames entityState overlayer
                     else entityState
@@ -2393,18 +2390,9 @@ module WorldModuleEntity =
             // fin
             entity
 
-        /// Create an entity from a simulant descriptor.
-        static member createEntity4 overlayDescriptor descriptor group world =
-            let entity = World.createEntity6 false descriptor.SimulantDispatcherName overlayDescriptor descriptor.SimulantSurnamesOpt group world
-            for (propertyName, property) in descriptor.SimulantProperties do
-                World.setEntityProperty propertyName property entity world |> ignore<bool>
-            if WorldModule.getSelected entity world then
-                World.propagateEntityPhysics entity world
-            entity
-
         /// Create an entity and add it to the world.
-        static member createEntity<'d when 'd :> EntityDispatcher> overlayDescriptor surnamesOpt group world =
-            World.createEntity6 false typeof<'d>.Name overlayDescriptor surnamesOpt group world
+        static member createEntity<'d when 'd :> EntityDispatcher> mountOpt overlayDescriptor surnamesOpt group world =
+            World.createEntity7 false typeof<'d>.Name mountOpt overlayDescriptor surnamesOpt group world
 
         /// Change the dispatcher of the given entity.
         static member changeEntityDispatcher dispatcherName entity world =
@@ -2488,7 +2476,11 @@ module WorldModuleEntity =
             let defaultOverlayNameOpt = World.getEntityDefaultOverlayName dispatcherName world
 
             // make the bare entity state with name as id
-            let entityState = EntityState.make (World.getImperative world) None defaultOverlayNameOpt dispatcher
+            let mountOpt =
+                match entityProperties.TryGetValue Constants.Engine.MountOptPropertyName with
+                | (true, mountOpt) -> symbolToValue mountOpt
+                | (false, _) -> Some (Address.makeParent ()) // HACK: this is to preserve legacy behavior where entities written without a mount are mounted to the parent.
+            let entityState = EntityState.make (World.getImperative world) mountOpt None defaultOverlayNameOpt dispatcher
 
             // attach the entity state's intrinsic properties
             let facetMap = World.getFacets world

@@ -3,7 +3,6 @@
 
 namespace Nu
 open System
-open System.Collections.Generic
 open System.IO
 open System.Numerics
 open DotRecast.Core
@@ -15,7 +14,6 @@ open DotRecast.Recast.Geom
 open DotRecast.Recast.Toolset.Builder
 open DotRecast.Recast.Toolset.Tools
 open Prime
-open System.Runtime.InteropServices
 
 /// Screen functions for the world (2/2).
 [<AutoOpen>]
@@ -237,21 +235,6 @@ module WorldScreenModule =
 
             // unconditionally zero-process ImSim screen first time
             WorldModule.tryProcessScreen true screen world
-            screen
-
-        /// Create a screen from a simulant descriptor.
-        static member createScreen2 descriptor world =
-            let screen =
-                let screenNameOpt =
-                    match descriptor.SimulantSurnamesOpt with
-                    | None -> None
-                    | Some [|name|] -> Some name
-                    | Some _ -> failwith "Screen cannot have multiple names."
-                World.createScreen4 descriptor.SimulantDispatcherName screenNameOpt world
-            for (propertyName, property) in descriptor.SimulantProperties do
-                World.setScreenProperty propertyName property screen world |> ignore<bool>
-            for childDescriptor in descriptor.SimulantChildren do
-                World.createGroup3 childDescriptor screen world |> ignore<Group>
             screen
 
         /// Create a screen and add it to the world.

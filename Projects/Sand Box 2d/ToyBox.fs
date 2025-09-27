@@ -49,21 +49,21 @@ module ToyBoxExtensions =
         member this.GetCreditsOpened world : bool = this.Get (nameof Screen.CreditsOpened) world
         member this.SetCreditsOpened (value : bool) world = this.Set (nameof Screen.CreditsOpened) value world
         member this.CreditsOpened = lens (nameof Screen.CreditsOpened) this this.GetCreditsOpened this.SetCreditsOpened
-
+        
 // this is the dispatcher that defines the behavior of the screen where gameplay takes place.
 type ToyBoxDispatcher () =
     inherit ScreenDispatcherImSim ()
 
     static let setDraggedEntity mousePosition (entity : Entity) (toyBox : Screen) world =
-        let relativePosition = (mousePosition - entity.GetPosition world).Transform (entity.GetRotation world).Inverted
-        toyBox.SetDragState (Some (entity, relativePosition, entity.GetBodyType world)) world
+        let dragOffset = (mousePosition - entity.GetPosition world).Transform (entity.GetRotation world).Inverted
+        toyBox.SetDragState (Some (entity, dragOffset, entity.GetBodyType world)) world
         entity.SetBodyType Dynamic world // Only dynamic bodies react to forces by the mouse joint below.
 
     static let processMouseDragging (toyBox : Screen) world =
 
         // attempt to select a drag an entity
         let mousePosition = (World.getMousePosition2dWorld false world).V3
-        if World.isMouseButtonPressed MouseLeft world then
+        if world.Advancing && World.isMouseButtonPressed MouseLeft world then
 
             // attempt to establish a dragged entity via direct point test
             let entityRedirects = toyBox.GetEntityRedirects world
@@ -93,10 +93,10 @@ type ToyBoxDispatcher () =
 
         // drag any dragged entity
         match toyBox.GetDragState world with
-        | Some (draggedEntity, relativePosition, draggedBodyType) when World.isMouseButtonDown MouseLeft world ->
+        | Some (draggedEntity, dragOffset, draggedBodyType) when World.isMouseButtonDown MouseLeft world ->
 
-            // declare sensor for mouse body (sensor don't have collision reponses)
-            World.doSphere2d "Mouse Sensor"
+            // begin declaration of sensor for mouse body (sensor don't have collision reponses)
+            World.beginEntity<Sphere2dDispatcher> "Mouse Sensor"
                 [Entity.BodyShape .=
                     SphereShape
                         { Radius = 0.1f
@@ -104,10 +104,10 @@ type ToyBoxDispatcher () =
                           TransformOpt = None }
                  Entity.Visible .= false
                  Entity.Position @= mousePosition] world |> ignore
-            let mouseSensor = world.DeclaredEntity
+            let mouseSensor = world.ContextEntity
 
             // declare distance joint for mouse body
-            let mouseJoint = world.ContextGroup / "Mouse Joint"
+            let mouseJoint = mouseSensor / "Mouse Joint"
             World.doBodyJoint2d mouseJoint.Name
                 [Entity.BodyJoint |= TwoBodyJoint2d { CreateTwoBodyJoint = fun _ toPhysicsV2 a b ->
                     let mousePosition = toPhysicsV2 mousePosition // convert mouse position (Vector2) to world position (Vector3) to physics engine position (Aether.ToyBox2d Vector2)
@@ -116,22 +116,26 @@ type ToyBoxDispatcher () =
                     else WeldJoint (a, b, mousePosition, mousePosition, true) }
                  Entity.BodyJointTarget .= Address.relate mouseJoint.EntityAddress draggedEntity.EntityAddress
                  Entity.BodyJointTarget2Opt .= Some mouseSensor.EntityAddress
-                 Entity.BreakingPoint .= infinityf] world |> ignore
-
-            // apply damping to body in order to stabilize it while dragged
-            draggedEntity.LinearVelocity.Map ((*) 0.9f) world
-            draggedEntity.AngularVelocity.Map ((*) 0.9f) world
-            let draggedPosition = relativePosition.Transform (draggedEntity.GetRotation world) + draggedEntity.GetPosition world
+                 Entity.BreakingPoint .= infinityf
+                 Entity.MountOpt .= None] world |> ignore
 
             // declare mouse joint visualization
-            World.doBlock2d "Mouse Joint Visual"
+            let draggedPosition = dragOffset.Transform (draggedEntity.GetRotation world) + draggedEntity.GetPosition world
+            World.doStaticSprite "Mouse Joint Visual"
                 [Entity.Position @= (draggedPosition + mousePosition) / 2f
                  Entity.Size @= v3 (Vector3.Distance (draggedPosition, mousePosition)) 1f 0f
                  Entity.Rotation @= Quaternion.CreateLookAt2d (mousePosition - draggedPosition).V2
                  Entity.Color .= color 1f 0f 0f 1f
                  Entity.StaticImage .= Assets.Default.White
                  Entity.Elevation .= 0.5f // elevate the line above other entities (elevation 0) but below buttons (elevation 1)
-                 Entity.BodyShape .= EmptyShape] world |> ignore // not part of the physics simulation, so uses an empty body shape
+                 Entity.MountOpt .= None] world |> ignore
+
+            // apply damping to body in order to stabilize it while dragged
+            draggedEntity.LinearVelocity.Map ((*) 0.9f) world
+            draggedEntity.AngularVelocity.Map ((*) 0.9f) world
+
+            // end declaration of sensor for mouse body
+            World.endEntity world
 
         // release any dragged entity
         | Some (draggedEntity, _, draggedBodyType) ->
@@ -374,7 +378,7 @@ type ToyBoxDispatcher () =
         // begin declaring head as parent
         let ballY = 60f
         let ballSize = 20f
-        World.beginEntity<Ball2dDispatcher> $"{name} Head"
+        World.beginEntity<Ball2dDispatcher> $"{name}"
             [Entity.Position |= spawnCenter + v3 0f 60f 0f
              Entity.Size .= v3 ballSize ballSize 0f
              Entity.AngularDamping .= 2f
@@ -412,8 +416,8 @@ type ToyBoxDispatcher () =
             World.doBodyJoint2d $"{name} {connectsTo}<->{componentName}"
                 [Entity.BodyJoint |= twoBodyJoint
                  Entity.BodyJointTarget .=
-                    if connectsTo = "Head" // special case for head as parent
-                    then Address.makeFromString $"^/^/{name} {connectsTo}"
+                    if connectsTo = "Head"
+                    then Address.makeFromString $"^/^/{name}" // special case for head as parent
                     else Address.makeFromString $"^/{name} {connectsTo}"
                  Entity.BodyJointTarget2Opt .= Some (Address.makeFromString $"^/{name} {componentName}")
                  Entity.MountOpt .= None] world |> ignore
@@ -586,14 +590,12 @@ type ToyBoxDispatcher () =
 
         // original design by Theo Jansen Walker - https://strandbeest.com/ [Distance joint]
 
-        // TODO: make this thing hierarchical like RagDoll, et al.
-
         // declare chassis
         let objectScale = 10f
         let density = Density (1f / objectScale ** 2f)
         let pivot = v3 0f 0.8f 0f
         let wheelAnchor = v3 0f -0.8f 0f
-        World.doBox2d $"{name} Chassis"
+        World.beginEntity<Box2dDispatcher> $"{name}"
             [Entity.Position |= spawnCenter + pivot * objectScale
              Entity.Size .= v3 5f 2f 0f * objectScale
              Entity.Elevation .= -0.7f
@@ -601,7 +603,7 @@ type ToyBoxDispatcher () =
              Entity.CollisionCategories .= "100" // set to a separate collision category so that they don't deform each other on contact...
              Entity.CollisionMask .= "011"] // but they still collide with borders and fans in category "10" and other entities in default category "1"
             world |> ignore
-        let chassis = world.DeclaredEntity
+        let chassis = world.ContextEntity
 
         // declare wheel
         World.doBall2d $"{name} Wheel"
@@ -610,7 +612,8 @@ type ToyBoxDispatcher () =
              Entity.Elevation .= -0.5f
              Entity.Substance .= density
              Entity.CollisionCategories .= "100"
-             Entity.CollisionMask .= "011"] world |> ignore
+             Entity.CollisionMask .= "011"
+             Entity.MountOpt .= None] world |> ignore
         let wheel = world.DeclaredEntity
         
         // declare motor
@@ -620,7 +623,8 @@ type ToyBoxDispatcher () =
                 RevoluteJoint (a, b, b.Position, true, MotorEnabled = true, MotorSpeed = 2f, MaxMotorTorque = 400f) }
              Entity.BodyJointTarget .= wheel.EntityAddress
              Entity.BodyJointTarget2Opt .= Some chassis.EntityAddress
-             Entity.CollideConnected .= false] world |> ignore
+             Entity.CollideConnected .= false
+             Entity.MountOpt .= None] world |> ignore
         
         // declare legs
         for rotation in [-1f; 0f; 1f] do
@@ -643,7 +647,8 @@ type ToyBoxDispatcher () =
                      Entity.BodyShape .= PointsShape { Points = legPolygon; Profile = Convex; TransformOpt = None; PropertiesOpt = None }
                      Entity.AngularDamping .= 10f
                      Entity.CollisionCategories .= "100"
-                     Entity.CollisionMask .= "011"] world |> ignore
+                     Entity.CollisionMask .= "011"
+                     Entity.MountOpt .= None] world |> ignore
                 let leg = world.DeclaredEntity
                 let legTransform = (leg.GetTransform world).AffineMatrix
 
@@ -659,7 +664,10 @@ type ToyBoxDispatcher () =
                          Entity.Position @= (p1 + p2) / 2f
                          Entity.Size @= v3 (p2 - p1).Magnitude 2f 0f
                          Entity.Rotation @= Quaternion.CreateLookAt2d (p2 - p1).V2
-                         Entity.StaticImage .= Assets.Default.Black] world)
+                         Entity.StaticImage .= Assets.Default.Black
+                         Entity.MountOpt .= None] world)
+
+                // declare shoulder body
                 World.doBox2d $"{name} {directionName} {rotation} Shoulder"
                     [Entity.Position |= spawnCenter + p4 * objectScale
                      Entity.Size .= v3Dup objectScale
@@ -668,13 +676,14 @@ type ToyBoxDispatcher () =
                      Entity.BodyShape .= PointsShape { Points = shoulderPolygon; Profile = Convex; TransformOpt = None; PropertiesOpt = None }
                      Entity.AngularDamping .= 10f
                      Entity.CollisionCategories .= "100"
-                     Entity.CollisionMask .= "011"] world |> ignore
+                     Entity.CollisionMask .= "011"
+                     Entity.MountOpt .= None] world |> ignore
                 let shoulder = world.DeclaredEntity
                 let shoulderTransform = (shoulder.GetTransform world).AffineMatrix
 
                 // declare visual representation of the shoulder
                 shoulderPolygon
-                |> Array.add shoulderPolygon[0]
+                |> Array.add shoulderPolygon.[0]
                 |> Array.map ((*) objectScale)
                 |> Array.pairwise
                 |> Array.iter (fun (p1, p2) ->
@@ -684,11 +693,14 @@ type ToyBoxDispatcher () =
                          Entity.Position @= (p1 + p2) / 2f
                          Entity.Size @= v3 (p2 - p1).Magnitude 2f 0f
                          Entity.Rotation @= Quaternion.CreateLookAt2d (p2 - p1).V2
-                         Entity.StaticImage .= Assets.Default.Black] world)
+                         Entity.StaticImage .= Assets.Default.Black
+                         Entity.MountOpt .= None] world)
 
                 // using a soft distance joint can reduce some jitter. it also makes the structure seem a bit more
                 // fluid by acting like a suspension system.
                 for (i, (entity1, entity2, position1, position2, entity1SpawnPosition, entity2SpawnPosition)) in
+
+                    // declare distance joints between leg, shoulder, and wheel
                     List.indexed
                         [(leg, shoulder, p2, p5, v3Zero, p4)
                          (leg, shoulder, p3, p4, v3Zero, p4)
@@ -705,7 +717,10 @@ type ToyBoxDispatcher () =
                                  Frequency = 10f, DampingRatio = 0.5f) }
                          Entity.BodyJointTarget .= entity1.EntityAddress
                          Entity.BodyJointTarget2Opt .= Some entity2.EntityAddress
-                         Entity.CollideConnected .= false] world |> ignore
+                         Entity.CollideConnected .= false
+                         Entity.MountOpt .= None] world |> ignore
+
+                    // declare visual representation of the distance joint
                     World.doStaticSprite $"{name} {directionName} {rotation} Distance Joint Visual {i}"
                         [let p1 = (position1 * objectScale - entity1SpawnPosition * objectScale).Transform (entity1.GetTransform(world).AffineMatrix)
                          let p2 = (position2 * objectScale - entity2SpawnPosition * objectScale).Transform (entity2.GetTransform(world).AffineMatrix)
@@ -714,13 +729,20 @@ type ToyBoxDispatcher () =
                          Entity.Rotation @= Quaternion.CreateLookAt2d (p2 - p1).V2
                          Entity.StaticImage .= Assets.Gameplay.Link
                          Entity.Color .= color 1f 1f 1f 0.2f
-                         Entity.Elevation .= -0.6f] world
+                         Entity.Elevation .= -0.6f
+                         Entity.MountOpt .= None] world
+
+                // declare revolute joint between leg and shoulder
                 World.doBodyJoint2d $"{name} {directionName} {rotation} Revolute Joint"
                     [Entity.BodyJoint |= TwoBodyJoint2d { CreateTwoBodyJoint = fun _ toPhysicsV2 a b ->
                         RevoluteJoint (a, b, toPhysicsV2 (p4 * objectScale + spawnCenter), true) }
                      Entity.BodyJointTarget .= shoulder.EntityAddress
                      Entity.BodyJointTarget2Opt .= Some chassis.EntityAddress
-                     Entity.CollideConnected .= false] world |> ignore
+                     Entity.CollideConnected .= false
+                     Entity.MountOpt .= None] world |> ignore
+
+        // end chassis declaration
+        World.endEntity world
     
     // here we define default property values
     static member Properties =
