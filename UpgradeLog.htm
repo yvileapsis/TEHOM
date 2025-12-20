@@ -1,0 +1,293 @@
+﻿<!DOCTYPE html>
+<!-- saved from url=(0014)about:internet -->
+ <html xmlns:msxsl="urn:schemas-microsoft-com:xslt"><head><meta content="en-us" http-equiv="Content-Language" /><meta content="text/html; charset=utf-16" http-equiv="Content-Type" /><title _locID="ConversionReport0">
+          Migration Report
+        </title><style> 
+                    /* Body style, for the entire document */
+                    body
+                    {
+                        background: #F3F3F4;
+                        color: #1E1E1F;
+                        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+                        padding: 0;
+                        margin: 0;
+                    }
+
+                    /* Header1 style, used for the main title */
+                    h1
+                    {
+                        padding: 10px 0px 10px 10px;
+                        font-size: 21pt;
+                        background-color: #E2E2E2;
+                        border-bottom: 1px #C1C1C2 solid; 
+                        color: #201F20;
+                        margin: 0;
+                        font-weight: normal;
+                    }
+
+                    /* Header2 style, used for "Overview" and other sections */
+                    h2
+                    {
+                        font-size: 18pt;
+                        font-weight: normal;
+                        padding: 15px 0 5px 0;
+                        margin: 0;
+                    }
+
+                    /* Header3 style, used for sub-sections, such as project name */
+                    h3
+                    {
+                        font-weight: normal;
+                        font-size: 15pt;
+                        margin: 0;
+                        padding: 15px 0 5px 0;
+                        background-color: transparent;
+                    }
+
+                    /* Color all hyperlinks one color */
+                    a
+                    {
+                        color: #1382CE;
+                    }
+
+                    /* Table styles */ 
+                    table
+                    {
+                        border-spacing: 0 0;
+                        border-collapse: collapse;
+                        font-size: 10pt;
+                    }
+
+                    table th
+                    {
+                        background: #E7E7E8;
+                        text-align: left;
+                        text-decoration: none;
+                        font-weight: normal;
+                        padding: 3px 6px 3px 6px;
+                    }
+
+                    table td
+                    {
+                        vertical-align: top;
+                        padding: 3px 6px 5px 5px;
+                        margin: 0px;
+                        border: 1px solid #E7E7E8;
+                        background: #F7F7F8;
+                    }
+
+                    /* Local link is a style for hyperlinks that link to file:/// content, there are lots so color them as 'normal' text until the user mouse overs */
+                    .localLink
+                    {
+                        color: #1E1E1F;
+                        background: #EEEEED;
+                        text-decoration: none;
+                    }
+
+                    .localLink:hover
+                    {
+                        color: #1382CE;
+                        background: #FFFF99;
+                        text-decoration: none;
+                    }
+
+                    /* Center text, used in the over views cells that contain message level counts */ 
+                    .textCentered
+                    {
+                        text-align: center;
+                    }
+
+                    /* The message cells in message tables should take up all avaliable space */
+                    .messageCell
+                    {
+                        width: 100%;
+                    }
+
+                    /* Padding around the content after the h1 */ 
+                    #content 
+                    {
+	                    padding: 0px 12px 12px 12px; 
+                    }
+
+                    /* The overview table expands to width, with a max width of 97% */ 
+                    #overview table
+                    {
+                        width: auto;
+                        max-width: 75%; 
+                    }
+
+                    /* The messages tables are always 97% width */
+                    #messages table
+                    {
+                        width: 97%;
+                    }
+
+                    /* All Icons */
+                    .IconSuccessEncoded, .IconInfoEncoded, .IconWarningEncoded, .IconErrorEncoded
+                    {
+                        min-width:18px;
+                        min-height:18px; 
+                        background-repeat:no-repeat;
+                        background-position:center;
+                    }
+
+                    /* Success icon encoded */
+                    .IconSuccessEncoded
+                    {
+                        /* Note: Do not delete the comment below. It is used to verify the correctness of the encoded image resource below before the product is released */
+                        /* [---XsltValidateInternal-Base64EncodedImage:IconSuccess#Begin#background-image: url(data:image/png;base64,#Separator#);#End#] */
+                        background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAA7EAAAOxAGVKw4bAAABcElEQVR4Xq2TsUsCURzHv15g8ZJcBWlyiYYgCIWcb9DFRRwMW5TA2c0/QEFwFkxxUQdxVlBwCYWOi6IhWgQhBLHJUCkhLr/BW8S7gvrAg+N+v8/v+x68Z8MGy+XSCyABQAXgBgHGALoASkIIDWSLeLBetdHryMjd5IxQPWT4rn1c/P7+xxp72Cs9m5SZ0Bq2vPnbPFafK2zDvmNHypdC0BPkLlQhxJsCAhQoZwdZU5mwxh720qGo8MzTxTTKZDPCx2HoVzp6lz0Q9tKhyx0kGs8Ny+TkWRKk8lCROwEduhyg9l/6lunOPSfmH3NUH6uQ0KHLAe7JYvJjevm+DAMGJHToKtigE+vwvIidxLamb8IBY9e+C5LiXREkfho3TSd06HJA13/oh6T51MTsfQbHrsMynQ5dDihFjiK8JJAU9AKIWTp76dCVN7HWHrajmUEGvyF9nkbAE6gLIS7kTUyuf2gscLoJrElZo/Mvj+nPz/kLTmfnEwP3tB0AAAAASUVORK5CYII=);
+                    }
+
+                    /* Information icon encoded */
+                    .IconInfoEncoded
+                    {
+                        /* Note: Do not delete the comment below. It is used to verify the correctness of the encoded image resource below before the product is released */
+                        /* [---XsltValidateInternal-Base64EncodedImage:IconInformation#Begin#background-image: url(data:image/png;base64,#Separator#);#End#] */
+                        background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABHElEQVR4Xs2TsUoDQRRF7wwoziokjZUKadInhdhukR9YP8DMX1hYW+QvdsXa/QHBbcXC7W0CamWTQnclFutceIQJwwaWNLlwm5k5d94M76mmaeCrrmsLYOocY12FcxZFUeozCqKqqgYA8uevv1H6VuPxcwlfk5N92KHBxfFeCSAxxswlYAW/Xr989x/mv9gkhtyMDhcAxgzRsp7flj8B/HF1RsMXq+NZMkopaHe7lbKxQUEIGbKsYNoGn969060hZBkQex/W8oRQwsQaW2o3Ago2SVcJUzAgY3N0lTCZZm+zPS8HB51gMmS1DEYyOz9acKO1D8JWTlafKIMxdhvlfdyT94Vv5h7P8Ky7nQzACmhvKq3zk3PjW9asz9D/1oigecsioooAAAAASUVORK5CYII=);
+                    }
+
+                    /* Warning icon encoded */
+                    .IconWarningEncoded
+                    {
+                        /* Note: Do not delete the comment below. It is used to verify the correctness of the encoded image resource below before the product is released */
+                        /* [---XsltValidateInternal-Base64EncodedImage:IconWarning#Begin#background-image: url(data:image/png;base64,#Separator#);#End#] */
+                        background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAAx0lEQVR4XpWSMQ7CMAxFf4xAyBMLCxMrO8dhaBcuwdCJS3RJBw7SA/QGTCxdWJgiQYWKXJWKIXHIlyw5lqr34tQgEOdcBsCOx5yZK3hCCKdYXneQkh4pEfqzLfu+wVDSyyzFoJjfz9NB+pAF+eizx2Vruts0k15mPgvS6GYvpVtQhB61IB/dk6AF6fS4Ben0uIX5odtFe8Q/eW1KvFeH4e8khT6+gm5B+t3juyDt7n0jpe+CANTd+oTUjN/U3yVaABnSUjFz/gFq44JaVSCXeQAAAABJRU5ErkJggg==);
+                    }
+
+                    /* Error icon encoded */
+                    .IconErrorEncoded
+                    {
+                        /* Note: Do not delete the comment below. It is used to verify the correctness of the encoded image resource below before the product is released */
+                        /* [---XsltValidateInternal-Base64EncodedImage:IconError#Begin#background-image: url(data:image/png;base64,#Separator#);#End#] */
+                        background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABQElEQVR4XqWTvUoEQRCE6wYPZUA80AfwAQz23uCMjA7MDRQEIzPBVEyNTQUFIw00vcQTTMzuAh/AxEQQT8HF/3G/oGGnEUGuoNnd6qoZuqltyKEsyzVJq5I6rnUp6SjGeGhESikzzlc1eL7opfuVbrqbU1Zw9NCgtQMaZpY0eNnaaL2fHusvTK5vKu7sjSS1Y4y3QUA6K3e3Mau5UFDyMP7tYF9o8cAHZv68vipoIJg971PZIZ5HiwdvYGGvFVFHmGmZ2MxwmQYPXubPl9Up0tfoMQGetXd6mRbvhBw+boZ6WF7Mbv1+GsHRk0fQmPAH1GfmZirbCfDJ61tw3Px8/8pZsPAG4jlVhcPgZ7adwNWBB68lkRQWFiTgFlbnLY3DGGM7izIJIyT/jjIvEJw6fdJTc6krDzh6aMwMP9bvDH4ADSsa9uSWVJkAAAAASUVORK5CYII=);
+                    }
+                 </style><script type="text/javascript" language="javascript"> 
+          
+            // Startup 
+            // Hook up the the loaded event for the document/window, to linkify the document content
+            var startupFunction = function() { linkifyElement("messages"); };
+            
+            if(window.attachEvent)
+            {
+              window.attachEvent('onload', startupFunction);
+            }
+            else if (window.addEventListener) 
+            {
+              window.addEventListener('load', startupFunction, false);
+            }
+            else 
+            {
+              document.addEventListener('load', startupFunction, false);
+            } 
+            
+            // Toggles the visibility of table rows with the specified name 
+            function toggleTableRowsByName(name)
+            {
+               var allRows = document.getElementsByTagName('tr');
+               for (i=0; i < allRows.length; i++)
+               {
+                  var currentName = allRows[i].getAttribute('name');
+                  if(!!currentName && currentName.indexOf(name) == 0)
+                  {
+                      var isVisible = allRows[i].style.display == ''; 
+                      isVisible ? allRows[i].style.display = 'none' : allRows[i].style.display = '';
+                  }
+               }
+            }
+            
+            function scrollToFirstVisibleRow(name) 
+            {
+               var allRows = document.getElementsByTagName('tr');
+               for (i=0; i < allRows.length; i++)
+               {
+                  var currentName = allRows[i].getAttribute('name');
+                  var isVisible = allRows[i].style.display == ''; 
+                  if(!!currentName && currentName.indexOf(name) == 0 && isVisible)
+                  {
+                     allRows[i].scrollIntoView(true); 
+                     return true; 
+                  }
+               }
+               
+               return false;
+            }
+            
+            // Linkifies the specified text content, replaces candidate links with html links 
+            function linkify(text)
+            {
+                 if(!text || 0 === text.length)
+                 {
+                     return text; 
+                 }
+
+                 // Find http, https and ftp links and replace them with hyper links 
+                 var urlLink = /(http|https|ftp)\:\/\/[a-zA-Z0-9\-\.]+(:[a-zA-Z0-9]*)?\/?([a-zA-Z0-9\-\._\?\,\/\\\+&%\$#\=~;\{\}])*/gi;
+                 
+                 return text.replace(urlLink, '<a href="$&">$&</a>') ;
+            }
+            
+            // Linkifies the specified element by ID
+            function linkifyElement(id)
+            {
+                var element = document.getElementById(id);
+                if(!!element)
+                {
+                  element.innerHTML = linkify(element.innerHTML); 
+                }
+            }
+            
+            function ToggleMessageVisibility(projectName)
+            {
+              if(!projectName || 0 === projectName.length)
+              {
+                return; 
+              }
+              
+              toggleTableRowsByName("MessageRowClass" + projectName);
+              toggleTableRowsByName('MessageRowHeaderShow' + projectName);
+              toggleTableRowsByName('MessageRowHeaderHide' + projectName); 
+            }
+            
+            function ScrollToFirstVisibleMessage(projectName)
+            {
+              if(!projectName || 0 === projectName.length)
+              {
+                return; 
+              }
+              
+              // First try the 'Show messages' row
+              if(!scrollToFirstVisibleRow('MessageRowHeaderShow' + projectName))
+              {
+                // Failed to find a visible row for 'Show messages', try an actual message row 
+                scrollToFirstVisibleRow('MessageRowClass' + projectName); 
+              }
+            }
+           </script></head><body><h1 _locID="ConversionReport">
+          Migration Report - </h1><div id="content"><h2 _locID="OverviewTitle">Overview</h2><div id="overview"><table><tr><th></th><th _locID="ProjectTableHeader">Project</th><th _locID="PathTableHeader">Path</th><th _locID="ErrorsTableHeader">Errors</th><th _locID="WarningsTableHeader">Warnings</th><th _locID="MessagesTableHeader">Messages</th></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Blaze Vector ImSim">Blaze Vector ImSim</a></strong></td><td>Projects\Blaze Vector ImSim\Blaze Vector ImSim.fsproj</td><td class="textCentered"><a href="#Blaze Vector ImSimError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Blaze Vector Mmcc">Blaze Vector Mmcc</a></strong></td><td>Projects\Blaze Vector Mmcc\Blaze Vector Mmcc.fsproj</td><td class="textCentered"><a href="#Blaze Vector MmccError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Breakout ImSim">Breakout ImSim</a></strong></td><td>Projects\Breakout ImSim\Breakout ImSim.fsproj</td><td class="textCentered"><a href="#Breakout ImSimError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Breakout Mmcc">Breakout Mmcc</a></strong></td><td>Projects\Breakout Mmcc\Breakout Mmcc.fsproj</td><td class="textCentered"><a href="#Breakout MmccError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Jump Box">Jump Box</a></strong></td><td>Projects\Jump Box\Jump Box.fsproj</td><td class="textCentered"><a href="#Jump BoxError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Metrics">Metrics</a></strong></td><td>Projects\Metrics\Metrics.fsproj</td><td class="textCentered"><a href="#MetricsError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nelmish">Nelmish</a></strong></td><td>Projects\Nelmish\Nelmish.fsproj</td><td class="textCentered"><a href="#NelmishError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nu">Nu</a></strong></td><td>Nu\Nu\Nu.fsproj</td><td class="textCentered"><a href="#NuError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nu.Gaia">Nu.Gaia</a></strong></td><td>Nu\Nu.Gaia\Nu.Gaia.fsproj</td><td class="textCentered"><a href="#Nu.GaiaError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nu.Math">Nu.Math</a></strong></td><td>Nu\Nu.Math\Nu.Math.csproj</td><td class="textCentered"><a href="#Nu.MathError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nu.Pipe">Nu.Pipe</a></strong></td><td>Nu\Nu.Pipe\Nu.Pipe.fsproj</td><td class="textCentered"><a href="#Nu.PipeError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nu.Spine">Nu.Spine</a></strong></td><td>Nu\Nu.Spine\Nu.Spine.csproj</td><td class="textCentered"><a href="#Nu.SpineError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nu.Template.ImSim.Empty">Nu.Template.ImSim.Empty</a></strong></td><td>Nu\Nu.Template.ImSim.Empty\Nu.Template.ImSim.Empty.fsproj</td><td class="textCentered"><a href="#Nu.Template.ImSim.EmptyError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nu.Template.ImSim.Game">Nu.Template.ImSim.Game</a></strong></td><td>Nu\Nu.Template.ImSim.Game\Nu.Template.ImSim.Game.fsproj</td><td class="textCentered"><a href="#Nu.Template.ImSim.GameError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nu.Template.Mmcc.Empty">Nu.Template.Mmcc.Empty</a></strong></td><td>Nu\Nu.Template.Mmcc.Empty\Nu.Template.Mmcc.Empty.fsproj</td><td class="textCentered"><a href="#Nu.Template.Mmcc.EmptyError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nu.Template.Mmcc.Game">Nu.Template.Mmcc.Game</a></strong></td><td>Nu\Nu.Template.Mmcc.Game\Nu.Template.Mmcc.Game.fsproj</td><td class="textCentered"><a href="#Nu.Template.Mmcc.GameError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Nu.Tests">Nu.Tests</a></strong></td><td>Nu\Nu.Tests\Nu.Tests.fsproj</td><td class="textCentered"><a href="#Nu.TestsError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Sand Box 2d">Sand Box 2d</a></strong></td><td>Projects\Sand Box 2d\Sand Box 2d.fsproj</td><td class="textCentered"><a href="#Sand Box 2dError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Terra Firma">Terra Firma</a></strong></td><td>Projects\Terra Firma\Terra Firma.fsproj</td><td class="textCentered"><a href="#Terra FirmaError">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconErrorEncoded" /><td><strong><a href="#Twenty 48">Twenty 48</a></strong></td><td>Projects\Twenty 48\Twenty 48.fsproj</td><td class="textCentered"><a href="#Twenty 48Error">1</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconSuccessEncoded" /><td><strong><a href="#Projects">Projects</a></strong></td><td>Projects</td><td class="textCentered"><a>0</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#">0</a></td></tr><tr><td class="IconSuccessEncoded" /><td><strong><a href="#Solution"><span _locID="OverviewSolutionSpan">Solution</span></a></strong></td><td>Nu.sln</td><td class="textCentered"><a>0</a></td><td class="textCentered"><a>0</a></td><td class="textCentered"><a href="#" onclick="ScrollToFirstVisibleMessage('Solution'); return false;">1</a></td></tr></table></div><h2 _locID="SolutionAndProjectsTitle">Solution and projects</h2><div id="messages"><a name="Blaze Vector ImSim" /><h3>Blaze Vector ImSim</h3><table><tr id="Blaze Vector ImSimHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassBlaze Vector ImSim"><td class="IconErrorEncoded"><a name="Blaze Vector ImSimError" /></td><td class="messageCell"><strong>Projects\Blaze Vector ImSim\Blaze Vector ImSim.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Blaze Vector Mmcc" /><h3>Blaze Vector Mmcc</h3><table><tr id="Blaze Vector MmccHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassBlaze Vector Mmcc"><td class="IconErrorEncoded"><a name="Blaze Vector MmccError" /></td><td class="messageCell"><strong>Projects\Blaze Vector Mmcc\Blaze Vector Mmcc.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Breakout ImSim" /><h3>Breakout ImSim</h3><table><tr id="Breakout ImSimHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassBreakout ImSim"><td class="IconErrorEncoded"><a name="Breakout ImSimError" /></td><td class="messageCell"><strong>Projects\Breakout ImSim\Breakout ImSim.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Breakout Mmcc" /><h3>Breakout Mmcc</h3><table><tr id="Breakout MmccHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassBreakout Mmcc"><td class="IconErrorEncoded"><a name="Breakout MmccError" /></td><td class="messageCell"><strong>Projects\Breakout Mmcc\Breakout Mmcc.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Jump Box" /><h3>Jump Box</h3><table><tr id="Jump BoxHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassJump Box"><td class="IconErrorEncoded"><a name="Jump BoxError" /></td><td class="messageCell"><strong>Projects\Jump Box\Jump Box.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Metrics" /><h3>Metrics</h3><table><tr id="MetricsHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassMetrics"><td class="IconErrorEncoded"><a name="MetricsError" /></td><td class="messageCell"><strong>Projects\Metrics\Metrics.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Nelmish" /><h3>Nelmish</h3><table><tr id="NelmishHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNelmish"><td class="IconErrorEncoded"><a name="NelmishError" /></td><td class="messageCell"><strong>Projects\Nelmish\Nelmish.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Nu" /><h3>Nu</h3><table><tr id="NuHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNu"><td class="IconErrorEncoded"><a name="NuError" /></td><td class="messageCell"><strong>Nu\Nu\Nu.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Nu.Gaia" /><h3>Nu.Gaia</h3><table><tr id="Nu.GaiaHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNu.Gaia"><td class="IconErrorEncoded"><a name="Nu.GaiaError" /></td><td class="messageCell"><strong>Nu\Nu.Gaia\Nu.Gaia.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Nu.Math" /><h3>Nu.Math</h3><table><tr id="Nu.MathHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNu.Math"><td class="IconErrorEncoded"><a name="Nu.MathError" /></td><td class="messageCell"><strong>Nu\Nu.Math\Nu.Math.csproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 9a19103f-16f7-4668-be54-9a1e7a4f7556</span></td></tr></table><a name="Nu.Pipe" /><h3>Nu.Pipe</h3><table><tr id="Nu.PipeHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNu.Pipe"><td class="IconErrorEncoded"><a name="Nu.PipeError" /></td><td class="messageCell"><strong>Nu\Nu.Pipe\Nu.Pipe.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Nu.Spine" /><h3>Nu.Spine</h3><table><tr id="Nu.SpineHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNu.Spine"><td class="IconErrorEncoded"><a name="Nu.SpineError" /></td><td class="messageCell"><strong>Nu\Nu.Spine\Nu.Spine.csproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 9a19103f-16f7-4668-be54-9a1e7a4f7556</span></td></tr></table><a name="Nu.Template.ImSim.Empty" /><h3>Nu.Template.ImSim.Empty</h3><table><tr id="Nu.Template.ImSim.EmptyHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNu.Template.ImSim.Empty"><td class="IconErrorEncoded"><a name="Nu.Template.ImSim.EmptyError" /></td><td class="messageCell"><strong>Nu\Nu.Template.ImSim.Empty\Nu.Template.ImSim.Empty.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Nu.Template.ImSim.Game" /><h3>Nu.Template.ImSim.Game</h3><table><tr id="Nu.Template.ImSim.GameHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNu.Template.ImSim.Game"><td class="IconErrorEncoded"><a name="Nu.Template.ImSim.GameError" /></td><td class="messageCell"><strong>Nu\Nu.Template.ImSim.Game\Nu.Template.ImSim.Game.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Nu.Template.Mmcc.Empty" /><h3>Nu.Template.Mmcc.Empty</h3><table><tr id="Nu.Template.Mmcc.EmptyHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNu.Template.Mmcc.Empty"><td class="IconErrorEncoded"><a name="Nu.Template.Mmcc.EmptyError" /></td><td class="messageCell"><strong>Nu\Nu.Template.Mmcc.Empty\Nu.Template.Mmcc.Empty.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Nu.Template.Mmcc.Game" /><h3>Nu.Template.Mmcc.Game</h3><table><tr id="Nu.Template.Mmcc.GameHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNu.Template.Mmcc.Game"><td class="IconErrorEncoded"><a name="Nu.Template.Mmcc.GameError" /></td><td class="messageCell"><strong>Nu\Nu.Template.Mmcc.Game\Nu.Template.Mmcc.Game.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Nu.Tests" /><h3>Nu.Tests</h3><table><tr id="Nu.TestsHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassNu.Tests"><td class="IconErrorEncoded"><a name="Nu.TestsError" /></td><td class="messageCell"><strong>Nu\Nu.Tests\Nu.Tests.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Sand Box 2d" /><h3>Sand Box 2d</h3><table><tr id="Sand Box 2dHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassSand Box 2d"><td class="IconErrorEncoded"><a name="Sand Box 2dError" /></td><td class="messageCell"><strong>Projects\Sand Box 2d\Sand Box 2d.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Terra Firma" /><h3>Terra Firma</h3><table><tr id="Terra FirmaHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassTerra Firma"><td class="IconErrorEncoded"><a name="Terra FirmaError" /></td><td class="messageCell"><strong>Projects\Terra Firma\Terra Firma.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Twenty 48" /><h3>Twenty 48</h3><table><tr id="Twenty 48HeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="ErrorRowClassTwenty 48"><td class="IconErrorEncoded"><a name="Twenty 48Error" /></td><td class="messageCell"><strong>Projects\Twenty 48\Twenty 48.fsproj:
+        </strong><span>The application which this project type is based on was not found. Please try this link for further information: 6ec3ee1d-3c4e-46dd-8f32-0cc8e7565705</span></td></tr></table><a name="Projects" /><h3>Projects</h3><table><tr id="ProjectsHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr><td class="IconInfoEncoded" /><td class="messageCell" _locID="NoMessagesRow">Projects logged no messages.
+                  </td></tr></table><a name="Solution" /><h3 _locID="ProjectDisplayNameHeader">Solution</h3><table><tr id="SolutionHeaderRow"><th></th><th class="messageCell" _locID="MessageTableHeader">Message</th></tr><tr name="MessageRowHeaderShowSolution"><td class="IconInfoEncoded" /><td class="messageCell"><a _locID="ShowAdditionalMessages" href="#" name="SolutionMessage" onclick="ToggleMessageVisibility('Solution'); return false;">
+          Show 1 additional messages
+        </a></td></tr><tr name="MessageRowClassSolution" style="display: none"><td class="IconInfoEncoded"><a name="SolutionMessage" /></td><td class="messageCell"><strong>Nu.sln:
+        </strong><span>The solution file does not require migration.</span></td></tr><tr style="display: none" name="MessageRowHeaderHideSolution"><td class="IconInfoEncoded" /><td class="messageCell"><a _locID="HideAdditionalMessages" href="#" name="SolutionMessage" onclick="ToggleMessageVisibility('Solution'); return false;">
+          Hide 1 additional messages
+        </a></td></tr></table></div></div></body></html>
