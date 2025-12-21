@@ -10,6 +10,9 @@ type GameplayMessage =
     | StartPlaying
     | FinishQuitting
     | TimeUpdate
+    | Select of Int32 * Int32
+    | Enter of Int32
+    | Nil
     interface Message
 
 // this is our gameplay MMCC command type.
@@ -41,6 +44,20 @@ type GameplayDispatcher () =
         Screen.SelectEvent => StartPlaying
         Screen.DeselectingEvent => FinishQuitting
         Screen.TimeUpdateEvent => TimeUpdate
+        Game.KeyboardKeyDownEvent =|> fun evt ->
+            if not evt.Data.Repeated then
+                match evt.Data.KeyboardKey with
+                | KeyboardKey.Num1 -> Enter 1
+                | KeyboardKey.Num2 -> Enter 2
+                | KeyboardKey.Num3 -> Enter 3
+                | KeyboardKey.Num4 -> Enter 4
+                | KeyboardKey.Num5 -> Enter 5
+                | KeyboardKey.Num6 -> Enter 6
+                | KeyboardKey.Num7 -> Enter 7
+                | KeyboardKey.Num8 -> Enter 8
+                | KeyboardKey.Num9 -> Enter 9
+                | _ -> Nil
+            else Nil
     ]
 
     // here we handle the above messages
@@ -48,17 +65,28 @@ type GameplayDispatcher () =
 
         match message with
         | StartPlaying ->
-            let gameplay = Gameplay.initial
-            just gameplay
+            let model = Gameplay.initial
+            just model
 
         | FinishQuitting ->
-            let gameplay = Gameplay.empty
-            just gameplay
+            let model = Gameplay.empty
+            just model
 
         | TimeUpdate ->
             let gameDelta = world.GameDelta
-            let gameplay = { model with GameplayTime = model.GameplayTime + gameDelta.Updates }
-            just gameplay
+            let model = { model with GameplayTime = model.GameplayTime + gameDelta.Updates }
+            just model
+
+        | Select (block_i, cell_i) ->
+            let model = { model with Selected = Some (block_i, cell_i) }
+            just model
+
+        | Enter value ->
+            let model = Gameplay.attemptSetCell value model
+            just model
+
+        | Nil ->
+            just model
 
     // here we handle the above commands
     override this.Command (_, command, screen, world) =
@@ -70,16 +98,124 @@ type GameplayDispatcher () =
     override this.Content (model, _) = [// the scene group while playing
         if model.GameplayState = Playing then
 
-            Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" [] [
+            Content.group "Sudoku" [] [
 
-                // decor
-                Content.staticModel "StaticModel" [
-                    Entity.Position == v3 0.0f 0.0f -2.0f
-                    Entity.Rotation := Quaternion.CreateFromAxisAngle (
-                        (v3 1.0f 0.75f 0.5f).Normalized,
-                        model.GameplayTime % 360L |> single |> Math.DegreesToRadians
-                    )
+                Content.text "Selected" [
+                    Entity.Size == v3 100f 20f 0f
+                    Entity.Elevation == 1f
+                    Entity.Position == v3 0f 135f 0f
+                    Entity.Text := $"{model.Selected}"
                 ]
+
+                Content.panel $"Field" [
+                    Entity.Size == v3 231.0f 231.0f 0.0f
+                    Entity.Elevation == 1.0f
+                    Entity.Layout == Layout.Grid (v2i 3 3, Some FlowRightward, false)
+                ] [
+                    for (i, block) in List.indexed model.Field do
+                        Content.panel $"Block{i}" [
+                            Entity.Size == v3 75.0f 75.0f 0.0f
+                            Entity.Elevation == 2.0f
+                            Entity.Layout == Layout.Grid (v2i 3 3, Some FlowRightward, false)
+                        ] [
+                            for (j, cell) in List.indexed block.Cells do
+
+                                match cell with
+                                | Given num ->
+                                    Content.button $"Cell{j}" [
+                                        Entity.Size == v3 24.0f 24.0f 0.0f
+                                        Entity.Elevation == 3.0f
+                                        Entity.Text := $"{num}"
+                                        Entity.FontSizing == Some 15
+                                        Entity.FontStyling := Set.ofList [ FontStyle.Bold ]
+                                        Entity.ClickEvent => Select (i, j)
+                                        Entity.UpImage == Assets.Default.EmptyImage
+                                        Entity.DownImage == Assets.Default.White
+                                    ]
+
+                                | Guessed num ->
+                                    Content.association $"Cell{j}" [
+                                        Entity.Size == v3 24.0f 24.0f 0.0f
+                                    ] [
+                                        Content.button "Button" [
+                                            Entity.Size == v3 24.0f 24.0f 0.0f
+                                            Entity.Elevation == 3.0f
+                                            Entity.Text := $"{num}"
+                                            Entity.FontSizing == Some 15
+                                            Entity.FontStyling := Set.ofList []
+                                            Entity.ClickEvent => Select (i, j)
+                                            Entity.UpImage == Assets.Default.EmptyImage
+                                            Entity.DownImage == Assets.Default.White
+                                        ]
+                                        if Some (i, j) = model.Selected then
+                                            Content.staticSprite "Selected" [
+                                                Entity.Size == v3 24.0f 24.0f 0.0f
+                                                Entity.StaticImage == Assets.Default.White
+                                                Entity.Color == color 0.2f 0.2f 0.2f 1f
+                                            ]
+                                    ]
+
+                                | Nothing ->
+                                    Content.association $"Cell{j}" [
+                                        Entity.Size == v3 24.0f 24.0f 0.0f
+                                    ] [
+                                        Content.button "Button" [
+                                            Entity.Size == v3 24.0f 24.0f 0.0f
+                                            Entity.Elevation == 3.0f
+                                            Entity.Text := ""
+                                            Entity.FontSizing == Some 15
+                                            Entity.FontStyling := Set.ofList []
+                                            Entity.ClickEvent => Select (i, j)
+                                            Entity.UpImage == Assets.Default.EmptyImage
+                                            Entity.DownImage == Assets.Default.White
+                                        ]
+                                        if Some (i, j) = model.Selected then
+                                            Content.staticSprite "Selected" [
+                                                Entity.Size == v3 24.0f 24.0f 0.0f
+                                                Entity.StaticImage == Assets.Default.White
+                                                Entity.Color == color 0.2f 0.2f 0.2f 1f
+                                            ]
+                                    ]
+
+                                | Markers list ->
+                                    Content.panel $"Markers{j}" [
+                                        Entity.Size == v3 24.0f 24.0f 0.0f
+                                        Entity.Elevation == 3.0f
+                                        Entity.Layout == Layout.Grid (v2i 3 3, Some FlowRightward, true)
+                                    ] [
+                                        for i in List.init 9 id do
+                                            Content.text $"Marker{i}" [
+                                                Entity.Text == $"{i + 1}"
+                                                Entity.FontSizing == Some 6
+                                            ]
+                                    ]
+
+                        ]
+
+                ]
+
+                Content.panel "Numbers" [
+                    Entity.Size == v3 75.0f 75.0f 0.0f
+                    Entity.Position == v3 200.0f 0f 0f
+                    Entity.Elevation == 1.0f
+                    Entity.Layout == Layout.Grid (v2i 3 3, Some FlowRightward, false)
+                ] [
+                    for i in List.init 9 id do
+                        if true then
+                            Content.button $"Cell{i}" [
+                                Entity.Size == v3 24.0f 24.0f 0.0f
+                                Entity.Elevation == 2.0f
+                                Entity.Text == $"{i + 1}"
+                                Entity.FontSizing == Some 15
+                                Entity.ClickEvent => Enter (i + 1)
+                                Entity.UpImage == Assets.Default.Black
+                                Entity.DownImage == Assets.Default.White
+                            ]
+                ]
+
+            ]
+
+            Content.group Simulants.GameplayScene.Name [] [
 
                 // quit
                 Content.button Simulants.GameplayQuit.Name [
