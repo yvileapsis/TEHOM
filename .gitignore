@@ -29,6 +29,7 @@ bin/
 obj/
 refinement/
 .vs/
+.idea/
 
 #########
 # Nuget #
