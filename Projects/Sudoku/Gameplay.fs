@@ -88,15 +88,31 @@ type HintTechnique =
         | SwordfishRow -> "Swordfish by rows"
         | SwordfishColumn -> "Swordfish by columns"
 
+// this represents what a hint will do on its second press.
+type HintAction =
+    | PlaceNumber of Vector2i * int
+    | RemoveMarks of (Vector2i * Set<int>) list
+
 // this represents a pending hint. The first hint press stores this and highlights its region; the second applies it.
 type Hint =
     { Target : Vector2i
-      Number : int
       Region : HintRegion
-      Technique : HintTechnique }
+      Technique : HintTechnique
+      Action : HintAction }
 
     member this.Label =
-        this.Technique.Label + ": row " + string (this.Target.Y + 1) + ", column " + string (this.Target.X + 1) + " can be " + string this.Number + "."
+        match this.Action with
+        | PlaceNumber (target, number) ->
+            this.Technique.Label + ": row " + string (target.Y + 1) + ", column " + string (target.X + 1) + " can be " + string number + "."
+        | RemoveMarks removals ->
+            let numbers =
+                removals
+                |> List.collect (fun (_, numbers) -> Set.toList numbers)
+                |> Set.ofList
+                |> Set.toList
+                |> List.map string
+                |> String.concat ", "
+            this.Technique.Label + ": remove pencil mark" + (if List.length removals = 1 then " " else "s ") + numbers + "."
 
 // this is our MMCC model type representing gameplay.
 type Gameplay =
@@ -194,11 +210,11 @@ type Gameplay =
     static member private columnPositions (column : int) =
         [for y in 0 .. 8 -> v2i column y]
 
-    static member private blockPositions (block : Vector2i) =
+    static member public blockPositions (block : Vector2i) =
         [for y in block.Y * 3 .. block.Y * 3 + 2 do
             for x in block.X * 3 .. block.X * 3 + 2 -> v2i x y]
 
-    static member private blockOfPosition (position : Vector2i) =
+    static member public blockOfPosition (position : Vector2i) =
         v2i (position.X / 3) (position.Y / 3)
 
     static member private combinations (count : int) (items : 'a list) =
@@ -225,30 +241,56 @@ type Gameplay =
                             if board[y, x] <> 0 then yield board[y, x]]
             Set.difference (set [1 .. 9]) (Set.unionMany [rowValues; columnValues; blockValues])
 
+    static member private workingCandidates (gameplay : Gameplay) (position : Vector2i) =
+        if gameplay.Puzzle[position.Y, position.X] <> 0 then Set.empty
+        else
+            let marks = gameplay.Marks[position.Y, position.X]
+            if Set.notEmpty marks then marks
+            else Gameplay.candidates gameplay.Puzzle position
+
     static member private fillLegalMarks (gameplay : Gameplay) =
-        let marks = Gameplay.makeMarks ()
+        let marks = Array2D.copy gameplay.Marks
         for position in Gameplay.allPositions do
-            if gameplay.Puzzle[position.Y, position.X] = 0 && not gameplay.Given[position.Y, position.X] then
+            if gameplay.Puzzle[position.Y, position.X] = 0 &&
+               not gameplay.Given[position.Y, position.X] &&
+               Set.isEmpty marks[position.Y, position.X] then
                 marks[position.Y, position.X] <- Gameplay.candidates gameplay.Puzzle position
         { gameplay with
             Marks = marks
             PencilMode = true
             HintOpt = None
-            HintStatusOpt = Some "No regular placement hint found; filled legal pencil marks." }
+            HintStatusOpt = Some "No immediate hint found; filled legal pencil marks." }
+
+    static member private hasOpenCellsWithoutMarks (gameplay : Gameplay) =
+        Gameplay.allPositions
+        |> List.exists (fun position ->
+            gameplay.Puzzle[position.Y, position.X] = 0 &&
+            not gameplay.Given[position.Y, position.X] &&
+            Set.isEmpty gameplay.Marks[position.Y, position.X])
 
     static member private tryMakeHint (technique : HintTechnique) (region : HintRegion) (position : Vector2i) (number : int) (gameplay : Gameplay) =
         if gameplay.Solution[position.Y, position.X] = number
-        then Some { Target = position; Number = number; Region = region; Technique = technique }
+        then Some { Target = position; Region = region; Technique = technique; Action = PlaceNumber (position, number) }
         else None
 
     static member private tryMakeEliminationHint (technique : HintTechnique) (region : HintRegion) (eliminations : (Vector2i * Set<int>) list) (gameplay : Gameplay) =
-        eliminations
-        |> List.tryPick (fun (position, eliminated) ->
-            let candidates = Gameplay.candidates gameplay.Puzzle position
-            let candidatesReduced = Set.difference candidates eliminated
-            if Set.count candidates > 1 && Set.count candidatesReduced = 1 && Set.count candidatesReduced < Set.count candidates then
-                Gameplay.tryMakeHint technique region position (Set.minElement candidatesReduced) gameplay
-            else None)
+        let removals =
+            eliminations
+            |> List.choose (fun (position, eliminated) ->
+                let marks = gameplay.Marks[position.Y, position.X]
+                let safeEliminated = Set.remove gameplay.Solution[position.Y, position.X] eliminated
+                let removed = Set.intersect marks safeEliminated
+                if Set.notEmpty removed then Some (position, removed)
+                else None)
+        match removals with
+        | (target, _) :: _ ->
+            let removalPositions = removals |> List.map fst |> Set.ofList
+            let region =
+                match region with
+                | HintCells positions -> HintCells (Set.union positions removalPositions)
+                | _ -> region
+            Some { Target = target; Region = region; Technique = technique; Action = RemoveMarks removals }
+        | [] -> None
 
     static member private tryFindFullHouse (technique : HintTechnique) (region : HintRegion) (positions : Vector2i list) (gameplay : Gameplay) =
         let emptyPositions = positions |> List.filter (fun position -> gameplay.Puzzle[position.Y, position.X] = 0)
@@ -278,7 +320,7 @@ type Gameplay =
     static member private tryFindNakedSingle (gameplay : Gameplay) =
         Gameplay.allPositions
         |> List.tryPick (fun position ->
-            let candidates = Gameplay.candidates gameplay.Puzzle position
+            let candidates = Gameplay.workingCandidates gameplay position
             if Set.count candidates = 1 then
                 Gameplay.tryMakeHint NakedSingle (HintCell position) position (Set.minElement candidates) gameplay
             else None)
@@ -289,7 +331,7 @@ type Gameplay =
                 let positions =
                     [for x in 0 .. 8 do
                         let position = v2i x row
-                        if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then yield position]
+                        if Set.contains number (Gameplay.workingCandidates gameplay position) then yield position]
                 match positions with
                 | [position] -> yield (row, number, position)
                 | _ -> ()]
@@ -302,7 +344,7 @@ type Gameplay =
                 let positions =
                     [for y in 0 .. 8 do
                         let position = v2i column y
-                        if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then yield position]
+                        if Set.contains number (Gameplay.workingCandidates gameplay position) then yield position]
                 match positions with
                 | [position] -> yield (column, number, position)
                 | _ -> ()]
@@ -318,7 +360,7 @@ type Gameplay =
                         [for y in blockY * 3 .. blockY * 3 + 2 do
                             for x in blockX * 3 .. blockX * 3 + 2 do
                                 let position = v2i x y
-                                if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then yield position]
+                                if Set.contains number (Gameplay.workingCandidates gameplay position) then yield position]
                     match positions with
                     | [position] -> yield (block, number, position)
                     | _ -> ()]
@@ -329,7 +371,7 @@ type Gameplay =
         let candidatesByPosition =
             positions
             |> List.choose (fun position ->
-                let candidates = Gameplay.candidates gameplay.Puzzle position
+                let candidates = Gameplay.workingCandidates gameplay position
                 if Set.count candidates >= 2 && Set.count candidates <= size then Some (position, candidates)
                 else None)
         Gameplay.combinations size candidatesByPosition
@@ -382,7 +424,7 @@ type Gameplay =
                 for number in 1 .. 9 do
                     let positions =
                         blockPositions
-                        |> List.filter (fun position -> Set.contains number (Gameplay.candidates gameplay.Puzzle position))
+                        |> List.filter (fun position -> Set.contains number (Gameplay.workingCandidates gameplay position))
                     if List.length positions >= 2 then
                         let rows = positions |> List.map (fun position -> position.Y) |> Set.ofList
                         let columns = positions |> List.map (fun position -> position.X) |> Set.ofList
@@ -390,7 +432,7 @@ type Gameplay =
                             let row = Set.minElement rows
                             let eliminations =
                                 [for position in Gameplay.rowPositions row do
-                                    if Gameplay.blockOfPosition position <> block && Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                    if Gameplay.blockOfPosition position <> block && Set.contains number (Gameplay.workingCandidates gameplay position) then
                                         yield (position, set [number])]
                             let region = HintCells (Set.ofList positions)
                             yield (PointingRow, region, eliminations)
@@ -398,7 +440,7 @@ type Gameplay =
                             let column = Set.minElement columns
                             let eliminations =
                                 [for position in Gameplay.columnPositions column do
-                                    if Gameplay.blockOfPosition position <> block && Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                    if Gameplay.blockOfPosition position <> block && Set.contains number (Gameplay.workingCandidates gameplay position) then
                                         yield (position, set [number])]
                             let region = HintCells (Set.ofList positions)
                             yield (PointingColumn, region, eliminations)]
@@ -412,14 +454,14 @@ type Gameplay =
                 for number in 1 .. 9 do
                     let positions =
                         rowPositions
-                        |> List.filter (fun position -> Set.contains number (Gameplay.candidates gameplay.Puzzle position))
+                        |> List.filter (fun position -> Set.contains number (Gameplay.workingCandidates gameplay position))
                     if List.length positions >= 2 then
                         let blocks = positions |> List.map Gameplay.blockOfPosition |> Set.ofList
                         if Set.count blocks = 1 then
                             let block = Set.minElement blocks
                             let eliminations =
                                 [for position in Gameplay.blockPositions block do
-                                    if position.Y <> row && Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                    if position.Y <> row && Set.contains number (Gameplay.workingCandidates gameplay position) then
                                         yield (position, set [number])]
                             let region = HintCells (Set.ofList positions)
                             yield (ClaimingRow, region, eliminations)]
@@ -429,14 +471,14 @@ type Gameplay =
                 for number in 1 .. 9 do
                     let positions =
                         columnPositions
-                        |> List.filter (fun position -> Set.contains number (Gameplay.candidates gameplay.Puzzle position))
+                        |> List.filter (fun position -> Set.contains number (Gameplay.workingCandidates gameplay position))
                     if List.length positions >= 2 then
                         let blocks = positions |> List.map Gameplay.blockOfPosition |> Set.ofList
                         if Set.count blocks = 1 then
                             let block = Set.minElement blocks
                             let eliminations =
                                 [for position in Gameplay.blockPositions block do
-                                    if position.X <> column && Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                    if position.X <> column && Set.contains number (Gameplay.workingCandidates gameplay position) then
                                         yield (position, set [number])]
                             let region = HintCells (Set.ofList positions)
                             yield (ClaimingColumn, region, eliminations)]
@@ -450,7 +492,7 @@ type Gameplay =
                 [for row in 0 .. 8 do
                     let columns =
                         [for position in Gameplay.rowPositions row do
-                            if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then yield position.X]
+                            if Set.contains number (Gameplay.workingCandidates gameplay position) then yield position.X]
                     if List.length columns >= 2 && List.length columns <= size then yield (row, Set.ofList columns)]
             for rowSet in Gameplay.combinations size rows do
                 let columns = rowSet |> List.map snd |> Set.unionMany
@@ -461,7 +503,7 @@ type Gameplay =
                             for row in 0 .. 8 do
                                 if not (Set.contains row selectedRows) then
                                     let position = v2i column row
-                                    if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                    if Set.contains number (Gameplay.workingCandidates gameplay position) then
                                         yield (position, set [number])]
                     let regionPositions =
                         [for row in selectedRows do
@@ -477,7 +519,7 @@ type Gameplay =
                 [for column in 0 .. 8 do
                     let rows =
                         [for position in Gameplay.columnPositions column do
-                            if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then yield position.Y]
+                            if Set.contains number (Gameplay.workingCandidates gameplay position) then yield position.Y]
                     if List.length rows >= 2 && List.length rows <= size then yield (column, Set.ofList rows)]
             for columnSet in Gameplay.combinations size columns do
                 let rows = columnSet |> List.map snd |> Set.unionMany
@@ -488,7 +530,7 @@ type Gameplay =
                             for column in 0 .. 8 do
                                 if not (Set.contains column selectedColumns) then
                                     let position = v2i column row
-                                    if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                    if Set.contains number (Gameplay.workingCandidates gameplay position) then
                                         yield (position, set [number])]
                     let regionPositions =
                         [for column in selectedColumns do
@@ -538,6 +580,15 @@ type Gameplay =
             else gameplay
         else gameplay
 
+    static member private removeMarks (removals : (Vector2i * Set<int>) list) (gameplay : Gameplay) =
+        let marks = Array2D.copy gameplay.Marks
+        for (position, removed) in removals do
+            marks[position.Y, position.X] <- Set.difference marks[position.Y, position.X] removed
+        { gameplay with
+            Marks = marks
+            HintOpt = None
+            HintStatusOpt = None }
+
     static member private toggleMarkAt (position : Vector2i) (number : int) (gameplay : Gameplay) =
         if gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] && gameplay.Puzzle[position.Y, position.X] = 0 then
             let marks = Array2D.copy gameplay.Marks
@@ -576,17 +627,32 @@ type Gameplay =
         if gameplay.GameplayState = Playing then
             match gameplay.HintOpt with
             | Some hint ->
-                let gameplay = Gameplay.withNumberAt hint.Target hint.Number ({ gameplay with SelectedCellOpt = Some hint.Target })
-                { gameplay with HintStatusOpt = Some ("Placed " + string hint.Number + " by " + hint.Technique.Label + ".") }
+                match hint.Action with
+                | PlaceNumber (target, number) ->
+                    let gameplay = Gameplay.withNumberAt target number ({ gameplay with SelectedCellOpt = Some target })
+                    { gameplay with HintStatusOpt = Some ("Placed " + string number + " by " + hint.Technique.Label + ".") }
+                | RemoveMarks removals ->
+                    let removedCount = removals |> List.sumBy (fun (_, numbers) -> Set.count numbers)
+                    let gameplay = Gameplay.removeMarks removals gameplay
+                    { gameplay with HintStatusOpt = Some ("Removed " + string removedCount + " pencil mark" + (if removedCount = 1 then "" else "s") + " by " + hint.Technique.Label + ".") }
             | None ->
                 match Gameplay.tryFindHint gameplay with
                 | Some hint ->
+                    let applyText =
+                        match hint.Action with
+                        | PlaceNumber _ -> " Press Hint again to place it."
+                        | RemoveMarks _ -> " Press Hint again to remove the marks."
                     { gameplay with
                         HintOpt = Some hint
-                        HintStatusOpt = Some (hint.Label + " Press Hint again to place it.")
+                        HintStatusOpt = Some (hint.Label + applyText)
                         SelectedCellOpt = Some hint.Target }
                 | None ->
-                    Gameplay.fillLegalMarks gameplay
+                    if Gameplay.hasOpenCellsWithoutMarks gameplay
+                    then Gameplay.fillLegalMarks gameplay
+                    else
+                        { gameplay with
+                            HintOpt = None
+                            HintStatusOpt = Some "No hint available from the current pencil marks." }
         else gameplay
 
     static member make (difficulty : Difficulty) (score : int) =
@@ -678,6 +744,9 @@ type GameplayDispatcher () =
     static let cellPosition (x : int) (y : int) =
         v3 (boardMin.X + (single x + 0.5f) * cellSize) (boardMin.Y + (single (8 - y) + 0.5f) * cellSize) 0.0f
 
+    static let numberStatusPosition (number : int) =
+        v3 (boardMin.X - 38.0f) (boardMin.Y + (single (9 - number) + 0.5f) * cellSize) 0.0f
+
     static let markPositionLocal (number : int) =
         let index = number - 1
         let column = index % 3
@@ -702,6 +771,29 @@ type GameplayDispatcher () =
             elif gameplay.HasConflict position value then color 0.58f 0.16f 0.16f 1.0f
             elif value = 0 then color 0.12f 0.14f 0.17f 1.0f
             else color 0.20f 0.26f 0.33f 1.0f
+
+    static let numberRemaining (gameplay : Gameplay) (number : int) =
+        9 - List.length [for y in 0 .. 8 do for x in 0 .. 8 do if gameplay.Puzzle[y, x] = number then yield number]
+
+    static let numberMissingFromSelectedBlock (gameplay : Gameplay) (number : int) =
+        match gameplay.SelectedCellOpt with
+        | Some selected ->
+            let block = Gameplay.blockOfPosition selected
+            block
+            |> Gameplay.blockPositions
+            |> List.exists (fun (position : Vector2i) -> gameplay.Puzzle[position.Y, position.X] = number)
+            |> not
+        | None -> false
+
+    static let numberStatusColor (gameplay : Gameplay) (number : int) =
+        let remaining = numberRemaining gameplay number
+        if remaining <= 0 then color 0.10f 0.12f 0.14f 1.0f
+        elif numberMissingFromSelectedBlock gameplay number then color 0.78f 0.58f 0.14f 1.0f
+        else color 0.22f 0.36f 0.54f 1.0f
+
+    static let numberStatusTextColor (gameplay : Gameplay) (number : int) =
+        if numberRemaining gameplay number <= 0 then color 0.44f 0.48f 0.52f 1.0f
+        else Color.GhostWhite
 
     static let difficultyButtonColor (selected : Difficulty) (difficulty : Difficulty) =
         if selected = difficulty then color 0.30f 0.48f 0.72f 1.0f
@@ -850,6 +942,38 @@ type GameplayDispatcher () =
                          Entity.Text := difficulty.Label
                          Entity.ClickEvent => SetDifficulty difficulty]
 
+                 Content.text "NumberStatusTitle"
+                    [Entity.Position == v3 (boardMin.X - 38.0f) (boardMin.Y + boardSize + 16.0f) 0.0f
+                     Entity.Size == v3 52.0f 18.0f 0.0f
+                     Entity.Elevation == 10.0f
+                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                     Entity.FontSizing == Some 7.0f
+                     Entity.Text == "Needed"]
+
+                 for number in 1 .. 9 do
+                    Content.panel ("NumberStatus+" + string number)
+                        [Entity.Position == numberStatusPosition number
+                         Entity.Size == v3 28.0f 28.0f 0.0f
+                         Entity.Elevation == 4.0f
+                         Entity.BackdropImageOpt == Some Assets.Default.White
+                         Entity.Color := numberStatusColor gameplay number]
+                        [Content.text "Value"
+                            [Entity.PositionLocal == v3 0.0f 3.0f 0.0f
+                             Entity.Size == v3 28.0f 18.0f 0.0f
+                             Entity.ElevationLocal == 1.0f
+                             Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                             Entity.FontSizing == Some 10.0f
+                             Entity.TextColor := numberStatusTextColor gameplay number
+                             Entity.Text == string number]
+                         Content.text "Remaining"
+                            [Entity.PositionLocal == v3 0.0f -8.0f 0.0f
+                             Entity.Size == v3 28.0f 10.0f 0.0f
+                             Entity.ElevationLocal == 1.0f
+                             Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                             Entity.FontSizing == Some 5.0f
+                             Entity.TextColor := numberStatusTextColor gameplay number
+                             Entity.Text := string (numberRemaining gameplay number)]]
+
                  for y in 0 .. 8 do
                     for x in 0 .. 8 do
                         let value = gameplay.Puzzle[y, x]
@@ -901,7 +1025,7 @@ type GameplayDispatcher () =
                     [Entity.Position == v3 196.0f -52.0f 0.0f
                      Entity.Size == v3 128.0f 28.0f 0.0f
                      Entity.Elevation == 10.0f
-                     Entity.Text := if gameplay.HintOpt.IsSome then "Place Hint" else "Hint"
+                     Entity.Text := if gameplay.HintOpt.IsSome then "Apply Hint" else "Hint"
                      Entity.ClickEvent => RequestHint]
 
                  Content.button "Pencil"
