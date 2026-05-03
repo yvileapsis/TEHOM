@@ -32,6 +32,37 @@ type Difficulty =
         | Normal -> "Normal"
         | Hard -> "Hard"
 
+// this represents the area a hint is asking the player to inspect.
+type HintRegion =
+    | HintCell of Vector2i
+    | HintRow of int
+    | HintColumn of int
+    | HintBlock of Vector2i
+
+// this represents a simple human solving technique.
+type HintTechnique =
+    | NakedSingle
+    | HiddenSingleRow
+    | HiddenSingleColumn
+    | HiddenSingleBlock
+
+    member this.Label =
+        match this with
+        | NakedSingle -> "Naked single"
+        | HiddenSingleRow -> "Hidden single in row"
+        | HiddenSingleColumn -> "Hidden single in column"
+        | HiddenSingleBlock -> "Hidden single in block"
+
+// this represents a pending hint. The first hint press stores this and highlights its region; the second applies it.
+type Hint =
+    { Target : Vector2i
+      Number : int
+      Region : HintRegion
+      Technique : HintTechnique }
+
+    member this.Label =
+        this.Technique.Label + ": row " + string (this.Target.Y + 1) + ", column " + string (this.Target.X + 1) + " can be " + string this.Number + "."
+
 // this is our MMCC model type representing gameplay.
 type Gameplay =
     { GameplayTime : int64
@@ -41,6 +72,8 @@ type Gameplay =
       Given : bool[,]
       SelectedCellOpt : Vector2i option
       Difficulty : Difficulty
+      HintOpt : Hint option
+      HintStatusOpt : string option
       Score : int }
 
     member this.BoardSize = v2iDup 9
@@ -63,7 +96,7 @@ type Gameplay =
             |> List.forall setFull
         rowsValid && columnsValid && blocksValid
 
-    member this.HasConflict(position: Vector2i) value =
+    member this.HasConflict (position : Vector2i) (value : int) =
         if value = 0 then false
         else
             let board = this.Puzzle
@@ -83,7 +116,7 @@ type Gameplay =
                 |> List.exists (fun position2 -> position2 <> position && board[position2.Y, position2.X] = value)
             rowConflict || columnConflict || blockConflict
 
-    static member private shuffle list =
+    static member private shuffle (list : 'a list) =
         list |> List.sortBy (fun _ -> Gen.random1 Int32.MaxValue)
 
     static member public makeSolvedBoard () =
@@ -103,7 +136,7 @@ type Gameplay =
                 board[y, x] <- digits[pattern]
         board
 
-    static member public makePuzzle (difficulty : Difficulty) solution =
+    static member public makePuzzle (difficulty : Difficulty) (solution : int[,]) =
         let puzzle = Array2D.copy solution
         let given = Array2D.create 9 9 true
         let holes = Gameplay.shuffle [for y in 0 .. 8 do for x in 0 .. 8 -> v2i x y] |> List.take difficulty.Holes
@@ -112,24 +145,129 @@ type Gameplay =
             given[hole.Y, hole.X] <- false
         (puzzle, given)
 
-    static member public withNumber number gameplay =
-        match gameplay.SelectedCellOpt with
-        | Some position when gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] ->
+    static member private candidates (board : int[,]) (position : Vector2i) =
+        if board[position.Y, position.X] <> 0 then Set.empty
+        else
+            let rowValues = set [for x in 0 .. 8 do if board[position.Y, x] <> 0 then yield board[position.Y, x]]
+            let columnValues = set [for y in 0 .. 8 do if board[y, position.X] <> 0 then yield board[y, position.X]]
+            let blockMinX = position.X / 3 * 3
+            let blockMinY = position.Y / 3 * 3
+            let blockValues =
+                set [for y in blockMinY .. blockMinY + 2 do
+                        for x in blockMinX .. blockMinX + 2 do
+                            if board[y, x] <> 0 then yield board[y, x]]
+            Set.difference (set [1 .. 9]) (Set.unionMany [rowValues; columnValues; blockValues])
+
+    static member private tryMakeHint (technique : HintTechnique) (region : HintRegion) (position : Vector2i) (number : int) (gameplay : Gameplay) =
+        if gameplay.Solution[position.Y, position.X] = number
+        then Some { Target = position; Number = number; Region = region; Technique = technique }
+        else None
+
+    static member private tryFindNakedSingle (gameplay : Gameplay) =
+        [for y in 0 .. 8 do for x in 0 .. 8 -> v2i x y]
+        |> List.tryPick (fun position ->
+            let candidates = Gameplay.candidates gameplay.Puzzle position
+            if Set.count candidates = 1 then
+                Gameplay.tryMakeHint NakedSingle (HintCell position) position (Set.minElement candidates) gameplay
+            else None)
+
+    static member private tryFindHiddenSingleInRow (gameplay : Gameplay) =
+        [for row in 0 .. 8 do
+            for number in 1 .. 9 do
+                let positions =
+                    [for x in 0 .. 8 do
+                        let position = v2i x row
+                        if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then yield position]
+                match positions with
+                | [position] -> yield (row, number, position)
+                | _ -> ()]
+        |> List.tryPick (fun (row : int, number : int, position : Vector2i) ->
+            Gameplay.tryMakeHint HiddenSingleRow (HintRow row) position number gameplay)
+
+    static member private tryFindHiddenSingleInColumn (gameplay : Gameplay) =
+        [for column in 0 .. 8 do
+            for number in 1 .. 9 do
+                let positions =
+                    [for y in 0 .. 8 do
+                        let position = v2i column y
+                        if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then yield position]
+                match positions with
+                | [position] -> yield (column, number, position)
+                | _ -> ()]
+        |> List.tryPick (fun (column : int, number : int, position : Vector2i) ->
+            Gameplay.tryMakeHint HiddenSingleColumn (HintColumn column) position number gameplay)
+
+    static member private tryFindHiddenSingleInBlock (gameplay : Gameplay) =
+        [for blockY in 0 .. 2 do
+            for blockX in 0 .. 2 do
+                let block = v2i blockX blockY
+                for number in 1 .. 9 do
+                    let positions =
+                        [for y in blockY * 3 .. blockY * 3 + 2 do
+                            for x in blockX * 3 .. blockX * 3 + 2 do
+                                let position = v2i x y
+                                if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then yield position]
+                    match positions with
+                    | [position] -> yield (block, number, position)
+                    | _ -> ()]
+        |> List.tryPick (fun (block : Vector2i, number : int, position : Vector2i) ->
+            Gameplay.tryMakeHint HiddenSingleBlock (HintBlock block) position number gameplay)
+
+    static member private tryFindHint (gameplay : Gameplay) =
+        let finders : (Gameplay -> Hint option) list =
+            [fun gameplay -> Gameplay.tryFindNakedSingle gameplay
+             fun gameplay -> Gameplay.tryFindHiddenSingleInRow gameplay
+             fun gameplay -> Gameplay.tryFindHiddenSingleInColumn gameplay
+             fun gameplay -> Gameplay.tryFindHiddenSingleInBlock gameplay]
+        finders
+        |> List.tryPick (fun find -> find gameplay)
+
+    static member private withNumberAt (position : Vector2i) (number : int) (gameplay : Gameplay) =
+        if gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] then
             let puzzle = Array2D.copy gameplay.Puzzle
             puzzle[position.Y, position.X] <- number
-            let gameplay = { gameplay with Puzzle = puzzle }
+            let gameplay =
+                { gameplay with
+                    Puzzle = puzzle
+                    HintOpt = None
+                    HintStatusOpt = None }
             if gameplay.IsSolved then { gameplay with GameplayState = Won; Score = inc gameplay.Score }
             else gameplay
+        else gameplay
+
+    static member public withNumber (number : int) (gameplay : Gameplay) =
+        match gameplay.SelectedCellOpt with
+        | Some position when gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] ->
+            Gameplay.withNumberAt position number gameplay
         | _ -> gameplay
 
-    static member public moveSelection (delta : Vector2i) gameplay =
+    static member public moveSelection (delta : Vector2i) (gameplay : Gameplay) =
         match gameplay.SelectedCellOpt with
         | Some selected ->
             let selected = v2i ((selected.X + delta.X + 9) % 9) ((selected.Y + delta.Y + 9) % 9)
             { gameplay with SelectedCellOpt = Some selected }
         | None -> { gameplay with SelectedCellOpt = Some (v2i 0 0) }
 
-    static member make difficulty score =
+    static member public withHint (gameplay : Gameplay) =
+        if gameplay.GameplayState = Playing then
+            match gameplay.HintOpt with
+            | Some hint ->
+                let gameplay = Gameplay.withNumberAt hint.Target hint.Number ({ gameplay with SelectedCellOpt = Some hint.Target })
+                { gameplay with HintStatusOpt = Some ("Placed " + string hint.Number + " by " + hint.Technique.Label + ".") }
+            | None ->
+                match Gameplay.tryFindHint gameplay with
+                | Some hint ->
+                    { gameplay with
+                        HintOpt = Some hint
+                        HintStatusOpt = Some (hint.Label + " Press Hint again to place it.")
+                        SelectedCellOpt = Some hint.Target }
+                | None ->
+                    { gameplay with
+                        HintOpt = None
+                        HintStatusOpt = Some "No hint available yet. TODO: add more solving techniques." }
+        else gameplay
+
+    static member make (difficulty : Difficulty) (score : int) =
         let solution = Gameplay.makeSolvedBoard ()
         let (puzzle, given) = Gameplay.makePuzzle difficulty solution
         { GameplayTime = 0L
@@ -139,6 +277,8 @@ type Gameplay =
           Given = given
           SelectedCellOpt = Some (v2i 0 0)
           Difficulty = difficulty
+          HintOpt = None
+          HintStatusOpt = None
           Score = score }
 
     // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
@@ -160,6 +300,7 @@ type GameplayMessage =
     | EnterNumber of int
     | ClearCell
     | SetDifficulty of Difficulty
+    | RequestHint
     | Restart
     | Nil
     interface Message
@@ -187,7 +328,7 @@ type GameplayDispatcher () =
     static let boardSize = cellSize * 9.0f
     static let boardMin = boardCenter - v2Dup (boardSize * 0.5f)
 
-    static let tryKeyboardNumber key =
+    static let tryKeyboardNumber (key : KeyboardKey) =
         match key with
         | KeyboardKey.Num1 | KeyboardKey.Kp1 -> Some 1
         | KeyboardKey.Num2 | KeyboardKey.Kp2 -> Some 2
@@ -200,7 +341,7 @@ type GameplayDispatcher () =
         | KeyboardKey.Num9 | KeyboardKey.Kp9 -> Some 9
         | _ -> None
 
-    static let tryMouseCell world =
+    static let tryMouseCell (world : World) =
         let mouse = World.getMousePosition2dWorld false world
         let local = mouse - boardMin
         if local.X >= 0.0f && local.Y >= 0.0f && local.X < boardSize && local.Y < boardSize then
@@ -209,17 +350,28 @@ type GameplayDispatcher () =
             Some (v2i column row)
         else None
 
-    static let cellPosition x y =
+    static let cellPosition (x : int) (y : int) =
         v3 (boardMin.X + (single x + 0.5f) * cellSize) (boardMin.Y + (single (8 - y) + 0.5f) * cellSize) 0.0f
 
-    static let cellColor (gameplay : Gameplay) position value =
-        if gameplay.SelectedCellOpt = Some position then color 0.30f 0.48f 0.72f 1.0f
-        elif gameplay.Given[position.Y, position.X] then color 0.18f 0.22f 0.27f 1.0f
-        elif gameplay.HasConflict position value then color 0.58f 0.16f 0.16f 1.0f
-        elif value = 0 then color 0.12f 0.14f 0.17f 1.0f
-        else color 0.20f 0.26f 0.33f 1.0f
+    static let positionInHintRegion (hint : Hint) (position : Vector2i) =
+        match hint.Region with
+        | HintCell cell -> position = cell
+        | HintRow row -> position.Y = row
+        | HintColumn column -> position.X = column
+        | HintBlock block -> position.X / 3 = block.X && position.Y / 3 = block.Y
 
-    static let difficultyButtonColor selected difficulty =
+    static let cellColor (gameplay : Gameplay) (position : Vector2i) (value : int) =
+        match gameplay.HintOpt with
+        | Some hint when position = hint.Target -> color 0.78f 0.58f 0.14f 1.0f
+        | Some hint when positionInHintRegion hint position -> color 0.18f 0.40f 0.26f 1.0f
+        | _ ->
+            if gameplay.SelectedCellOpt = Some position then color 0.30f 0.48f 0.72f 1.0f
+            elif gameplay.Given[position.Y, position.X] then color 0.18f 0.22f 0.27f 1.0f
+            elif gameplay.HasConflict position value then color 0.58f 0.16f 0.16f 1.0f
+            elif value = 0 then color 0.12f 0.14f 0.17f 1.0f
+            else color 0.20f 0.26f 0.33f 1.0f
+
+    static let difficultyButtonColor (selected : Difficulty) (difficulty : Difficulty) =
         if selected = difficulty then color 0.30f 0.48f 0.72f 1.0f
         else color 0.18f 0.22f 0.27f 1.0f
 
@@ -252,6 +404,7 @@ type GameplayDispatcher () =
                     | KeyboardKey.N -> SetDifficulty Normal
                     | KeyboardKey.H -> SetDifficulty Hard
                     | KeyboardKey.R -> Restart
+                    | KeyboardKey.F1 -> RequestHint
                     | _ -> Nil]
 
     // here we handle the above messages
@@ -262,7 +415,7 @@ type GameplayDispatcher () =
             just (Gameplay.make gameplay.Difficulty gameplay.Score)
 
         | FinishQuitting ->
-            just { Gameplay.empty with Score = gameplay.Score }
+            just { gameplay with GameplayState = Quit; SelectedCellOpt = None; HintOpt = None; HintStatusOpt = None }
 
         | TimeUpdate ->
             let gameDelta = world.GameDelta
@@ -285,6 +438,9 @@ type GameplayDispatcher () =
 
         | SetDifficulty difficulty ->
             just (Gameplay.make difficulty gameplay.Score)
+
+        | RequestHint ->
+            just (Gameplay.withHint gameplay)
 
         | Restart ->
             just (Gameplay.make gameplay.Difficulty gameplay.Score)
@@ -320,14 +476,17 @@ type GameplayDispatcher () =
 
                  Content.text "Status"
                     [Entity.Position == v3 196.0f 102.0f 0.0f
-                     Entity.Size == v3 170.0f 44.0f 0.0f
+                     Entity.Size == v3 178.0f 48.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                     Entity.FontSizing == Some 10.0f
+                     Entity.FontSizing == Some 8.0f
                      Entity.Text :=
                         match gameplay.GameplayState with
                         | Won -> "You won!"
-                        | Playing -> "Fill every row, column, and block."
+                        | Playing ->
+                            match gameplay.HintStatusOpt with
+                            | Some status -> status
+                            | None -> "Fill every row, column, and block."
                         | Quit -> ""]
 
                  Content.text "Difficulty"
@@ -340,7 +499,7 @@ type GameplayDispatcher () =
 
                  for (i, difficulty) in List.indexed [Trivial; Easy; Normal; Hard] do
                     Content.button ("Difficulty+" + difficulty.Label)
-                        [Entity.Position == v3 (124.0f + single (i % 2) * 96.0f) (30.0f - single (i / 2) * 34.0f) 0.0f
+                        [Entity.Position == v3 (160.0f + single (i % 2) * 96.0f) (30.0f - single (i / 2) * 34.0f) 0.0f
                          Entity.Size == v3 86.0f 28.0f 0.0f
                          Entity.Elevation == 10.0f
                          Entity.Color := difficultyButtonColor gameplay.Difficulty difficulty
@@ -382,14 +541,20 @@ type GameplayDispatcher () =
                          Entity.StaticImage == Assets.Default.White
                          Entity.Color == color 0.05f 0.06f 0.07f 1.0f]
 
+                 Content.button "Hint"
+                    [Entity.Position == v3 196.0f -46.0f 0.0f
+                     Entity.Elevation == 10.0f
+                     Entity.Text := if gameplay.HintOpt.IsSome then "Place Hint" else "Hint"
+                     Entity.ClickEvent => RequestHint]
+
                  Content.button "Restart"
-                    [Entity.Position == v3 196.0f -50.0f 0.0f
+                    [Entity.Position == v3 196.0f -86.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Text := if gameplay.GameplayState = Won then "New Board" else "Restart"
                      Entity.ClickEvent => Restart]
 
                  Content.button Simulants.GameplayQuit.Name
-                    [Entity.Position == v3 196.0f -96.0f 0.0f
+                    [Entity.Position == v3 196.0f -126.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Text == "Quit"
                      Entity.ClickEvent => StartQuitting]]]
