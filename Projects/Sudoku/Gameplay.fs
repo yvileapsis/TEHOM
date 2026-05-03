@@ -35,23 +35,58 @@ type Difficulty =
 // this represents the area a hint is asking the player to inspect.
 type HintRegion =
     | HintCell of Vector2i
+    | HintCells of Set<Vector2i>
     | HintRow of int
     | HintColumn of int
     | HintBlock of Vector2i
 
 // this represents a simple human solving technique.
 type HintTechnique =
+    | FullHouseRow
+    | FullHouseColumn
+    | FullHouseBlock
     | NakedSingle
     | HiddenSingleRow
     | HiddenSingleColumn
     | HiddenSingleBlock
+    | NakedPairRow
+    | NakedPairColumn
+    | NakedPairBlock
+    | NakedTripleRow
+    | NakedTripleColumn
+    | NakedTripleBlock
+    | PointingRow
+    | PointingColumn
+    | ClaimingRow
+    | ClaimingColumn
+    | XWingRow
+    | XWingColumn
+    | SwordfishRow
+    | SwordfishColumn
 
     member this.Label =
         match this with
+        | FullHouseRow -> "Full house in row"
+        | FullHouseColumn -> "Full house in column"
+        | FullHouseBlock -> "Full house in block"
         | NakedSingle -> "Naked single"
         | HiddenSingleRow -> "Hidden single in row"
         | HiddenSingleColumn -> "Hidden single in column"
         | HiddenSingleBlock -> "Hidden single in block"
+        | NakedPairRow -> "Naked pair in row"
+        | NakedPairColumn -> "Naked pair in column"
+        | NakedPairBlock -> "Naked pair in block"
+        | NakedTripleRow -> "Naked triple in row"
+        | NakedTripleColumn -> "Naked triple in column"
+        | NakedTripleBlock -> "Naked triple in block"
+        | PointingRow -> "Pointing pair / triple by row"
+        | PointingColumn -> "Pointing pair / triple by column"
+        | ClaimingRow -> "Claiming pair / triple by row"
+        | ClaimingColumn -> "Claiming pair / triple by column"
+        | XWingRow -> "X-Wing by rows"
+        | XWingColumn -> "X-Wing by columns"
+        | SwordfishRow -> "Swordfish by rows"
+        | SwordfishColumn -> "Swordfish by columns"
 
 // this represents a pending hint. The first hint press stores this and highlights its region; the second applies it.
 type Hint =
@@ -150,6 +185,33 @@ type Gameplay =
     static member private makeMarks () =
         Array2D.create 9 9 Set.empty<int>
 
+    static member private allPositions =
+        [for y in 0 .. 8 do for x in 0 .. 8 -> v2i x y]
+
+    static member private rowPositions (row : int) =
+        [for x in 0 .. 8 -> v2i x row]
+
+    static member private columnPositions (column : int) =
+        [for y in 0 .. 8 -> v2i column y]
+
+    static member private blockPositions (block : Vector2i) =
+        [for y in block.Y * 3 .. block.Y * 3 + 2 do
+            for x in block.X * 3 .. block.X * 3 + 2 -> v2i x y]
+
+    static member private blockOfPosition (position : Vector2i) =
+        v2i (position.X / 3) (position.Y / 3)
+
+    static member private combinations (count : int) (items : 'a list) =
+        let rec step count items =
+            match (count, items) with
+            | (0, _) -> [[]]
+            | (_, []) -> []
+            | (count, head :: tail) ->
+                let withHead = step (count - 1) tail |> List.map (fun items -> head :: items)
+                let withoutHead = step count tail
+                withHead @ withoutHead
+        step count items
+
     static member private candidates (board : int[,]) (position : Vector2i) =
         if board[position.Y, position.X] <> 0 then Set.empty
         else
@@ -163,13 +225,58 @@ type Gameplay =
                             if board[y, x] <> 0 then yield board[y, x]]
             Set.difference (set [1 .. 9]) (Set.unionMany [rowValues; columnValues; blockValues])
 
+    static member private fillLegalMarks (gameplay : Gameplay) =
+        let marks = Gameplay.makeMarks ()
+        for position in Gameplay.allPositions do
+            if gameplay.Puzzle[position.Y, position.X] = 0 && not gameplay.Given[position.Y, position.X] then
+                marks[position.Y, position.X] <- Gameplay.candidates gameplay.Puzzle position
+        { gameplay with
+            Marks = marks
+            PencilMode = true
+            HintOpt = None
+            HintStatusOpt = Some "No regular placement hint found; filled legal pencil marks." }
+
     static member private tryMakeHint (technique : HintTechnique) (region : HintRegion) (position : Vector2i) (number : int) (gameplay : Gameplay) =
         if gameplay.Solution[position.Y, position.X] = number
         then Some { Target = position; Number = number; Region = region; Technique = technique }
         else None
 
+    static member private tryMakeEliminationHint (technique : HintTechnique) (region : HintRegion) (eliminations : (Vector2i * Set<int>) list) (gameplay : Gameplay) =
+        eliminations
+        |> List.tryPick (fun (position, eliminated) ->
+            let candidates = Gameplay.candidates gameplay.Puzzle position
+            let candidatesReduced = Set.difference candidates eliminated
+            if Set.count candidates > 1 && Set.count candidatesReduced = 1 && Set.count candidatesReduced < Set.count candidates then
+                Gameplay.tryMakeHint technique region position (Set.minElement candidatesReduced) gameplay
+            else None)
+
+    static member private tryFindFullHouse (technique : HintTechnique) (region : HintRegion) (positions : Vector2i list) (gameplay : Gameplay) =
+        let emptyPositions = positions |> List.filter (fun position -> gameplay.Puzzle[position.Y, position.X] = 0)
+        match emptyPositions with
+        | [position] ->
+            let existing = set [for position in positions do if gameplay.Puzzle[position.Y, position.X] <> 0 then yield gameplay.Puzzle[position.Y, position.X]]
+            let missing = Set.difference (set [1 .. 9]) existing
+            if Set.count missing = 1 then Gameplay.tryMakeHint technique region position (Set.minElement missing) gameplay
+            else None
+        | _ -> None
+
+    static member private tryFindFullHouseInRow (gameplay : Gameplay) =
+        [0 .. 8]
+        |> List.tryPick (fun row ->
+            Gameplay.tryFindFullHouse FullHouseRow (HintRow row) (Gameplay.rowPositions row) gameplay)
+
+    static member private tryFindFullHouseInColumn (gameplay : Gameplay) =
+        [0 .. 8]
+        |> List.tryPick (fun column ->
+            Gameplay.tryFindFullHouse FullHouseColumn (HintColumn column) (Gameplay.columnPositions column) gameplay)
+
+    static member private tryFindFullHouseInBlock (gameplay : Gameplay) =
+        [for y in 0 .. 2 do for x in 0 .. 2 -> v2i x y]
+        |> List.tryPick (fun block ->
+            Gameplay.tryFindFullHouse FullHouseBlock (HintBlock block) (Gameplay.blockPositions block) gameplay)
+
     static member private tryFindNakedSingle (gameplay : Gameplay) =
-        [for y in 0 .. 8 do for x in 0 .. 8 -> v2i x y]
+        Gameplay.allPositions
         |> List.tryPick (fun position ->
             let candidates = Gameplay.candidates gameplay.Puzzle position
             if Set.count candidates = 1 then
@@ -218,12 +325,200 @@ type Gameplay =
         |> List.tryPick (fun (block : Vector2i, number : int, position : Vector2i) ->
             Gameplay.tryMakeHint HiddenSingleBlock (HintBlock block) position number gameplay)
 
+    static member private tryFindNakedSubsetInUnit (technique : HintTechnique) (region : HintRegion) (size : int) (positions : Vector2i list) (gameplay : Gameplay) =
+        let candidatesByPosition =
+            positions
+            |> List.choose (fun position ->
+                let candidates = Gameplay.candidates gameplay.Puzzle position
+                if Set.count candidates >= 2 && Set.count candidates <= size then Some (position, candidates)
+                else None)
+        Gameplay.combinations size candidatesByPosition
+        |> List.tryPick (fun subset ->
+            let subsetCandidates = subset |> List.map snd |> Set.unionMany
+            if Set.count subsetCandidates = size then
+                let subsetPositions = subset |> List.map fst |> Set.ofList
+                let eliminations =
+                    [for position in positions do
+                        if not (Set.contains position subsetPositions) && gameplay.Puzzle[position.Y, position.X] = 0 then
+                            yield (position, subsetCandidates)]
+                Gameplay.tryMakeEliminationHint technique region eliminations gameplay
+            else None)
+
+    static member private tryFindNakedPairsInRows (gameplay : Gameplay) =
+        [0 .. 8]
+        |> List.tryPick (fun row ->
+            Gameplay.tryFindNakedSubsetInUnit NakedPairRow (HintRow row) 2 (Gameplay.rowPositions row) gameplay)
+
+    static member private tryFindNakedPairsInColumns (gameplay : Gameplay) =
+        [0 .. 8]
+        |> List.tryPick (fun column ->
+            Gameplay.tryFindNakedSubsetInUnit NakedPairColumn (HintColumn column) 2 (Gameplay.columnPositions column) gameplay)
+
+    static member private tryFindNakedPairsInBlocks (gameplay : Gameplay) =
+        [for y in 0 .. 2 do for x in 0 .. 2 -> v2i x y]
+        |> List.tryPick (fun block ->
+            Gameplay.tryFindNakedSubsetInUnit NakedPairBlock (HintBlock block) 2 (Gameplay.blockPositions block) gameplay)
+
+    static member private tryFindNakedTriplesInRows (gameplay : Gameplay) =
+        [0 .. 8]
+        |> List.tryPick (fun row ->
+            Gameplay.tryFindNakedSubsetInUnit NakedTripleRow (HintRow row) 3 (Gameplay.rowPositions row) gameplay)
+
+    static member private tryFindNakedTriplesInColumns (gameplay : Gameplay) =
+        [0 .. 8]
+        |> List.tryPick (fun column ->
+            Gameplay.tryFindNakedSubsetInUnit NakedTripleColumn (HintColumn column) 3 (Gameplay.columnPositions column) gameplay)
+
+    static member private tryFindNakedTriplesInBlocks (gameplay : Gameplay) =
+        [for y in 0 .. 2 do for x in 0 .. 2 -> v2i x y]
+        |> List.tryPick (fun block ->
+            Gameplay.tryFindNakedSubsetInUnit NakedTripleBlock (HintBlock block) 3 (Gameplay.blockPositions block) gameplay)
+
+    static member private tryFindPointingRowOrColumn (gameplay : Gameplay) =
+        [for blockY in 0 .. 2 do
+            for blockX in 0 .. 2 do
+                let block = v2i blockX blockY
+                let blockPositions = Gameplay.blockPositions block
+                for number in 1 .. 9 do
+                    let positions =
+                        blockPositions
+                        |> List.filter (fun position -> Set.contains number (Gameplay.candidates gameplay.Puzzle position))
+                    if List.length positions >= 2 then
+                        let rows = positions |> List.map (fun position -> position.Y) |> Set.ofList
+                        let columns = positions |> List.map (fun position -> position.X) |> Set.ofList
+                        if Set.count rows = 1 then
+                            let row = Set.minElement rows
+                            let eliminations =
+                                [for position in Gameplay.rowPositions row do
+                                    if Gameplay.blockOfPosition position <> block && Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                        yield (position, set [number])]
+                            let region = HintCells (Set.ofList positions)
+                            yield (PointingRow, region, eliminations)
+                        if Set.count columns = 1 then
+                            let column = Set.minElement columns
+                            let eliminations =
+                                [for position in Gameplay.columnPositions column do
+                                    if Gameplay.blockOfPosition position <> block && Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                        yield (position, set [number])]
+                            let region = HintCells (Set.ofList positions)
+                            yield (PointingColumn, region, eliminations)]
+        |> List.tryPick (fun (technique : HintTechnique, region : HintRegion, eliminations : (Vector2i * Set<int>) list) ->
+            Gameplay.tryMakeEliminationHint technique region eliminations gameplay)
+
+    static member private tryFindClaimingRowOrColumn (gameplay : Gameplay) =
+        let rowClaims =
+            [for row in 0 .. 8 do
+                let rowPositions = Gameplay.rowPositions row
+                for number in 1 .. 9 do
+                    let positions =
+                        rowPositions
+                        |> List.filter (fun position -> Set.contains number (Gameplay.candidates gameplay.Puzzle position))
+                    if List.length positions >= 2 then
+                        let blocks = positions |> List.map Gameplay.blockOfPosition |> Set.ofList
+                        if Set.count blocks = 1 then
+                            let block = Set.minElement blocks
+                            let eliminations =
+                                [for position in Gameplay.blockPositions block do
+                                    if position.Y <> row && Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                        yield (position, set [number])]
+                            let region = HintCells (Set.ofList positions)
+                            yield (ClaimingRow, region, eliminations)]
+        let columnClaims =
+            [for column in 0 .. 8 do
+                let columnPositions = Gameplay.columnPositions column
+                for number in 1 .. 9 do
+                    let positions =
+                        columnPositions
+                        |> List.filter (fun position -> Set.contains number (Gameplay.candidates gameplay.Puzzle position))
+                    if List.length positions >= 2 then
+                        let blocks = positions |> List.map Gameplay.blockOfPosition |> Set.ofList
+                        if Set.count blocks = 1 then
+                            let block = Set.minElement blocks
+                            let eliminations =
+                                [for position in Gameplay.blockPositions block do
+                                    if position.X <> column && Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                        yield (position, set [number])]
+                            let region = HintCells (Set.ofList positions)
+                            yield (ClaimingColumn, region, eliminations)]
+        rowClaims @ columnClaims
+        |> List.tryPick (fun (technique : HintTechnique, region : HintRegion, eliminations : (Vector2i * Set<int>) list) ->
+            Gameplay.tryMakeEliminationHint technique region eliminations gameplay)
+
+    static member private tryFindFishRows (size : int) (technique : HintTechnique) (gameplay : Gameplay) =
+        [for number in 1 .. 9 do
+            let rows =
+                [for row in 0 .. 8 do
+                    let columns =
+                        [for position in Gameplay.rowPositions row do
+                            if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then yield position.X]
+                    if List.length columns >= 2 && List.length columns <= size then yield (row, Set.ofList columns)]
+            for rowSet in Gameplay.combinations size rows do
+                let columns = rowSet |> List.map snd |> Set.unionMany
+                if Set.count columns = size then
+                    let selectedRows = rowSet |> List.map fst |> Set.ofList
+                    let eliminations =
+                        [for column in columns do
+                            for row in 0 .. 8 do
+                                if not (Set.contains row selectedRows) then
+                                    let position = v2i column row
+                                    if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                        yield (position, set [number])]
+                    let regionPositions =
+                        [for row in selectedRows do
+                            for column in columns -> v2i column row]
+                        |> Set.ofList
+                    yield (technique, HintCells regionPositions, eliminations)]
+        |> List.tryPick (fun (technique : HintTechnique, region : HintRegion, eliminations : (Vector2i * Set<int>) list) ->
+            Gameplay.tryMakeEliminationHint technique region eliminations gameplay)
+
+    static member private tryFindFishColumns (size : int) (technique : HintTechnique) (gameplay : Gameplay) =
+        [for number in 1 .. 9 do
+            let columns =
+                [for column in 0 .. 8 do
+                    let rows =
+                        [for position in Gameplay.columnPositions column do
+                            if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then yield position.Y]
+                    if List.length rows >= 2 && List.length rows <= size then yield (column, Set.ofList rows)]
+            for columnSet in Gameplay.combinations size columns do
+                let rows = columnSet |> List.map snd |> Set.unionMany
+                if Set.count rows = size then
+                    let selectedColumns = columnSet |> List.map fst |> Set.ofList
+                    let eliminations =
+                        [for row in rows do
+                            for column in 0 .. 8 do
+                                if not (Set.contains column selectedColumns) then
+                                    let position = v2i column row
+                                    if Set.contains number (Gameplay.candidates gameplay.Puzzle position) then
+                                        yield (position, set [number])]
+                    let regionPositions =
+                        [for column in selectedColumns do
+                            for row in rows -> v2i column row]
+                        |> Set.ofList
+                    yield (technique, HintCells regionPositions, eliminations)]
+        |> List.tryPick (fun (technique : HintTechnique, region : HintRegion, eliminations : (Vector2i * Set<int>) list) ->
+            Gameplay.tryMakeEliminationHint technique region eliminations gameplay)
+
     static member private tryFindHint (gameplay : Gameplay) =
         let finders : (Gameplay -> Hint option) list =
-            [fun gameplay -> Gameplay.tryFindNakedSingle gameplay
+            [fun gameplay -> Gameplay.tryFindFullHouseInRow gameplay
+             fun gameplay -> Gameplay.tryFindFullHouseInColumn gameplay
+             fun gameplay -> Gameplay.tryFindFullHouseInBlock gameplay
+             fun gameplay -> Gameplay.tryFindNakedSingle gameplay
              fun gameplay -> Gameplay.tryFindHiddenSingleInRow gameplay
              fun gameplay -> Gameplay.tryFindHiddenSingleInColumn gameplay
-             fun gameplay -> Gameplay.tryFindHiddenSingleInBlock gameplay]
+             fun gameplay -> Gameplay.tryFindHiddenSingleInBlock gameplay
+             fun gameplay -> Gameplay.tryFindNakedPairsInRows gameplay
+             fun gameplay -> Gameplay.tryFindNakedPairsInColumns gameplay
+             fun gameplay -> Gameplay.tryFindNakedPairsInBlocks gameplay
+             fun gameplay -> Gameplay.tryFindNakedTriplesInRows gameplay
+             fun gameplay -> Gameplay.tryFindNakedTriplesInColumns gameplay
+             fun gameplay -> Gameplay.tryFindNakedTriplesInBlocks gameplay
+             fun gameplay -> Gameplay.tryFindPointingRowOrColumn gameplay
+             fun gameplay -> Gameplay.tryFindClaimingRowOrColumn gameplay
+             fun gameplay -> Gameplay.tryFindFishRows 2 XWingRow gameplay
+             fun gameplay -> Gameplay.tryFindFishColumns 2 XWingColumn gameplay
+             fun gameplay -> Gameplay.tryFindFishRows 3 SwordfishRow gameplay
+             fun gameplay -> Gameplay.tryFindFishColumns 3 SwordfishColumn gameplay]
         finders
         |> List.tryPick (fun find -> find gameplay)
 
@@ -291,9 +586,7 @@ type Gameplay =
                         HintStatusOpt = Some (hint.Label + " Press Hint again to place it.")
                         SelectedCellOpt = Some hint.Target }
                 | None ->
-                    { gameplay with
-                        HintOpt = None
-                        HintStatusOpt = Some "No hint available yet. TODO: add more solving techniques." }
+                    Gameplay.fillLegalMarks gameplay
         else gameplay
 
     static member make (difficulty : Difficulty) (score : int) =
@@ -394,6 +687,7 @@ type GameplayDispatcher () =
     static let positionInHintRegion (hint : Hint) (position : Vector2i) =
         match hint.Region with
         | HintCell cell -> position = cell
+        | HintCells cells -> Set.contains position cells
         | HintRow row -> position.Y = row
         | HintColumn column -> position.X = column
         | HintBlock block -> position.X / 3 = block.X && position.Y / 3 = block.Y
