@@ -70,8 +70,10 @@ type Gameplay =
       Puzzle : int[,]
       Solution : int[,]
       Given : bool[,]
+      Marks : Set<int>[,]
       SelectedCellOpt : Vector2i option
       Difficulty : Difficulty
+      PencilMode : bool
       HintOpt : Hint option
       HintStatusOpt : string option
       Score : int }
@@ -144,6 +146,9 @@ type Gameplay =
             puzzle[hole.Y, hole.X] <- 0
             given[hole.Y, hole.X] <- false
         (puzzle, given)
+
+    static member private makeMarks () =
+        Array2D.create 9 9 Set.empty<int>
 
     static member private candidates (board : int[,]) (position : Vector2i) =
         if board[position.Y, position.X] <> 0 then Set.empty
@@ -225,20 +230,44 @@ type Gameplay =
     static member private withNumberAt (position : Vector2i) (number : int) (gameplay : Gameplay) =
         if gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] then
             let puzzle = Array2D.copy gameplay.Puzzle
+            let marks = Array2D.copy gameplay.Marks
             puzzle[position.Y, position.X] <- number
+            marks[position.Y, position.X] <- Set.empty
             let gameplay =
                 { gameplay with
                     Puzzle = puzzle
+                    Marks = marks
                     HintOpt = None
                     HintStatusOpt = None }
             if gameplay.IsSolved then { gameplay with GameplayState = Won; Score = inc gameplay.Score }
             else gameplay
         else gameplay
 
+    static member private toggleMarkAt (position : Vector2i) (number : int) (gameplay : Gameplay) =
+        if gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] && gameplay.Puzzle[position.Y, position.X] = 0 then
+            let marks = Array2D.copy gameplay.Marks
+            marks[position.Y, position.X] <-
+                if Set.contains number marks[position.Y, position.X]
+                then Set.remove number marks[position.Y, position.X]
+                else Set.add number marks[position.Y, position.X]
+            { gameplay with
+                Marks = marks
+                HintOpt = None
+                HintStatusOpt = None }
+        else gameplay
+
     static member public withNumber (number : int) (gameplay : Gameplay) =
         match gameplay.SelectedCellOpt with
+        | Some position when gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] && gameplay.PencilMode && number <> 0 ->
+            Gameplay.toggleMarkAt position number gameplay
         | Some position when gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] ->
             Gameplay.withNumberAt position number gameplay
+        | _ -> gameplay
+
+    static member public clearSelected (gameplay : Gameplay) =
+        match gameplay.SelectedCellOpt with
+        | Some position when gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] ->
+            Gameplay.withNumberAt position 0 gameplay
         | _ -> gameplay
 
     static member public moveSelection (delta : Vector2i) (gameplay : Gameplay) =
@@ -275,8 +304,10 @@ type Gameplay =
           Puzzle = puzzle
           Solution = solution
           Given = given
+          Marks = Gameplay.makeMarks ()
           SelectedCellOpt = Some (v2i 0 0)
           Difficulty = difficulty
+          PencilMode = false
           HintOpt = None
           HintStatusOpt = None
           Score = score }
@@ -299,6 +330,7 @@ type GameplayMessage =
     | MoveSelection of Vector2i
     | EnterNumber of int
     | ClearCell
+    | TogglePencilMode
     | SetDifficulty of Difficulty
     | RequestHint
     | Restart
@@ -353,6 +385,12 @@ type GameplayDispatcher () =
     static let cellPosition (x : int) (y : int) =
         v3 (boardMin.X + (single x + 0.5f) * cellSize) (boardMin.Y + (single (8 - y) + 0.5f) * cellSize) 0.0f
 
+    static let markPositionLocal (number : int) =
+        let index = number - 1
+        let column = index % 3
+        let row = index / 3
+        v3 ((single column - 1.0f) * 9.0f) ((1.0f - single row) * 9.0f) 0.0f
+
     static let positionInHintRegion (hint : Hint) (position : Vector2i) =
         match hint.Region with
         | HintCell cell -> position = cell
@@ -399,6 +437,7 @@ type GameplayDispatcher () =
                     | KeyboardKey.Up -> MoveSelection (v2i 0 -1)
                     | KeyboardKey.Down -> MoveSelection (v2i 0 1)
                     | KeyboardKey.Backspace | KeyboardKey.Delete | KeyboardKey.Num0 | KeyboardKey.Kp0 -> ClearCell
+                    | KeyboardKey.P -> TogglePencilMode
                     | KeyboardKey.T -> SetDifficulty Trivial
                     | KeyboardKey.E -> SetDifficulty Easy
                     | KeyboardKey.N -> SetDifficulty Normal
@@ -434,7 +473,10 @@ type GameplayDispatcher () =
             just (Gameplay.withNumber number gameplay)
 
         | ClearCell ->
-            just (Gameplay.withNumber 0 gameplay)
+            just (Gameplay.clearSelected gameplay)
+
+        | TogglePencilMode ->
+            just { gameplay with PencilMode = not gameplay.PencilMode; HintStatusOpt = None }
 
         | SetDifficulty difficulty ->
             just (Gameplay.make difficulty gameplay.Score)
@@ -497,9 +539,17 @@ type GameplayDispatcher () =
                      Entity.FontSizing == Some 9.0f
                      Entity.Text := "Difficulty: " + gameplay.Difficulty.Label]
 
+                 Content.text "InputMode"
+                    [Entity.Position == v3 196.0f 48.0f 0.0f
+                     Entity.Size == v3 170.0f 20.0f 0.0f
+                     Entity.Elevation == 10.0f
+                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                     Entity.FontSizing == Some 8.0f
+                     Entity.Text := if gameplay.PencilMode then "Pencil marks" else "Normal entry"]
+
                  for (i, difficulty) in List.indexed [Trivial; Easy; Normal; Hard] do
                     Content.button ("Difficulty+" + difficulty.Label)
-                        [Entity.Position == v3 (160.0f + single (i % 2) * 96.0f) (30.0f - single (i / 2) * 34.0f) 0.0f
+                        [Entity.Position == v3 (160.0f + single (i % 2) * 96.0f) (22.0f - single (i / 2) * 34.0f) 0.0f
                          Entity.Size == v3 86.0f 28.0f 0.0f
                          Entity.Elevation == 10.0f
                          Entity.Color := difficultyButtonColor gameplay.Difficulty difficulty
@@ -509,6 +559,7 @@ type GameplayDispatcher () =
                  for y in 0 .. 8 do
                     for x in 0 .. 8 do
                         let value = gameplay.Puzzle[y, x]
+                        let marks = gameplay.Marks[y, x]
                         let position = v2i x y
                         Content.panel ("Cell+" + string x + "+" + string y)
                             [Entity.Position == cellPosition x y
@@ -516,14 +567,25 @@ type GameplayDispatcher () =
                              Entity.Elevation == 1.0f
                              Entity.BackdropImageOpt == Some Assets.Default.White
                              Entity.Color := cellColor gameplay position value]
-                            [Content.text "Value"
-                                [Entity.PositionLocal == v3Zero
-                                 Entity.Size == v3 (cellSize - 2.0f) (cellSize - 2.0f) 0.0f
-                                 Entity.ElevationLocal == 1.0f
-                                 Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                                 Entity.FontSizing := if gameplay.Given[y, x] then Some 15.0f else Some 16.0f
-                                 Entity.TextColor := if gameplay.Given[y, x] then Color.GhostWhite else color 0.78f 0.90f 1.0f 1.0f
-                                 Entity.Text := if value = 0 then "" else string value]]
+                            [if value <> 0 then
+                                Content.text "Value"
+                                    [Entity.PositionLocal == v3Zero
+                                     Entity.Size == v3 (cellSize - 2.0f) (cellSize - 2.0f) 0.0f
+                                     Entity.ElevationLocal == 1.0f
+                                     Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                                     Entity.FontSizing := if gameplay.Given[y, x] then Some 15.0f else Some 16.0f
+                                     Entity.TextColor := if gameplay.Given[y, x] then Color.GhostWhite else color 0.78f 0.90f 1.0f 1.0f
+                                     Entity.Text := string value]
+                             else
+                                for mark in marks do
+                                    Content.text ("Mark+" + string mark)
+                                        [Entity.PositionLocal == markPositionLocal mark
+                                         Entity.Size == v3 10.0f 10.0f 0.0f
+                                         Entity.ElevationLocal == 1.0f
+                                         Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                                         Entity.FontSizing == Some 6.0f
+                                         Entity.TextColor == color 0.66f 0.78f 0.90f 1.0f
+                                         Entity.Text == string mark]]
 
                  for i in 0 .. 9 do
                     let lineSize = if i % 3 = 0 then 4.0f else 1.5f
@@ -542,19 +604,30 @@ type GameplayDispatcher () =
                          Entity.Color == color 0.05f 0.06f 0.07f 1.0f]
 
                  Content.button "Hint"
-                    [Entity.Position == v3 196.0f -46.0f 0.0f
+                    [Entity.Position == v3 196.0f -52.0f 0.0f
+                     Entity.Size == v3 128.0f 28.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Text := if gameplay.HintOpt.IsSome then "Place Hint" else "Hint"
                      Entity.ClickEvent => RequestHint]
 
-                 Content.button "Restart"
+                 Content.button "Pencil"
                     [Entity.Position == v3 196.0f -86.0f 0.0f
+                     Entity.Size == v3 128.0f 28.0f 0.0f
+                     Entity.Elevation == 10.0f
+                     Entity.Color := if gameplay.PencilMode then color 0.30f 0.48f 0.72f 1.0f else color 0.18f 0.22f 0.27f 1.0f
+                     Entity.Text := if gameplay.PencilMode then "Pencil On" else "Pencil Off"
+                     Entity.ClickEvent => TogglePencilMode]
+
+                 Content.button "Restart"
+                    [Entity.Position == v3 196.0f -120.0f 0.0f
+                     Entity.Size == v3 128.0f 28.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Text := if gameplay.GameplayState = Won then "New Board" else "Restart"
                      Entity.ClickEvent => Restart]
 
                  Content.button Simulants.GameplayQuit.Name
-                    [Entity.Position == v3 196.0f -126.0f 0.0f
+                    [Entity.Position == v3 196.0f -154.0f 0.0f
+                     Entity.Size == v3 128.0f 28.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Text == "Quit"
                      Entity.ClickEvent => StartQuitting]]]
