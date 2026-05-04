@@ -15,7 +15,8 @@ module PuzzleGeneration =
           FishSteps : int
           MaxEliminationChain : int
           CurrentEliminationChain : int
-          InterestScore : int }
+          InterestScore : int
+          TraceReversed : PuzzleSolveStep list }
 
     type private HintSelection =
         { Hint : Hint
@@ -39,7 +40,8 @@ module PuzzleGeneration =
           FishSteps = 0
           MaxEliminationChain = 0
           CurrentEliminationChain = 0
-          InterestScore = 0 }
+          InterestScore = 0
+          TraceReversed = [] }
 
     let private incrementTechniqueCount (technique : HintTechnique) (counts : Map<HintTechnique, int>) =
         let count =
@@ -197,6 +199,14 @@ module PuzzleGeneration =
         let currentEliminationChain =
             if isElimination then profile.CurrentEliminationChain + 1
             else 0
+        let interestScore = profile.InterestScore + selection.Score
+        let solveStep =
+            { StepIndex = profile.TotalSteps + 1
+              Hint = hint
+              Score = selection.Score
+              CumulativeScore = interestScore
+              EliminationChain = currentEliminationChain
+              RemovedMarkCount = removedMarkCount hint }
         { profile with
             TechniqueCounts = incrementTechniqueCount hint.Technique profile.TechniqueCounts
             TotalSteps = profile.TotalSteps + 1
@@ -207,7 +217,8 @@ module PuzzleGeneration =
             FishSteps = profile.FishSteps + (if isFish hint.Technique then 1 else 0)
             MaxEliminationChain = max profile.MaxEliminationChain currentEliminationChain
             CurrentEliminationChain = currentEliminationChain
-            InterestScore = profile.InterestScore + selection.Score }
+            InterestScore = interestScore
+            TraceReversed = solveStep :: profile.TraceReversed }
 
     let private solveWithSelector (selector : SolveProfile -> SudokuBoardState -> HintSelection option) (solution : int[,]) (puzzle : int[,]) (given : bool[,]) =
         let state : SudokuBoardState =
@@ -376,13 +387,30 @@ module PuzzleGeneration =
                 elif candidate.Removed <> current.Removed then candidate.Removed > current.Removed
                 else candidate.Profile.HiddenSingleSteps < current.Profile.HiddenSingleSteps
 
-    let private toGeneratedPuzzle (candidate : PuzzleCandidate) =
+    let private toPuzzleRanking (candidate : PuzzleCandidate) =
+        { RemovedCells = candidate.Removed
+          TechniqueCounts = candidate.Profile.TechniqueCounts
+          TotalSteps = candidate.Profile.TotalSteps
+          EliminationSteps = candidate.Profile.EliminationSteps
+          PointingClaimingSteps = candidate.Profile.PointingClaimingSteps
+          NakedSubsetSteps = candidate.Profile.NakedSubsetSteps
+          HiddenSingleSteps = candidate.Profile.HiddenSingleSteps
+          FishSteps = candidate.Profile.FishSteps
+          MaxEliminationChain = candidate.Profile.MaxEliminationChain
+          GenerationScore = candidate.Profile.InterestScore
+          OpportunityScoreOpt = candidate.OpportunityProfile |> Option.map (fun profile -> opportunityScore (Some profile))
+          SolveTrace = List.rev candidate.Profile.TraceReversed }
+
+    let private toGeneratedPuzzle (candidate : PuzzleCandidate) : GeneratedPuzzle =
+        let ranking = toPuzzleRanking candidate
         { Solution = candidate.Solution
           Puzzle = candidate.Puzzle
           Given = candidate.Given
-          TechniqueCounts = candidate.Profile.TechniqueCounts
-          GenerationScore = candidate.Profile.InterestScore
-          MaxEliminationChain = candidate.Profile.MaxEliminationChain }
+          PuzzleNumberOpt = None
+          TechniqueCounts = ranking.TechniqueCounts
+          GenerationScore = ranking.GenerationScore
+          MaxEliminationChain = ranking.MaxEliminationChain
+          Ranking = ranking }
 
     let make (difficulty : Difficulty) =
         let rec tryMake (samplesRemaining : int) (bestOpt : PuzzleCandidate option) =

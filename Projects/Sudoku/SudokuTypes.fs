@@ -134,11 +134,54 @@ type SudokuBoardState =
       Given : bool[,]
       Marks : Set<int>[,] }
 
+// this contains one selected solving step from a ranked solve pass.
+type PuzzleSolveStep =
+    { StepIndex : int
+      Hint : Hint
+      Score : int
+      CumulativeScore : int
+      EliminationChain : int
+      RemovedMarkCount : int }
+
+// this contains the aggregate ranking information produced while generating a puzzle.
+type PuzzleRanking =
+    { RemovedCells : int
+      TechniqueCounts : Map<HintTechnique, int>
+      TotalSteps : int
+      EliminationSteps : int
+      PointingClaimingSteps : int
+      NakedSubsetSteps : int
+      HiddenSingleSteps : int
+      FishSteps : int
+      MaxEliminationChain : int
+      GenerationScore : int
+      OpportunityScoreOpt : int option
+      SolveTrace : PuzzleSolveStep list }
+
 // this contains a generated puzzle and the solver profile selected for it.
 type GeneratedPuzzle =
     { Solution : int[,]
       Puzzle : int[,]
       Given : bool[,]
+      PuzzleNumberOpt : int option
       TechniqueCounts : Map<HintTechnique, int>
       GenerationScore : int
-      MaxEliminationChain : int }
+      MaxEliminationChain : int
+      Ranking : PuzzleRanking }
+
+// this contains one serialized puzzle bank entry. Grids are flattened row-major to keep the bank text simple.
+type PuzzleBankEntry =
+    { Number : int
+      Puzzle : int list
+      Solution : int list
+      Given : bool list
+      TechniqueCounts : Map<HintTechnique, int>
+      GenerationScore : int
+      MaxEliminationChain : int
+      Ranking : PuzzleRanking }
+
+// this contains the serialized bank for a single difficulty.
+type PuzzleBankData =
+    { SchemaVersion : int
+      Difficulty : Difficulty
+      Puzzles : PuzzleBankEntry list }

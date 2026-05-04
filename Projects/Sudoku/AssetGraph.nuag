@@ -21,4 +21,4 @@
    [Assets Assets/Gameplay [wav ogg mp3] [] [Audio]]
    [Assets Assets/Gameplay [cur] [] [Cursor]]
    [Assets Assets/Gameplay [nueffect nuscript csv] [] [Symbol]]
-   [Assets Assets/Gameplay [nuentity nugroup tsx tmx atlas nav nbrd glsl bin] [] []]]]]
+   [Assets Assets/Gameplay [nuentity nugroup tsx tmx atlas nav nbrd glsl bin nupuzzles] [] []]]]]

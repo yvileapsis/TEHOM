@@ -21,6 +21,7 @@ type Gameplay =
       Marks : Set<int>[,]
       SelectedCellOpt : Vector2i option
       Difficulty : Difficulty
+      PuzzleNumberOpt : int option
       PencilMode : bool
       HintOpt : Hint option
       HintStatusOpt : string option
@@ -166,8 +167,36 @@ type Gameplay =
                             HintStatusOpt = Some "No hint available from the current pencil marks." }
         else gameplay
 
+    static member private inertGenerated : GeneratedPuzzle =
+        let puzzle = Array2D.zeroCreate<int> 9 9
+        let given = Array2D.create 9 9 false
+        let ranking =
+            { RemovedCells = 0
+              TechniqueCounts = Map.empty
+              TotalSteps = 0
+              EliminationSteps = 0
+              PointingClaimingSteps = 0
+              NakedSubsetSteps = 0
+              HiddenSingleSteps = 0
+              FishSteps = 0
+              MaxEliminationChain = 0
+              GenerationScore = 0
+              OpportunityScoreOpt = None
+              SolveTrace = [] }
+        { Solution = Array2D.zeroCreate<int> 9 9
+          Puzzle = puzzle
+          Given = given
+          PuzzleNumberOpt = None
+          TechniqueCounts = Map.empty
+          GenerationScore = 0
+          MaxEliminationChain = 0
+          Ranking = ranking }
+
     static member make (difficulty : Difficulty) (score : int) =
-        let generated = PuzzleGeneration.make difficulty
+        let generated : GeneratedPuzzle =
+            match PuzzleBank.tryTake difficulty with
+            | Some generated -> generated
+            | None -> PuzzleGeneration.make difficulty
         { GameplayTime = 0L
           GameplayState = Playing
           Puzzle = generated.Puzzle
@@ -176,6 +205,7 @@ type Gameplay =
           Marks = SudokuGrid.makeMarks ()
           SelectedCellOpt = Some (v2i 0 0)
           Difficulty = difficulty
+          PuzzleNumberOpt = generated.PuzzleNumberOpt
           PencilMode = false
           HintOpt = None
           HintStatusOpt = None
@@ -186,9 +216,23 @@ type Gameplay =
 
     // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
     static member empty =
-        { Gameplay.make Normal 0 with
-            GameplayState = Quit
-            SelectedCellOpt = None }
+        let generated = Gameplay.inertGenerated
+        { GameplayTime = 0L
+          GameplayState = Quit
+          Puzzle = generated.Puzzle
+          Solution = generated.Solution
+          Given = generated.Given
+          Marks = SudokuGrid.makeMarks ()
+          SelectedCellOpt = None
+          Difficulty = Normal
+          PuzzleNumberOpt = generated.PuzzleNumberOpt
+          PencilMode = false
+          HintOpt = None
+          HintStatusOpt = None
+          TechniqueCounts = generated.TechniqueCounts
+          GenerationScore = generated.GenerationScore
+          MaxEliminationChain = generated.MaxEliminationChain
+          Score = 0 }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
     static member initial = Gameplay.make Normal 0
@@ -311,6 +355,11 @@ type GameplayDispatcher () =
     static let difficultyButtonColor (selected : Difficulty) (difficulty : Difficulty) =
         if selected = difficulty then color 0.30f 0.48f 0.72f 1.0f
         else color 0.18f 0.22f 0.27f 1.0f
+
+    static let puzzleHeaderText (gameplay : Gameplay) =
+        match gameplay.PuzzleNumberOpt with
+        | Some number -> "Puzzle #" + string number + " - " + gameplay.Difficulty.Label
+        | None -> "Puzzle: Live - " + gameplay.Difficulty.Label
 
     // here we define the screen's fallback model depending on whether screen is selected
     override this.GetFallbackModel (_, screen, world) =
@@ -436,7 +485,7 @@ type GameplayDispatcher () =
                      Entity.Elevation == 10.0f
                      Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                      Entity.FontSizing == Some 9.0f
-                     Entity.Text := "Difficulty: " + gameplay.Difficulty.Label]
+                     Entity.Text := puzzleHeaderText gameplay]
 
                  Content.text "InputMode"
                     [Entity.Position == v3 196.0f 48.0f 0.0f
