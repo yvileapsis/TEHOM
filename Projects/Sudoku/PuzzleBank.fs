@@ -95,7 +95,8 @@ module PuzzleBank =
             Directory.CreateDirectory directory |> ignore<DirectoryInfo>
         let data = sanitizeData difficulty { data with SchemaVersion = SchemaVersion; Difficulty = difficulty }
         let filePathTmp = filePath + ".tmp"
-        File.WriteAllText (filePathTmp, scstring data)
+        let symbol = valueToSymbol data
+        File.WriteAllText (filePathTmp, PrettyPrinter.prettyPrintSymbol symbol PrettyPrinter.defaultPrinter)
         if File.Exists filePath then File.SetAttributes (filePath, FileAttributes.Normal)
         File.Move (filePathTmp, filePath, true)
         data
