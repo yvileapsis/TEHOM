@@ -94,6 +94,22 @@ module SudokuGrid =
             not state.Given[position.Y, position.X] &&
             Set.isEmpty state.Marks[position.Y, position.X])
 
+    let correctedMarkSets (state : SudokuBoardState) =
+        allPositions
+        |> List.choose (fun position ->
+            let marks = state.Marks[position.Y, position.X]
+            if state.Puzzle[position.Y, position.X] = 0 &&
+               not state.Given[position.Y, position.X] &&
+               Set.notEmpty marks then
+                let legal = candidates state.Puzzle position
+                let solution = state.Solution[position.Y, position.X]
+                if Set.contains solution legal then
+                    let corrected = Set.add solution (Set.intersect marks legal)
+                    if corrected <> marks then Some (position, corrected)
+                    else None
+                else None
+            else None)
+
     let peerPositions (position : Vector2i) =
         let block = blockOfPosition position
         [rowPositions position.Y
@@ -122,6 +138,11 @@ module SudokuGrid =
             let marks = Array2D.copy state.Marks
             for (position, removed) in removals do
                 marks[position.Y, position.X] <- Set.difference marks[position.Y, position.X] removed
+            { state with Marks = marks }
+        | CorrectMarks corrections ->
+            let marks = Array2D.copy state.Marks
+            for (position, corrected) in corrections do
+                marks[position.Y, position.X] <- corrected
             { state with Marks = marks }
 
     let isSolved (board : int[,]) =

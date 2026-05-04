@@ -38,6 +38,7 @@ type HintRegion =
 
 // this represents a simple human solving technique.
 type HintTechnique =
+    | PencilMarkCorrection
     | FullHouseRow
     | FullHouseColumn
     | FullHouseBlock
@@ -48,9 +49,15 @@ type HintTechnique =
     | NakedPairRow
     | NakedPairColumn
     | NakedPairBlock
+    | HiddenPairRow
+    | HiddenPairColumn
+    | HiddenPairBlock
     | NakedTripleRow
     | NakedTripleColumn
     | NakedTripleBlock
+    | HiddenTripleRow
+    | HiddenTripleColumn
+    | HiddenTripleBlock
     | PointingRow
     | PointingColumn
     | ClaimingRow
@@ -62,6 +69,7 @@ type HintTechnique =
 
     member this.Label =
         match this with
+        | PencilMarkCorrection -> "Pencil mark correction"
         | FullHouseRow -> "Full house in row"
         | FullHouseColumn -> "Full house in column"
         | FullHouseBlock -> "Full house in block"
@@ -72,9 +80,15 @@ type HintTechnique =
         | NakedPairRow -> "Naked pair in row"
         | NakedPairColumn -> "Naked pair in column"
         | NakedPairBlock -> "Naked pair in block"
+        | HiddenPairRow -> "Hidden pair in row"
+        | HiddenPairColumn -> "Hidden pair in column"
+        | HiddenPairBlock -> "Hidden pair in block"
         | NakedTripleRow -> "Naked triple in row"
         | NakedTripleColumn -> "Naked triple in column"
         | NakedTripleBlock -> "Naked triple in block"
+        | HiddenTripleRow -> "Hidden triple in row"
+        | HiddenTripleColumn -> "Hidden triple in column"
+        | HiddenTripleBlock -> "Hidden triple in block"
         | PointingRow -> "Pointing pair / triple by row"
         | PointingColumn -> "Pointing pair / triple by column"
         | ClaimingRow -> "Claiming pair / triple by row"
@@ -88,6 +102,7 @@ type HintTechnique =
 type HintAction =
     | PlaceNumber of Vector2i * int
     | RemoveMarks of (Vector2i * Set<int>) list
+    | CorrectMarks of (Vector2i * Set<int>) list
 
 // this represents a pending hint. The first hint press stores this and highlights its region; the second applies it.
 type Hint =
@@ -109,6 +124,8 @@ type Hint =
                 |> List.map string
                 |> String.concat ", "
             this.Technique.Label + ": remove pencil mark" + (if List.length removals = 1 then " " else "s ") + numbers + "."
+        | CorrectMarks corrections ->
+            this.Technique.Label + ": correct pencil marks in " + string (List.length corrections) + " cell" + (if List.length corrections = 1 then "" else "s") + "."
 
 // this contains the board data needed by hint and generation code.
 type SudokuBoardState =

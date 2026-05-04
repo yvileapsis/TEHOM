@@ -82,6 +82,15 @@ type Gameplay =
             HintOpt = None
             HintStatusOpt = None }
 
+    static member private correctMarks (corrections : (Vector2i * Set<int>) list) (gameplay : Gameplay) =
+        let marks = Array2D.copy gameplay.Marks
+        for (position, corrected) in corrections do
+            marks[position.Y, position.X] <- corrected
+        { gameplay with
+            Marks = marks
+            HintOpt = None
+            HintStatusOpt = None }
+
     static member private toggleMarkAt (position : Vector2i) (number : int) (gameplay : Gameplay) =
         if gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] && gameplay.Puzzle[position.Y, position.X] = 0 then
             let marks = Array2D.copy gameplay.Marks
@@ -128,6 +137,10 @@ type Gameplay =
                     let removedCount = removals |> List.sumBy (fun (_, numbers) -> Set.count numbers)
                     let gameplay = Gameplay.removeMarks removals gameplay
                     { gameplay with HintStatusOpt = Some ("Removed " + string removedCount + " pencil mark" + (if removedCount = 1 then "" else "s") + " by " + hint.Technique.Label + ".") }
+                | CorrectMarks corrections ->
+                    let correctedCount = List.length corrections
+                    let gameplay = Gameplay.correctMarks corrections gameplay
+                    { gameplay with HintStatusOpt = Some ("Corrected pencil marks in " + string correctedCount + " cell" + (if correctedCount = 1 then "" else "s") + ".") }
             | None ->
                 match SudokuHints.findFirst true (Gameplay.toBoardState gameplay) with
                 | Some hint ->
@@ -135,9 +148,14 @@ type Gameplay =
                         match hint.Action with
                         | PlaceNumber _ -> " Press Hint again to place it."
                         | RemoveMarks _ -> " Press Hint again to remove the marks."
+                        | CorrectMarks _ -> " Press Hint again to update them."
+                    let hintText =
+                        match hint.Action with
+                        | CorrectMarks _ -> "Pencil marks can be corrected."
+                        | _ -> hint.Label
                     { gameplay with
                         HintOpt = Some hint
-                        HintStatusOpt = Some (hint.Label + applyText)
+                        HintStatusOpt = Some (hintText + applyText)
                         SelectedCellOpt = Some hint.Target }
                 | None ->
                     if Gameplay.hasOpenCellsWithoutMarks gameplay

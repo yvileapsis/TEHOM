@@ -5,6 +5,19 @@ open Prime
 [<RequireQualifiedAccess>]
 module SudokuHints =
 
+    let private pencilMarkCorrections (state : SudokuBoardState) =
+        match SudokuGrid.correctedMarkSets state with
+        | (target, _) :: _ as corrections ->
+            let correctionPositions =
+                corrections
+                |> List.map fst
+                |> Set.ofList
+            [{ Target = target
+               Region = HintCells correctionPositions
+               Technique = PencilMarkCorrection
+               Action = CorrectMarks corrections }]
+        | [] -> []
+
     let private tryMakeHint (technique : HintTechnique) (region : HintRegion) (position : Vector2i) (number : int) (state : SudokuBoardState) =
         if state.Solution[position.Y, position.X] = number
         then Some { Target = position; Region = region; Technique = technique; Action = PlaceNumber (position, number) }
@@ -146,6 +159,51 @@ module SudokuHints =
         |> List.collect (fun block ->
             nakedSubsetsInUnit NakedPairBlock (HintBlock block) 2 (SudokuGrid.blockPositions block) state)
 
+    let private hiddenSubsetsInUnit (technique : HintTechnique) (size : int) (positions : Vector2i list) (state : SudokuBoardState) =
+        let positionsByNumber =
+            [1 .. 9]
+            |> List.choose (fun (number : int) ->
+                let candidatePositions =
+                    positions
+                    |> List.filter (fun (position : Vector2i) -> Set.contains number (SudokuGrid.workingCandidates state position))
+                let positionCount = List.length candidatePositions
+                if positionCount >= 2 && positionCount <= size then Some (number, candidatePositions)
+                else None)
+        SudokuGrid.combinations size positionsByNumber
+        |> List.choose (fun (subset : (int * Vector2i list) list) ->
+            let subsetNumbers =
+                subset
+                |> List.map fst
+                |> Set.ofList
+            let subsetPositions =
+                subset
+                |> List.collect snd
+                |> Set.ofList
+            if Set.count subsetPositions = size then
+                let eliminations =
+                    subsetPositions
+                    |> Set.toList
+                    |> List.map (fun (position : Vector2i) ->
+                        let candidates = SudokuGrid.workingCandidates state position
+                        (position, Set.difference candidates subsetNumbers))
+                tryMakeEliminationHint technique (HintCells subsetPositions) eliminations state
+            else None)
+
+    let private hiddenPairsInRows (state : SudokuBoardState) =
+        [0 .. 8]
+        |> List.collect (fun row ->
+            hiddenSubsetsInUnit HiddenPairRow 2 (SudokuGrid.rowPositions row) state)
+
+    let private hiddenPairsInColumns (state : SudokuBoardState) =
+        [0 .. 8]
+        |> List.collect (fun column ->
+            hiddenSubsetsInUnit HiddenPairColumn 2 (SudokuGrid.columnPositions column) state)
+
+    let private hiddenPairsInBlocks (state : SudokuBoardState) =
+        [for y in 0 .. 2 do for x in 0 .. 2 -> v2i x y]
+        |> List.collect (fun block ->
+            hiddenSubsetsInUnit HiddenPairBlock 2 (SudokuGrid.blockPositions block) state)
+
     let private nakedTriplesInRows (state : SudokuBoardState) =
         [0 .. 8]
         |> List.collect (fun row ->
@@ -160,6 +218,21 @@ module SudokuHints =
         [for y in 0 .. 2 do for x in 0 .. 2 -> v2i x y]
         |> List.collect (fun block ->
             nakedSubsetsInUnit NakedTripleBlock (HintBlock block) 3 (SudokuGrid.blockPositions block) state)
+
+    let private hiddenTriplesInRows (state : SudokuBoardState) =
+        [0 .. 8]
+        |> List.collect (fun row ->
+            hiddenSubsetsInUnit HiddenTripleRow 3 (SudokuGrid.rowPositions row) state)
+
+    let private hiddenTriplesInColumns (state : SudokuBoardState) =
+        [0 .. 8]
+        |> List.collect (fun column ->
+            hiddenSubsetsInUnit HiddenTripleColumn 3 (SudokuGrid.columnPositions column) state)
+
+    let private hiddenTriplesInBlocks (state : SudokuBoardState) =
+        [for y in 0 .. 2 do for x in 0 .. 2 -> v2i x y]
+        |> List.collect (fun block ->
+            hiddenSubsetsInUnit HiddenTripleBlock 3 (SudokuGrid.blockPositions block) state)
 
     let private pointingRowsOrColumns (state : SudokuBoardState) =
         [for blockY in 0 .. 2 do
@@ -283,7 +356,8 @@ module SudokuHints =
 
     let private hintGroups (allowFish : bool) =
         let basicGroups : (SudokuBoardState -> Hint list) list =
-            [fullHouseRows
+            [pencilMarkCorrections
+             fullHouseRows
              fullHouseColumns
              fullHouseBlocks
              nakedSingles
@@ -293,9 +367,15 @@ module SudokuHints =
              nakedPairsInRows
              nakedPairsInColumns
              nakedPairsInBlocks
+             hiddenPairsInRows
+             hiddenPairsInColumns
+             hiddenPairsInBlocks
              nakedTriplesInRows
              nakedTriplesInColumns
              nakedTriplesInBlocks
+             hiddenTriplesInRows
+             hiddenTriplesInColumns
+             hiddenTriplesInBlocks
              pointingRowsOrColumns
              claimingRowsOrColumns]
         if allowFish then

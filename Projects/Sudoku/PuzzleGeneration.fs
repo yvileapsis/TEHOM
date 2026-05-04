@@ -21,6 +21,14 @@ module PuzzleGeneration =
         { Hint : Hint
           Score : int }
 
+    type private PuzzleCandidate =
+        { Removed : int
+          Solution : int[,]
+          Puzzle : int[,]
+          Given : bool[,]
+          Profile : SolveProfile
+          OpportunityProfile : SolveProfile option }
+
     let private emptySolveProfile =
         { TechniqueCounts = Map.empty<HintTechnique, int>
           TotalSteps = 0
@@ -48,7 +56,9 @@ module PuzzleGeneration =
     let private isNakedSubset (technique : HintTechnique) =
         match technique with
         | NakedPairRow | NakedPairColumn | NakedPairBlock
-        | NakedTripleRow | NakedTripleColumn | NakedTripleBlock -> true
+        | HiddenPairRow | HiddenPairColumn | HiddenPairBlock
+        | NakedTripleRow | NakedTripleColumn | NakedTripleBlock
+        | HiddenTripleRow | HiddenTripleColumn | HiddenTripleBlock -> true
         | _ -> false
 
     let private isHiddenSingle (technique : HintTechnique) =
@@ -63,18 +73,22 @@ module PuzzleGeneration =
 
     let private techniqueRank (technique : HintTechnique) =
         match technique with
+        | PencilMarkCorrection -> -1
         | FullHouseRow | FullHouseColumn | FullHouseBlock -> 0
         | NakedSingle -> 1
         | HiddenSingleRow | HiddenSingleColumn | HiddenSingleBlock -> 2
         | NakedPairRow | NakedPairColumn | NakedPairBlock -> 3
-        | NakedTripleRow | NakedTripleColumn | NakedTripleBlock -> 4
-        | PointingRow | PointingColumn | ClaimingRow | ClaimingColumn -> 5
-        | XWingRow | XWingColumn | SwordfishRow | SwordfishColumn -> 6
+        | HiddenPairRow | HiddenPairColumn | HiddenPairBlock -> 4
+        | NakedTripleRow | NakedTripleColumn | NakedTripleBlock -> 5
+        | HiddenTripleRow | HiddenTripleColumn | HiddenTripleBlock -> 6
+        | PointingRow | PointingColumn | ClaimingRow | ClaimingColumn -> 7
+        | XWingRow | XWingColumn | SwordfishRow | SwordfishColumn -> 8
 
     let private removedMarkCount (hint : Hint) =
         match hint.Action with
         | RemoveMarks removals -> removals |> List.sumBy (fun (_, marks) -> Set.count marks)
         | PlaceNumber _ -> 0
+        | CorrectMarks _ -> 0
 
     let private removalGoals (hint : Hint) =
         match hint.Action with
@@ -83,11 +97,13 @@ module PuzzleGeneration =
                 for number in numbers -> (position, number)]
             |> Set.ofList
         | PlaceNumber _ -> Set.empty<(Vector2i * int)>
+        | CorrectMarks _ -> Set.empty<(Vector2i * int)>
 
     let private placementGoal (hint : Hint) =
         match hint.Action with
         | PlaceNumber (position, number) -> Some (position, number)
         | RemoveMarks _ -> None
+        | CorrectMarks _ -> None
 
     let private hasSimplerPlacementGoal (target : Vector2i) (number : int) (simplerHints : Hint list) =
         simplerHints
@@ -106,9 +122,11 @@ module PuzzleGeneration =
         match hint.Action with
         | RemoveMarks _ -> profile.CurrentEliminationChain + 1
         | PlaceNumber _ -> 0
+        | CorrectMarks _ -> 0
 
     let private scoreSimpleHint (hint : Hint) (nextEliminationChain : int) =
         match hint.Action with
+        | CorrectMarks _ -> 0
         | RemoveMarks _ when isPointingOrClaiming hint.Technique ->
             90 + removedMarkCount hint * 6 + nextEliminationChain * 16
         | RemoveMarks _ when isNakedSubset hint.Technique ->
@@ -125,6 +143,7 @@ module PuzzleGeneration =
     let private scoreGenerationHint (profile : SolveProfile) (allHints : Hint list) (hint : Hint) =
         let nextChain = nextEliminationChain hint profile
         match hint.Action with
+        | CorrectMarks _ -> 0
         | RemoveMarks _ ->
             let novelGoals = Set.difference (removalGoals hint) (simplerRemovalGoals hint allHints)
             let novelCount = Set.count novelGoals
@@ -174,6 +193,7 @@ module PuzzleGeneration =
             match hint.Action with
             | RemoveMarks _ -> true
             | PlaceNumber _ -> false
+            | CorrectMarks _ -> false
         let currentEliminationChain =
             if isElimination then profile.CurrentEliminationChain + 1
             else 0
@@ -220,76 +240,162 @@ module PuzzleGeneration =
     let private buildPuzzleFromSolution (difficulty : Difficulty) (solution : int[,]) =
         let puzzle = Array2D.copy solution
         let given = Array2D.create 9 9 true
-        let holes = SudokuGrid.shuffle SudokuGrid.allPositions
         let targetReached (removed : int) =
             match difficulty.TargetHoles with
             | Some holes -> removed >= holes
             | None -> false
-        let rec removeCells (removed : int) (profile : SolveProfile) (positions : Vector2i list) =
-            if targetReached removed then (removed, Array2D.copy puzzle, Array2D.copy given, profile)
+
+        let rec removeCellsInPass (removed : int) (profile : SolveProfile) (acceptedInPass : int) (positions : Vector2i list) =
+            if targetReached removed then (removed, profile, acceptedInPass)
             else
                 match positions with
-                | [] -> (removed, Array2D.copy puzzle, Array2D.copy given, profile)
+                | [] -> (removed, profile, acceptedInPass)
                 | position :: remaining ->
-                    let value = puzzle[position.Y, position.X]
-                    puzzle[position.Y, position.X] <- 0
-                    given[position.Y, position.X] <- false
-                    match solveHardFirstNoFish solution puzzle given with
-                    | Some profile -> removeCells (removed + 1) profile remaining
-                    | None ->
-                        puzzle[position.Y, position.X] <- value
-                        given[position.Y, position.X] <- true
-                        removeCells removed profile remaining
-        removeCells 0 emptySolveProfile holes
+                    if given[position.Y, position.X] then
+                        let value = puzzle[position.Y, position.X]
+                        puzzle[position.Y, position.X] <- 0
+                        given[position.Y, position.X] <- false
+                        match solveSimpleFirstNoFish solution puzzle given with
+                        | Some profile -> removeCellsInPass (removed + 1) profile (acceptedInPass + 1) remaining
+                        | None ->
+                            puzzle[position.Y, position.X] <- value
+                            given[position.Y, position.X] <- true
+                            removeCellsInPass removed profile acceptedInPass remaining
+                    else removeCellsInPass removed profile acceptedInPass remaining
 
-    let private withSimpleFirstPenalty (solution : int[,]) (puzzle : int[,]) (given : bool[,]) (profile : SolveProfile) =
-        match solveSimpleFirstNoFish solution puzzle given with
-        | Some simpleProfile ->
-            let placementSteps = simpleProfile.TotalSteps - simpleProfile.EliminationSteps
-            let noPointingPenalty = if simpleProfile.PointingClaimingSteps = 0 then 500 else 0
-            let shortChainPenalty = if simpleProfile.MaxEliminationChain < 2 then 250 else 0
-            let penalty = simpleProfile.HiddenSingleSteps * 18 + placementSteps * 3 + noPointingPenalty + shortChainPenalty
-            { profile with InterestScore = profile.InterestScore - penalty }
-        | None -> profile
+        let rec removeUntilDone (removed : int) (profile : SolveProfile) =
+            let positions = SudokuGrid.shuffle SudokuGrid.allPositions
+            let (removed, profile, acceptedInPass) = removeCellsInPass removed profile 0 positions
+            match difficulty.TargetHoles with
+            | Some _ ->
+                if targetReached removed || acceptedInPass = 0 then (removed, Array2D.copy puzzle, Array2D.copy given, profile)
+                else removeUntilDone removed profile
+            | None ->
+                if acceptedInPass > 0 then removeUntilDone removed profile
+                else (removed, Array2D.copy puzzle, Array2D.copy given, profile)
+
+        removeUntilDone 0 emptySolveProfile
+
+    let private placementStepCount (profile : SolveProfile) =
+        profile.TotalSteps - profile.EliminationSteps
+
+    let private liveComplexityTier (profile : SolveProfile) =
+        if profile.PointingClaimingSteps > 0 then 2
+        elif profile.NakedSubsetSteps > 0 || profile.MaxEliminationChain >= 2 then 1
+        else 0
+
+    let private scoreLiveProfile (difficulty : Difficulty) (removed : int) (profile : SolveProfile) =
+        let placementSteps = placementStepCount profile
+        let complexityScore =
+            profile.PointingClaimingSteps * 1400 +
+            profile.NakedSubsetSteps * 650 +
+            profile.MaxEliminationChain * 300 +
+            profile.EliminationSteps * 80
+        let hiddenSinglePenalty =
+            match difficulty with
+            | Hard -> profile.HiddenSingleSteps * 42
+            | _ -> profile.HiddenSingleSteps * 18
+        let placementPenalty =
+            match difficulty with
+            | Hard -> placementSteps * 8
+            | _ -> placementSteps * 3
+        let simplePenalty = hiddenSinglePenalty + placementPenalty
+        let emptyEliminationPenalty =
+            if profile.EliminationSteps = 0 then
+                match difficulty with
+                | Hard -> 1500
+                | _ -> 250
+            else 0
+        let noComplexityPenalty =
+            match difficulty with
+            | Hard when liveComplexityTier profile = 0 -> 1800
+            | _ -> 0
+        let shortChainPenalty =
+            match difficulty with
+            | Hard when profile.MaxEliminationChain < 2 -> 700
+            | _ -> 0
+        let removedScore =
+            match difficulty with
+            | Hard -> removed * 2
+            | _ -> removed * 20
+        complexityScore + removedScore - simplePenalty - emptyEliminationPenalty - noComplexityPenalty - shortChainPenalty
+
+    let private withLiveGenerationScore (difficulty : Difficulty) (removed : int) (profile : SolveProfile) =
+        { profile with InterestScore = scoreLiveProfile difficulty removed profile }
+
+    let private makeOpportunityProfile (difficulty : Difficulty) (solution : int[,]) (puzzle : int[,]) (given : bool[,]) =
+        match difficulty with
+        | Hard -> solveHardFirstNoFish solution puzzle given
+        | _ -> None
+
+    let private opportunityScore (profileOpt : SolveProfile option) =
+        match profileOpt with
+        | Some profile ->
+            profile.PointingClaimingSteps * 50 +
+            profile.NakedSubsetSteps * 30 +
+            profile.MaxEliminationChain * 20 +
+            profile.EliminationSteps * 10
+        | None -> -1000
 
     let private generationSampleCount (difficulty : Difficulty) =
         match difficulty with
         | Trivial -> 1
         | Easy -> 4
         | Normal -> 8
-        | Hard -> 6
+        | Hard -> 3
 
     let private hasReachedHoleTarget (difficulty : Difficulty) (removed : int) =
         match difficulty.TargetHoles with
         | Some holes -> removed >= holes
         | None -> false
 
-    let private isBetterPuzzleCandidate (difficulty : Difficulty) (candidate : int * int[,] * int[,] * bool[,] * SolveProfile) (current : int * int[,] * int[,] * bool[,] * SolveProfile) =
-        let (candidateRemoved, _, _, _, candidateProfile) = candidate
-        let (currentRemoved, _, _, _, currentProfile) = current
-        let candidateComplete = hasReachedHoleTarget difficulty candidateRemoved
-        let currentComplete = hasReachedHoleTarget difficulty currentRemoved
+    let private isBetterPuzzleCandidate (difficulty : Difficulty) (candidate : PuzzleCandidate) (current : PuzzleCandidate) =
+        let candidateComplete = hasReachedHoleTarget difficulty candidate.Removed
+        let currentComplete = hasReachedHoleTarget difficulty current.Removed
         if candidateComplete <> currentComplete then candidateComplete
-        elif candidateProfile.InterestScore <> currentProfile.InterestScore then candidateProfile.InterestScore > currentProfile.InterestScore
-        elif candidateProfile.PointingClaimingSteps <> currentProfile.PointingClaimingSteps then candidateProfile.PointingClaimingSteps > currentProfile.PointingClaimingSteps
-        elif candidateProfile.MaxEliminationChain <> currentProfile.MaxEliminationChain then candidateProfile.MaxEliminationChain > currentProfile.MaxEliminationChain
-        elif candidateRemoved <> currentRemoved then candidateRemoved > currentRemoved
-        else candidateProfile.HiddenSingleSteps < currentProfile.HiddenSingleSteps
+        else
+            match difficulty with
+            | Hard ->
+                let candidateTier = liveComplexityTier candidate.Profile
+                let currentTier = liveComplexityTier current.Profile
+                let candidateOpportunityScore = opportunityScore candidate.OpportunityProfile
+                let currentOpportunityScore = opportunityScore current.OpportunityProfile
+                if candidateTier <> currentTier then candidateTier > currentTier
+                elif candidate.Profile.InterestScore <> current.Profile.InterestScore then candidate.Profile.InterestScore > current.Profile.InterestScore
+                elif candidate.Profile.PointingClaimingSteps <> current.Profile.PointingClaimingSteps then candidate.Profile.PointingClaimingSteps > current.Profile.PointingClaimingSteps
+                elif candidate.Profile.NakedSubsetSteps <> current.Profile.NakedSubsetSteps then candidate.Profile.NakedSubsetSteps > current.Profile.NakedSubsetSteps
+                elif candidate.Profile.MaxEliminationChain <> current.Profile.MaxEliminationChain then candidate.Profile.MaxEliminationChain > current.Profile.MaxEliminationChain
+                elif candidate.Profile.EliminationSteps <> current.Profile.EliminationSteps then candidate.Profile.EliminationSteps > current.Profile.EliminationSteps
+                elif candidate.Profile.HiddenSingleSteps <> current.Profile.HiddenSingleSteps then candidate.Profile.HiddenSingleSteps < current.Profile.HiddenSingleSteps
+                elif candidateOpportunityScore <> currentOpportunityScore then candidateOpportunityScore > currentOpportunityScore
+                else candidate.Removed > current.Removed
+            | _ ->
+                if candidate.Profile.InterestScore <> current.Profile.InterestScore then candidate.Profile.InterestScore > current.Profile.InterestScore
+                elif candidate.Profile.PointingClaimingSteps <> current.Profile.PointingClaimingSteps then candidate.Profile.PointingClaimingSteps > current.Profile.PointingClaimingSteps
+                elif candidate.Profile.MaxEliminationChain <> current.Profile.MaxEliminationChain then candidate.Profile.MaxEliminationChain > current.Profile.MaxEliminationChain
+                elif candidate.Removed <> current.Removed then candidate.Removed > current.Removed
+                else candidate.Profile.HiddenSingleSteps < current.Profile.HiddenSingleSteps
 
-    let private toGeneratedPuzzle (solution : int[,]) (puzzle : int[,]) (given : bool[,]) (profile : SolveProfile) =
-        { Solution = solution
-          Puzzle = puzzle
-          Given = given
-          TechniqueCounts = profile.TechniqueCounts
-          GenerationScore = profile.InterestScore
-          MaxEliminationChain = profile.MaxEliminationChain }
+    let private toGeneratedPuzzle (candidate : PuzzleCandidate) =
+        { Solution = candidate.Solution
+          Puzzle = candidate.Puzzle
+          Given = candidate.Given
+          TechniqueCounts = candidate.Profile.TechniqueCounts
+          GenerationScore = candidate.Profile.InterestScore
+          MaxEliminationChain = candidate.Profile.MaxEliminationChain }
 
     let make (difficulty : Difficulty) =
-        let rec tryMake (samplesRemaining : int) (bestOpt : (int * int[,] * int[,] * bool[,] * SolveProfile) option) =
+        let rec tryMake (samplesRemaining : int) (bestOpt : PuzzleCandidate option) =
             let solution = SudokuGrid.makeSolvedBoard ()
             let (removed, puzzle, given, profile) = buildPuzzleFromSolution difficulty solution
-            let profile = withSimpleFirstPenalty solution puzzle given profile
-            let candidate = (removed, solution, puzzle, given, profile)
+            let profile = withLiveGenerationScore difficulty removed profile
+            let candidate =
+                { Removed = removed
+                  Solution = solution
+                  Puzzle = puzzle
+                  Given = given
+                  Profile = profile
+                  OpportunityProfile = makeOpportunityProfile difficulty solution puzzle given }
             let bestOpt =
                 match bestOpt with
                 | Some best when isBetterPuzzleCandidate difficulty candidate best -> Some candidate
@@ -298,10 +404,16 @@ module PuzzleGeneration =
             if samplesRemaining > 1 then tryMake (samplesRemaining - 1) bestOpt
             else
                 match bestOpt with
-                | Some (_, solution, puzzle, given, profile) -> toGeneratedPuzzle solution puzzle given profile
+                | Some candidate -> toGeneratedPuzzle candidate
                 | None ->
                     let solution = SudokuGrid.makeSolvedBoard ()
                     let puzzle = Array2D.copy solution
                     let given = SudokuGrid.givenFromPuzzle puzzle
-                    toGeneratedPuzzle solution puzzle given emptySolveProfile
+                    { Removed = 0
+                      Solution = solution
+                      Puzzle = puzzle
+                      Given = given
+                      Profile = emptySolveProfile
+                      OpportunityProfile = None }
+                    |> toGeneratedPuzzle
         tryMake (generationSampleCount difficulty) None
