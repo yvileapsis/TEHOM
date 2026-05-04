@@ -24,10 +24,6 @@ module Assets =
         let PuzzleBankEasyFilePath = "Assets/Gameplay/PuzzleBankEasy.nupuzzles"
         let PuzzleBankNormalFilePath = "Assets/Gameplay/PuzzleBankNormal.nupuzzles"
         let PuzzleBankHardFilePath = "Assets/Gameplay/PuzzleBankHard.nupuzzles"
-        let PuzzleBankTrivial = asset<Raw> PackageName "PuzzleBankTrivial"
-        let PuzzleBankEasy = asset<Raw> PackageName "PuzzleBankEasy"
-        let PuzzleBankNormal = asset<Raw> PackageName "PuzzleBankNormal"
-        let PuzzleBankHard = asset<Raw> PackageName "PuzzleBankHard"
 
         let PuzzleBankFilePath difficulty =
             match difficulty with

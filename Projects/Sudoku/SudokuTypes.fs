@@ -143,9 +143,12 @@ type PuzzleSolveStep =
       EliminationChain : int
       RemovedMarkCount : int }
 
-// this contains the aggregate ranking information produced while generating a puzzle.
-type PuzzleRanking =
-    { RemovedCells : int
+// this contains a generated puzzle together with its persisted bank number and ranking profile.
+type GeneratedPuzzle =
+    { Number : int
+      Solution : int list
+      Puzzle : int list
+      Given : bool list
       TechniqueCounts : Map<HintTechnique, int>
       TotalSteps : int
       EliminationSteps : int
@@ -154,34 +157,13 @@ type PuzzleRanking =
       HiddenSingleSteps : int
       FishSteps : int
       MaxEliminationChain : int
+      RemovedCells : int
       GenerationScore : int
       OpportunityScoreOpt : int option
       SolveTrace : PuzzleSolveStep list }
-
-// this contains a generated puzzle and the solver profile selected for it.
-type GeneratedPuzzle =
-    { Solution : int[,]
-      Puzzle : int[,]
-      Given : bool[,]
-      PuzzleNumberOpt : int option
-      TechniqueCounts : Map<HintTechnique, int>
-      GenerationScore : int
-      MaxEliminationChain : int
-      Ranking : PuzzleRanking }
-
-// this contains one serialized puzzle bank entry. Grids are flattened row-major to keep the bank text simple.
-type PuzzleBankEntry =
-    { Number : int
-      Puzzle : int list
-      Solution : int list
-      Given : bool list
-      TechniqueCounts : Map<HintTechnique, int>
-      GenerationScore : int
-      MaxEliminationChain : int
-      Ranking : PuzzleRanking }
 
 // this contains the serialized bank for a single difficulty.
 type PuzzleBankData =
     { SchemaVersion : int
       Difficulty : Difficulty
-      Puzzles : PuzzleBankEntry list }
+      Puzzles : GeneratedPuzzle list }

@@ -21,13 +21,10 @@ type Gameplay =
       Marks : Set<int>[,]
       SelectedCellOpt : Vector2i option
       Difficulty : Difficulty
-      PuzzleNumberOpt : int option
       PencilMode : bool
       HintOpt : Hint option
       HintStatusOpt : string option
-      TechniqueCounts : Map<HintTechnique, int>
-      GenerationScore : int
-      MaxEliminationChain : int
+      PuzzleNumber : int
       Score : int }
 
     member this.BoardSize = v2iDup 9
@@ -37,6 +34,24 @@ type Gameplay =
 
     member this.HasConflict (position : Vector2i) (value : int) =
         SudokuGrid.hasConflict this.Puzzle position value
+
+    static member private gridFromFlat (values : int list) =
+        let grid = Array2D.zeroCreate<int> 9 9
+        values
+        |> List.iteri (fun i value ->
+            let y = i / 9
+            let x = i % 9
+            if y < 9 then grid[y, x] <- value)
+        grid
+
+    static member private boolGridFromFlat (values : bool list) =
+        let grid = Array2D.zeroCreate<bool> 9 9
+        values
+        |> List.iteri (fun i value ->
+            let y = i / 9
+            let x = i % 9
+            if y < 9 then grid[y, x] <- value)
+        grid
 
     static member private toBoardState (gameplay : Gameplay) =
         { Puzzle = gameplay.Puzzle
@@ -168,29 +183,22 @@ type Gameplay =
         else gameplay
 
     static member private inertGenerated : GeneratedPuzzle =
-        let puzzle = Array2D.zeroCreate<int> 9 9
-        let given = Array2D.create 9 9 false
-        let ranking =
-            { RemovedCells = 0
-              TechniqueCounts = Map.empty
-              TotalSteps = 0
-              EliminationSteps = 0
-              PointingClaimingSteps = 0
-              NakedSubsetSteps = 0
-              HiddenSingleSteps = 0
-              FishSteps = 0
-              MaxEliminationChain = 0
-              GenerationScore = 0
-              OpportunityScoreOpt = None
-              SolveTrace = [] }
-        { Solution = Array2D.zeroCreate<int> 9 9
-          Puzzle = puzzle
-          Given = given
-          PuzzleNumberOpt = None
+        { Number = 0
+          Solution = List.replicate 81 0
+          Puzzle = List.replicate 81 0
+          Given = List.replicate 81 false
           TechniqueCounts = Map.empty
+          TotalSteps = 0
+          EliminationSteps = 0
+          PointingClaimingSteps = 0
+          NakedSubsetSteps = 0
+          HiddenSingleSteps = 0
+          FishSteps = 0
+          RemovedCells = 0
           GenerationScore = 0
           MaxEliminationChain = 0
-          Ranking = ranking }
+          OpportunityScoreOpt = None
+          SolveTrace = [] }
 
     static member make (difficulty : Difficulty) (score : int) =
         let generated : GeneratedPuzzle =
@@ -199,19 +207,16 @@ type Gameplay =
             | None -> PuzzleGeneration.make difficulty
         { GameplayTime = 0L
           GameplayState = Playing
-          Puzzle = generated.Puzzle
-          Solution = generated.Solution
-          Given = generated.Given
+          Puzzle = Gameplay.gridFromFlat generated.Puzzle
+          Solution = Gameplay.gridFromFlat generated.Solution
+          Given = Gameplay.boolGridFromFlat generated.Given
           Marks = SudokuGrid.makeMarks ()
           SelectedCellOpt = Some (v2i 0 0)
           Difficulty = difficulty
-          PuzzleNumberOpt = generated.PuzzleNumberOpt
           PencilMode = false
           HintOpt = None
           HintStatusOpt = None
-          TechniqueCounts = generated.TechniqueCounts
-          GenerationScore = generated.GenerationScore
-          MaxEliminationChain = generated.MaxEliminationChain
+          PuzzleNumber = generated.Number
           Score = score }
 
     // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
@@ -219,19 +224,16 @@ type Gameplay =
         let generated = Gameplay.inertGenerated
         { GameplayTime = 0L
           GameplayState = Quit
-          Puzzle = generated.Puzzle
-          Solution = generated.Solution
-          Given = generated.Given
+          Puzzle = Gameplay.gridFromFlat generated.Puzzle
+          Solution = Gameplay.gridFromFlat generated.Solution
+          Given = Gameplay.boolGridFromFlat generated.Given
           Marks = SudokuGrid.makeMarks ()
           SelectedCellOpt = None
           Difficulty = Normal
-          PuzzleNumberOpt = generated.PuzzleNumberOpt
           PencilMode = false
           HintOpt = None
           HintStatusOpt = None
-          TechniqueCounts = generated.TechniqueCounts
-          GenerationScore = generated.GenerationScore
-          MaxEliminationChain = generated.MaxEliminationChain
+          PuzzleNumber = generated.Number
           Score = 0 }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
@@ -357,9 +359,9 @@ type GameplayDispatcher () =
         else color 0.18f 0.22f 0.27f 1.0f
 
     static let puzzleHeaderText (gameplay : Gameplay) =
-        match gameplay.PuzzleNumberOpt with
-        | Some number -> "Puzzle #" + string number + " - " + gameplay.Difficulty.Label
-        | None -> "Puzzle: Live - " + gameplay.Difficulty.Label
+        if gameplay.PuzzleNumber > 0
+        then "Puzzle #" + string gameplay.PuzzleNumber + " - " + gameplay.Difficulty.Label
+        else "Puzzle: Live - " + gameplay.Difficulty.Label
 
     // here we define the screen's fallback model depending on whether screen is selected
     override this.GetFallbackModel (_, screen, world) =

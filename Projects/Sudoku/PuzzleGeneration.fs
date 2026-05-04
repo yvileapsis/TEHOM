@@ -30,6 +30,10 @@ module PuzzleGeneration =
           Profile : SolveProfile
           OpportunityProfile : SolveProfile option }
 
+    let private flattenGrid (grid : 'a[,]) =
+        [for y in 0 .. 8 do
+            for x in 0 .. 8 -> grid[y, x]]
+
     let private emptySolveProfile =
         { TechniqueCounts = Map.empty<HintTechnique, int>
           TotalSteps = 0
@@ -387,8 +391,11 @@ module PuzzleGeneration =
                 elif candidate.Removed <> current.Removed then candidate.Removed > current.Removed
                 else candidate.Profile.HiddenSingleSteps < current.Profile.HiddenSingleSteps
 
-    let private toPuzzleRanking (candidate : PuzzleCandidate) =
-        { RemovedCells = candidate.Removed
+    let private toGeneratedPuzzle (candidate : PuzzleCandidate) : GeneratedPuzzle =
+        { Number = 0
+          Solution = flattenGrid candidate.Solution
+          Puzzle = flattenGrid candidate.Puzzle
+          Given = flattenGrid candidate.Given
           TechniqueCounts = candidate.Profile.TechniqueCounts
           TotalSteps = candidate.Profile.TotalSteps
           EliminationSteps = candidate.Profile.EliminationSteps
@@ -397,20 +404,10 @@ module PuzzleGeneration =
           HiddenSingleSteps = candidate.Profile.HiddenSingleSteps
           FishSteps = candidate.Profile.FishSteps
           MaxEliminationChain = candidate.Profile.MaxEliminationChain
+          RemovedCells = candidate.Removed
           GenerationScore = candidate.Profile.InterestScore
           OpportunityScoreOpt = candidate.OpportunityProfile |> Option.map (fun profile -> opportunityScore (Some profile))
           SolveTrace = List.rev candidate.Profile.TraceReversed }
-
-    let private toGeneratedPuzzle (candidate : PuzzleCandidate) : GeneratedPuzzle =
-        let ranking = toPuzzleRanking candidate
-        { Solution = candidate.Solution
-          Puzzle = candidate.Puzzle
-          Given = candidate.Given
-          PuzzleNumberOpt = None
-          TechniqueCounts = ranking.TechniqueCounts
-          GenerationScore = ranking.GenerationScore
-          MaxEliminationChain = ranking.MaxEliminationChain
-          Ranking = ranking }
 
     let make (difficulty : Difficulty) =
         let rec tryMake (samplesRemaining : int) (bestOpt : PuzzleCandidate option) =
