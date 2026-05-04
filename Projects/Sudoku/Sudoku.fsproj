@@ -51,6 +51,10 @@
 		<Compile Include="Assets.fs" />
 		<Compile Include="Simulants.fs" />
 		<Compile Include="Events.fs" />
+		<Compile Include="SudokuTypes.fs" />
+		<Compile Include="SudokuGrid.fs" />
+		<Compile Include="SudokuHints.fs" />
+		<Compile Include="PuzzleGeneration.fs" />
 		<Compile Include="Gameplay.fs" />
 		<Compile Include="Sudoku.fs" />
 		<Compile Include="SudokuPlugin.fs" />
