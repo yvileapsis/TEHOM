@@ -60,6 +60,7 @@ module Hl =
         | Bc5
         | Astc
         | D32f
+        | D16Unorm
         | D32fs8ui
         | D24s8ui
 
@@ -76,6 +77,7 @@ module Hl =
             | Bc5 -> VkFormat.Bc5UnormBlock
             | Astc -> VkFormat.Astc4x4UnormBlock
             | D32f -> VkFormat.D32Sfloat
+            | D16Unorm -> VkFormat.D16Unorm
             | D32fs8ui -> VkFormat.D32SfloatS8Uint
             | D24s8ui -> VkFormat.D24UnormS8Uint
 
@@ -92,6 +94,7 @@ module Hl =
             | Bc5 -> VkImageAspectFlags.Color
             | Astc -> VkImageAspectFlags.Color
             | D32f -> VkImageAspectFlags.Depth
+            | D16Unorm -> VkImageAspectFlags.Depth
             | D32fs8ui -> VkImageAspectFlags.Depth ||| VkImageAspectFlags.Stencil
             | D24s8ui -> VkImageAspectFlags.Depth ||| VkImageAspectFlags.Stencil
         
@@ -111,28 +114,25 @@ module Hl =
                 let y = if height % 4 = 0 then height else (height / 4 + 1) * 4
                 x * y
             | D32f -> width * height * 4
+            | D16Unorm -> width * height * 2
             | D32fs8ui -> width * height * 5
             | D24s8ui -> width * height * 4
 
-        /// Determine if format is supported for use as an attachment.
-        static member supportsAttachment vkPhysicalDevice format =
-            let requiredFeatures =
-                match format with
-                | Rgba8
-                | Rgba16f
-                | Rgb16f
-                | Rg32f
-                | R16f
-                | R32f
-                | Bc3
-                | Bc5
-                | Astc -> VkFormatFeatureFlags.BlitSrc ||| VkFormatFeatureFlags.BlitDst ||| VkFormatFeatureFlags.ColorAttachment ||| VkFormatFeatureFlags.SampledImage
-                | D32f
-                | D32fs8ui
-                | D24s8ui -> VkFormatFeatureFlags.BlitSrc ||| VkFormatFeatureFlags.BlitDst ||| VkFormatFeatureFlags.DepthStencilAttachment
+        /// Determine if format supports the given features.
+        static member private supportsFeatures (vkPhysicalDevice : VkPhysicalDevice) (format : ImageFormat) (requiredFeatures : VkFormatFeatureFlags) =
             let mutable properties = Unchecked.defaultof<VkFormatProperties>
             Vulkan.vkGetPhysicalDeviceFormatProperties (vkPhysicalDevice, format.VkFormat, &properties)
             properties.optimalTilingFeatures &&& requiredFeatures = requiredFeatures
+
+        /// Determine if format is supported for use as a color attachment.
+        static member supportsColorAttachment (vkPhysicalDevice : VkPhysicalDevice) (format : ImageFormat) =
+            ImageFormat.supportsFeatures
+                vkPhysicalDevice format
+                (VkFormatFeatureFlags.BlitSrc ||| VkFormatFeatureFlags.BlitDst ||| VkFormatFeatureFlags.ColorAttachment ||| VkFormatFeatureFlags.SampledImage)
+
+        /// Determine if format is supported for use as a depth attachment.
+        static member supportsDepthAttachment (vkPhysicalDevice : VkPhysicalDevice) (format : ImageFormat) =
+            ImageFormat.supportsFeatures vkPhysicalDevice format VkFormatFeatureFlags.DepthStencilAttachment
     
     /// The pixel format of an image.
     type PixelFormat =
@@ -291,9 +291,9 @@ module Hl =
         | BulkDescriptorIndexed
         | BulkSetIndexed
     
-    /// Check if an image format is supported for attachments, falling back to a standard format where possible.
+    /// Check if an image format is supported for color attachments, falling back to a standard format where possible.
     let rec CheckAttachmentFormat (vkPhysicalDevice, format : ImageFormat) =
-        if not (ImageFormat.supportsAttachment vkPhysicalDevice format) then
+        if not (ImageFormat.supportsColorAttachment vkPhysicalDevice format) then
             
             // NOTE: DJL: format fallbacks must not be ints for blit conversion.
             let (formatFallback : ImageFormat) =
@@ -312,15 +312,32 @@ module Hl =
                     
                     // NOTE: DJL: for spec requirements, see https://docs.vulkan.org/spec/latest/chapters/formats.html#features-required-format-support.
                     Log.fail ("Vulkan attachment image format '" + scstring format.VkFormat + "' support is absent but required. Further, it's a requirement in the Vulkan specification!")
-                | D32f ->
-                    CheckAttachmentFormat (vkPhysicalDevice, D32fs8ui)
-                | D32fs8ui ->
-                    CheckAttachmentFormat (vkPhysicalDevice, D24s8ui)
+                | D32f
+                | D16Unorm
+                | D32fs8ui
                 | D24s8ui ->
-                    Log.fail "Could not find a suitable format for depth attachment textures."
+                    Log.fail "Depth image formats must be checked with CheckDepthAttachmentFormat."
             Log.warn ("Falling back to " + scstring formatFallback.VkFormat + " attachment format due to unavailability of " + scstring format.VkFormat + " attachment format.")
             formatFallback
         else format
+
+    /// Check if an image format is supported for depth attachments, falling back where possible.
+    let CheckDepthAttachmentFormat (vkPhysicalDevice, format : ImageFormat) =
+        let candidateFormats =
+            match format with
+            | D32f -> [|D32f; D16Unorm; D32fs8ui; D24s8ui|]
+            | D16Unorm -> [|D16Unorm; D32fs8ui; D24s8ui|]
+            | D32fs8ui -> [|D32fs8ui; D24s8ui|]
+            | D24s8ui -> [|D24s8ui|]
+            | _ -> Log.fail "Only depth image formats can be checked with CheckDepthAttachmentFormat."
+        match Array.tryFind (ImageFormat.supportsDepthAttachment vkPhysicalDevice) candidateFormats with
+        | Some formatFallback ->
+            if formatFallback <> format then
+                Log.warn ("Falling back to " + scstring formatFallback.VkFormat + " depth attachment format due to unavailability of " + scstring format.VkFormat + " depth attachment format.")
+            Log.infoOnce ("Using " + scstring formatFallback.VkFormat + " for depth attachment textures.")
+            formatFallback
+        | None ->
+            Log.fail "Could not find a suitable format for depth attachment textures."
     
     /// Convert VkExtensionProperties.extensionName to a string.
     /// TODO: see if we can inline functions like these once F# supports C#'s representation of this fixed buffer type.
@@ -1754,10 +1771,31 @@ module Hl =
         static member waitIdle (vkc : VulkanContext) =
             Vulkan.vkDeviceWaitIdle vkc.Device |> check
 
+        /// Configure macOS Vulkan ICD loading to prefer the application-local backend.
+        static member private configureMacOSVulkanIcd () =
+            if OperatingSystem.IsMacOS () then
+                let driverFiles = Environment.GetEnvironmentVariable "VK_DRIVER_FILES"
+                let icdFileNames = Environment.GetEnvironmentVariable "VK_ICD_FILENAMES"
+                if String.IsNullOrWhiteSpace driverFiles && String.IsNullOrWhiteSpace icdFileNames then
+                    let icdFileName =
+                        if Constants.Vulkan.MoltenVk
+                        then "MoltenVK_icd.json"
+                        else "libkosmickrisp_icd.json"
+                    let icdFilePath = Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "vulkan", "icd.d", icdFileName)
+                    if File.Exists icdFilePath then
+                        Environment.SetEnvironmentVariable ("VK_DRIVER_FILES", icdFilePath)
+                        Environment.SetEnvironmentVariable ("VK_ICD_FILENAMES", icdFilePath)
+                        Log.info ("Configured Vulkan loader ICD manifest: " + icdFilePath)
+                    else Log.warn ("Local Vulkan ICD manifest '" + icdFilePath + "' was not found; using Vulkan loader defaults.")
+                else Log.info "Vulkan loader ICD environment variables are already configured; using existing VK_DRIVER_FILES / VK_ICD_FILENAMES values."
+
         /// Attempt to create a VulkanContext.
         /// NOTE: this procedure is intended to be invoked from the main thread to satisfy the requirements of Mac and
         /// iOS surface creation, and possibly other platforms.
         static member tryCreate window =
+
+            // configure vulkan loader
+            VulkanContext.configureMacOSVulkanIcd ()
 
             // load vulkan; not vulkan function
             Vulkan.vkInitialize () |> check

@@ -29,7 +29,7 @@ module Attachment =
         let textureInternal =
             Texture.TextureInternal.create
                 Texture.MipmapNone (Texture.AttachmentDepth true) Texture.Texture2d optionalUsages
-                (Hl.CheckAttachmentFormat (vkc.VkPhysicalDevice, Hl.D32f)) Hl.Depth metadata vkc
+                (Hl.CheckDepthAttachmentFormat (vkc.VkPhysicalDevice, Hl.D32f)) Hl.Depth metadata vkc
         Texture.EagerTexture { TextureMetadata = Texture.TextureMetadata.empty; TextureInternal = textureInternal }
     
     /// Create general-purpose attachments.
