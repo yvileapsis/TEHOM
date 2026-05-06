@@ -5,11 +5,12 @@
 		<TargetFramework>net10.0</TargetFramework>
 		<ProjectGuid>{894E8EBE-2367-42B4-BAC2-F8FF23C55730}</ProjectGuid>
 		<PlatformTarget>AnyCPU</PlatformTarget>
+		<TargetPlatformIdentifier>$([MSBuild]::GetTargetPlatformIdentifier($(TargetFramework)))</TargetPlatformIdentifier>
 		<ServerGarbageCollection>True</ServerGarbageCollection>
 		<TieredPGO>True</TieredPGO>
 		<DisableFastUpToDateCheck>True</DisableFastUpToDateCheck>
-        <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-        <PostBuildEvent>dotnet "$(MSBuildProjectDirectory)/../../Nu/Nu.Pipe/bin/$(Configuration)/$(TargetFramework)/Nu.Pipe.dll" "$(MSBuildProjectDirectory)/" "$(MSBuildProjectDirectory)/bin/$(Configuration)/$(TargetFramework)/" "$(MSBuildProjectDirectory)/refinement/" "BcCompression" "False"</PostBuildEvent>
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+		<PostBuildEvent>dotnet "$(MSBuildProjectDirectory)/../../Nu/Nu.Pipe/bin/$(Configuration)/$(TargetFramework)/Nu.Pipe.dll" "$(MSBuildProjectDirectory)/" "$(MSBuildProjectDirectory)/bin/$(Configuration)/$(TargetFramework)/" "$(MSBuildProjectDirectory)/refinement/" "BcCompression" "False"</PostBuildEvent>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCpu'">
@@ -91,5 +92,33 @@
 		<ProjectReference Include="..\..\Nu\Nu.Math\Nu.Math.csproj" />
 		<ProjectReference Include="..\..\Nu\Nu.Spine\Nu.Spine.csproj" />
 	</ItemGroup>
+
+	<PropertyGroup>
+		<MacOSVulkanSdk></MacOSVulkanSdk>
+	</PropertyGroup>
+	<Target Name="CopyMacOSVulkanSdk" BeforeTargets="AssignTargetPaths" Condition="'$(TargetPlatformIdentifier)' == '' And $([System.OperatingSystem]::IsMacOS())">
+		<Exec Condition="'$(MacOSVulkanSdk)' == ''" Command="
+			if [ -x ~/.bash_profile ]
+			then source ~/.bash_profile
+			fi
+			if [ &quot;$VULKAN_SDK&quot; == &quot;&quot; ]
+			then VULKAN_SDK=`ls -d ~/VulkanSDK/* | grep -E &quot;[^/]+/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$&quot; | sort -V -r | head -n 1`
+			fi
+			echo &quot;$VULKAN_SDK&quot;" ConsoleToMsBuild="true">
+			<Output TaskParameter="ConsoleOutput" PropertyName="MacOSVulkanSdk" />
+		</Exec>
+		<Error Text="Please install the macOS Vulkan SDK. If installed to a non-default location, override the MacOSVulkanSdk property in this file." Condition="!$([System.IO.Directory]::Exists($(MacOSVulkanSdk)))" />
+		<ItemGroup>
+			<MacOSVulkanSdkDylib Include="$(MacOSVulkanSdk)/macOS/lib/*.dylib" />
+			<MacOSVulkanSdkIcdJson Include="$(MacOSVulkanSdk)/macOS/share/**/*_icd.json" />
+		</ItemGroup>
+		<Error Condition="'@(MacOSVulkanSdkDylib)'==''" Text="No macOS Vulkan SDK dylibs were found at '$(MacOSVulkanSdk)/macOS/lib/*.dylib'. Ensure MacOSVulkanSdk points to a valid Vulkan SDK installation." />
+		<Exec Command="mkdir -p &quot;$(OutDir)%(MacOSVulkanSdkDylib.RecursiveDir)&quot; &amp;&amp; ln -sfn &quot;%(MacOSVulkanSdkDylib.Identity)&quot; &quot;$(OutDir)%(MacOSVulkanSdkDylib.RecursiveDir)%(MacOSVulkanSdkDylib.Filename)%(MacOSVulkanSdkDylib.Extension)&quot;" />
+		<Copy SourceFiles="@(MacOSVulkanSdkIcdJson)" DestinationFiles="@(MacOSVulkanSdkIcdJson->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+		<ItemGroup>
+			<OutIcdJsonFile Include="$(OutDir)/vulkan/icd.d/*_icd.json" />
+		</ItemGroup>
+		<WriteLinesToFile File="%(OutIcdJsonFile.Identity)" Lines="$([System.IO.File]::ReadAllText('%(OutIcdJsonFile.Identity)').Replace('../../../lib/','../../'))" Overwrite="true" />
+	</Target>
 
 </Project>
