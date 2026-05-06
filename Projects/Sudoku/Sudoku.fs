@@ -11,13 +11,14 @@ type Sudoku =
     | Splash
     | Title
     | Credits
-    | Gameplay
+    | Gameplay of PuzzleSource
 
 // this is our top-level MMCC message type.
 type SudokuMessage =
     | ShowTitle
     | ShowCredits
-    | ShowGameplay
+    | ShowGeneratedGameplay
+    | ShowClassicGameplay
     interface Message
 
 // this is our top-level MMCC command type. Commands are used instead of messages when the world is to be transformed.
@@ -45,10 +46,11 @@ type SudokuDispatcher () =
             | Splash -> Desire Simulants.Splash
             | Title -> Desire Simulants.Title
             | Credits -> Desire Simulants.Credits
-            | Gameplay -> Desire Simulants.Gameplay
+            | Gameplay _ -> Desire Simulants.Gameplay
          if sudoku = Splash then Simulants.Splash.DeselectingEvent => ShowTitle
          Simulants.TitleCredits.ClickEvent => ShowCredits
-         Simulants.TitlePlay.ClickEvent => ShowGameplay
+         Simulants.TitlePlay.ClickEvent => ShowGeneratedGameplay
+         Simulants.TitleClassic.ClickEvent => ShowClassicGameplay
          Simulants.TitleExit.ClickEvent => Exit
          Simulants.CreditsBack.ClickEvent => ShowTitle
          Simulants.Gameplay.QuitEvent => ShowTitle]
@@ -58,7 +60,12 @@ type SudokuDispatcher () =
         match message with
         | ShowTitle -> just Title
         | ShowCredits -> just Credits
-        | ShowGameplay -> just Gameplay
+        | ShowGeneratedGameplay ->
+            GameplayStart.setSource Generated
+            just (Gameplay Generated)
+        | ShowClassicGameplay ->
+            GameplayStart.setSource Classic
+            just (Gameplay Classic)
 
     // here we handle the above commands
     override this.Command (_, command, _, world) =

@@ -8,49 +8,31 @@ open Nu
 [<RequireQualifiedAccess>]
 module PuzzleBank =
 
-    let SchemaVersion = 4
+    let SchemaVersion = 6
     let Difficulties = [Trivial; Easy; Normal; Hard]
 
     let private ioLock = obj ()
     let private queueLock = obj ()
-    let private queues = Dictionary<Difficulty, GeneratedPuzzle list> ()
+    let private queues = Dictionary<PuzzleSource * Difficulty, GeneratedPuzzle list> ()
 
     let private emptyData (difficulty : Difficulty) : PuzzleBankData =
         { SchemaVersion = SchemaVersion
           Difficulty = difficulty
           Puzzles = [] }
 
-    let private validPuzzleValue value =
-        value >= 0 && value <= 9
-
-    let private validSolutionValue value =
-        value >= 1 && value <= 9
-
-    let private hasGridShape values =
-        List.length values = 81
-
-    let private gridFromFlat (values : int list) =
-        let grid = Array2D.zeroCreate<int> 9 9
-        values
-        |> List.iteri (fun i value ->
-            let y = i / 9
-            let x = i % 9
-            grid[y, x] <- value)
-        grid
-
     let key (puzzle : GeneratedPuzzle) =
-        puzzle.Puzzle
-        |> List.map string
-        |> String.concat ""
+        puzzle.PuzzleKey
+
+    let private normalizePuzzleKeys (puzzle : GeneratedPuzzle) =
+        { puzzle with
+            PuzzleKey = PuzzleAnalysis.canonicalKey puzzle.Puzzle
+            SolutionKey = PuzzleAnalysis.canonicalKey puzzle.Solution }
 
     let private isValidPuzzle (puzzle : GeneratedPuzzle) =
-        if hasGridShape puzzle.Puzzle && hasGridShape puzzle.Solution && hasGridShape puzzle.Given then
-            List.forall validPuzzleValue puzzle.Puzzle &&
-            List.forall validSolutionValue puzzle.Solution &&
-            List.forall2 (fun value given -> given = (value <> 0)) puzzle.Puzzle puzzle.Given &&
-            List.forall2 (fun puzzle solution -> puzzle = 0 || puzzle = solution) puzzle.Puzzle puzzle.Solution &&
-            (puzzle.Solution |> gridFromFlat |> SudokuGrid.isSolved)
-        else false
+        PuzzleAnalysis.puzzleMatchesSolution puzzle.Puzzle puzzle.Solution &&
+        (puzzle.Solution |> PuzzleAnalysis.gridFromPuzzleString |> SudokuGrid.isSolved) &&
+        not (String.IsNullOrWhiteSpace puzzle.PuzzleKey) &&
+        not (String.IsNullOrWhiteSpace puzzle.SolutionKey)
 
     let private deduplicate puzzles =
         let (_, puzzles) =
@@ -71,6 +53,7 @@ module PuzzleBank =
             { data with
                 Puzzles =
                     data.Puzzles
+                    |> List.map normalizePuzzleKeys
                     |> List.filter isValidPuzzle
                     |> deduplicate
                     |> numberPuzzles }
@@ -115,6 +98,16 @@ module PuzzleBank =
         |> List.map (fun difficulty -> (difficulty, count difficulty))
         |> Map.ofList
 
+    let classicCount difficulty =
+        PuzzleCorpus.countsByDifficulty ()
+        |> Map.tryFind difficulty
+        |> Option.defaultValue 0
+
+    let classicCounts () =
+        Difficulties
+        |> List.map (fun difficulty -> (difficulty, classicCount difficulty))
+        |> Map.ofList
+
     let mergeGeneratedBatch (difficulty : Difficulty) (generated : GeneratedPuzzle list) =
         lock ioLock (fun () ->
             let data = readDataUnlocked difficulty
@@ -122,6 +115,7 @@ module PuzzleBank =
                 { data with
                     Puzzles =
                         data.Puzzles @ generated
+                        |> List.map normalizePuzzleKeys
                         |> List.filter isValidPuzzle
                         |> deduplicate }
             let data = writeDataUnlocked difficulty data
@@ -130,18 +124,24 @@ module PuzzleBank =
     let mergeGenerated difficulty generated =
         mergeGeneratedBatch difficulty [generated]
 
-    let tryTake difficulty =
+    let private puzzlesForSource source difficulty =
+        match source with
+        | Generated -> (read difficulty).Puzzles
+        | Classic -> PuzzleCorpus.entriesByDifficulty difficulty
+
+    let tryTake source difficulty =
         lock queueLock (fun () ->
-            match queues.TryGetValue difficulty with
+            let queueKey = (source, difficulty)
+            match queues.TryGetValue queueKey with
             | (true, puzzle :: puzzles) ->
-                queues[difficulty] <- puzzles
+                queues[queueKey] <- puzzles
                 Some puzzle
             | (true, []) | (false, _) ->
-                let puzzles = (read difficulty).Puzzles |> SudokuGrid.shuffle
+                let puzzles = puzzlesForSource source difficulty |> SudokuGrid.shuffle
                 match puzzles with
                 | puzzle :: puzzles ->
-                    queues[difficulty] <- puzzles
+                    queues[queueKey] <- puzzles
                     Some puzzle
                 | [] ->
-                    queues[difficulty] <- []
+                    queues[queueKey] <- []
                     None)

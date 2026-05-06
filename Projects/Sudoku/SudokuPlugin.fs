@@ -21,6 +21,15 @@ type SudokuPlugin () =
     static let mutable countsInitialized = false
     static let mutable cancellationSourceOpt : CancellationTokenSource option = None
     static let mutable generationTaskOpt : Task option = None
+    static let mutable importStatus = "Idle."
+    static let mutable importProcessed = 0
+    static let mutable importTotal = 0
+    static let mutable importSolved = 0
+    static let mutable importFailed = 0
+    static let mutable importSignatureKey = ""
+    static let mutable importLastError = ""
+    static let mutable importCancellationSourceOpt : CancellationTokenSource option = None
+    static let mutable importTaskOpt : Task option = None
 
     static member private isRunningUnlocked () =
         match generationTaskOpt with
@@ -36,14 +45,35 @@ type SudokuPlugin () =
         | Some task, None when task.IsCompleted ->
             generationTaskOpt <- None
         | _ -> ()
+        match importTaskOpt, importCancellationSourceOpt with
+        | Some task, Some cancellationSource when task.IsCompleted ->
+            cancellationSource.Dispose ()
+            importCancellationSourceOpt <- None
+            importTaskOpt <- None
+        | Some task, None when task.IsCompleted ->
+            importTaskOpt <- None
+        | _ -> ()
 
     static member private isRunning () =
         lock stateLock (fun () ->
             SudokuPlugin.cleanupCompletedUnlocked ()
             SudokuPlugin.isRunningUnlocked ())
 
+    static member private isImportRunningUnlocked () =
+        match importTaskOpt with
+        | Some task -> not task.IsCompleted
+        | None -> false
+
+    static member private isImportRunning () =
+        lock stateLock (fun () ->
+            SudokuPlugin.cleanupCompletedUnlocked ()
+            SudokuPlugin.isImportRunningUnlocked ())
+
     static member private setStatus status' =
         lock stateLock (fun () -> status <- status')
+
+    static member private setImportStatus status' =
+        lock stateLock (fun () -> importStatus <- status')
 
     static member private saveEntries difficulty target (entries : ResizeArray<GeneratedPuzzle>) =
         let data =
@@ -121,6 +151,64 @@ type SudokuPlugin () =
                 status <- "Canceling."
             | None -> ())
 
+    static member private runRoyleImport (cancellationToken : CancellationToken) =
+        try
+            lock stateLock (fun () ->
+                importStatus <- "Starting."
+                importProcessed <- 0
+                importTotal <- 0
+                importSolved <- 0
+                importFailed <- 0
+                importSignatureKey <- ""
+                importLastError <- "")
+            let manifest =
+                PuzzleCorpus.importRoyle
+                    Assets.Gameplay.Royle17SourceFilePath
+                    Assets.Gameplay.Royle17CorpusDirectoryPath
+                    cancellationToken
+                    (fun progress ->
+                        lock stateLock (fun () ->
+                            importTotal <- progress.Total
+                            importProcessed <- progress.Processed
+                            importSolved <- progress.Solved
+                            importFailed <- progress.Failed
+                            importSignatureKey <- progress.CurrentSignatureKey
+                            match progress.LastErrorOpt with
+                            | Some error -> importLastError <- error
+                            | None -> ()))
+            lock stateLock (fun () ->
+                importStatus <- $"Complete. Solved %i{manifest.SolvedCount}; failed %i{manifest.FailedCount}.")
+        with
+        | :? OperationCanceledException ->
+            SudokuPlugin.setImportStatus "Canceled."
+        | exn ->
+            SudokuPlugin.setImportStatus ("Failed: " + exn.Message)
+
+    static member private startRoyleImport () =
+        lock stateLock (fun () ->
+            SudokuPlugin.cleanupCompletedUnlocked ()
+            if not (SudokuPlugin.isImportRunningUnlocked ()) then
+                let cancellationSource = new CancellationTokenSource ()
+                importStatus <- "Starting."
+                importProcessed <- 0
+                importTotal <- 0
+                importSolved <- 0
+                importFailed <- 0
+                importSignatureKey <- ""
+                importLastError <- ""
+                importCancellationSourceOpt <- Some cancellationSource
+                importTaskOpt <-
+                    Some (Task.Run (Action (fun () ->
+                        SudokuPlugin.runRoyleImport cancellationSource.Token), cancellationSource.Token)))
+
+    static member private cancelRoyleImport () =
+        lock stateLock (fun () ->
+            match importCancellationSourceOpt with
+            | Some cancellationSource ->
+                cancellationSource.Cancel ()
+                importStatus <- "Canceling."
+            | None -> ())
+
     // this exposes different editing modes in the editor.
     override this.EditModes =
         Map.ofList
@@ -128,8 +216,13 @@ type SudokuPlugin () =
              "Title", Game.SetSudoku Title
              "Credits", Game.SetSudoku Credits
              "Gameplay", fun world ->
+                GameplayStart.setSource Generated
                 Simulants.Gameplay.SetGameplay Gameplay.initial world
-                Game.SetSudoku Gameplay world]
+                Game.SetSudoku (Gameplay Generated) world
+             "Classic Gameplay", fun world ->
+                GameplayStart.setSource Classic
+                Simulants.Gameplay.SetGameplay (Gameplay.make Classic Normal 0) world
+                Game.SetSudoku (Gameplay Classic) world]
 
     // this specifies which packages are automatically loaded at game start-up.
     override this.InitialPackages =
@@ -179,5 +272,46 @@ type SudokuPlugin () =
 
             ImGui.End ()
 
+            let importRunning = SudokuPlugin.isImportRunning ()
+            let importOpened = ImGui.Begin ("Sudoku Royle17 Import", ImGuiWindowFlags.NoNav)
+
+            if importOpened then
+
+                ImGui.Text ("Source: " + Assets.Gameplay.Royle17SourceFilePath)
+                ImGui.Text ("Output: " + Assets.Gameplay.Royle17CorpusDirectoryPath)
+
+                if importRunning then
+                    if ImGui.Button "Cancel Import" then SudokuPlugin.cancelRoyleImport ()
+                elif ImGui.Button "Import Royle17" then
+                    SudokuPlugin.startRoyleImport ()
+
+                let statusSnapshot, processedSnapshot, totalSnapshot, solvedSnapshot, failedSnapshot, signatureSnapshot, lastErrorSnapshot =
+                    lock stateLock (fun () ->
+                        importStatus,
+                        importProcessed,
+                        importTotal,
+                        importSolved,
+                        importFailed,
+                        importSignatureKey,
+                        importLastError)
+
+                ImGui.SameLine ()
+                ImGui.Text statusSnapshot
+                ImGui.Text $"Progress: %i{processedSnapshot} / %i{totalSnapshot}"
+                ImGui.Text $"Solved: %i{solvedSnapshot}   Failed: %i{failedSnapshot}"
+                if not (String.IsNullOrWhiteSpace signatureSnapshot) then
+                    ImGui.Text ("Signature: " + signatureSnapshot)
+                if not (String.IsNullOrWhiteSpace lastErrorSnapshot) then
+                    ImGui.Text ("Last error: " + lastErrorSnapshot)
+
+                let classicCounts = PuzzleBank.classicCounts ()
+                ImGui.Text "Imported classic counts"
+                for difficulty in PuzzleBank.Difficulties do
+                    let count = Map.tryFind difficulty classicCounts |> Option.defaultValue 0
+                    ImGui.Text $"%s{difficulty.Label}: %i{count}"
+
+            ImGui.End ()
+
     override this.CleanUp () =
         SudokuPlugin.cancelTopUp ()
+        SudokuPlugin.cancelRoyleImport ()

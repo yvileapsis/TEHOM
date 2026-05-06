@@ -28,6 +28,16 @@ type Difficulty =
         | Normal -> "Normal"
         | Hard -> "Hard"
 
+// this represents the source of playable puzzles.
+type PuzzleSource =
+    | Generated
+    | Classic
+
+    member this.Label =
+        match this with
+        | Generated -> "Generated"
+        | Classic -> "Classic"
+
 // this represents the area a hint is asking the player to inspect.
 type HintRegion =
     | HintCell of Vector2i
@@ -143,12 +153,13 @@ type PuzzleSolveStep =
       EliminationChain : int
       RemovedMarkCount : int }
 
-// this contains a generated puzzle together with its persisted bank number and ranking profile.
+// this contains a generated or imported puzzle together with its persisted bank number and ranking profile.
 type GeneratedPuzzle =
     { Number : int
-      Solution : int list
-      Puzzle : int list
-      Given : bool list
+      Puzzle : string
+      Solution : string
+      PuzzleKey : string
+      SolutionKey : string
       TechniqueCounts : Map<HintTechnique, int>
       TotalSteps : int
       EliminationSteps : int
@@ -159,11 +170,51 @@ type GeneratedPuzzle =
       MaxEliminationChain : int
       RemovedCells : int
       GenerationScore : int
-      OpportunityScoreOpt : int option
-      SolveTrace : PuzzleSolveStep list }
+      OpportunityScoreOpt : int option }
 
 // this contains the serialized bank for a single difficulty.
 type PuzzleBankData =
     { SchemaVersion : int
       Difficulty : Difficulty
       Puzzles : GeneratedPuzzle list }
+
+// this describes a chunk of imported corpus puzzles.
+type PuzzleCorpusChunk =
+    { SchemaVersion : int
+      SignatureKey : string
+      ChunkIndex : int
+      Puzzles : GeneratedPuzzle list }
+
+// this describes a chunk file in an imported corpus manifest.
+type PuzzleCorpusChunkInfo =
+    { SignatureKey : string
+      ChunkIndex : int
+      FilePath : string
+      PuzzleCount : int
+      DifficultyCounts : Map<Difficulty, int> }
+
+// this describes an imported puzzle corpus.
+type PuzzleCorpusManifest =
+    { SchemaVersion : int
+      SourceName : string
+      SourceFilePath : string
+      OutputDirectoryPath : string
+      TotalPuzzles : int
+      SolvedCount : int
+      FailedCount : int
+      GeneratedAt : string
+      Chunks : PuzzleCorpusChunkInfo list
+      DifficultyCounts : Map<Difficulty, int> }
+
+// this describes a puzzle that could not be imported into the corpus.
+type PuzzleCorpusFailure =
+    { LineNumber : int
+      Puzzle : string
+      Reason : string }
+
+// this describes the import failures persisted alongside a corpus manifest.
+type PuzzleCorpusFailureReport =
+    { SchemaVersion : int
+      SourceName : string
+      SourceFilePath : string
+      Failures : PuzzleCorpusFailure list }

@@ -24,6 +24,10 @@ module Assets =
         let PuzzleBankEasyFilePath = "Assets/Gameplay/PuzzleBankEasy.nupuzzles"
         let PuzzleBankNormalFilePath = "Assets/Gameplay/PuzzleBankNormal.nupuzzles"
         let PuzzleBankHardFilePath = "Assets/Gameplay/PuzzleBankHard.nupuzzles"
+        let Royle17SourceFilePath = "Assets/Gameplay/Royle17.txt"
+        let Royle17CorpusDirectoryPath = "Assets/Gameplay/Royle17Corpus"
+        let Royle17ManifestFilePath = Royle17CorpusDirectoryPath + "/Manifest.nucorpus"
+        let Royle17UnsolvedFilePath = Royle17CorpusDirectoryPath + "/Unsolved.nucorpus"
 
         let PuzzleBankFilePath difficulty =
             match difficulty with

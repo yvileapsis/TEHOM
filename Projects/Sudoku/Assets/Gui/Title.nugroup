@@ -13,15 +13,20 @@
     [Text "Sudoku"]]
    []]
   [ButtonDispatcher
-   [[Name Play] [Text Play]]
+   [[Name Play] [Text Generated]]
+   []]
+  [ButtonDispatcher
+   [[Name Classic]
+    [Position [0 -48 0]]
+    [Text Classic]]
    []]
   [ButtonDispatcher
    [[Name Credits]
-    [Position [0 -48 0]]
+    [Position [0 -96 0]]
     [Text Credits]]
    []]
   [ButtonDispatcher
    [[Name Exit]
-    [Position [0 -96 0]]
+    [Position [0 -144 0]]
     [Text Exit]]
    []]]]

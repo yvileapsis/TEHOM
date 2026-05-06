@@ -5,10 +5,23 @@ open Prime
 open Nu
 open Sudoku
 
+[<RequireQualifiedAccess>]
+module GameplayStart =
+
+    let private sourceLock = obj ()
+    let mutable private source = Generated
+
+    let setSource source' =
+        lock sourceLock (fun () -> source <- source')
+
+    let getSource () =
+        lock sourceLock (fun () -> source)
+
 // this represents the state of gameplay simulation.
 type GameplayState =
     | Playing
     | Won
+    | Unavailable
     | Quit
 
 // this is our MMCC model type representing gameplay.
@@ -20,6 +33,7 @@ type Gameplay =
       Given : bool[,]
       Marks : Set<int>[,]
       SelectedCellOpt : Vector2i option
+      PuzzleSource : PuzzleSource
       Difficulty : Difficulty
       PencilMode : bool
       HintOpt : Hint option
@@ -34,24 +48,6 @@ type Gameplay =
 
     member this.HasConflict (position : Vector2i) (value : int) =
         SudokuGrid.hasConflict this.Puzzle position value
-
-    static member private gridFromFlat (values : int list) =
-        let grid = Array2D.zeroCreate<int> 9 9
-        values
-        |> List.iteri (fun i value ->
-            let y = i / 9
-            let x = i % 9
-            if y < 9 then grid[y, x] <- value)
-        grid
-
-    static member private boolGridFromFlat (values : bool list) =
-        let grid = Array2D.zeroCreate<bool> 9 9
-        values
-        |> List.iteri (fun i value ->
-            let y = i / 9
-            let x = i % 9
-            if y < 9 then grid[y, x] <- value)
-        grid
 
     static member private toBoardState (gameplay : Gameplay) =
         { Puzzle = gameplay.Puzzle
@@ -184,9 +180,10 @@ type Gameplay =
 
     static member private inertGenerated : GeneratedPuzzle =
         { Number = 0
-          Solution = List.replicate 81 0
-          Puzzle = List.replicate 81 0
-          Given = List.replicate 81 false
+          Puzzle = PuzzleAnalysis.EmptyPuzzle
+          Solution = PuzzleAnalysis.EmptySolution
+          PuzzleKey = PuzzleAnalysis.EmptyPuzzle
+          SolutionKey = PuzzleAnalysis.EmptySolution
           TechniqueCounts = Map.empty
           TotalSteps = 0
           EliminationSteps = 0
@@ -197,21 +194,17 @@ type Gameplay =
           RemovedCells = 0
           GenerationScore = 0
           MaxEliminationChain = 0
-          OpportunityScoreOpt = None
-          SolveTrace = [] }
+          OpportunityScoreOpt = None }
 
-    static member make (difficulty : Difficulty) (score : int) =
-        let generated : GeneratedPuzzle =
-            match PuzzleBank.tryTake difficulty with
-            | Some generated -> generated
-            | None -> PuzzleGeneration.make difficulty
+    static member private makeFromPuzzle source difficulty score (generated : GeneratedPuzzle) =
         { GameplayTime = 0L
           GameplayState = Playing
-          Puzzle = Gameplay.gridFromFlat generated.Puzzle
-          Solution = Gameplay.gridFromFlat generated.Solution
-          Given = Gameplay.boolGridFromFlat generated.Given
+          Puzzle = PuzzleAnalysis.gridFromPuzzleString generated.Puzzle
+          Solution = PuzzleAnalysis.gridFromPuzzleString generated.Solution
+          Given = PuzzleAnalysis.givenFromPuzzleString generated.Puzzle
           Marks = SudokuGrid.makeMarks ()
           SelectedCellOpt = Some (v2i 0 0)
+          PuzzleSource = source
           Difficulty = difficulty
           PencilMode = false
           HintOpt = None
@@ -219,16 +212,42 @@ type Gameplay =
           PuzzleNumber = generated.Number
           Score = score }
 
+    static member private unavailable source difficulty score =
+        let generated = Gameplay.inertGenerated
+        { GameplayTime = 0L
+          GameplayState = Unavailable
+          Puzzle = PuzzleAnalysis.gridFromPuzzleString generated.Puzzle
+          Solution = PuzzleAnalysis.gridFromPuzzleString generated.Solution
+          Given = PuzzleAnalysis.givenFromPuzzleString generated.Puzzle
+          Marks = SudokuGrid.makeMarks ()
+          SelectedCellOpt = None
+          PuzzleSource = source
+          Difficulty = difficulty
+          PencilMode = false
+          HintOpt = None
+          HintStatusOpt = Some ("No imported " + difficulty.Label + " classic puzzle is available.")
+          PuzzleNumber = 0
+          Score = score }
+
+    static member make source difficulty score =
+        match PuzzleBank.tryTake source difficulty with
+        | Some generated -> Gameplay.makeFromPuzzle source difficulty score generated
+        | None ->
+            match source with
+            | Generated -> Gameplay.makeFromPuzzle source difficulty score (PuzzleGeneration.make difficulty)
+            | Classic -> Gameplay.unavailable source difficulty score
+
     // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
     static member empty =
         let generated = Gameplay.inertGenerated
         { GameplayTime = 0L
           GameplayState = Quit
-          Puzzle = Gameplay.gridFromFlat generated.Puzzle
-          Solution = Gameplay.gridFromFlat generated.Solution
-          Given = Gameplay.boolGridFromFlat generated.Given
+          Puzzle = PuzzleAnalysis.gridFromPuzzleString generated.Puzzle
+          Solution = PuzzleAnalysis.gridFromPuzzleString generated.Solution
+          Given = PuzzleAnalysis.givenFromPuzzleString generated.Puzzle
           Marks = SudokuGrid.makeMarks ()
           SelectedCellOpt = None
+          PuzzleSource = Generated
           Difficulty = Normal
           PencilMode = false
           HintOpt = None
@@ -237,7 +256,7 @@ type Gameplay =
           Score = 0 }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
-    static member initial = Gameplay.make Normal 0
+    static member initial = Gameplay.make Generated Normal 0
 
 // this is our gameplay MMCC message type.
 type GameplayMessage =
@@ -359,9 +378,13 @@ type GameplayDispatcher () =
         else color 0.18f 0.22f 0.27f 1.0f
 
     static let puzzleHeaderText (gameplay : Gameplay) =
-        if gameplay.PuzzleNumber > 0
-        then "Puzzle #" + string gameplay.PuzzleNumber + " - " + gameplay.Difficulty.Label
-        else "Puzzle: Live - " + gameplay.Difficulty.Label
+        match gameplay.GameplayState, gameplay.PuzzleNumber with
+        | Unavailable, _ ->
+            gameplay.PuzzleSource.Label + ": unavailable - " + gameplay.Difficulty.Label
+        | _, number when number > 0 ->
+            gameplay.PuzzleSource.Label + " #" + string number + " - " + gameplay.Difficulty.Label
+        | _ ->
+            gameplay.PuzzleSource.Label + ": Live - " + gameplay.Difficulty.Label
 
     // here we define the screen's fallback model depending on whether screen is selected
     override this.GetFallbackModel (_, screen, world) =
@@ -401,7 +424,8 @@ type GameplayDispatcher () =
 
         match message with
         | StartPlaying ->
-            just (Gameplay.make gameplay.Difficulty gameplay.Score)
+            let source = GameplayStart.getSource ()
+            just (Gameplay.make source gameplay.Difficulty gameplay.Score)
 
         | FinishQuitting ->
             just { gameplay with GameplayState = Quit; SelectedCellOpt = None; HintOpt = None; HintStatusOpt = None }
@@ -429,13 +453,13 @@ type GameplayDispatcher () =
             just { gameplay with PencilMode = not gameplay.PencilMode; HintStatusOpt = None }
 
         | SetDifficulty difficulty ->
-            just (Gameplay.make difficulty gameplay.Score)
+            just (Gameplay.make gameplay.PuzzleSource difficulty gameplay.Score)
 
         | RequestHint ->
             just (Gameplay.withHint gameplay)
 
         | Restart ->
-            just (Gameplay.make gameplay.Difficulty gameplay.Score)
+            just (Gameplay.make gameplay.PuzzleSource gameplay.Difficulty gameplay.Score)
 
 
         | Nil ->
@@ -475,6 +499,10 @@ type GameplayDispatcher () =
                      Entity.Text :=
                         match gameplay.GameplayState with
                         | Won -> "You won!"
+                        | Unavailable ->
+                            match gameplay.HintStatusOpt with
+                            | Some status -> status
+                            | None -> "No imported puzzle is available."
                         | Playing ->
                             match gameplay.HintStatusOpt with
                             | Some status -> status

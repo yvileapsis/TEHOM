@@ -54,7 +54,9 @@
 		<Compile Include="Assets.fs" />
 		<Compile Include="SudokuGrid.fs" />
 		<Compile Include="SudokuHints.fs" />
+		<Compile Include="PuzzleAnalysis.fs" />
 		<Compile Include="PuzzleGeneration.fs" />
+		<Compile Include="PuzzleCorpus.fs" />
 		<Compile Include="PuzzleBank.fs" />
 		<Compile Include="Gameplay.fs" />
 		<Compile Include="Sudoku.fs" />
