@@ -2,8 +2,9 @@
 
     <PropertyGroup>
         <!-- .NET settings -->
-        <TargetFrameworks>net10.0-android;net10.0</TargetFrameworks> <!-- For some reason, Android is required to come before desktop for Visual Studio to realize that mobile debug targets should be loaded! -->
-        <TargetFrameworks Condition="$([System.OperatingSystem]::IsMacOS())">$(TargetFrameworks);net10.0-ios</TargetFrameworks> <!-- We don't require installing the macOS Vulkan SDK on Windows. Therefore, don't build for iOS if not on macOS. -->
+        <TargetFrameworks>net10.0</TargetFrameworks>
+        <TargetFrameworks Condition="'$(BuildMobileTargets)' == 'true'">net10.0-android;$(TargetFrameworks)</TargetFrameworks> <!-- For some reason, Android is required to come before desktop for Visual Studio to realize that mobile debug targets should be loaded! -->
+        <TargetFrameworks Condition="'$(BuildMobileTargets)' == 'true' And $([System.OperatingSystem]::IsMacOS())">$(TargetFrameworks);net10.0-ios</TargetFrameworks> <!-- We don't require installing the macOS Vulkan SDK on Windows. Therefore, don't build for iOS if not on macOS. -->
         <OutputType>Exe</OutputType>
         <TargetPlatformIdentifier>$([MSBuild]::GetTargetPlatformIdentifier($(TargetFramework)))</TargetPlatformIdentifier> <!-- convenience property -->
         <ServerGarbageCollection Condition="'$(TargetPlatformIdentifier)' != 'ios'">True</ServerGarbageCollection>
@@ -12,7 +13,7 @@
 
         <!-- Project file local properties -->
         <BuildingMacOS>false</BuildingMacOS>
-        <BuildingMacOS Condition="'$(TargetPlatformIdentifier)' == '' And ('$(RuntimeIdentifier)'=='' And $([System.OperatingSystem]::IsMacOS()) Or $(RuntimeIdentifier.StartsWith('osx')))">true</BuildingMacOS>
+        <BuildingMacOS Condition="'$(TargetPlatformIdentifier)' == '' And (('$(RuntimeIdentifier)'=='' And $([System.OperatingSystem]::IsMacOS())) Or $(RuntimeIdentifier.StartsWith('osx')))">true</BuildingMacOS>
         <BlockCompression>BcCompression</BlockCompression>
         <BlockCompression Condition="$(BuildingMacOS) Or '$(TargetPlatformIdentifier)'=='ios' Or '$(TargetPlatformIdentifier)'=='android'">AstcCompression</BlockCompression>
 
@@ -42,24 +43,24 @@
 
         <!-- Required properties for mobile -->
         <!-- We use .NET MAUI SDK targets for <MauiIcon>, <MauiSplashScreen>, <MauiAsset>. -->
-        <UseMaui>true</UseMaui>
-		<!-- Additionally, we need this flag to tell Visual Studio that switching the debug target between <TargetFrameworks> is enabled instead of only using the first one. -->
-		<SingleProject>true</SingleProject>
-		<!-- However, we don't use MAUI UI libraries. -->
-        <SkipValidateMauiImplicitPackageReferences>true</SkipValidateMauiImplicitPackageReferences>
+        <UseMaui Condition="'$(TargetPlatformIdentifier)'=='ios' Or '$(TargetPlatformIdentifier)'=='android'">true</UseMaui>
+        <!-- Additionally, we need this flag to tell Visual Studio that switching the debug target between <TargetFrameworks> is enabled instead of only using the first one. -->
+        <SingleProject Condition="'$(TargetPlatformIdentifier)'=='ios' Or '$(TargetPlatformIdentifier)'=='android'">true</SingleProject>
+        <!-- However, we don't use MAUI UI libraries. -->
+        <SkipValidateMauiImplicitPackageReferences Condition="'$(TargetPlatformIdentifier)'=='ios' Or '$(TargetPlatformIdentifier)'=='android'">true</SkipValidateMauiImplicitPackageReferences>
         <!-- iOS: Work around for using Xcode 26.3 with 26.2 support from .NET -->
-        <ValidateXcodeVersion>false</ValidateXcodeVersion>
+        <ValidateXcodeVersion Condition="'$(TargetPlatformIdentifier)'=='ios'">false</ValidateXcodeVersion>
         <!-- Android: Debugging settings for asset packs https://learn.microsoft.com/en-us/dotnet/maui/android/asset-packs#test-asset-packs-locally -->
-        <AndroidPackageFormat Condition="'$(Configuration)' == 'Debug'">aab</AndroidPackageFormat>
-        <AndroidBundleToolExtraArgs Condition="'$(Configuration)' == 'Debug'">--local-testing</AndroidBundleToolExtraArgs>
+        <AndroidPackageFormat Condition="'$(TargetPlatformIdentifier)'=='android' And '$(Configuration)' == 'Debug'">aab</AndroidPackageFormat>
+        <AndroidBundleToolExtraArgs Condition="'$(TargetPlatformIdentifier)'=='android' And '$(Configuration)' == 'Debug'">--local-testing</AndroidBundleToolExtraArgs>
     </PropertyGroup>
 
     <!-- Build Nu.Pipe only once even for multi-project builds -->
-    <Target Name="BuildNuPipe" BeforeTargets="BeforeBuild">
+    <Target Name="BuildNuPipe" BeforeTargets="BeforeBuild" Condition="'$(SkipNuPipe)' != 'true'">
         <MSBuild Projects="../../Nu/Nu.Pipe/Nu.Pipe.fsproj" RemoveProperties="TargetFramework;RuntimeIdentifier;SelfContained" Targets="Restore;Build" />
     </Target>
     <!-- Run Nu.Pipe -->
-    <Target Name="NuPipe" BeforeTargets="ResizetizeCollectItems;AssignTargetPaths" DependsOnTargets="BuildNuPipe">
+    <Target Name="NuPipe" BeforeTargets="ResizetizeCollectItems;AssignTargetPaths" DependsOnTargets="BuildNuPipe" Condition="'$(SkipNuPipe)' != 'true'">
         <Copy SourceFiles="App.config;AssetGraph.nuag;Overlayer.nuol" DestinationFolder="refinement-out/$(TargetFramework)" SkipUnchangedFiles="true" />
         <!-- iOS and Android: call NuPipe via BeforeTargets="ResizetizeCollectItems" -->
 		<!-- Desktop: call NuPipe via BeforeTargets="AssignTargetPaths" -->
@@ -112,9 +113,9 @@
         <!-- To comply with Android resource naming rules, MauiIcon and MauiSplashScreen files names must be
             lowercase, start and end with a letter character, and contain only alphanumeric characters or underscores. -->
         <!-- MauiIcon (Composed icon): https://learn.microsoft.com/en-us/dotnet/maui/user-interface/images/app-icons#composed-icon -->
-        <MauiIcon Include="Platforms/mobile_icon_bg.svg" ForegroundFile="Platforms/mobile_icon_fg.svg" />
+        <MauiIcon Condition="'$(TargetPlatformIdentifier)'=='ios' Or '$(TargetPlatformIdentifier)'=='android'" Include="Platforms/mobile_icon_bg.svg" ForegroundFile="Platforms/mobile_icon_fg.svg" />
         <!-- MauiSplashScreen (with background color): https://learn.microsoft.com/en-us/dotnet/maui/user-interface/images/splashscreen#add-tint-and-background-color -->
-        <MauiSplashScreen Include="Platforms/mobile_icon_fg.svg" Color="#512BD4" /> <!-- For simplicity, icon_fg is both icon foreground and splash screen foreground. -->
+        <MauiSplashScreen Condition="'$(TargetPlatformIdentifier)'=='ios' Or '$(TargetPlatformIdentifier)'=='android'" Include="Platforms/mobile_icon_fg.svg" Color="#512BD4" /> <!-- For simplicity, icon_fg is both icon foreground and splash screen foreground. -->
 
         <None Include="AssetGraph.nuag" />
         <None Include="Overlayer.nuol" />
