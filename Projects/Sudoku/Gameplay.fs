@@ -339,16 +339,32 @@ type GameplayDispatcher () =
         | HintColumn column -> position.X = column
         | HintBlock block -> position.X / 3 = block.X && position.Y / 3 = block.Y
 
+    static let selectedCellValue (gameplay : Gameplay) =
+        gameplay.SelectedCellOpt
+        |> Option.map (fun selected -> gameplay.Puzzle[selected.Y, selected.X])
+        |> Option.defaultValue 0
+
+    static let positionSharesSelectedAxis (gameplay : Gameplay) (position : Vector2i) =
+        match gameplay.SelectedCellOpt with
+        | Some selected -> position.X = selected.X || position.Y = selected.Y
+        | None -> false
+
+    static let positionHasSelectedNumber (gameplay : Gameplay) (position : Vector2i) (value : int) =
+        let selectedValue = selectedCellValue gameplay
+        selectedValue <> 0 && gameplay.SelectedCellOpt <> Some position && value = selectedValue
+
     static let cellColor (gameplay : Gameplay) (position : Vector2i) (value : int) =
         match gameplay.HintOpt with
         | Some hint when position = hint.Target -> color 0.78f 0.58f 0.14f 1.0f
         | Some hint when positionInHintRegion hint position -> color 0.18f 0.40f 0.26f 1.0f
         | _ ->
-            if gameplay.SelectedCellOpt = Some position then color 0.30f 0.48f 0.72f 1.0f
-            elif gameplay.Given[position.Y, position.X] then color 0.18f 0.22f 0.27f 1.0f
+            if gameplay.SelectedCellOpt = Some position then color 0.34f 0.54f 0.80f 1.0f
             elif gameplay.HasConflict position value then color 0.58f 0.16f 0.16f 1.0f
-            elif value = 0 then color 0.12f 0.14f 0.17f 1.0f
-            else color 0.20f 0.26f 0.33f 1.0f
+            elif positionHasSelectedNumber gameplay position value then color 0.25f 0.37f 0.58f 1.0f
+            elif positionSharesSelectedAxis gameplay position then color 0.16f 0.21f 0.27f 1.0f
+            elif gameplay.Given[position.Y, position.X] then color 0.13f 0.16f 0.20f 1.0f
+            elif value = 0 then color 0.10f 0.12f 0.15f 1.0f
+            else color 0.19f 0.24f 0.30f 1.0f
 
     static let numberRemaining (gameplay : Gameplay) (number : int) =
         9 - List.length [for y in 0 .. 8 do for x in 0 .. 8 do if gameplay.Puzzle[y, x] = number then yield number]
@@ -584,7 +600,7 @@ type GameplayDispatcher () =
                                      Entity.ElevationLocal == 1.0f
                                      Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                                      Entity.FontSizing := if gameplay.Given[y, x] then Some 15.0f else Some 16.0f
-                                     Entity.TextColor := if gameplay.Given[y, x] then Color.GhostWhite else color 0.78f 0.90f 1.0f 1.0f
+                                     Entity.TextColor := if gameplay.Given[y, x] then color 0.78f 0.82f 0.88f 1.0f else color 0.88f 0.97f 1.0f 1.0f
                                      Entity.Text := string value]
                              else
                                 for mark in marks do
