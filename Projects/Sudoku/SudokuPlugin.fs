@@ -75,12 +75,8 @@ type SudokuPlugin () =
     static member private setImportStatus status' =
         lock stateLock (fun () -> importStatus <- status')
 
-    static member private saveEntries difficulty target (entries : ResizeArray<GeneratedPuzzle>) =
-        let data =
-            { SchemaVersion = PuzzleBank.SchemaVersion
-              Difficulty = difficulty
-              Puzzles = List.ofSeq entries }
-            |> PuzzleBank.write difficulty
+    static member private saveEntries (difficulty : Difficulty) target (entries : ResizeArray<SudokuPuzzle>) =
+        let data = PuzzleBankData.make difficulty (List.ofSeq entries) |> PuzzleBank.write
         entries.Clear ()
         entries.AddRange data.Puzzles
         lock stateLock (fun () ->
@@ -95,7 +91,7 @@ type SudokuPlugin () =
                 cancellationToken.ThrowIfCancellationRequested ()
                 let target = max 0 (Map.find difficulty targets)
                 let mutable data = PuzzleBank.read difficulty
-                let entries = ResizeArray<GeneratedPuzzle> (data.Puzzles)
+                let entries = ResizeArray<SudokuPuzzle> (data.Puzzles)
                 let keys = HashSet<string> (data.Puzzles |> List.map PuzzleBank.key)
                 let mutable unsavedAccepted = 0
                 let flush force =
@@ -216,13 +212,11 @@ type SudokuPlugin () =
              "Title", Game.SetSudoku Title
              "Credits", Game.SetSudoku Credits
              "Gameplay", fun world ->
-                GameplayStart.setSource Generated
                 Simulants.Gameplay.SetGameplay Gameplay.initial world
-                Game.SetSudoku (Gameplay Generated) world
+                Game.SetSudoku Gameplay world
              "Classic Gameplay", fun world ->
-                GameplayStart.setSource Classic
                 Simulants.Gameplay.SetGameplay (Gameplay.make Classic Normal 0) world
-                Game.SetSudoku (Gameplay Classic) world]
+                Game.SetSudoku Gameplay world]
 
     // this specifies which packages are automatically loaded at game start-up.
     override this.InitialPackages =

@@ -12,19 +12,10 @@ module PuzzleGeneration =
           Profile : PuzzleAnalysis.SolveProfile
           OpportunityProfile : PuzzleAnalysis.SolveProfile option }
 
-    let private solveSimpleFirstNoFish (solution : int[,]) (puzzle : int[,]) (given : bool[,]) =
-        PuzzleAnalysis.solveSimpleFirst false solution puzzle given
-
-    let private solveHardFirstNoFish (solution : int[,]) (puzzle : int[,]) (given : bool[,]) =
-        PuzzleAnalysis.solveHardFirst false solution puzzle given
-
     let private buildPuzzleFromSolution (difficulty : Difficulty) (solution : int[,]) =
         let puzzle = Array2D.copy solution
         let given = Array2D.create 9 9 true
-        let targetReached (removed : int) =
-            match difficulty.TargetHoles with
-            | Some holes -> removed >= holes
-            | None -> false
+        let targetReached (removed : int) = removed >= difficulty.Holes
 
         let rec removeCellsInPass
             (removed : int)
@@ -40,7 +31,7 @@ module PuzzleGeneration =
                         let value = puzzle[position.Y, position.X]
                         puzzle[position.Y, position.X] <- 0
                         given[position.Y, position.X] <- false
-                        match solveSimpleFirstNoFish solution puzzle given with
+                        match PuzzleAnalysis.solveSimpleFirst solution puzzle given with
                         | Some profile -> removeCellsInPass (removed + 1) profile (acceptedInPass + 1) remaining
                         | None ->
                             puzzle[position.Y, position.X] <- value
@@ -49,15 +40,11 @@ module PuzzleGeneration =
                     else removeCellsInPass removed profile acceptedInPass remaining
 
         let rec removeUntilDone (removed : int) (profile : PuzzleAnalysis.SolveProfile) =
-            let positions = SudokuGrid.shuffle SudokuGrid.allPositions
+            let positions = SudokuGrid.shuffle SudokuPuzzleDisplay.allPositions
             let removed, profile, acceptedInPass = removeCellsInPass removed profile 0 positions
-            match difficulty.TargetHoles with
-            | Some _ ->
-                if targetReached removed || acceptedInPass = 0 then (removed, Array2D.copy puzzle, Array2D.copy given, profile)
-                else removeUntilDone removed profile
-            | None ->
-                if acceptedInPass > 0 then removeUntilDone removed profile
-                else (removed, Array2D.copy puzzle, Array2D.copy given, profile)
+            if targetReached removed || acceptedInPass = 0 then (removed, Array2D.copy puzzle, Array2D.copy given, profile)
+            else removeUntilDone removed profile
+
 
         removeUntilDone 0 PuzzleAnalysis.emptySolveProfile
 
@@ -110,7 +97,7 @@ module PuzzleGeneration =
 
     let private makeOpportunityProfile (difficulty : Difficulty) (solution : int[,]) (puzzle : int[,]) (given : bool[,]) =
         match difficulty with
-        | Hard -> solveHardFirstNoFish solution puzzle given
+        | Hard -> PuzzleAnalysis.solveHardFirst solution puzzle given
         | _ -> None
 
     let private generationSampleCount (difficulty : Difficulty) =
@@ -121,9 +108,7 @@ module PuzzleGeneration =
         | Hard -> 3
 
     let private hasReachedHoleTarget (difficulty : Difficulty) (removed : int) =
-        match difficulty.TargetHoles with
-        | Some holes -> removed >= holes
-        | None -> false
+        removed >= difficulty.Holes
 
     let private isBetterPuzzleCandidate (difficulty : Difficulty) (candidate : PuzzleCandidate) (current : PuzzleCandidate) =
         let candidateComplete = hasReachedHoleTarget difficulty candidate.Removed
@@ -152,9 +137,9 @@ module PuzzleGeneration =
                 elif candidate.Removed <> current.Removed then candidate.Removed > current.Removed
                 else candidate.Profile.HiddenSingleSteps < current.Profile.HiddenSingleSteps
 
-    let private toGeneratedPuzzle (candidate : PuzzleCandidate) =
-        let puzzle = PuzzleAnalysis.puzzleStringFromGrid candidate.Puzzle
-        let solution = PuzzleAnalysis.solutionStringFromGrid candidate.Solution
+    let private toSudokuPuzzle (candidate : PuzzleCandidate) =
+        let puzzle = SudokuPuzzleInternals.puzzleStringFromGrid candidate.Puzzle
+        let solution = SudokuPuzzleInternals.puzzleStringFromGrid candidate.Solution
         let opportunityScoreOpt = candidate.OpportunityProfile |> Option.map (fun profile -> PuzzleAnalysis.opportunityScore (Some profile))
         PuzzleAnalysis.profileToPuzzle 0 puzzle solution candidate.Removed candidate.Profile.InterestScore opportunityScoreOpt candidate.Profile
 
@@ -178,16 +163,16 @@ module PuzzleGeneration =
             if samplesRemaining > 1 then tryMake (samplesRemaining - 1) bestOpt
             else
                 match bestOpt with
-                | Some candidate -> toGeneratedPuzzle candidate
+                | Some candidate -> toSudokuPuzzle candidate
                 | None ->
                     let solution = SudokuGrid.makeSolvedBoard ()
                     let puzzle = Array2D.copy solution
-                    let given = SudokuGrid.givenFromPuzzle puzzle
+                    let given = SudokuPuzzleDisplay.givenFromPuzzle puzzle
                     { Removed = 0
                       Solution = solution
                       Puzzle = puzzle
                       Given = given
                       Profile = PuzzleAnalysis.emptySolveProfile
                       OpportunityProfile = None }
-                    |> toGeneratedPuzzle
+                    |> toSudokuPuzzle
         tryMake (generationSampleCount difficulty) None

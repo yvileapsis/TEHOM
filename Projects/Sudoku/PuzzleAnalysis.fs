@@ -1,11 +1,18 @@
 namespace Sudoku
 open System
-open System.Collections.Generic
 open System.Numerics
 open Prime
 
 [<RequireQualifiedAccess>]
 module PuzzleAnalysis =
+    // this contains one selected solving step from a ranked solve pass.
+    type PuzzleSolveStep =
+        { StepIndex : int
+          Hint : Hint
+          Score : int
+          CumulativeScore : int
+          EliminationChain : int
+          RemovedMarkCount : int }
 
     type SolveProfile =
         { TechniqueCounts : Map<HintTechnique, int>
@@ -28,10 +35,6 @@ module PuzzleAnalysis =
         | ExactSolved of string
         | ExactFailed of string
 
-    let PuzzleLength = 81
-    let EmptyPuzzle = String.replicate PuzzleLength "."
-    let EmptySolution = EmptyPuzzle
-
     let emptySolveProfile =
         { TechniqueCounts = Map.empty<HintTechnique, int>
           TotalSteps = 0
@@ -45,21 +48,10 @@ module PuzzleAnalysis =
           InterestScore = 0
           TraceReversed = [] }
 
-    let private isPuzzleChar c =
-        c = '.' || c >= '1' && c <= '9'
-
-    let private isSolutionChar c =
-        c >= '1' && c <= '9'
-
     let isValidPuzzleString (puzzle : string) =
         not (isNull puzzle) &&
-        puzzle.Length = PuzzleLength &&
-        puzzle |> Seq.forall isPuzzleChar
-
-    let isValidSolutionString (solution : string) =
-        not (isNull solution) &&
-        solution.Length = PuzzleLength &&
-        solution |> Seq.forall isSolutionChar
+        puzzle.Length = SudokuPuzzleInternals.PuzzleLength &&
+        puzzle |> Seq.forall SudokuPuzzleInternals.isPuzzleChar
 
     let givenCount (puzzle : string) =
         puzzle |> Seq.filter (fun c -> c <> '.') |> Seq.length
@@ -67,132 +59,10 @@ module PuzzleAnalysis =
     let removedCellCount (puzzle : string) =
         puzzle |> Seq.filter ((=) '.') |> Seq.length
 
-    let gridFromPuzzleString (puzzle : string) =
-        let grid = Array2D.zeroCreate<int> 9 9
-        if not (isNull puzzle) then
-            puzzle
-            |> Seq.truncate PuzzleLength
-            |> Seq.iteri (fun i c ->
-                let y = i / 9
-                let x = i % 9
-                grid[y, x] <- if c = '.' then 0 else int c - int '0')
-        grid
-
-    let givenFromPuzzleString (puzzle : string) =
-        let given = Array2D.create 9 9 false
-        if not (isNull puzzle) then
-            puzzle
-            |> Seq.truncate PuzzleLength
-            |> Seq.iteri (fun i c ->
-                let y = i / 9
-                let x = i % 9
-                given[y, x] <- c <> '.')
-        given
-
-    let puzzleStringFromGrid (grid : int[,]) =
-        [|for y in 0 .. 8 do
-            for x in 0 .. 8 do
-                let value = grid[y, x]
-                yield if value = 0 then '.' else char (int '0' + value)|]
-        |> String
-
-    let solutionStringFromGrid (grid : int[,]) =
-        [|for y in 0 .. 8 do
-            for x in 0 .. 8 do
-                let value = grid[y, x]
-                yield if value = 0 then '.' else char (int '0' + value)|]
-        |> String
-
     let puzzleMatchesSolution (puzzle : string) (solution : string) =
         isValidPuzzleString puzzle &&
-        isValidSolutionString solution &&
+        isValidPuzzleString solution &&
         Seq.forall2 (fun puzzleChar solutionChar -> puzzleChar = '.' || puzzleChar = solutionChar) puzzle solution
-
-    let private permutations3 =
-        [|[|0; 1; 2|]
-          [|0; 2; 1|]
-          [|1; 0; 2|]
-          [|1; 2; 0|]
-          [|2; 0; 1|]
-          [|2; 1; 0|]|]
-
-    let private makePermutations9 () =
-        [|for groupPermutation in permutations3 do
-            for inner0 in permutations3 do
-                for inner1 in permutations3 do
-                    for inner2 in permutations3 do
-                        let inners = [|inner0; inner1; inner2|]
-                        yield
-                            [|for outputGroup in 0 .. 2 do
-                                let sourceGroup = groupPermutation[outputGroup]
-                                let inner = inners[outputGroup]
-                                for outputInner in 0 .. 2 do
-                                    yield sourceGroup * 3 + inner[outputInner]|]|]
-
-    let private rowPermutations = makePermutations9 ()
-    let private columnPermutations = rowPermutations
-    let private canonicalKeyLock = obj ()
-    let private canonicalKeyCache = Dictionary<string, string> ()
-
-    let private computeCanonicalKey (value : string) =
-        if isNull value || value.Length <> PuzzleLength then value
-        else
-            let source = value.ToCharArray ()
-            let mutable best : string = null
-            for transposed in [false; true] do
-                for rowPermutation in rowPermutations do
-                    for columnPermutation in columnPermutations do
-                        let chars = Array.zeroCreate<char> PuzzleLength
-                        let digitMap = Array.zeroCreate<char> 10
-                        let mutable nextDigit = int '1'
-                        let mutable relation = 0
-                        let mutable skipped = false
-                        let mutable i = 0
-                        while i < PuzzleLength && not skipped do
-                            let y = i / 9
-                            let x = i % 9
-                            let sourceY, sourceX =
-                                if transposed then columnPermutation[x], rowPermutation[y]
-                                else rowPermutation[y], columnPermutation[x]
-                            let raw = source[sourceY * 9 + sourceX]
-                            let normalized =
-                                if raw = '.' || raw = '0' then '.'
-                                else
-                                    let index = int raw - int '0'
-                                    let mapped = digitMap[index]
-                                    if mapped = char 0 then
-                                        let mapped = char nextDigit
-                                        digitMap[index] <- mapped
-                                        nextDigit <- nextDigit + 1
-                                        mapped
-                                    else mapped
-                            if not (isNull best) && relation = 0 then
-                                let bestChar = best[i]
-                                if normalized > bestChar then skipped <- true
-                                elif normalized < bestChar then relation <- -1
-                            if not skipped then
-                                chars[i] <- normalized
-                                i <- i + 1
-                        if not skipped then
-                            let candidate = String chars
-                            if isNull best || String.CompareOrdinal (candidate, best) < 0 then best <- candidate
-            best
-
-    let canonicalKey value =
-        if isNull value then value
-        else
-            lock canonicalKeyLock (fun () ->
-                match canonicalKeyCache.TryGetValue value with
-                | true, key -> Some key
-                | false, _ -> None)
-            |> function
-                | Some key -> key
-                | None ->
-                    let key = computeCanonicalKey value
-                    lock canonicalKeyLock (fun () ->
-                        if not (canonicalKeyCache.ContainsKey value) then
-                            canonicalKeyCache.Add (value, key))
-                    key
 
     let techniqueRank technique =
         match technique with
@@ -319,16 +189,16 @@ module PuzzleAnalysis =
             elif hint.Technique = NakedSingle then -20
             else -12
 
-    let selectSimpleFirst allowFish (profile : SolveProfile) (state : SudokuBoardState) =
-        match SudokuHints.findFirst allowFish state with
+    let selectSimpleFirst (profile : SolveProfile) (state : SudokuPuzzle) =
+        match SudokuHints.findFirst state with
         | Some hint ->
             Some
                 { Hint = hint
                   Score = scoreSimpleHint hint (nextEliminationChain hint profile) }
         | None -> None
 
-    let selectHardFirst allowFish (profile : SolveProfile) (state : SudokuBoardState) =
-        let allHints = SudokuHints.findAll allowFish state
+    let selectHardFirst (profile : SolveProfile) (state : SudokuPuzzle) =
+        let allHints = SudokuHints.findAll state
         let selections =
             allHints
             |> List.map (fun hint ->
@@ -372,42 +242,40 @@ module PuzzleAnalysis =
             TraceReversed = solveStep :: profile.TraceReversed }
 
     let solveWithSelector
-        (selector : SolveProfile -> SudokuBoardState -> HintSelection option)
+        (selector : SolveProfile -> SudokuPuzzle -> HintSelection option)
         (solution : int[,])
         (puzzle : int[,])
         (given : bool[,]) =
-        let state : SudokuBoardState =
-            { Puzzle = Array2D.copy puzzle
-              Solution = solution
-              Given = Array2D.copy given
-              Marks = SudokuGrid.makeMarks () }
-            |> SudokuGrid.fillLegalMarks
-        let rec solve (stepsRemaining : int) (profile : SolveProfile) (state : SudokuBoardState) =
-            if SudokuGrid.isPuzzleSolvedAgainstSolution solution state.Puzzle then Some profile
+        let state =
+            let state = SudokuPuzzle.fromGrids 0 puzzle solution given
+            { state with DisplayOpt = Some (SudokuPuzzleDisplay.fillLegalMarks state.Display) }
+        let rec solve (stepsRemaining : int) (profile : SolveProfile) (state : SudokuPuzzle) =
+            if SudokuPuzzleDisplay.isPuzzleSolvedAgainstSolution solution state.Display.PuzzleGrid then Some profile
             elif stepsRemaining <= 0 then None
             else
                 match selector profile state with
                 | Some selection ->
-                    let state = SudokuGrid.applyHint selection.Hint state
+                    let state = { state with DisplayOpt = Some (SudokuPuzzleDisplay.applyHint selection.Hint state.Display) }
                     let profile = updateSolveProfile selection profile
                     solve (stepsRemaining - 1) profile state
                 | None ->
-                    if SudokuGrid.hasOpenCellsWithoutMarks state then
-                        solve (stepsRemaining - 1) profile (SudokuGrid.fillLegalMarks state)
+                    if SudokuPuzzleDisplay.hasOpenCellsWithoutMarks state.Display then
+                        let display = SudokuPuzzleDisplay.fillLegalMarks state.Display
+                        solve (stepsRemaining - 1) profile { state with DisplayOpt = Some display }
                     else None
         solve 1000 emptySolveProfile state
 
-    let solveSimpleFirst allowFish (solution : int[,]) (puzzle : int[,]) (given : bool[,]) =
-        solveWithSelector (selectSimpleFirst allowFish) solution puzzle given
+    let solveSimpleFirst (solution : int[,]) (puzzle : int[,]) (given : bool[,]) =
+        solveWithSelector selectSimpleFirst solution puzzle given
 
-    let solveHardFirst allowFish (solution : int[,]) (puzzle : int[,]) (given : bool[,]) =
-        solveWithSelector (selectHardFirst allowFish) solution puzzle given
+    let solveHardFirst (solution : int[,]) (puzzle : int[,]) (given : bool[,]) =
+        solveWithSelector selectHardFirst solution puzzle given
 
-    let solveSimpleFirstFromStrings allowFish (solution : string) (puzzle : string) =
-        let solutionGrid = gridFromPuzzleString solution
-        let puzzleGrid = gridFromPuzzleString puzzle
-        let given = givenFromPuzzleString puzzle
-        solveSimpleFirst allowFish solutionGrid puzzleGrid given
+    let solveSimpleFirstFromStrings (solution : string) (puzzle : string) =
+        let solutionGrid = SudokuPuzzleInternals.gridFromPuzzleString solution
+        let puzzleGrid = SudokuPuzzleInternals.gridFromPuzzleString puzzle
+        let given = SudokuPuzzleInternals.givenFromPuzzleString puzzle
+        solveSimpleFirst solutionGrid puzzleGrid given
 
     let opportunityScore (profileOpt : SolveProfile option) =
         match profileOpt with
@@ -426,22 +294,27 @@ module PuzzleAnalysis =
         (generationScore : int)
         (opportunityScoreOpt : int option)
         (profile : SolveProfile) =
-        { Number = number
-          Puzzle = puzzle
+        let puzzle = SudokuPuzzleInternals.normalizePuzzleString puzzle
+        let solution = SudokuPuzzleInternals.normalizePuzzleString solution
+        { SolutionCanonical = SudokuPuzzleInternals.canonicalKey solution
+          PuzzleCanonical = SudokuPuzzleInternals.canonicalKey puzzle
+          Number = number
           Solution = solution
-          PuzzleKey = canonicalKey puzzle
-          SolutionKey = canonicalKey solution
-          TechniqueCounts = profile.TechniqueCounts
-          TotalSteps = profile.TotalSteps
-          EliminationSteps = profile.EliminationSteps
-          PointingClaimingSteps = profile.PointingClaimingSteps
-          NakedSubsetSteps = profile.NakedSubsetSteps
-          HiddenSingleSteps = profile.HiddenSingleSteps
-          FishSteps = profile.FishSteps
-          MaxEliminationChain = profile.MaxEliminationChain
-          RemovedCells = removedCells
-          GenerationScore = generationScore
-          OpportunityScoreOpt = opportunityScoreOpt }
+          Puzzle = puzzle
+          AnalysisOpt =
+            Some
+                { TechniqueCounts = profile.TechniqueCounts
+                  TotalSteps = profile.TotalSteps
+                  EliminationSteps = profile.EliminationSteps
+                  PointingClaimingSteps = profile.PointingClaimingSteps
+                  NakedSubsetSteps = profile.NakedSubsetSteps
+                  HiddenSingleSteps = profile.HiddenSingleSteps
+                  FishSteps = profile.FishSteps
+                  MaxEliminationChain = profile.MaxEliminationChain
+                  RemovedCells = removedCells
+                  GenerationScore = generationScore
+                  OpportunityScoreOpt = opportunityScoreOpt }
+          DisplayOpt = None }
 
     let techniqueSignatureKey (counts : Map<HintTechnique, int>) =
         let techniques =
@@ -454,10 +327,11 @@ module PuzzleAnalysis =
         | [] -> "None"
         | _ -> String.concat "+" techniques
 
-    let difficultyOfEntry (entry : GeneratedPuzzle) =
-        if entry.FishSteps > 0 || entry.MaxEliminationChain >= 4 || entry.EliminationSteps >= 10 then Hard
-        elif entry.EliminationSteps > 0 then Normal
-        elif entry.HiddenSingleSteps > 0 then Easy
+    let difficultyOfEntry (entry : SudokuPuzzle) =
+        let analysis = entry.Analysis
+        if analysis.FishSteps > 0 || analysis.MaxEliminationChain >= 4 || analysis.EliminationSteps >= 10 then Hard
+        elif analysis.EliminationSteps > 0 then Normal
+        elif analysis.HiddenSingleSteps > 0 then Easy
         else Trivial
 
     let private blockIndex i =
@@ -473,7 +347,7 @@ module PuzzleAnalysis =
             let columns = Array.zeroCreate<int> 9
             let blocks = Array.zeroCreate<int> 9
             let mutable conflict = false
-            for i in 0 .. PuzzleLength - 1 do
+            for i in 0 .. SudokuPuzzleInternals.PuzzleLength - 1 do
                 let value = grid[i]
                 if value <> 0 then
                     let bit = 1 <<< (value - 1)
@@ -495,7 +369,7 @@ module PuzzleAnalysis =
                         let mutable bestMask = 0
                         let mutable bestCount = 10
                         let mutable impossible = false
-                        for i in 0 .. PuzzleLength - 1 do
+                        for i in 0 .. SudokuPuzzleInternals.PuzzleLength - 1 do
                             if grid[i] = 0 then
                                 let row = i / 9
                                 let column = i % 9

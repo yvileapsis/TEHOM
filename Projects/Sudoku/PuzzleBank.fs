@@ -1,38 +1,42 @@
 namespace Sudoku
 open System
-open System.Collections.Generic
 open System.IO
 open Prime
 open Nu
 
+// this contains the serialized bank for a single difficulty.
+type PuzzleBankData =
+    { Difficulty : Difficulty
+      Puzzles : SudokuPuzzle list }
+
+    static member empty (difficulty : Difficulty) : PuzzleBankData =
+        { Difficulty = difficulty
+          Puzzles = [] }
+
+    static member make (difficulty : Difficulty) (puzzles : SudokuPuzzle list) : PuzzleBankData =
+        { Difficulty = difficulty
+          Puzzles = puzzles }
+
 [<RequireQualifiedAccess>]
 module PuzzleBank =
 
-    let SchemaVersion = 6
     let Difficulties = [Trivial; Easy; Normal; Hard]
 
     let private ioLock = obj ()
-    let private queueLock = obj ()
-    let private queues = Dictionary<PuzzleSource * Difficulty, GeneratedPuzzle list> ()
+    let mutable queues = Map.empty<PuzzleSource * Difficulty, SudokuPuzzle list>
 
-    let private emptyData (difficulty : Difficulty) : PuzzleBankData =
-        { SchemaVersion = SchemaVersion
-          Difficulty = difficulty
-          Puzzles = [] }
+    let key (puzzle : SudokuPuzzle) =
+        puzzle.PuzzleCanonical
 
-    let key (puzzle : GeneratedPuzzle) =
-        puzzle.PuzzleKey
+    let private normalizePuzzleCanonicals (puzzle : SudokuPuzzle) =
+        puzzle.Dehydrate ()
 
-    let private normalizePuzzleKeys (puzzle : GeneratedPuzzle) =
-        { puzzle with
-            PuzzleKey = PuzzleAnalysis.canonicalKey puzzle.Puzzle
-            SolutionKey = PuzzleAnalysis.canonicalKey puzzle.Solution }
-
-    let private isValidPuzzle (puzzle : GeneratedPuzzle) =
-        PuzzleAnalysis.puzzleMatchesSolution puzzle.Puzzle puzzle.Solution &&
-        (puzzle.Solution |> PuzzleAnalysis.gridFromPuzzleString |> SudokuGrid.isSolved) &&
-        not (String.IsNullOrWhiteSpace puzzle.PuzzleKey) &&
-        not (String.IsNullOrWhiteSpace puzzle.SolutionKey)
+    let private isValidPuzzle (puzzle : SudokuPuzzle) =
+        let solution = SudokuPuzzleInternals.normalizePuzzleString puzzle.Solution
+        PuzzleAnalysis.puzzleMatchesSolution puzzle.Puzzle solution &&
+        (solution |> SudokuPuzzleInternals.gridFromPuzzleString |> SudokuPuzzleDisplay.isSolved) &&
+        not (String.IsNullOrWhiteSpace puzzle.PuzzleCanonical) &&
+        not (String.IsNullOrWhiteSpace puzzle.SolutionCanonical)
 
     let private deduplicate puzzles =
         let (_, puzzles) =
@@ -48,35 +52,33 @@ module PuzzleBank =
         puzzles
         |> List.mapi (fun i puzzle -> { puzzle with Number = i + 1 })
 
-    let private sanitizeData (difficulty : Difficulty) (data : PuzzleBankData) =
-        if data.SchemaVersion = SchemaVersion && data.Difficulty = difficulty then
-            { data with
-                Puzzles =
-                    data.Puzzles
-                    |> List.map normalizePuzzleKeys
-                    |> List.filter isValidPuzzle
-                    |> deduplicate
-                    |> numberPuzzles }
-        else emptyData difficulty
+    let private sanitizeData (data : PuzzleBankData) =
+        { data with
+            Puzzles =
+                data.Puzzles
+                |> List.map normalizePuzzleCanonicals
+                |> List.filter isValidPuzzle
+                |> deduplicate
+                |> numberPuzzles }
 
     let private readDataUnlocked (difficulty : Difficulty) =
-        let filePath = Assets.Gameplay.PuzzleBankFilePath difficulty
+        let filePath = Assets.Gameplay.PuzzleBankFilePath difficulty.Label
         if File.Exists filePath then
             try
                 File.ReadAllText filePath
                 |> scvalue<PuzzleBankData>
-                |> sanitizeData difficulty
+                |> sanitizeData
             with exn ->
                 Log.warn ("Failed to read Sudoku puzzle bank '" + filePath + "' due to: " + scstring exn)
-                emptyData difficulty
-        else emptyData difficulty
+                PuzzleBankData.empty difficulty
+        else PuzzleBankData.empty difficulty
 
-    let private writeDataUnlocked (difficulty : Difficulty) (data : PuzzleBankData) =
-        let filePath = Assets.Gameplay.PuzzleBankFilePath difficulty
+    let private writeDataUnlocked (data : PuzzleBankData) =
+        let filePath = Assets.Gameplay.PuzzleBankFilePath data.Difficulty.Label
         let directory = Path.GetDirectoryName filePath
         if not (String.IsNullOrWhiteSpace directory) then
             Directory.CreateDirectory directory |> ignore<DirectoryInfo>
-        let data = sanitizeData difficulty { data with SchemaVersion = SchemaVersion; Difficulty = difficulty }
+        let data = sanitizeData data
         let filePathTmp = filePath + ".tmp"
         let symbol = valueToSymbol data
         File.WriteAllText (filePathTmp, PrettyPrinter.prettyPrintSymbol symbol PrettyPrinter.defaultPrinter)
@@ -87,8 +89,8 @@ module PuzzleBank =
     let read difficulty =
         lock ioLock (fun () -> readDataUnlocked difficulty)
 
-    let write difficulty data =
-        lock ioLock (fun () -> writeDataUnlocked difficulty data)
+    let write data =
+        lock ioLock (fun () -> writeDataUnlocked data)
 
     let count difficulty =
         (read difficulty).Puzzles.Length
@@ -108,17 +110,17 @@ module PuzzleBank =
         |> List.map (fun difficulty -> (difficulty, classicCount difficulty))
         |> Map.ofList
 
-    let mergeGeneratedBatch (difficulty : Difficulty) (generated : GeneratedPuzzle list) =
+    let mergeGeneratedBatch (difficulty : Difficulty) (generated : SudokuPuzzle list) =
         lock ioLock (fun () ->
             let data = readDataUnlocked difficulty
             let data =
                 { data with
                     Puzzles =
                         data.Puzzles @ generated
-                        |> List.map normalizePuzzleKeys
+                        |> List.map normalizePuzzleCanonicals
                         |> List.filter isValidPuzzle
                         |> deduplicate }
-            let data = writeDataUnlocked difficulty data
+            let data = writeDataUnlocked data
             data.Puzzles.Length)
 
     let mergeGenerated difficulty generated =
@@ -130,18 +132,16 @@ module PuzzleBank =
         | Classic -> PuzzleCorpus.entriesByDifficulty difficulty
 
     let tryTake source difficulty =
-        lock queueLock (fun () ->
-            let queueKey = (source, difficulty)
-            match queues.TryGetValue queueKey with
-            | (true, puzzle :: puzzles) ->
-                queues[queueKey] <- puzzles
-                Some puzzle
-            | (true, []) | (false, _) ->
-                let puzzles = puzzlesForSource source difficulty |> SudokuGrid.shuffle
-                match puzzles with
-                | puzzle :: puzzles ->
-                    queues[queueKey] <- puzzles
-                    Some puzzle
-                | [] ->
-                    queues[queueKey] <- []
-                    None)
+        let queueKey = (source, difficulty)
+        match Map.tryFind queueKey queues with
+        | Some (puzzle :: puzzles) ->
+            queues <- Map.add queueKey puzzles queues
+            Some (puzzle.Rehydrate ())
+        | Some [] | None ->
+            match puzzlesForSource source difficulty |> SudokuGrid.shuffle with
+            | puzzle :: puzzles ->
+                queues <- Map.add queueKey puzzles queues
+                Some (puzzle.Rehydrate ())
+            | [] ->
+                queues <- Map.remove queueKey queues
+                None

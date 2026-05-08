@@ -5,18 +5,6 @@ open Prime
 open Nu
 open Sudoku
 
-[<RequireQualifiedAccess>]
-module GameplayStart =
-
-    let private sourceLock = obj ()
-    let mutable private source = Generated
-
-    let setSource source' =
-        lock sourceLock (fun () -> source <- source')
-
-    let getSource () =
-        lock sourceLock (fun () -> source)
-
 // this represents the state of gameplay simulation.
 type GameplayState =
     | Playing
@@ -24,14 +12,118 @@ type GameplayState =
     | Unavailable
     | Quit
 
+// this contains display settings for the gameplay screen that can be adjusted from Gaia.
+type [<SymbolicExpansion>] GameplayDisplay =
+    { BoardCenter : Vector2
+      CellSize : single
+      CellGap : single
+      BoardLineThin : single
+      BoardLineThick : single
+      NumberStatusOffsetX : single
+      NumberStatusTitleOffsetY : single
+      NumberStatusPanelSize : Vector3
+      NumberStatusValueOffsetY : single
+      NumberStatusRemainingOffsetY : single
+      NumberStatusValueSize : Vector3
+      NumberStatusRemainingSize : Vector3
+      MarkSpacing : single
+      MarkSize : Vector3
+      TitlePosition : Vector3
+      ScorePosition : Vector3
+      StatusPosition : Vector3
+      StatusSize : Vector3
+      HeaderPosition : Vector3
+      HeaderSize : Vector3
+      InputModePosition : Vector3
+      InputModeSize : Vector3
+      DifficultyButtonOrigin : Vector2
+      DifficultyButtonSpacing : Vector2
+      DifficultyButtonSize : Vector3
+      ActionButtonOrigin : Vector2
+      ActionButtonSpacingY : single
+      ActionButtonSize : Vector3
+      HintTargetColor : Color
+      HintRegionColor : Color
+      SelectedCellColor : Color
+      ConflictCellColor : Color
+      SelectedNumberCellColor : Color
+      SelectedAxisCellColor : Color
+      GivenCellColor : Color
+      EmptyCellColor : Color
+      PlayerCellColor : Color
+      NumberStatusCompleteColor : Color
+      NumberStatusBlockMissingColor : Color
+      NumberStatusAvailableColor : Color
+      NumberStatusCompleteTextColor : Color
+      NumberStatusAvailableTextColor : Color
+      ButtonSelectedColor : Color
+      ButtonNormalColor : Color
+      GivenTextColor : Color
+      PlayerTextColor : Color
+      MarkTextColor : Color
+      GridLineColor : Color }
+
+    member this.BoardSize = this.CellSize * 9.0f
+
+    member this.BoardMin =
+        this.BoardCenter - v2Dup (this.BoardSize * 0.5f)
+
+    static member initial =
+        { BoardCenter = v2 -52.0f -10.0f
+          CellSize = 34.0f
+          CellGap = 2.0f
+          BoardLineThin = 1.5f
+          BoardLineThick = 4.0f
+          NumberStatusOffsetX = -38.0f
+          NumberStatusTitleOffsetY = 16.0f
+          NumberStatusPanelSize = v3 28.0f 28.0f 0.0f
+          NumberStatusValueOffsetY = 3.0f
+          NumberStatusRemainingOffsetY = -8.0f
+          NumberStatusValueSize = v3 28.0f 18.0f 0.0f
+          NumberStatusRemainingSize = v3 28.0f 10.0f 0.0f
+          MarkSpacing = 9.0f
+          MarkSize = v3 10.0f 10.0f 0.0f
+          TitlePosition = v3 -52.0f 176.0f 0.0f
+          ScorePosition = v3 196.0f 142.0f 0.0f
+          StatusPosition = v3 196.0f 102.0f 0.0f
+          StatusSize = v3 178.0f 48.0f 0.0f
+          HeaderPosition = v3 196.0f 66.0f 0.0f
+          HeaderSize = v3 170.0f 24.0f 0.0f
+          InputModePosition = v3 196.0f 48.0f 0.0f
+          InputModeSize = v3 170.0f 20.0f 0.0f
+          DifficultyButtonOrigin = v2 160.0f 22.0f
+          DifficultyButtonSpacing = v2 96.0f -34.0f
+          DifficultyButtonSize = v3 86.0f 28.0f 0.0f
+          ActionButtonOrigin = v2 196.0f -52.0f
+          ActionButtonSpacingY = -34.0f
+          ActionButtonSize = v3 128.0f 28.0f 0.0f
+          HintTargetColor = color 0.78f 0.58f 0.14f 1.0f
+          HintRegionColor = color 0.18f 0.40f 0.26f 1.0f
+          SelectedCellColor = color 0.34f 0.54f 0.80f 1.0f
+          ConflictCellColor = color 0.58f 0.16f 0.16f 1.0f
+          SelectedNumberCellColor = color 0.25f 0.37f 0.58f 1.0f
+          SelectedAxisCellColor = color 0.16f 0.21f 0.27f 1.0f
+          GivenCellColor = color 0.13f 0.16f 0.20f 1.0f
+          EmptyCellColor = color 0.10f 0.12f 0.15f 1.0f
+          PlayerCellColor = color 0.19f 0.24f 0.30f 1.0f
+          NumberStatusCompleteColor = color 0.10f 0.12f 0.14f 1.0f
+          NumberStatusBlockMissingColor = color 0.78f 0.58f 0.14f 1.0f
+          NumberStatusAvailableColor = color 0.22f 0.36f 0.54f 1.0f
+          NumberStatusCompleteTextColor = color 0.44f 0.48f 0.52f 1.0f
+          NumberStatusAvailableTextColor = Color.GhostWhite
+          ButtonSelectedColor = color 0.30f 0.48f 0.72f 1.0f
+          ButtonNormalColor = color 0.18f 0.22f 0.27f 1.0f
+          GivenTextColor = color 0.78f 0.82f 0.88f 1.0f
+          PlayerTextColor = color 0.88f 0.97f 1.0f 1.0f
+          MarkTextColor = color 0.66f 0.78f 0.90f 1.0f
+          GridLineColor = color 0.05f 0.06f 0.07f 1.0f }
+
 // this is our MMCC model type representing gameplay.
 type Gameplay =
     { GameplayTime : int64
       GameplayState : GameplayState
-      Puzzle : int[,]
-      Solution : int[,]
-      Given : bool[,]
-      Marks : Set<int>[,]
+      Puzzle : SudokuPuzzle
+      Display : GameplayDisplay
       SelectedCellOpt : Vector2i option
       PuzzleSource : PuzzleSource
       Difficulty : Difficulty
@@ -44,89 +136,97 @@ type Gameplay =
     member this.BoardSize = v2iDup 9
 
     member this.IsSolved =
-        SudokuGrid.isSolved this.Puzzle
+        SudokuPuzzleDisplay.isSolved this.Puzzle.Display.PuzzleGrid
 
     member this.HasConflict (position : Vector2i) (value : int) =
-        SudokuGrid.hasConflict this.Puzzle position value
-
-    static member private toBoardState (gameplay : Gameplay) =
-        { Puzzle = gameplay.Puzzle
-          Solution = gameplay.Solution
-          Given = gameplay.Given
-          Marks = gameplay.Marks }
+        SudokuPuzzleDisplay.hasConflict this.Puzzle.Display.PuzzleGrid position value
 
     static member private fillLegalMarks (gameplay : Gameplay) =
-        let state = Gameplay.toBoardState gameplay |> SudokuGrid.fillLegalMarks
+        let puzzle = gameplay.Puzzle.Rehydrate ()
+        let display = SudokuPuzzleDisplay.fillLegalMarks puzzle.Display
         { gameplay with
-            Marks = state.Marks
+            Puzzle = { puzzle with DisplayOpt = Some display }
             PencilMode = true
             HintOpt = None
             HintStatusOpt = Some "No immediate hint found; filled legal pencil marks." }
 
     static member private hasOpenCellsWithoutMarks (gameplay : Gameplay) =
-        gameplay
-        |> Gameplay.toBoardState
-        |> SudokuGrid.hasOpenCellsWithoutMarks
+        SudokuPuzzleDisplay.hasOpenCellsWithoutMarks (gameplay.Puzzle.Rehydrate ()).Display
 
     static member private withNumberAt (position : Vector2i) (number : int) (gameplay : Gameplay) =
-        if gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] then
-            let puzzle = Array2D.copy gameplay.Puzzle
-            let marks = Array2D.copy gameplay.Marks
-            puzzle[position.Y, position.X] <- number
+        let sudoku = gameplay.Puzzle.Rehydrate ()
+        let display = sudoku.Display
+        if gameplay.GameplayState = Playing && not display.Given[position.Y, position.X] then
+            let grid = Array2D.copy display.PuzzleGrid
+            let marks = Array2D.copy display.Marks
+            grid[position.Y, position.X] <- number
             marks[position.Y, position.X] <- Set.empty
-            SudokuGrid.prunePeerMarks position number marks
+            SudokuPuzzleDisplay.prunePeerMarks position number marks
+            let sudoku = { sudoku with DisplayOpt = Some { display with PuzzleGrid = grid; Marks = marks } }
             let gameplay =
                 { gameplay with
-                    Puzzle = puzzle
-                    Marks = marks
+                    Puzzle = sudoku
                     HintOpt = None
                     HintStatusOpt = None }
-            if gameplay.IsSolved then { gameplay with GameplayState = Won; Score = inc gameplay.Score }
+            if SudokuPuzzleDisplay.isSolved grid then { gameplay with GameplayState = Won; Score = inc gameplay.Score }
             else gameplay
         else gameplay
 
     static member private removeMarks (removals : (Vector2i * Set<int>) list) (gameplay : Gameplay) =
-        let marks = Array2D.copy gameplay.Marks
+        let sudoku = gameplay.Puzzle.Rehydrate ()
+        let display = sudoku.Display
+        let marks = Array2D.copy display.Marks
         for (position, removed) in removals do
             marks[position.Y, position.X] <- Set.difference marks[position.Y, position.X] removed
+        let sudoku = { sudoku with DisplayOpt = Some { display with Marks = marks } }
         { gameplay with
-            Marks = marks
+            Puzzle = sudoku
             HintOpt = None
             HintStatusOpt = None }
 
     static member private correctMarks (corrections : (Vector2i * Set<int>) list) (gameplay : Gameplay) =
-        let marks = Array2D.copy gameplay.Marks
+        let sudoku = gameplay.Puzzle.Rehydrate ()
+        let display = sudoku.Display
+        let marks = Array2D.copy display.Marks
         for (position, corrected) in corrections do
             marks[position.Y, position.X] <- corrected
+        let sudoku = { sudoku with DisplayOpt = Some { display with Marks = marks } }
         { gameplay with
-            Marks = marks
+            Puzzle = sudoku
             HintOpt = None
             HintStatusOpt = None }
 
     static member private toggleMarkAt (position : Vector2i) (number : int) (gameplay : Gameplay) =
-        if gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] && gameplay.Puzzle[position.Y, position.X] = 0 then
-            let marks = Array2D.copy gameplay.Marks
+        let sudoku = gameplay.Puzzle.Rehydrate ()
+        let display = sudoku.Display
+        if gameplay.GameplayState = Playing && not display.Given[position.Y, position.X] && display.PuzzleGrid[position.Y, position.X] = 0 then
+            let marks = Array2D.copy display.Marks
             marks[position.Y, position.X] <-
                 if Set.contains number marks[position.Y, position.X]
                 then Set.remove number marks[position.Y, position.X]
                 else Set.add number marks[position.Y, position.X]
+            let sudoku = { sudoku with DisplayOpt = Some { display with Marks = marks } }
             { gameplay with
-                Marks = marks
+                Puzzle = sudoku
                 HintOpt = None
                 HintStatusOpt = None }
         else gameplay
 
     static member public withNumber (number : int) (gameplay : Gameplay) =
+        let sudoku = gameplay.Puzzle.Rehydrate ()
+        let display = sudoku.Display
         match gameplay.SelectedCellOpt with
-        | Some position when gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] && gameplay.PencilMode && number <> 0 ->
+        | Some position when gameplay.GameplayState = Playing && not display.Given[position.Y, position.X] && gameplay.PencilMode && number <> 0 ->
             Gameplay.toggleMarkAt position number gameplay
-        | Some position when gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] ->
+        | Some position when gameplay.GameplayState = Playing && not display.Given[position.Y, position.X] ->
             Gameplay.withNumberAt position number gameplay
         | _ -> gameplay
 
     static member public clearSelected (gameplay : Gameplay) =
+        let sudoku = gameplay.Puzzle.Rehydrate ()
+        let display = sudoku.Display
         match gameplay.SelectedCellOpt with
-        | Some position when gameplay.GameplayState = Playing && not gameplay.Given[position.Y, position.X] ->
+        | Some position when gameplay.GameplayState = Playing && not display.Given[position.Y, position.X] ->
             Gameplay.withNumberAt position 0 gameplay
         | _ -> gameplay
 
@@ -154,7 +254,7 @@ type Gameplay =
                     let gameplay = Gameplay.correctMarks corrections gameplay
                     { gameplay with HintStatusOpt = Some ("Corrected pencil marks in " + string correctedCount + " cell" + (if correctedCount = 1 then "" else "s") + ".") }
             | None ->
-                match SudokuHints.findFirst true (Gameplay.toBoardState gameplay) with
+                match SudokuHints.findFirst (gameplay.Puzzle.Rehydrate ()) with
                 | Some hint ->
                     let applyText =
                         match hint.Action with
@@ -178,48 +278,30 @@ type Gameplay =
                             HintStatusOpt = Some "No hint available from the current pencil marks." }
         else gameplay
 
-    static member private inertGenerated : GeneratedPuzzle =
-        { Number = 0
-          Puzzle = PuzzleAnalysis.EmptyPuzzle
-          Solution = PuzzleAnalysis.EmptySolution
-          PuzzleKey = PuzzleAnalysis.EmptyPuzzle
-          SolutionKey = PuzzleAnalysis.EmptySolution
-          TechniqueCounts = Map.empty
-          TotalSteps = 0
-          EliminationSteps = 0
-          PointingClaimingSteps = 0
-          NakedSubsetSteps = 0
-          HiddenSingleSteps = 0
-          FishSteps = 0
-          RemovedCells = 0
-          GenerationScore = 0
-          MaxEliminationChain = 0
-          OpportunityScoreOpt = None }
+    static member private inertPuzzle =
+        SudokuPuzzle.empty
 
-    static member private makeFromPuzzle source difficulty score (generated : GeneratedPuzzle) =
+    static member private makeFromPuzzle source difficulty score (sudoku : SudokuPuzzle) =
+        let sudoku = sudoku.Rehydrate ()
         { GameplayTime = 0L
           GameplayState = Playing
-          Puzzle = PuzzleAnalysis.gridFromPuzzleString generated.Puzzle
-          Solution = PuzzleAnalysis.gridFromPuzzleString generated.Solution
-          Given = PuzzleAnalysis.givenFromPuzzleString generated.Puzzle
-          Marks = SudokuGrid.makeMarks ()
-          SelectedCellOpt = Some (v2i 0 0)
+          Puzzle = sudoku
+          Display = GameplayDisplay.initial
+          SelectedCellOpt = None
           PuzzleSource = source
           Difficulty = difficulty
           PencilMode = false
           HintOpt = None
           HintStatusOpt = None
-          PuzzleNumber = generated.Number
+          PuzzleNumber = sudoku.Number
           Score = score }
 
     static member private unavailable source difficulty score =
-        let generated = Gameplay.inertGenerated
+        let sudoku = Gameplay.inertPuzzle.Rehydrate ()
         { GameplayTime = 0L
           GameplayState = Unavailable
-          Puzzle = PuzzleAnalysis.gridFromPuzzleString generated.Puzzle
-          Solution = PuzzleAnalysis.gridFromPuzzleString generated.Solution
-          Given = PuzzleAnalysis.givenFromPuzzleString generated.Puzzle
-          Marks = SudokuGrid.makeMarks ()
+          Puzzle = sudoku
+          Display = GameplayDisplay.initial
           SelectedCellOpt = None
           PuzzleSource = source
           Difficulty = difficulty
@@ -239,20 +321,18 @@ type Gameplay =
 
     // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
     static member empty =
-        let generated = Gameplay.inertGenerated
+        let sudoku = Gameplay.inertPuzzle.Rehydrate ()
         { GameplayTime = 0L
           GameplayState = Quit
-          Puzzle = PuzzleAnalysis.gridFromPuzzleString generated.Puzzle
-          Solution = PuzzleAnalysis.gridFromPuzzleString generated.Solution
-          Given = PuzzleAnalysis.givenFromPuzzleString generated.Puzzle
-          Marks = SudokuGrid.makeMarks ()
+          Puzzle = sudoku
+          Display = GameplayDisplay.initial
           SelectedCellOpt = None
           PuzzleSource = Generated
           Difficulty = Normal
           PencilMode = false
           HintOpt = None
           HintStatusOpt = None
-          PuzzleNumber = generated.Number
+          PuzzleNumber = sudoku.Number
           Score = 0 }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
@@ -260,7 +340,7 @@ type Gameplay =
 
 // this is our gameplay MMCC message type.
 type GameplayMessage =
-    | StartPlaying
+    | StartPlaying of PuzzleSource
     | FinishQuitting
     | TimeUpdate
     | SelectCellAtMouse
@@ -292,11 +372,6 @@ module GameplayExtensions =
 type GameplayDispatcher () =
     inherit ScreenDispatcher<Gameplay, GameplayMessage, GameplayCommand> (Gameplay.empty)
 
-    static let boardCenter = v2 -52.0f -10.0f
-    static let cellSize = 34.0f
-    static let boardSize = cellSize * 9.0f
-    static let boardMin = boardCenter - v2Dup (boardSize * 0.5f)
-
     static let tryKeyboardNumber (key : KeyboardKey) =
         match key with
         | KeyboardKey.Num1 | KeyboardKey.Kp1 -> Some 1
@@ -310,26 +385,30 @@ type GameplayDispatcher () =
         | KeyboardKey.Num9 | KeyboardKey.Kp9 -> Some 9
         | _ -> None
 
-    static let tryMouseCell (world : World) =
+    static let tryMouseCell (display : GameplayDisplay) (world : World) =
         let mouse = World.getMousePosition2dWorld false world
+        let boardMin = display.BoardMin
+        let boardSize = display.BoardSize
         let local = mouse - boardMin
         if local.X >= 0.0f && local.Y >= 0.0f && local.X < boardSize && local.Y < boardSize then
-            let column = int (local.X / cellSize)
-            let row = 8 - int (local.Y / cellSize)
+            let column = int (local.X / display.CellSize)
+            let row = 8 - int (local.Y / display.CellSize)
             Some (v2i column row)
         else None
 
-    static let cellPosition (x : int) (y : int) =
-        v3 (boardMin.X + (single x + 0.5f) * cellSize) (boardMin.Y + (single (8 - y) + 0.5f) * cellSize) 0.0f
+    static let cellPosition (display : GameplayDisplay) (x : int) (y : int) =
+        let boardMin = display.BoardMin
+        v3 (boardMin.X + (single x + 0.5f) * display.CellSize) (boardMin.Y + (single (8 - y) + 0.5f) * display.CellSize) 0.0f
 
-    static let numberStatusPosition (number : int) =
-        v3 (boardMin.X - 38.0f) (boardMin.Y + (single (9 - number) + 0.5f) * cellSize) 0.0f
+    static let numberStatusPosition (display : GameplayDisplay) (number : int) =
+        let boardMin = display.BoardMin
+        v3 (boardMin.X + display.NumberStatusOffsetX) (boardMin.Y + (single (9 - number) + 0.5f) * display.CellSize) 0.0f
 
-    static let markPositionLocal (number : int) =
+    static let markPositionLocal (display : GameplayDisplay) (number : int) =
         let index = number - 1
         let column = index % 3
         let row = index / 3
-        v3 ((single column - 1.0f) * 9.0f) ((1.0f - single row) * 9.0f) 0.0f
+        v3 ((single column - 1.0f) * display.MarkSpacing) ((1.0f - single row) * display.MarkSpacing) 0.0f
 
     static let positionInHintRegion (hint : Hint) (position : Vector2i) =
         match hint.Region with
@@ -341,7 +420,7 @@ type GameplayDispatcher () =
 
     static let selectedCellValue (gameplay : Gameplay) =
         gameplay.SelectedCellOpt
-        |> Option.map (fun selected -> gameplay.Puzzle[selected.Y, selected.X])
+        |> Option.map (fun selected -> gameplay.Puzzle.Display.PuzzleGrid[selected.Y, selected.X])
         |> Option.defaultValue 0
 
     static let positionSharesSelectedAxis (gameplay : Gameplay) (position : Vector2i) =
@@ -354,44 +433,47 @@ type GameplayDispatcher () =
         selectedValue <> 0 && gameplay.SelectedCellOpt <> Some position && value = selectedValue
 
     static let cellColor (gameplay : Gameplay) (position : Vector2i) (value : int) =
+        let display = gameplay.Display
         match gameplay.HintOpt with
-        | Some hint when position = hint.Target -> color 0.78f 0.58f 0.14f 1.0f
-        | Some hint when positionInHintRegion hint position -> color 0.18f 0.40f 0.26f 1.0f
+        | Some hint when position = hint.Target -> display.HintTargetColor
+        | Some hint when positionInHintRegion hint position -> display.HintRegionColor
         | _ ->
-            if gameplay.SelectedCellOpt = Some position then color 0.34f 0.54f 0.80f 1.0f
-            elif gameplay.HasConflict position value then color 0.58f 0.16f 0.16f 1.0f
-            elif positionHasSelectedNumber gameplay position value then color 0.25f 0.37f 0.58f 1.0f
-            elif positionSharesSelectedAxis gameplay position then color 0.16f 0.21f 0.27f 1.0f
-            elif gameplay.Given[position.Y, position.X] then color 0.13f 0.16f 0.20f 1.0f
-            elif value = 0 then color 0.10f 0.12f 0.15f 1.0f
-            else color 0.19f 0.24f 0.30f 1.0f
+            if gameplay.SelectedCellOpt = Some position then display.SelectedCellColor
+            elif gameplay.HasConflict position value then display.ConflictCellColor
+            elif positionHasSelectedNumber gameplay position value then display.SelectedNumberCellColor
+            elif positionSharesSelectedAxis gameplay position then display.SelectedAxisCellColor
+            elif gameplay.Puzzle.Display.Given[position.Y, position.X] then display.GivenCellColor
+            elif value = 0 then display.EmptyCellColor
+            else display.PlayerCellColor
 
     static let numberRemaining (gameplay : Gameplay) (number : int) =
-        9 - List.length [for y in 0 .. 8 do for x in 0 .. 8 do if gameplay.Puzzle[y, x] = number then yield number]
+        let puzzleDisplay = gameplay.Puzzle.Display
+        9 - List.length [for y in 0 .. 8 do for x in 0 .. 8 do if puzzleDisplay.PuzzleGrid[y, x] = number then yield number]
 
     static let numberMissingFromSelectedBlock (gameplay : Gameplay) (number : int) =
         match gameplay.SelectedCellOpt with
         | Some selected ->
-            let block = SudokuGrid.blockOfPosition selected
+            let block = SudokuPuzzleDisplay.blockOfPosition selected
             block
-            |> SudokuGrid.blockPositions
-            |> List.exists (fun (position : Vector2i) -> gameplay.Puzzle[position.Y, position.X] = number)
+            |> SudokuPuzzleDisplay.blockPositions
+            |> List.exists (fun (position : Vector2i) -> gameplay.Puzzle.Display.PuzzleGrid[position.Y, position.X] = number)
             |> not
         | None -> false
 
     static let numberStatusColor (gameplay : Gameplay) (number : int) =
+        let display = gameplay.Display
         let remaining = numberRemaining gameplay number
-        if remaining <= 0 then color 0.10f 0.12f 0.14f 1.0f
-        elif numberMissingFromSelectedBlock gameplay number then color 0.78f 0.58f 0.14f 1.0f
-        else color 0.22f 0.36f 0.54f 1.0f
+        if remaining <= 0 then display.NumberStatusCompleteColor
+        elif numberMissingFromSelectedBlock gameplay number then display.NumberStatusBlockMissingColor
+        else display.NumberStatusAvailableColor
 
     static let numberStatusTextColor (gameplay : Gameplay) (number : int) =
-        if numberRemaining gameplay number <= 0 then color 0.44f 0.48f 0.52f 1.0f
-        else Color.GhostWhite
+        if numberRemaining gameplay number <= 0 then gameplay.Display.NumberStatusCompleteTextColor
+        else gameplay.Display.NumberStatusAvailableTextColor
 
-    static let difficultyButtonColor (selected : Difficulty) (difficulty : Difficulty) =
-        if selected = difficulty then color 0.30f 0.48f 0.72f 1.0f
-        else color 0.18f 0.22f 0.27f 1.0f
+    static let difficultyButtonColor (display : GameplayDisplay) (selected : Difficulty) (difficulty : Difficulty) =
+        if selected = difficulty then display.ButtonSelectedColor
+        else display.ButtonNormalColor
 
     static let puzzleHeaderText (gameplay : Gameplay) =
         match gameplay.GameplayState, gameplay.PuzzleNumber with
@@ -410,7 +492,7 @@ type GameplayDispatcher () =
 
     // here we define the screen's property values and event handling
     override this.Definitions (_, _) =
-        [Screen.SelectEvent => StartPlaying
+        [//Screen.SelectEvent => StartPlaying
          Screen.DeselectingEvent => FinishQuitting
          Screen.TimeUpdateEvent => TimeUpdate
          Game.MouseLeftDownEvent => SelectCellAtMouse
@@ -439,9 +521,8 @@ type GameplayDispatcher () =
     override this.Message (gameplay, message, _, world) =
 
         match message with
-        | StartPlaying ->
-            let source = GameplayStart.getSource ()
-            just (Gameplay.make source gameplay.Difficulty gameplay.Score)
+        | StartPlaying source ->
+            just { Gameplay.make source gameplay.Difficulty gameplay.Score with Display = gameplay.Display }
 
         | FinishQuitting ->
             just { gameplay with GameplayState = Quit; SelectedCellOpt = None; HintOpt = None; HintStatusOpt = None }
@@ -451,7 +532,7 @@ type GameplayDispatcher () =
             just { gameplay with GameplayTime = gameplay.GameplayTime + gameDelta.Updates }
 
         | SelectCellAtMouse ->
-            match tryMouseCell world with
+            match tryMouseCell gameplay.Display world with
             | Some cell when gameplay.GameplayState <> Quit -> just { gameplay with SelectedCellOpt = Some cell }
             | _ -> just gameplay
 
@@ -469,13 +550,13 @@ type GameplayDispatcher () =
             just { gameplay with PencilMode = not gameplay.PencilMode; HintStatusOpt = None }
 
         | SetDifficulty difficulty ->
-            just (Gameplay.make gameplay.PuzzleSource difficulty gameplay.Score)
+            just { Gameplay.make gameplay.PuzzleSource difficulty gameplay.Score with Display = gameplay.Display }
 
         | RequestHint ->
             just (Gameplay.withHint gameplay)
 
         | Restart ->
-            just (Gameplay.make gameplay.PuzzleSource gameplay.Difficulty gameplay.Score)
+            just { Gameplay.make gameplay.PuzzleSource gameplay.Difficulty gameplay.Score with Display = gameplay.Display }
 
 
         | Nil ->
@@ -492,23 +573,28 @@ type GameplayDispatcher () =
 
         [// the scene group while playing
          if gameplay.GameplayState <> Quit then
+            let display = gameplay.Display
+            let puzzleDisplay = gameplay.Puzzle.Display
+            let boardMin = display.BoardMin
+            let boardSize = display.BoardSize
+            let cellSize = display.CellSize
             Content.group Simulants.GameplayScene.Name []
 
                 [Content.text "Title"
-                    [Entity.Position == v3 -52.0f 176.0f 0.0f
+                    [Entity.Position := display.TitlePosition
                      Entity.Elevation == 10.0f
                      Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                      Entity.FontSizing == Some 22.0f
                      Entity.Text == "Sudoku"]
 
                  Content.text "Score"
-                    [Entity.Position == v3 196.0f 142.0f 0.0f
+                    [Entity.Position := display.ScorePosition
                      Entity.Elevation == 10.0f
                      Entity.Text := "Score: " + string gameplay.Score]
 
                  Content.text "Status"
-                    [Entity.Position == v3 196.0f 102.0f 0.0f
-                     Entity.Size == v3 178.0f 48.0f 0.0f
+                    [Entity.Position := display.StatusPosition
+                     Entity.Size := display.StatusSize
                      Entity.Elevation == 10.0f
                      Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                      Entity.FontSizing == Some 8.0f
@@ -526,16 +612,16 @@ type GameplayDispatcher () =
                         | Quit -> ""]
 
                  Content.text "Difficulty"
-                    [Entity.Position == v3 196.0f 66.0f 0.0f
-                     Entity.Size == v3 170.0f 24.0f 0.0f
+                    [Entity.Position := display.HeaderPosition
+                     Entity.Size := display.HeaderSize
                      Entity.Elevation == 10.0f
                      Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                      Entity.FontSizing == Some 9.0f
                      Entity.Text := puzzleHeaderText gameplay]
 
                  Content.text "InputMode"
-                    [Entity.Position == v3 196.0f 48.0f 0.0f
-                     Entity.Size == v3 170.0f 20.0f 0.0f
+                    [Entity.Position := display.InputModePosition
+                     Entity.Size := display.InputModeSize
                      Entity.Elevation == 10.0f
                      Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                      Entity.FontSizing == Some 8.0f
@@ -543,15 +629,15 @@ type GameplayDispatcher () =
 
                  for (i, difficulty) in List.indexed [Trivial; Easy; Normal; Hard] do
                     Content.button ("Difficulty+" + difficulty.Label)
-                        [Entity.Position == v3 (160.0f + single (i % 2) * 96.0f) (22.0f - single (i / 2) * 34.0f) 0.0f
-                         Entity.Size == v3 86.0f 28.0f 0.0f
+                        [Entity.Position := v3 (display.DifficultyButtonOrigin.X + single (i % 2) * display.DifficultyButtonSpacing.X) (display.DifficultyButtonOrigin.Y + single (i / 2) * display.DifficultyButtonSpacing.Y) 0.0f
+                         Entity.Size := display.DifficultyButtonSize
                          Entity.Elevation == 10.0f
-                         Entity.Color := difficultyButtonColor gameplay.Difficulty difficulty
+                         Entity.Color := difficultyButtonColor display gameplay.Difficulty difficulty
                          Entity.Text := difficulty.Label
                          Entity.ClickEvent => SetDifficulty difficulty]
 
                  Content.text "NumberStatusTitle"
-                    [Entity.Position == v3 (boardMin.X - 38.0f) (boardMin.Y + boardSize + 16.0f) 0.0f
+                    [Entity.Position := v3 (boardMin.X + display.NumberStatusOffsetX) (boardMin.Y + boardSize + display.NumberStatusTitleOffsetY) 0.0f
                      Entity.Size == v3 52.0f 18.0f 0.0f
                      Entity.Elevation == 10.0f
                      Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
@@ -560,22 +646,22 @@ type GameplayDispatcher () =
 
                  for number in 1 .. 9 do
                     Content.panel ("NumberStatus+" + string number)
-                        [Entity.Position == numberStatusPosition number
-                         Entity.Size == v3 28.0f 28.0f 0.0f
+                        [Entity.Position := numberStatusPosition display number
+                         Entity.Size := display.NumberStatusPanelSize
                          Entity.Elevation == 4.0f
                          Entity.BackdropImageOpt == Some Assets.Default.White
                          Entity.Color := numberStatusColor gameplay number]
                         [Content.text "Value"
-                            [Entity.PositionLocal == v3 0.0f 3.0f 0.0f
-                             Entity.Size == v3 28.0f 18.0f 0.0f
+                            [Entity.PositionLocal := v3 0.0f display.NumberStatusValueOffsetY 0.0f
+                             Entity.Size := display.NumberStatusValueSize
                              Entity.ElevationLocal == 1.0f
                              Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                              Entity.FontSizing == Some 10.0f
                              Entity.TextColor := numberStatusTextColor gameplay number
                              Entity.Text == string number]
                          Content.text "Remaining"
-                            [Entity.PositionLocal == v3 0.0f -8.0f 0.0f
-                             Entity.Size == v3 28.0f 10.0f 0.0f
+                            [Entity.PositionLocal := v3 0.0f display.NumberStatusRemainingOffsetY 0.0f
+                             Entity.Size := display.NumberStatusRemainingSize
                              Entity.ElevationLocal == 1.0f
                              Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                              Entity.FontSizing == Some 5.0f
@@ -584,76 +670,76 @@ type GameplayDispatcher () =
 
                  for y in 0 .. 8 do
                     for x in 0 .. 8 do
-                        let value = gameplay.Puzzle[y, x]
-                        let marks = gameplay.Marks[y, x]
+                        let value = puzzleDisplay.PuzzleGrid[y, x]
+                        let marks = puzzleDisplay.Marks[y, x]
                         let position = v2i x y
                         Content.panel ("Cell+" + string x + "+" + string y)
-                            [Entity.Position == cellPosition x y
-                             Entity.Size == v3 (cellSize - 2.0f) (cellSize - 2.0f) 0.0f
+                            [Entity.Position := cellPosition display x y
+                             Entity.Size := v3 (cellSize - display.CellGap) (cellSize - display.CellGap) 0.0f
                              Entity.Elevation == 1.0f
                              Entity.BackdropImageOpt == Some Assets.Default.White
                              Entity.Color := cellColor gameplay position value]
                             [if value <> 0 then
                                 Content.text "Value"
                                     [Entity.PositionLocal == v3Zero
-                                     Entity.Size == v3 (cellSize - 2.0f) (cellSize - 2.0f) 0.0f
+                                     Entity.Size := v3 (cellSize - display.CellGap) (cellSize - display.CellGap) 0.0f
                                      Entity.ElevationLocal == 1.0f
                                      Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
-                                     Entity.FontSizing := if gameplay.Given[y, x] then Some 15.0f else Some 16.0f
-                                     Entity.TextColor := if gameplay.Given[y, x] then color 0.78f 0.82f 0.88f 1.0f else color 0.88f 0.97f 1.0f 1.0f
+                                     Entity.FontSizing := if puzzleDisplay.Given[y, x] then Some 15.0f else Some 16.0f
+                                     Entity.TextColor := if puzzleDisplay.Given[y, x] then display.GivenTextColor else display.PlayerTextColor
                                      Entity.Text := string value]
                              else
                                 for mark in marks do
                                     Content.text ("Mark+" + string mark)
-                                        [Entity.PositionLocal == markPositionLocal mark
-                                         Entity.Size == v3 10.0f 10.0f 0.0f
+                                        [Entity.PositionLocal := markPositionLocal display mark
+                                         Entity.Size := display.MarkSize
                                          Entity.ElevationLocal == 1.0f
                                          Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
                                          Entity.FontSizing == Some 6.0f
-                                         Entity.TextColor == color 0.66f 0.78f 0.90f 1.0f
+                                         Entity.TextColor := display.MarkTextColor
                                          Entity.Text == string mark]]
 
                  for i in 0 .. 9 do
-                    let lineSize = if i % 3 = 0 then 4.0f else 1.5f
+                    let lineSize = if i % 3 = 0 then display.BoardLineThick else display.BoardLineThin
                     let lineOffset = single i * cellSize
                     Content.staticSprite ("LineV+" + string i)
-                        [Entity.Position == v3 (boardMin.X + lineOffset) boardCenter.Y 0.0f
-                         Entity.Size == v3 lineSize boardSize 0.0f
+                        [Entity.Position := v3 (boardMin.X + lineOffset) display.BoardCenter.Y 0.0f
+                         Entity.Size := v3 lineSize boardSize 0.0f
                          Entity.Elevation == 6.0f
                          Entity.StaticImage == Assets.Default.White
-                         Entity.Color == color 0.05f 0.06f 0.07f 1.0f]
+                         Entity.Color := display.GridLineColor]
                     Content.staticSprite ("LineH+" + string i)
-                        [Entity.Position == v3 boardCenter.X (boardMin.Y + lineOffset) 0.0f
-                         Entity.Size == v3 boardSize lineSize 0.0f
+                        [Entity.Position := v3 display.BoardCenter.X (boardMin.Y + lineOffset) 0.0f
+                         Entity.Size := v3 boardSize lineSize 0.0f
                          Entity.Elevation == 6.0f
                          Entity.StaticImage == Assets.Default.White
-                         Entity.Color == color 0.05f 0.06f 0.07f 1.0f]
+                         Entity.Color := display.GridLineColor]
 
                  Content.button "Hint"
-                    [Entity.Position == v3 196.0f -52.0f 0.0f
-                     Entity.Size == v3 128.0f 28.0f 0.0f
+                    [Entity.Position := v3 display.ActionButtonOrigin.X display.ActionButtonOrigin.Y 0.0f
+                     Entity.Size := display.ActionButtonSize
                      Entity.Elevation == 10.0f
                      Entity.Text := if gameplay.HintOpt.IsSome then "Apply Hint" else "Hint"
                      Entity.ClickEvent => RequestHint]
 
                  Content.button "Pencil"
-                    [Entity.Position == v3 196.0f -86.0f 0.0f
-                     Entity.Size == v3 128.0f 28.0f 0.0f
+                    [Entity.Position := v3 display.ActionButtonOrigin.X (display.ActionButtonOrigin.Y + display.ActionButtonSpacingY) 0.0f
+                     Entity.Size := display.ActionButtonSize
                      Entity.Elevation == 10.0f
-                     Entity.Color := if gameplay.PencilMode then color 0.30f 0.48f 0.72f 1.0f else color 0.18f 0.22f 0.27f 1.0f
+                     Entity.Color := if gameplay.PencilMode then display.ButtonSelectedColor else display.ButtonNormalColor
                      Entity.Text := if gameplay.PencilMode then "Pencil On" else "Pencil Off"
                      Entity.ClickEvent => TogglePencilMode]
 
                  Content.button "Restart"
-                    [Entity.Position == v3 196.0f -120.0f 0.0f
-                     Entity.Size == v3 128.0f 28.0f 0.0f
+                    [Entity.Position := v3 display.ActionButtonOrigin.X (display.ActionButtonOrigin.Y + display.ActionButtonSpacingY * 2.0f) 0.0f
+                     Entity.Size := display.ActionButtonSize
                      Entity.Elevation == 10.0f
                      Entity.Text := if gameplay.GameplayState = Won then "New Board" else "Restart"
                      Entity.ClickEvent => Restart]
 
                  Content.button Simulants.GameplayQuit.Name
-                    [Entity.Position == v3 196.0f -154.0f 0.0f
-                     Entity.Size == v3 128.0f 28.0f 0.0f
+                    [Entity.Position := v3 display.ActionButtonOrigin.X (display.ActionButtonOrigin.Y + display.ActionButtonSpacingY * 3.0f) 0.0f
+                     Entity.Size := display.ActionButtonSize
                      Entity.Elevation == 10.0f
                      Entity.Text == "Quit"
                      Entity.ClickEvent => StartQuitting]]]

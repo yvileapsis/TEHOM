@@ -47,11 +47,10 @@
 	</Target>
 
 	<ItemGroup>
-        <None Include="Assets\*" />
+		<None Include="Assets\*" />
         <None Include="Assets\*\*" />
 		<Compile Include="Simulants.fs" />
 		<Compile Include="Events.fs" />
-		<Compile Include="SudokuTypes.fs" />
 		<Compile Include="Assets.fs" />
 		<Compile Include="SudokuGrid.fs" />
 		<Compile Include="SudokuHints.fs" />
