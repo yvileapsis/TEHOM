@@ -198,7 +198,7 @@ module Metadata =
                         | Some metadata ->
                             let lastWriteTime =
                                 try DateTimeOffset (File.GetLastWriteTime asset.FilePath)
-                                with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue.DateTime
+                                with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue
                             return Some (asset.AssetTag.AssetName, (lastWriteTime, asset.FilePath, metadata))
                         | None -> return None })
                 |> Vsync.Parallel
@@ -261,7 +261,7 @@ module Metadata =
                         let (lastWriteTime, filePath, audioAsset) = assetEntry.Value
                         let lastWriteTime' =
                             try DateTimeOffset (File.GetLastWriteTime filePath)
-                            with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue.DateTime
+                            with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue
                         if lastWriteTime >= lastWriteTime' then
                             assetsToKeep.Add (assetName, (lastWriteTime, filePath, audioAsset))
 
@@ -278,7 +278,7 @@ module Metadata =
                         | Some assetMetadata ->
                             let lastWriteTime =
                                 try DateTimeOffset (File.GetLastWriteTime asset.FilePath)
-                                with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue.DateTime
+                                with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue
                             assetsLoaded[asset.AssetTag.AssetName] <- (lastWriteTime, asset.FilePath, assetMetadata)
                         | None -> ()
 

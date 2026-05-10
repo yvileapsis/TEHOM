@@ -184,7 +184,7 @@ type [<ReferenceEquality>] SdlAudioPlayer =
                     try DateTimeOffset (File.GetLastWriteTime asset.FilePath)
                     with exn ->
                         Log.info ("Asset file write time read error due to: " + scstring exn)
-                        DateTimeOffset.MinValue.DateTime
+                        DateTimeOffset.MinValue
                 if lastWriteTime < lastWriteTime'
                 then assetsToFree.Add (asset, audioAsset)
                 else assetsToKeep.Add (assetName, (lastWriteTime, asset, audioAsset))
@@ -210,7 +210,7 @@ type [<ReferenceEquality>] SdlAudioPlayer =
                         try DateTimeOffset (File.GetLastWriteTime asset.FilePath)
                         with exn ->
                             Log.info ("Asset file write time read error due to: " + scstring exn)
-                            DateTimeOffset.MinValue.DateTime
+                            DateTimeOffset.MinValue
                     assetsLoaded[asset.AssetTag.AssetName] <- (lastWriteTime, asset, audioAsset)
                 | None -> ()
 

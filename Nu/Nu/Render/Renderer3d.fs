@@ -1536,7 +1536,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                 let (lastWriteTime, asset, renderAsset) = assetEntry.Value
                 let lastWriteTime' =
                     try DateTimeOffset (File.GetLastWriteTime asset.FilePath)
-                    with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue.DateTime
+                    with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue
                 if lastWriteTime < lastWriteTime'
                 then assetsToFree.Add (asset.FilePath, renderAsset)
                 else assetsToKeep.Add (assetName, (lastWriteTime, asset, renderAsset))
@@ -1569,7 +1569,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                 | Some renderAsset ->
                     let lastWriteTime =
                         try DateTimeOffset (File.GetLastWriteTime asset.FilePath)
-                        with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue.DateTime
+                        with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue
                     assetsLoaded[asset.AssetTag.AssetName] <- (lastWriteTime, asset, renderAsset)
                 | None -> ()
 
@@ -1820,7 +1820,7 @@ type [<ReferenceEquality>] GlRenderer3d =
             match renderer.RenderPackages.TryGetValue assetTag.PackageName with
             | (true, package) ->
                 let asset = Asset.make assetTag "" [] (Set.singleton Constants.Associations.Render3d)
-                package.Assets[assetTag.AssetName] <- (DateTimeOffset.MinValue.DateTime, asset, StaticModelAsset (true, model))
+                package.Assets[assetTag.AssetName] <- (DateTimeOffset.MinValue, asset, StaticModelAsset (true, model))
             | (false, _) ->
                 let assetClient =
                     AssetClient
@@ -1828,7 +1828,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                          OpenGL.CubeMap.CubeMapClient (),
                          OpenGL.PhysicallyBased.PhysicallyBasedSceneClient ())
                 let asset = Asset.make assetTag "" [] (Set.singleton Constants.Associations.Render3d)
-                let package = { Assets = Dictionary.singleton StringComparer.Ordinal assetTag.AssetName (DateTimeOffset.MinValue.DateTime, asset, StaticModelAsset (true, model)); PackageState = assetClient }
+                let package = { Assets = Dictionary.singleton StringComparer.Ordinal assetTag.AssetName (DateTimeOffset.MinValue, asset, StaticModelAsset (true, model)); PackageState = assetClient }
                 renderer.RenderPackages[assetTag.PackageName] <- package
 
         // attempted to replace a loaded asset
@@ -1902,7 +1902,7 @@ type [<ReferenceEquality>] GlRenderer3d =
             match renderer.RenderPackages.TryGetValue assetTag.PackageName with
             | (true, package) ->
                 let asset = Asset.make assetTag "" [] (Set.singleton Constants.Associations.Render3d)
-                package.Assets[assetTag.AssetName] <- (DateTimeOffset.MinValue.DateTime, asset, VoxelModelAsset (true, model))
+                package.Assets[assetTag.AssetName] <- (DateTimeOffset.MinValue, asset, VoxelModelAsset (true, model))
             | (false, _) ->
                 let assetClient =
                     AssetClient
@@ -1910,7 +1910,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                          OpenGL.CubeMap.CubeMapClient (),
                          OpenGL.PhysicallyBased.PhysicallyBasedSceneClient ())
                 let asset = Asset.make assetTag "" [] (Set.singleton Constants.Associations.Render3d)
-                let package = { Assets = Dictionary.singleton StringComparer.Ordinal assetTag.AssetName (DateTimeOffset.MinValue.DateTime, asset, VoxelModelAsset (true, model)); PackageState = assetClient }
+                let package = { Assets = Dictionary.singleton StringComparer.Ordinal assetTag.AssetName (DateTimeOffset.MinValue, asset, VoxelModelAsset (true, model)); PackageState = assetClient }
                 renderer.RenderPackages[assetTag.PackageName] <- package
 
         // attempted to replace a loaded asset
