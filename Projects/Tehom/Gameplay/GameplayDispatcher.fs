@@ -287,7 +287,6 @@ type GameplayDispatcher () =
                     Entity.RenderStyle == Forward (0.0f, 0.0f)
                     Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = ValueSome (color 0.3f 0.3f 0.3f 1f)}
                 ]
-
             ]
 
             Content.group Simulants.GameplayCharacters.Name [] []

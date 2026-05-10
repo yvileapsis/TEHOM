@@ -285,6 +285,7 @@ module Effects =
 module Paths =
 
     let [<Literal>] SpriteShaderFilePath = "Assets/Default/Sprite.glsl"
+    let [<Literal>] TextShaderFilePath = "Assets/Default/Text.glsl"
     let [<Literal>] SpriteBatchShaderFilePath = "Assets/Default/SpriteBatch.glsl"
     let [<Literal>] SkyBoxShaderFilePath = "Assets/Default/SkyBox.glsl"
     let [<Literal>] IrradianceShaderFilePath = "Assets/Default/Irradiance.glsl"

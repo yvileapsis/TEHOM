@@ -136,8 +136,8 @@ W....!!....!!....!!....!!....!!....!"
         Content.group "RogueBackground" [] [
             Content.staticSprite "Background" [
                 Entity.Size == Constants.Render.DisplayVirtualResolution.V3
-                Entity.StaticImage == Assets.Default.Black
-                Entity.Color == Color.Black
+                Entity.StaticImage == Assets.Default.White
+                Entity.Color == Color.White
             ]
 
             ContentEx.glyph "GlyphDisplay" [
@@ -151,8 +151,48 @@ W....!!....!!....!!....!!....!!....!"
                 Entity.Font == Assets.Gui.MonaspaceFont
                 Entity.FontSizing == Some 10
                 Entity.Justification == Justified (JustifyRight, JustifyMiddle)
-                Entity.TextColor := Color.FloralWhite
+                Entity.TextColor := Color.Cyan
+                Entity.Visible == false
             ]
+
+            for i in List.init 100 id do
+                Content.text $"Testing{i}" [
+                    Entity.Text == "TESTING"
+                    Entity.Position == v3 240f (-160f + (float32 i) * 12f) 0f
+                    Entity.Visible == true
+                ]
+
+
+            let text = [
+                100, "You wake up on a rusted **gurney**, its thin mattress stiff with age. The wheels are misaligned, one of them jammed with something brittle, as if shattered glass had been ground into the mechanism. A faint, lingering warmth clings to the sheets beneath you—like someone else had just been here."
+                90, "The air smells of old antiseptic, overtaken by dust and something faintly metallic."
+                80, "The windows are barricaded, wooden planks bolted over the glass, gaps thin enough to let in only slivers of light. Some of the boards are deeply gouged."
+                70, "A **security camera**, lens cracked. The power light is off, but it still seems to be aimed directly at you."
+                60, "At the far end of the hall, a **heavy metal door** stands locked, secured by a **keypad** mechanism. The numbers are worn, dulled by countless presses. Someone scratched something into the metal just beneath the keypad, but it has been deliberately scraped away. Only faint indentations remain."
+                50, "A wall-mounted **payphone** is bolted to the wall nearby. The handset dangles from its cord, swaying slightly. A dial tone hums softly from the receiver."
+                40, "An old **vending machine**, dark and unpowered, its glass front smeared with handprints. One of the buttons has been jammed inward, as if someone pressed it too hard. The snack behind it is missing."
+                30, "A directory sign, most of the text scratched away—except for one word: DOORS. Someone has circled it in ink, pressing so hard that the plastic beneath is slightly warped."
+                20, "A toppled wheelchair, its footrests twisted as if someone forced their way out of it in a hurry. The wheels are caked in dried grime, except for one small, spotless streak."
+                10, "A row of waiting chairs lines the wall. The plastic seats are cracked, their metal frames rusted. One chair near the back is missing entirely, but the dust outline where it once sat is perfectly clean."
+            ]
+
+            let text =
+                text
+                |> List.sortBy fst
+                |> List.rev
+                |> List.choose (fun (_, str) ->
+                    Some str
+                )
+                |> List.join "\n\n"
+
+            ContentEx.richText "Text" [
+                Entity.FontSizing == Some 10
+                Entity.PositionLocal == v3 0f 60f 0f
+                Entity.Size == v3 300f 32f 0f
+                Entity.TextColor == Color.Cyan
+                Entity.Text := text
+            ]
+
         ]
 
 
