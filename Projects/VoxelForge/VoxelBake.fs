@@ -58,12 +58,12 @@ module VoxelBake =
                     for x in 0 .. dec width do
                         let sliceX = x / side
                         let sliceY = y / side
-                        let z = sliceY * atlasColumns + sliceX
-                        if z < side then
+                        let yLayer = sliceY * atlasColumns + sliceX
+                        if yLayer < side then
                             let i = (y * width + x) * 4
                             let albedo = readColor byteOrder bytes i
                             if albedo.A > 0.0f then
-                                let coord = v3i (x % side) (y % side) z
+                                let coord = v3i (x % side) yLayer (y % side)
                                 occupied[coord] <- albedo
                 let size = v3 (single side * voxelSize.X) (single side * voxelSize.Y) (single side * voxelSize.Z)
                 let half = size * 0.5f

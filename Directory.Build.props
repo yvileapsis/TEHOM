@@ -1,0 +1,9 @@
+<Project>
+    <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.fsproj'">
+        <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(MSBuildProjectExtension)' == '.fsproj'">
+        <PackageReference Include="FSharp.Core" Version="10.1.203" />
+    </ItemGroup>
+</Project>
