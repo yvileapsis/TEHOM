@@ -136,6 +136,14 @@ void main()
     if (hit.y < hitDistance)
         discard;
 
+    vec3 hitLocal = rayOriginLocal + rayDirectionLocal * hitDistance;
+    vec3 faceDistance = abs(abs(hitLocal) - halfSize);
+    vec3 localNormal =
+        faceDistance.x <= faceDistance.y && faceDistance.x <= faceDistance.z ? vec3(hitLocal.x < 0.0 ? -1.0 : 1.0, 0.0, 0.0) :
+        faceDistance.y <= faceDistance.z ? vec3(0.0, hitLocal.y < 0.0 ? -1.0 : 1.0, 0.0) :
+        vec3(0.0, 0.0, hitLocal.z < 0.0 ? -1.0 : 1.0);
+    vec3 faceNormal = normalize(localNormal.x * xDir + localNormal.y * yDir + localNormal.z * zDir);
+
     vec3 hitWorld = rayOriginWorld + rayDirectionWorld * hitDistance;
     vec4 hitClip = projection * view * vec4(hitWorld, 1.0);
     float hitDepth = hitClip.z / hitClip.w * 0.5 + 0.5;
@@ -146,7 +154,7 @@ void main()
     depth = hitDepth;
     albedo = pow(clamp(colorOut.rgb * albedoOut.rgb, vec3(0.0), vec3(1.0)), vec3(GAMMA));
     material = materialOut;
-    normalPlus.xyz = normalize(normalOut);
+    normalPlus.xyz = faceNormal;
     normalPlus.w = heightPlusOut.y;
 
     float scatterType = subsurfacePlusOut.g;

@@ -48,12 +48,14 @@ module GameplayExtensions =
 [<RequireQualifiedAccess>]
 module GameplayLogic =
 
+    let private grassBlockSideVoxels = 16
     let private fieldTiles = v2i 16 16
-    let private sourceVoxelSize = v3Dup 0.2f
+    let private sourceVoxelSize = v3Dup (1.0f / single grassBlockSideVoxels)
     let private fieldChunkSizeVoxels = v3i 64 16 64
     let fieldChunkCounts = v2i 4 4
     let fieldChunkSize = v3 (single fieldChunkSizeVoxels.X * sourceVoxelSize.X) (single fieldChunkSizeVoxels.Y * sourceVoxelSize.Y) (single fieldChunkSizeVoxels.Z * sourceVoxelSize.Z)
-    let fieldSize = v3 (3.2f * single fieldTiles.X) 3.2f (3.2f * single fieldTiles.Y)
+    let private grassBlockSize = sourceVoxelSize * single grassBlockSideVoxels
+    let fieldSize = v3 (grassBlockSize.X * single fieldTiles.X) grassBlockSize.Y (grassBlockSize.Z * single fieldTiles.Y)
 
     let fieldChunkCenter x z =
         let fieldMin = fieldSize * -0.5f
@@ -86,7 +88,7 @@ module GameplayLogic =
                 World.destroyUserDefinedVoxelModel (Assets.Voxels.GrassFieldChunk x z) world
 
     let setInitialCamera world =
-        let eyeCenter = v3 28.0f 24.0f 34.0f
+        let eyeCenter = v3 9.0f 8.0f 11.0f
         let eyeRotation = Quaternion.CreateLookAt ((v3Zero - eyeCenter).Normalized, v3Up)
         World.setEye3dCenter eyeCenter world
         World.setEye3dRotation eyeRotation world
@@ -144,7 +146,14 @@ type GameplayDispatcher () =
                             [Entity.Position == GameplayLogic.fieldChunkCenter x z
                              Entity.Size == GameplayLogic.fieldChunkSize
                              Entity.VoxelModel == Assets.Voxels.GrassFieldChunk x z
-                             Entity.MaterialProperties == { MaterialProperties.empty with RoughnessOpt = ValueSome 0.84f }]
+                             Entity.MaterialProperties ==
+                                { MaterialProperties.empty with
+                                    RoughnessOpt = ValueSome 0.92f
+                                    MetallicOpt = ValueSome 0.0f
+                                    AmbientOcclusionOpt = ValueSome 1.0f
+                                    EmissionOpt = ValueSome 0.0f
+                                    ClearCoatOpt = ValueSome 0.0f
+                                    ClearCoatRoughnessOpt = ValueSome 1.0f }]
 
                  match gameplay.RayPickPositionOpt with
                  | Some position ->
