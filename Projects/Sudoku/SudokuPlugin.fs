@@ -210,12 +210,13 @@ type SudokuPlugin () =
         Map.ofList
             ["Splash", Game.SetSudoku Splash
              "Title", Game.SetSudoku Title
+             "Map", Game.SetSudoku StudyMap
              "Credits", Game.SetSudoku Credits
              "Gameplay", fun world ->
                 Simulants.Gameplay.SetGameplay Gameplay.initial world
                 Game.SetSudoku Gameplay world
              "Classic Gameplay", fun world ->
-                Simulants.Gameplay.SetGameplay (Gameplay.make Classic Normal 0) world
+                Simulants.Gameplay.SetGameplay (Gameplay.make ProgressionCatalog.ClassicCorpus.Context 0) world
                 Game.SetSudoku Gameplay world]
 
     // this specifies which packages are automatically loaded at game start-up.

@@ -10,18 +10,21 @@ open Sudoku
 type Sudoku =
     | Splash
     | Title
+    | StudyMap
     | Credits
     | Gameplay
 
 // this is our top-level MMCC message type.
 type SudokuMessage =
     | ShowTitle
+    | ShowMap
     | ShowCredits
-    | ShowGameplay of PuzzleSource
+    | ShowGameplay of GameplayContext
     interface Message
 
 // this is our top-level MMCC command type. Commands are used instead of messages when the world is to be transformed.
 type SudokuCommand =
+    | SetGameplay of GameplayContext
     | Exit
     interface Command
 
@@ -44,32 +47,39 @@ type SudokuDispatcher () =
             match sudoku with
             | Splash -> Desire Simulants.Splash
             | Title -> Desire Simulants.Title
+            | StudyMap -> Desire Simulants.Map
             | Credits -> Desire Simulants.Credits
             | Gameplay -> Desire Simulants.Gameplay
          if sudoku = Splash then Simulants.Splash.DeselectingEvent => ShowTitle
          Simulants.TitleCredits.ClickEvent => ShowCredits
-         Simulants.TitlePlay.ClickEvent => ShowGameplay Generated
-         Simulants.TitleClassic.ClickEvent => ShowGameplay Classic
+         Simulants.TitlePlay.ClickEvent => ShowMap
          Simulants.TitleExit.ClickEvent => Exit
+         Simulants.Map.MapBackEvent => ShowTitle
+         Simulants.Map.MapNodeSelectedEvent =|> fun evt -> ShowGameplay evt.Data
          Simulants.CreditsBack.ClickEvent => ShowTitle
-         Simulants.Gameplay.QuitEvent => ShowTitle]
+         Simulants.Gameplay.QuitEvent => ShowMap]
 
     // here we handle the above messages
     override this.Message (_, message, _, _) =
         match message with
         | ShowTitle -> just Title
+        | ShowMap -> just StudyMap
         | ShowCredits -> just Credits
-        | ShowGameplay source ->
-            withSignal (StartPlaying source) Gameplay
+        | ShowGameplay context ->
+            withSignal (SetGameplay context) Gameplay
 
     // here we handle the above commands
     override this.Command (_, command, _, world) =
         match command with
+        | SetGameplay context ->
+            let gameplay = Simulants.Gameplay.GetGameplay world
+            Simulants.Gameplay.SetGameplay { Gameplay.make context gameplay.Score with Display = gameplay.Display } world
         | Exit -> if world.Unaccompanied then World.exit world
 
     // here we describe the content of the game, including all of its screens
     override this.Content (_, _) =
         [Content.screen Simulants.Splash.Name (Slide (Constants.Dissolve.Default, Constants.Slide.Default, None, Simulants.Title)) [] []
          Content.screenWithGroupFromFile Simulants.Title.Name (Dissolve (Constants.Dissolve.Default, None)) "Assets/Gui/Title.nugroup" [] []
+         Content.screen<ProgressionMapDispatcher> Simulants.Map.Name (Dissolve (Constants.Dissolve.Default, None)) [] []
          Content.screenWithGroupFromFile Simulants.Credits.Name (Dissolve (Constants.Dissolve.Default, None)) "Assets/Gui/Credits.nugroup" [] []
          Content.screen<GameplayDispatcher> Simulants.Gameplay.Name (Dissolve (Constants.Dissolve.Default, None)) [] []]

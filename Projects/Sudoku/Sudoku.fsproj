@@ -50,14 +50,16 @@
 		<None Include="Assets\*" />
         <None Include="Assets\*\*" />
 		<Compile Include="Simulants.fs" />
-		<Compile Include="Events.fs" />
 		<Compile Include="Assets.fs" />
 		<Compile Include="SudokuGrid.fs" />
+		<Compile Include="ProgressionTypes.fs" />
+		<Compile Include="Events.fs" />
 		<Compile Include="SudokuHints.fs" />
 		<Compile Include="PuzzleAnalysis.fs" />
 		<Compile Include="PuzzleGeneration.fs" />
 		<Compile Include="PuzzleCorpus.fs" />
 		<Compile Include="PuzzleBank.fs" />
+		<Compile Include="ProgressionMap.fs" />
 		<Compile Include="Gameplay.fs" />
 		<Compile Include="Sudoku.fs" />
 		<Compile Include="SudokuPlugin.fs" />

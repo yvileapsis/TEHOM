@@ -15,9 +15,13 @@ module Simulants =
     let Title = Game / "Title"
     let TitleGui = Title / "Gui"
     let TitlePlay = TitleGui / "Play"
-    let TitleClassic = TitleGui / "Classic"
     let TitleCredits = TitleGui / "Credits"
     let TitleExit = TitleGui / "Exit"
+
+    // map screen
+    let Map = Game / "Map"
+    let MapGui = Map / "Gui"
+    let MapBack = MapGui / "Back"
 
     // credits screen
     let Credits = Game / "Credits"

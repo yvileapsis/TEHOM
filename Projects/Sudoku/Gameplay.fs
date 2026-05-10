@@ -125,8 +125,7 @@ type Gameplay =
       Puzzle : SudokuPuzzle
       Display : GameplayDisplay
       SelectedCellOpt : Vector2i option
-      PuzzleSource : PuzzleSource
-      Difficulty : Difficulty
+      Context : GameplayContext
       PencilMode : bool
       HintOpt : Hint option
       HintStatusOpt : string option
@@ -281,43 +280,41 @@ type Gameplay =
     static member private inertPuzzle =
         SudokuPuzzle.empty
 
-    static member private makeFromPuzzle source difficulty score (sudoku : SudokuPuzzle) =
+    static member private makeFromPuzzle context score (sudoku : SudokuPuzzle) =
         let sudoku = sudoku.Rehydrate ()
         { GameplayTime = 0L
           GameplayState = Playing
           Puzzle = sudoku
           Display = GameplayDisplay.initial
           SelectedCellOpt = None
-          PuzzleSource = source
-          Difficulty = difficulty
+          Context = context
           PencilMode = false
           HintOpt = None
           HintStatusOpt = None
           PuzzleNumber = sudoku.Number
           Score = score }
 
-    static member private unavailable source difficulty score =
+    static member private unavailable context score =
         let sudoku = Gameplay.inertPuzzle.Rehydrate ()
         { GameplayTime = 0L
           GameplayState = Unavailable
           Puzzle = sudoku
           Display = GameplayDisplay.initial
           SelectedCellOpt = None
-          PuzzleSource = source
-          Difficulty = difficulty
+          Context = context
           PencilMode = false
           HintOpt = None
-          HintStatusOpt = Some ("No imported " + difficulty.Label + " classic puzzle is available.")
+          HintStatusOpt = Some ("No imported " + context.Difficulty.Label + " classic puzzle is available.")
           PuzzleNumber = 0
           Score = score }
 
-    static member make source difficulty score =
-        match PuzzleBank.tryTake source difficulty with
-        | Some generated -> Gameplay.makeFromPuzzle source difficulty score generated
+    static member make context score =
+        match PuzzleBank.tryTake context.PuzzleSource context.Difficulty with
+        | Some generated -> Gameplay.makeFromPuzzle context score generated
         | None ->
-            match source with
-            | Generated -> Gameplay.makeFromPuzzle source difficulty score (PuzzleGeneration.make difficulty)
-            | Classic -> Gameplay.unavailable source difficulty score
+            match context.PuzzleSource with
+            | Generated -> Gameplay.makeFromPuzzle context score (PuzzleGeneration.make context.Difficulty)
+            | Classic -> Gameplay.unavailable context score
 
     // this represents the gameplay model in an unutilized state, such as when the gameplay screen is not selected.
     static member empty =
@@ -327,8 +324,7 @@ type Gameplay =
           Puzzle = sudoku
           Display = GameplayDisplay.initial
           SelectedCellOpt = None
-          PuzzleSource = Generated
-          Difficulty = Normal
+          Context = ProgressionCatalog.DefaultContext
           PencilMode = false
           HintOpt = None
           HintStatusOpt = None
@@ -336,11 +332,11 @@ type Gameplay =
           Score = 0 }
 
     // this represents the gameplay model in its initial state, such as when gameplay starts.
-    static member initial = Gameplay.make Generated Normal 0
+    static member initial = Gameplay.make ProgressionCatalog.DefaultContext 0
 
 // this is our gameplay MMCC message type.
 type GameplayMessage =
-    | StartPlaying of PuzzleSource
+    | StartPlaying of GameplayContext
     | FinishQuitting
     | TimeUpdate
     | SelectCellAtMouse
@@ -476,13 +472,14 @@ type GameplayDispatcher () =
         else display.ButtonNormalColor
 
     static let puzzleHeaderText (gameplay : Gameplay) =
+        let context = gameplay.Context
         match gameplay.GameplayState, gameplay.PuzzleNumber with
         | Unavailable, _ ->
-            gameplay.PuzzleSource.Label + ": unavailable - " + gameplay.Difficulty.Label
+            context.NodeTitle + ": " + context.PuzzleSource.Label + " unavailable - " + context.Difficulty.Label
         | _, number when number > 0 ->
-            gameplay.PuzzleSource.Label + " #" + string number + " - " + gameplay.Difficulty.Label
+            context.NodeTitle + ": " + context.PuzzleSource.Label + " #" + string number + " - " + context.Difficulty.Label
         | _ ->
-            gameplay.PuzzleSource.Label + ": Live - " + gameplay.Difficulty.Label
+            context.NodeTitle + ": " + context.PuzzleSource.Label + " live - " + context.Difficulty.Label
 
     // here we define the screen's fallback model depending on whether screen is selected
     override this.GetFallbackModel (_, screen, world) =
@@ -521,8 +518,8 @@ type GameplayDispatcher () =
     override this.Message (gameplay, message, _, world) =
 
         match message with
-        | StartPlaying source ->
-            just { Gameplay.make source gameplay.Difficulty gameplay.Score with Display = gameplay.Display }
+        | StartPlaying context ->
+            just { Gameplay.make context gameplay.Score with Display = gameplay.Display }
 
         | FinishQuitting ->
             just { gameplay with GameplayState = Quit; SelectedCellOpt = None; HintOpt = None; HintStatusOpt = None }
@@ -550,13 +547,13 @@ type GameplayDispatcher () =
             just { gameplay with PencilMode = not gameplay.PencilMode; HintStatusOpt = None }
 
         | SetDifficulty difficulty ->
-            just { Gameplay.make gameplay.PuzzleSource difficulty gameplay.Score with Display = gameplay.Display }
+            just { Gameplay.make (gameplay.Context.WithDifficulty difficulty) gameplay.Score with Display = gameplay.Display }
 
         | RequestHint ->
             just (Gameplay.withHint gameplay)
 
         | Restart ->
-            just { Gameplay.make gameplay.PuzzleSource gameplay.Difficulty gameplay.Score with Display = gameplay.Display }
+            just { Gameplay.make gameplay.Context gameplay.Score with Display = gameplay.Display }
 
 
         | Nil ->
@@ -632,7 +629,7 @@ type GameplayDispatcher () =
                         [Entity.Position := v3 (display.DifficultyButtonOrigin.X + single (i % 2) * display.DifficultyButtonSpacing.X) (display.DifficultyButtonOrigin.Y + single (i / 2) * display.DifficultyButtonSpacing.Y) 0.0f
                          Entity.Size := display.DifficultyButtonSize
                          Entity.Elevation == 10.0f
-                         Entity.Color := difficultyButtonColor display gameplay.Difficulty difficulty
+                         Entity.Color := difficultyButtonColor display gameplay.Context.Difficulty difficulty
                          Entity.Text := difficulty.Label
                          Entity.ClickEvent => SetDifficulty difficulty]
 
