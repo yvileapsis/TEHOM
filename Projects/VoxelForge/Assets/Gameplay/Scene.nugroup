@@ -19,10 +19,10 @@
    [[AmbientBrightness 0.5]
     [AmbientColor [1 1 1 1]]
     [Name LightProbe3d]
-    [Position [0 1 0]]
+    [Position [0 8 0]]
     [Presence Omnipresent]
     [ProbeBounds
-     [[-9 -1 -9] [18 3 18]]]
+     [[-9 -1 -9] [18 18 18]]]
     [Size [0.25 0.25 0.25]]
     [Static True]]
    []]]]

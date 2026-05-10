@@ -21,5 +21,5 @@ module Simulants =
     let GameplayGui = Gameplay / "Gui"
     let GameplayQuit = GameplayGui / "Quit"
     let GameplayScene = Gameplay / "Scene"
-    let VoxelFieldChunk x z = GameplayScene / ("VoxelField" + string x + "_" + string z)
+    let VoxelLevelChunk x y z = GameplayScene / ("VoxelLevel" + string x + "_" + string y + "_" + string z)
     let RayPickMarker = GameplayScene / "RayPickMarker"

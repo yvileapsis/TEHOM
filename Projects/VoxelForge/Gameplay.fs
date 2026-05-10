@@ -9,16 +9,23 @@ type GameplayState =
     | Playing
     | Quit
 
+type VoxelChunk =
+    { ChunkCoord : Vector3i
+      ChunkCenter : Vector3
+      ChunkSize : Vector3 }
+
 type Gameplay =
     { GameplayTime : int64
       GameplayState : GameplayState
       VoxelModelReady : bool
+      VoxelChunks : VoxelChunk array
       RayPickPositionOpt : Vector3 option }
 
     static member val empty =
         { GameplayTime = 0L
           GameplayState = Quit
           VoxelModelReady = false
+          VoxelChunks = [||]
           RayPickPositionOpt = None }
 
     static member val initial =
@@ -48,21 +55,13 @@ module GameplayExtensions =
 [<RequireQualifiedAccess>]
 module GameplayLogic =
 
-    let private grassBlockSideVoxels = 16
-    let private fieldTiles = v2i 16 16
-    let private sourceVoxelSize = v3Dup (1.0f / single grassBlockSideVoxels)
-    let private fieldChunkSizeVoxels = v3i 64 16 64
-    let fieldChunkCounts = v2i 4 4
-    let fieldChunkSize = v3 (single fieldChunkSizeVoxels.X * sourceVoxelSize.X) (single fieldChunkSizeVoxels.Y * sourceVoxelSize.Y) (single fieldChunkSizeVoxels.Z * sourceVoxelSize.Z)
-    let private grassBlockSize = sourceVoxelSize * single grassBlockSideVoxels
-    let fieldSize = v3 (grassBlockSize.X * single fieldTiles.X) grassBlockSize.Y (grassBlockSize.Z * single fieldTiles.Y)
-
-    let fieldChunkCenter x z =
-        let fieldMin = fieldSize * -0.5f
-        v3
-            (fieldMin.X + (single x + 0.5f) * fieldChunkSize.X)
-            0.0f
-            (fieldMin.Z + (single z + 0.5f) * fieldChunkSize.Z)
+    let private minecraftBlockSideVoxels = 16
+    let private minecraftLevelSideVoxels = 256
+    let private sourceVoxelSize = v3Dup (1.0f / single minecraftBlockSideVoxels)
+    let private levelChunkSizeVoxels = v3i 64 64 64
+    let private levelChunkCounts = v3i 4 4 4
+    let private levelSize = sourceVoxelSize * single minecraftLevelSideVoxels
+    let private levelOffset = v3 0.0f (levelSize.Y * 0.5f) 0.0f
 
     let tryPickGround world =
         let ray = World.getMouseRay3dWorld world
@@ -73,23 +72,28 @@ module GameplayLogic =
         else None
 
     let createVoxelModel world =
-        match VoxelBake.tryBakeSliceAtlas Assets.Voxels.GrassBlock sourceVoxelSize with
-        | Some grassBlock ->
-            let grassField = VoxelBake.tile fieldTiles.X fieldTiles.Y grassBlock
-            let grassChunks = VoxelBake.chunk fieldChunkSizeVoxels grassField
-            for struct (chunkCoord, _, grassChunk) in grassChunks do
-                World.createUserDefinedVoxelModel grassChunk (Assets.Voxels.GrassFieldChunk chunkCoord.X chunkCoord.Z) world
+        match VoxelBake.tryBakeSliceAtlas Assets.Voxels.Minecraft sourceVoxelSize with
+        | Some minecraftLevel ->
+            let minecraftChunks = VoxelBake.chunk levelChunkSizeVoxels minecraftLevel
+            [|for struct (chunkCoord, chunkCenter, minecraftChunk) in minecraftChunks do
+                World.createUserDefinedVoxelModel minecraftChunk (Assets.Voxels.MinecraftLevelChunk chunkCoord.X chunkCoord.Y chunkCoord.Z) world
+                { ChunkCoord = chunkCoord
+                  ChunkCenter = chunkCenter + levelOffset
+                  ChunkSize = minecraftChunk.Bounds.Size }|]
         | None ->
-            Log.warnOnce "VoxelForge could not bake the grass_block voxel slice atlas."
+            Log.warnOnce "VoxelForge could not bake the minecraft voxel slice atlas."
+            [||]
 
     let destroyVoxelModel world =
-        for z in 0 .. dec fieldChunkCounts.Y do
-            for x in 0 .. dec fieldChunkCounts.X do
-                World.destroyUserDefinedVoxelModel (Assets.Voxels.GrassFieldChunk x z) world
+        for z in 0 .. dec levelChunkCounts.Z do
+            for y in 0 .. dec levelChunkCounts.Y do
+                for x in 0 .. dec levelChunkCounts.X do
+                    World.destroyUserDefinedVoxelModel (Assets.Voxels.MinecraftLevelChunk x y z) world
 
     let setInitialCamera world =
-        let eyeCenter = v3 9.0f 8.0f 11.0f
-        let eyeRotation = Quaternion.CreateLookAt ((v3Zero - eyeCenter).Normalized, v3Up)
+        let eyeCenter = v3 12.0f 12.0f 14.0f
+        let eyeTarget = v3 0.0f 5.0f 0.0f
+        let eyeRotation = Quaternion.CreateLookAt ((eyeTarget - eyeCenter).Normalized, v3Up)
         World.setEye3dCenter eyeCenter world
         World.setEye3dRotation eyeRotation world
         World.setEye3dFieldOfView 0.75f world
@@ -125,10 +129,11 @@ type GameplayDispatcher () =
                 withSignal (signal EnsureVoxelModel) { gameplay with VoxelModelReady = true }
             else just gameplay
 
-    override this.Command (_, command, screen, world) =
+    override this.Command (gameplay, command, screen, world) =
         match command with
         | EnsureVoxelModel ->
-            GameplayLogic.createVoxelModel world
+            let voxelChunks = GameplayLogic.createVoxelModel world
+            screen.SetGameplay { gameplay with GameplayState = Playing; VoxelModelReady = true; VoxelChunks = voxelChunks } world
             if world.Unaccompanied then GameplayLogic.setInitialCamera world
         | DestroyVoxelModel ->
             GameplayLogic.destroyVoxelModel world
@@ -140,20 +145,19 @@ type GameplayDispatcher () =
         [if gameplay.GameplayState = Playing then
             Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" []
 
-                [for z in 0 .. dec GameplayLogic.fieldChunkCounts.Y do
-                    for x in 0 .. dec GameplayLogic.fieldChunkCounts.X do
-                        Content.voxel (Simulants.VoxelFieldChunk x z).Name
-                            [Entity.Position == GameplayLogic.fieldChunkCenter x z
-                             Entity.Size == GameplayLogic.fieldChunkSize
-                             Entity.VoxelModel == Assets.Voxels.GrassFieldChunk x z
-                             Entity.MaterialProperties ==
-                                { MaterialProperties.empty with
-                                    RoughnessOpt = ValueSome 0.92f
-                                    MetallicOpt = ValueSome 0.0f
-                                    AmbientOcclusionOpt = ValueSome 1.0f
-                                    EmissionOpt = ValueSome 0.0f
-                                    ClearCoatOpt = ValueSome 0.0f
-                                    ClearCoatRoughnessOpt = ValueSome 1.0f }]
+                [for voxelChunk in gameplay.VoxelChunks do
+                    Content.voxel (Simulants.VoxelLevelChunk voxelChunk.ChunkCoord.X voxelChunk.ChunkCoord.Y voxelChunk.ChunkCoord.Z).Name
+                        [Entity.Position == voxelChunk.ChunkCenter
+                         Entity.Size == voxelChunk.ChunkSize
+                         Entity.VoxelModel == Assets.Voxels.MinecraftLevelChunk voxelChunk.ChunkCoord.X voxelChunk.ChunkCoord.Y voxelChunk.ChunkCoord.Z
+                         Entity.MaterialProperties ==
+                            { MaterialProperties.empty with
+                                RoughnessOpt = ValueSome 0.92f
+                                MetallicOpt = ValueSome 0.0f
+                                AmbientOcclusionOpt = ValueSome 1.0f
+                                EmissionOpt = ValueSome 0.0f
+                                ClearCoatOpt = ValueSome 0.0f
+                                ClearCoatRoughnessOpt = ValueSome 1.0f }]
 
                  match gameplay.RayPickPositionOpt with
                  | Some position ->
