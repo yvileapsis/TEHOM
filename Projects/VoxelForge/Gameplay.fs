@@ -1,5 +1,6 @@
 ﻿namespace VoxelForge
 open System
+open System.Collections.Generic
 open System.Numerics
 open Prime
 open Nu
@@ -12,7 +13,9 @@ type GameplayState =
 type VoxelChunk =
     { ChunkCoord : Vector3i
       ChunkCenter : Vector3
-      ChunkSize : Vector3 }
+      ChunkSize : Vector3
+      BodyShape : BodyShape
+      BoxCount : int }
 
 type Gameplay =
     { GameplayTime : int64
@@ -63,23 +66,56 @@ module GameplayLogic =
     let private levelSize = sourceVoxelSize * single minecraftLevelSideVoxels
     let private levelOffset = v3 0.0f (levelSize.Y * 0.5f) 0.0f
 
-    let tryPickGround world =
-        let ray = World.getMouseRay3dWorld world
-        if abs ray.Direction.Y > 0.0001f then
-            let t = -ray.Origin.Y / ray.Direction.Y
-            if t > 0.0f then Some (ray.Origin + ray.Direction * t)
-            else None
-        else None
+    let rec private translateBodyShape translation bodyShape =
+        let translateTransform transformOpt =
+            match transformOpt with
+            | Some (transform : Affine) -> Some { transform with Translation = transform.Translation + translation }
+            | None -> Some (Affine.makeTranslation translation)
+        match bodyShape with
+        | BoxShape boxShape -> BoxShape { boxShape with TransformOpt = translateTransform boxShape.TransformOpt }
+        | SphereShape sphereShape -> SphereShape { sphereShape with TransformOpt = translateTransform sphereShape.TransformOpt }
+        | CapsuleShape capsuleShape -> CapsuleShape { capsuleShape with TransformOpt = translateTransform capsuleShape.TransformOpt }
+        | BoxRoundedShape boxRoundedShape -> BoxRoundedShape { boxRoundedShape with TransformOpt = translateTransform boxRoundedShape.TransformOpt }
+        | EdgeShape edgeShape -> EdgeShape { edgeShape with TransformOpt = translateTransform edgeShape.TransformOpt }
+        | ContourShape contourShape -> ContourShape { contourShape with TransformOpt = translateTransform contourShape.TransformOpt }
+        | PointsShape pointsShape -> PointsShape { pointsShape with TransformOpt = translateTransform pointsShape.TransformOpt }
+        | GeometryShape geometryShape -> GeometryShape { geometryShape with TransformOpt = translateTransform geometryShape.TransformOpt }
+        | StaticModelShape staticModelShape -> StaticModelShape { staticModelShape with TransformOpt = translateTransform staticModelShape.TransformOpt }
+        | StaticModelSurfaceShape staticModelSurfaceShape -> StaticModelSurfaceShape { staticModelSurfaceShape with TransformOpt = translateTransform staticModelSurfaceShape.TransformOpt }
+        | TerrainShape terrainShape -> TerrainShape { terrainShape with TransformOpt = translateTransform terrainShape.TransformOpt }
+        | BodyShapes bodyShapes -> BodyShapes (bodyShapes |> List.map (translateBodyShape translation))
+        | EmptyShape -> EmptyShape
 
-    let createVoxelModel world =
-        match VoxelBake.tryBakeSliceAtlas Assets.Voxels.Minecraft sourceVoxelSize with
+    let tryPickGround world =
+        let mouseRay = World.getMouseRay3dWorld world
+        let pickRay = ray3 mouseRay.Origin (mouseRay.Direction * 1000.0f)
+        World.rayCastBodies3d pickRay 2UL 2UL false world
+        |> Array.tryHead
+        |> Option.map (fun (intersection : BodyIntersection) -> intersection.Position)
+
+    let createVoxelLevel world =
+        match VoxelBake.tryBakeSliceAtlasVolume Assets.Voxels.Minecraft sourceVoxelSize with
         | Some minecraftLevel ->
-            let minecraftChunks = VoxelBake.chunk levelChunkSizeVoxels minecraftLevel
-            [|for struct (chunkCoord, chunkCenter, minecraftChunk) in minecraftChunks do
-                World.createUserDefinedVoxelModel minecraftChunk (Assets.Voxels.MinecraftLevelChunk chunkCoord.X chunkCoord.Y chunkCoord.Z) world
-                { ChunkCoord = chunkCoord
-                  ChunkCenter = chunkCenter + levelOffset
-                  ChunkSize = minecraftChunk.Bounds.Size }|]
+            let minecraftChunks = VoxelBake.chunk levelChunkSizeVoxels minecraftLevel.VoxelModel
+            let voxelPhysicsChunks = Dictionary<Vector3i, struct (Vector3 * BodyShape * int)> (HashIdentity.Structural)
+            for struct (chunkCoord, chunkCenter, bodyShape, boxCount) in VoxelBake.chunkBodyShapes levelChunkSizeVoxels minecraftLevel do
+                voxelPhysicsChunks.Add (chunkCoord, struct (chunkCenter, bodyShape, boxCount))
+            let voxelChunks =
+                [|for struct (chunkCoord, chunkCenter, minecraftChunk) in minecraftChunks do
+                    let struct (bodyCenter, bodyShape, boxCount) =
+                        match voxelPhysicsChunks.TryGetValue chunkCoord with
+                        | (true, physicsChunk) -> physicsChunk
+                        | (false, _) -> struct (chunkCenter, EmptyShape, 0)
+                    let bodyShape = translateBodyShape (bodyCenter - chunkCenter) bodyShape
+                    World.createUserDefinedVoxelModel minecraftChunk (Assets.Voxels.MinecraftLevelChunk chunkCoord.X chunkCoord.Y chunkCoord.Z) world
+                    { ChunkCoord = chunkCoord
+                      ChunkCenter = chunkCenter + levelOffset
+                      ChunkSize = minecraftChunk.Bounds.Size
+                      BodyShape = bodyShape
+                      BoxCount = boxCount }|]
+            let bodyShapeCount = voxelChunks |> Array.sumBy (fun (voxelChunk : VoxelChunk) -> voxelChunk.BoxCount)
+            Log.infoOnce ("VoxelForge generated " + scstring voxelChunks.Length + " voxel chunks with " + scstring bodyShapeCount + " merged physics boxes.")
+            voxelChunks
         | None ->
             Log.warnOnce "VoxelForge could not bake the minecraft voxel slice atlas."
             [||]
@@ -132,7 +168,7 @@ type GameplayDispatcher () =
     override this.Command (gameplay, command, screen, world) =
         match command with
         | EnsureVoxelModel ->
-            let voxelChunks = GameplayLogic.createVoxelModel world
+            let voxelChunks = GameplayLogic.createVoxelLevel world
             screen.SetGameplay { gameplay with GameplayState = Playing; VoxelModelReady = true; VoxelChunks = voxelChunks } world
             if world.Unaccompanied then GameplayLogic.setInitialCamera world
         | DestroyVoxelModel ->
@@ -147,9 +183,14 @@ type GameplayDispatcher () =
 
                 [for voxelChunk in gameplay.VoxelChunks do
                     Content.voxel (Simulants.VoxelLevelChunk voxelChunk.ChunkCoord.X voxelChunk.ChunkCoord.Y voxelChunk.ChunkCoord.Z).Name
-                        [Entity.Position == voxelChunk.ChunkCenter
+                        [Entity.FacetNames == Set.ofList [nameof VoxelFacet; nameof RigidBodyFacet]
+                         Entity.Position == voxelChunk.ChunkCenter
                          Entity.Size == voxelChunk.ChunkSize
                          Entity.VoxelModel == Assets.Voxels.MinecraftLevelChunk voxelChunk.ChunkCoord.X voxelChunk.ChunkCoord.Y voxelChunk.ChunkCoord.Z
+                         Entity.BodyType == Static
+                         Entity.BodyShape == voxelChunk.BodyShape
+                         Entity.CollisionCategories == "10"
+                         Entity.Static == true
                          Entity.MaterialProperties ==
                             { MaterialProperties.empty with
                                 RoughnessOpt = ValueSome 0.92f
@@ -158,6 +199,19 @@ type GameplayDispatcher () =
                                 EmissionOpt = ValueSome 0.0f
                                 ClearCoatOpt = ValueSome 0.0f
                                 ClearCoatRoughnessOpt = ValueSome 1.0f }]
+
+                 Content.boxBody3d Simulants.PhysicsTestCube.Name
+                    [Entity.Position == v3 0.0f 18.0f 0.0f
+                     Entity.Size == v3One
+                     Entity.BodyType == Dynamic
+                     Entity.BodyShape == BoxShape { Size = v3One; TransformOpt = None; PropertiesOpt = None }
+                     Entity.StaticModel == Assets.Default.StaticModel
+                     Entity.Substance == Mass 4.0f
+                     Entity.Friction == 0.8f
+                     Entity.MaterialProperties ==
+                        { MaterialProperties.empty with
+                            AlbedoOpt = ValueSome (color 0.85f 0.45f 0.35f 1.0f)
+                            RoughnessOpt = ValueSome 0.65f }]
 
                  match gameplay.RayPickPositionOpt with
                  | Some position ->

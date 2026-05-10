@@ -557,8 +557,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
 
     static member private attachBodyShapes bodyProperties bodyShapes scShapeSettings masses physicsEngine =
         List.fold (fun masses bodyShape ->
-            let masses' = JoltPhysicsEngine.attachBodyShape bodyProperties bodyShape scShapeSettings masses physicsEngine
-            masses' @ masses)
+            JoltPhysicsEngine.attachBodyShape bodyProperties bodyShape scShapeSettings masses physicsEngine)
             masses
             bodyShapes
 

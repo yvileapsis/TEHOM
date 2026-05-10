@@ -9,6 +9,10 @@ type VoxelColorByteOrder =
     | Rgba
     | Bgra
 
+type VoxelVolumeDescriptor =
+    { VoxelModel : VoxelModelDescriptor
+      OccupiedCoords : Vector3i array }
+
 [<RequireQualifiedAccess>]
 module VoxelBake =
 
@@ -47,7 +51,7 @@ module VoxelBake =
                 (single bytes[i] * scalar)
                 (single bytes[i+3] * scalar)
 
-    let tryDecodeSliceAtlasBytes (byteOrder : VoxelColorByteOrder) (width : int) (height : int) (bytes : byte array) (voxelSize : Vector3) =
+    let tryDecodeSliceAtlasVolumeBytes (byteOrder : VoxelColorByteOrder) (width : int) (height : int) (bytes : byte array) (voxelSize : Vector3) =
         if bytes.Length < width * height * 4 then None
         else
             match tryInferCubeSide width height with
@@ -88,12 +92,19 @@ module VoxelBake =
                               Albedo = entry.Value
                               Normal = normal }
                 Some
-                    { Splats = splats.ToArray ()
-                      Bounds = box3 (size * -0.5f) size
-                      VoxelSize = voxelSize }
+                    { VoxelModel =
+                        { Splats = splats.ToArray ()
+                          Bounds = box3 (size * -0.5f) size
+                          VoxelSize = voxelSize }
+                      OccupiedCoords = occupied.Keys |> Seq.toArray }
             | None -> None
 
-    let tryBakeSliceAtlas image voxelSize =
+    let tryDecodeSliceAtlasBytes byteOrder width height bytes voxelSize =
+        match tryDecodeSliceAtlasVolumeBytes byteOrder width height bytes voxelSize with
+        | Some volume -> Some volume.VoxelModel
+        | None -> None
+
+    let tryBakeSliceAtlasVolume image voxelSize =
         match Metadata.tryGetFilePath image with
         | Some filePath ->
             match OpenGL.Texture.TryCreateTextureData (false, filePath) with
@@ -102,8 +113,13 @@ module VoxelBake =
                 let (compressed, bytes) = textureData.Bytes
                 textureData.Dispose ()
                 if compressed then None
-                else tryDecodeSliceAtlasBytes Bgra metadata.TextureWidth metadata.TextureHeight bytes voxelSize
+                else tryDecodeSliceAtlasVolumeBytes Bgra metadata.TextureWidth metadata.TextureHeight bytes voxelSize
             | None -> None
+        | None -> None
+
+    let tryBakeSliceAtlas image voxelSize =
+        match tryBakeSliceAtlasVolume image voxelSize with
+        | Some volume -> Some volume.VoxelModel
         | None -> None
 
     let tile tilesX tilesZ (descriptor : VoxelModelDescriptor) =
@@ -163,3 +179,88 @@ module VoxelBake =
                  { descriptor with
                     Splats = splats
                     Bounds = box3 (min - center) size })|]
+
+    let chunkBodyShapes (chunkSize : Vector3i) (volume : VoxelVolumeDescriptor) =
+        let chunkSize = v3i (max 1 chunkSize.X) (max 1 chunkSize.Y) (max 1 chunkSize.Z)
+        let chunks = Dictionary<Vector3i, List<Vector3i>> (HashIdentity.Structural)
+        for coord in volume.OccupiedCoords do
+            let chunkCoord = v3i (coord.X / chunkSize.X) (coord.Y / chunkSize.Y) (coord.Z / chunkSize.Z)
+            let localCoord = v3i (coord.X % chunkSize.X) (coord.Y % chunkSize.Y) (coord.Z % chunkSize.Z)
+            match chunks.TryGetValue chunkCoord with
+            | (true, coords) -> coords.Add localCoord
+            | (false, _) ->
+                let coords = List ()
+                coords.Add localCoord
+                chunks.Add (chunkCoord, coords)
+        [|for entry in chunks |> Seq.sortBy (fun entry -> struct (entry.Key.Z, entry.Key.Y, entry.Key.X)) do
+            let chunkCoord = entry.Key
+            let filled = Array3D.zeroCreate<bool> chunkSize.X chunkSize.Y chunkSize.Z
+            let visited = Array3D.zeroCreate<bool> chunkSize.X chunkSize.Y chunkSize.Z
+            for coord in entry.Value do
+                filled[coord.X, coord.Y, coord.Z] <- true
+            let origin = volume.VoxelModel.Bounds.Min
+            let voxelSize = volume.VoxelModel.VoxelSize
+            let chunkMin =
+                origin +
+                v3
+                    (single (chunkCoord.X * chunkSize.X) * voxelSize.X)
+                    (single (chunkCoord.Y * chunkSize.Y) * voxelSize.Y)
+                    (single (chunkCoord.Z * chunkSize.Z) * voxelSize.Z)
+            let chunkWorldSize =
+                v3
+                    (single chunkSize.X * voxelSize.X)
+                    (single chunkSize.Y * voxelSize.Y)
+                    (single chunkSize.Z * voxelSize.Z)
+            let chunkCenter = chunkMin + chunkWorldSize * 0.5f
+            let canUse x y z = filled[x, y, z] && not visited[x, y, z]
+            let canGrowZ x y z sizeX sizeZ =
+                let z = z + sizeZ
+                let mutable canGrow = z < chunkSize.Z
+                let mutable ix = 0
+                while canGrow && ix < sizeX do
+                    canGrow <- canUse (x + ix) y z
+                    ix <- inc ix
+                canGrow
+            let canGrowY x y z sizeX sizeY sizeZ =
+                let y = y + sizeY
+                let mutable canGrow = y < chunkSize.Y
+                let mutable iz = 0
+                while canGrow && iz < sizeZ do
+                    let mutable ix = 0
+                    while canGrow && ix < sizeX do
+                        canGrow <- canUse (x + ix) y (z + iz)
+                        ix <- inc ix
+                    iz <- inc iz
+                canGrow
+            let bodyShapes = List<BodyShape> ()
+            for y in 0 .. dec chunkSize.Y do
+                for z in 0 .. dec chunkSize.Z do
+                    for x in 0 .. dec chunkSize.X do
+                        if canUse x y z then
+                            let mutable sizeX = 1
+                            while x + sizeX < chunkSize.X && canUse (x + sizeX) y z do
+                                sizeX <- inc sizeX
+                            let mutable sizeZ = 1
+                            while canGrowZ x y z sizeX sizeZ do
+                                sizeZ <- inc sizeZ
+                            let mutable sizeY = 1
+                            while canGrowY x y z sizeX sizeY sizeZ do
+                                sizeY <- inc sizeY
+                            for iy in 0 .. dec sizeY do
+                                for iz in 0 .. dec sizeZ do
+                                    for ix in 0 .. dec sizeX do
+                                        visited[x + ix, y + iy, z + iz] <- true
+                            let boxSize =
+                                v3
+                                    (single sizeX * voxelSize.X)
+                                    (single sizeY * voxelSize.Y)
+                                    (single sizeZ * voxelSize.Z)
+                            let boxMin =
+                                chunkMin +
+                                v3
+                                    (single x * voxelSize.X)
+                                    (single y * voxelSize.Y)
+                                    (single z * voxelSize.Z)
+                            let boxCenter = boxMin + boxSize * 0.5f
+                            bodyShapes.Add (BoxShape { Size = boxSize; TransformOpt = Some (Affine.makeTranslation (boxCenter - chunkCenter)); PropertiesOpt = None })
+            struct (chunkCoord, chunkCenter, BodyShapes (bodyShapes |> Seq.toList), bodyShapes.Count)|]
