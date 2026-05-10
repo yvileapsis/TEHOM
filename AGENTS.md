@@ -24,6 +24,7 @@ This workspace contains the Nu engine plus the active game project at `Projects/
 - Before editing, inspect the relevant Sudoku module and nearby Nu patterns instead of guessing.
 - Keep changes scoped to `Projects/Sudoku` unless the user explicitly asks for broader repository or engine changes.
 - For F# edits, respect the compile order in `Projects/Sudoku/Sudoku.fsproj`. If adding a source file, insert it after the files it depends on and before files that depend on it.
+- For F# functions that assume a parameter's shape, especially record, struct, math, asset, world, or renderer values accessed through members, add explicit parameter type annotations instead of relying on inference.
 - Avoid unrelated refactors, generated asset churn, and reverting user changes.
 - If existing user changes are present, work with them. Do not reset, checkout, or otherwise discard them unless the user explicitly requests it.
 
