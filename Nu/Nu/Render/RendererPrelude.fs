@@ -133,4 +133,5 @@ type RenderAsset =
     | FontAsset of FontSizeDefault : single * Font : TTF_Font nativeptr
     | CubeMapAsset of FilePaths : OpenGL.CubeMap.CubeMapKey * CubeMap : OpenGL.Texture.Texture * IrradianceAndEnvironmentMapOptRef : (OpenGL.Texture.Texture * OpenGL.Texture.Texture) option ref
     | StaticModelAsset of UserDefined : bool * StaticModel : OpenGL.PhysicallyBased.PhysicallyBasedModel
+    | VoxelModelAsset of UserDefined : bool * VoxelModel : OpenGL.PhysicallyBased.PhysicallyBasedVoxelModel
     | AnimatedModelAsset of AnimatedModel : OpenGL.PhysicallyBased.PhysicallyBasedModel

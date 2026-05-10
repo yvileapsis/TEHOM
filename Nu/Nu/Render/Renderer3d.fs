@@ -321,6 +321,14 @@ type [<Struct>] StaticModelValue =
       mutable DepthTest : DepthTest
       mutable RenderType : RenderType }
 
+/// A mutable voxel model value type.
+type [<Struct>] VoxelModelValue =
+    { mutable ModelMatrix : Matrix4x4
+      mutable CastShadow : bool
+      mutable Presence : Presence
+      mutable MaterialProperties : MaterialProperties
+      mutable VoxelModel : VoxelModel AssetTag }
+
 /// A mutable static model surface value type.
 type [<Struct>] StaticModelSurfaceValue =
     { mutable ModelMatrix : Matrix4x4
@@ -408,6 +416,15 @@ type CachedStaticModelSurfaceMessage =
       mutable CachedStaticModelSurfaceRenderType : RenderType
       mutable CachedStaticModelSurfaceRenderPass : RenderPass }
 
+/// An internally cached voxel model used to reduce GC promotion or pressure.
+type CachedVoxelModelMessage =
+    { mutable CachedVoxelModelMatrix : Matrix4x4
+      mutable CachedVoxelModelCastShadow : bool
+      mutable CachedVoxelModelPresence : Presence
+      mutable CachedVoxelModelMaterialProperties : MaterialProperties
+      mutable CachedVoxelModel : VoxelModel AssetTag
+      mutable CachedVoxelModelRenderPass : RenderPass }
+
 /// An internally cached animated model used to reduce GC promotion or pressure.
 type CachedAnimatedModelMessage =
     { mutable CachedAnimatedModelMatrix : Matrix4x4
@@ -458,6 +475,15 @@ type CreateUserDefinedStaticModel =
 /// Describes how to destroy a user-defined static model.
 type DestroyUserDefinedStaticModel =
     { StaticModel : StaticModel AssetTag }
+
+/// Describes how to create a user-defined voxel model.
+type CreateUserDefinedVoxelModel =
+    { VoxelModelDescriptor : VoxelModelDescriptor
+      VoxelModel : VoxelModel AssetTag }
+
+/// Describes how to destroy a user-defined voxel model.
+type DestroyUserDefinedVoxelModel =
+    { VoxelModel : VoxelModel AssetTag }
 
 /// Describes how to render a sky box.
 type RenderSkyBox =
@@ -592,6 +618,15 @@ type RenderStaticModels =
       Clipped : bool
       DepthTest : DepthTest
       RenderType : RenderType
+      RenderPass : RenderPass }
+
+/// Describes how to render a voxel model.
+type RenderVoxelModel =
+    { ModelMatrix : Matrix4x4
+      CastShadow : bool
+      Presence : Presence
+      MaterialProperties : MaterialProperties
+      VoxelModel : VoxelModel AssetTag
       RenderPass : RenderPass }
 
 /// Describes how to render an animated model.
@@ -826,6 +861,8 @@ type [<SymbolicExpansion>] Renderer3dConfig =
 type RenderMessage3d =
     | CreateUserDefinedStaticModel of CreateUserDefinedStaticModel
     | DestroyUserDefinedStaticModel of DestroyUserDefinedStaticModel
+    | CreateUserDefinedVoxelModel of CreateUserDefinedVoxelModel
+    | DestroyUserDefinedVoxelModel of DestroyUserDefinedVoxelModel
     | RenderSkyBox of RenderSkyBox
     | RenderLightProbe3d of RenderLightProbe3d
     | RenderLightMap3d of RenderLightMap3d
@@ -840,6 +877,8 @@ type RenderMessage3d =
     | RenderStaticModels of RenderStaticModels
     | RenderCachedStaticModel of CachedStaticModelMessage
     | RenderCachedStaticModelSurface of CachedStaticModelSurfaceMessage
+    | RenderVoxelModel of RenderVoxelModel
+    | RenderCachedVoxelModel of CachedVoxelModelMessage
     | RenderUserDefinedStaticModel of RenderUserDefinedStaticModel
     | RenderAnimatedModel of RenderAnimatedModel
     | RenderAnimatedModels of RenderAnimatedModels
@@ -1069,6 +1108,7 @@ type [<ReferenceEquality>] private RenderTasks =
       DeferredStaticClippedPreBatches : Dictionary<Guid, struct (OpenGL.PhysicallyBased.PhysicallyBasedSurface * (Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Box3) array)>
       DeferredAnimated : Dictionary<AnimatedModelSurfaceKey, struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties) List>
       DeferredTerrains : struct (TerrainDescriptor * TerrainPatchDescriptor * OpenGL.PhysicallyBased.PhysicallyBasedGeometry) List
+      DeferredVoxels : struct (Matrix4x4 * bool * Presence * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedVoxelModel) List
       Forward : struct (single * single * Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * OpenGL.PhysicallyBased.PhysicallyBasedSurface * DepthTest) List
       ForwardSorted : struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * OpenGL.PhysicallyBased.PhysicallyBasedSurface * DepthTest) List
       DeferredStaticRemovals : OpenGL.PhysicallyBased.PhysicallyBasedSurface List
@@ -1088,6 +1128,7 @@ type [<ReferenceEquality>] private RenderTasks =
           DeferredStaticClippedPreBatches = dictPlus HashIdentity.Structural []
           DeferredAnimated = dictPlus AnimatedModelSurfaceKey.comparer []
           DeferredTerrains = List ()
+          DeferredVoxels = List ()
           Forward = List ()
           ForwardSorted = List ()
           DeferredStaticRemovals = List ()
@@ -1132,6 +1173,7 @@ type [<ReferenceEquality>] private RenderTasks =
         renderTasks.Forward.Clear ()
         renderTasks.ForwardSorted.Clear ()
         renderTasks.DeferredTerrains.Clear ()
+        renderTasks.DeferredVoxels.Clear ()
 
         renderTasks.ShadowBufferIndexOpt <- None
 
@@ -1177,6 +1219,13 @@ type [<ReferenceEquality>] private RenderTasks =
                     terrainDescriptor.Bounds = terrainDescriptorCached.Bounds &&
                     terrainDescriptor.CastShadow = terrainDescriptorCached.CastShadow &&
                     terrainDescriptor.HeightMap = terrainDescriptorCached.HeightMap)
+            let deferredVoxelsCached =
+                renderTasks.DeferredVoxels.Count = renderTasksCached.DeferredVoxels.Count &&
+                (renderTasks.DeferredVoxels, renderTasksCached.DeferredVoxels)
+                ||> Seq.forall2 (fun struct (m, cs, _, _, vm) struct (mCached, csCached, _, _, vmCached) ->
+                    m = mCached &&
+                    cs = csCached &&
+                    vm.VoxelGeometry.VertexBuffer = vmCached.VoxelGeometry.VertexBuffer)
             let forwardCached =
                 renderTasks.Forward.Count = renderTasksCached.Forward.Count &&
                 (renderTasks.Forward, renderTasksCached.Forward)
@@ -1191,6 +1240,7 @@ type [<ReferenceEquality>] private RenderTasks =
             deferredStaticClippedPreBatchesCached &&
             deferredAnimatedCached &&
             deferredTerrainsCached &&
+            deferredVoxelsCached &&
             forwardCached
         else false
 
@@ -1244,6 +1294,7 @@ type [<ReferenceEquality>] GlRenderer3d =
           PhysicallyBasedStaticVao : uint
           PhysicallyBasedAnimatedVao : uint
           PhysicallyBasedTerrainVao : uint
+          PhysicallyBasedVoxelVao : uint
           mutable PhysicallyBasedShaders : OpenGL.PhysicallyBased.PhysicallyBasedShaders
           ShadowMatrices : Matrix4x4 array
           LightShadowIndices : Dictionary<uint64, int>
@@ -1274,6 +1325,7 @@ type [<ReferenceEquality>] GlRenderer3d =
           mutable RendererConfigChanged : bool
           mutable InstanceFields : single array
           mutable UserDefinedStaticModelFields : single array
+          mutable UserDefinedVoxelModelFields : single array
           ForwardSurfacesComparer : IComparer<struct (single * single * Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * OpenGL.PhysicallyBased.PhysicallyBasedSurface * DepthTest * single * int)>
           ForwardSurfacesSortBuffer : struct (single * single * Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * OpenGL.PhysicallyBased.PhysicallyBasedSurface * DepthTest * single * int) List
           RenderPackages : Packages<RenderAsset, AssetClient>
@@ -1439,6 +1491,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         | FontAsset (_, font) -> SDL3_ttf.TTF_CloseFont font
         | CubeMapAsset (_, cubeMap, _) -> cubeMap.Destroy ()
         | StaticModelAsset (_, model) -> OpenGL.PhysicallyBased.DestroyPhysicallyBasedModel model
+        | VoxelModelAsset (_, model) -> OpenGL.PhysicallyBased.DestroyPhysicallyBasedVoxelModel model
         | AnimatedModelAsset model -> OpenGL.PhysicallyBased.DestroyPhysicallyBasedModel model
         OpenGL.Hl.Assert ()
 
@@ -1497,7 +1550,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                 | TextureAsset _ -> renderPackage.PackageState.TextureClient.Textures.Remove filePath |> ignore<bool>
                 | FontAsset _ -> ()
                 | CubeMapAsset (cubeMapKey, _, _) -> renderPackage.PackageState.CubeMapClient.CubeMaps.Remove cubeMapKey |> ignore<bool>
-                | StaticModelAsset _ | AnimatedModelAsset _ -> ()
+                | StaticModelAsset _ | VoxelModelAsset _ | AnimatedModelAsset _ -> ()
                 GlRenderer3d.freeRenderAsset renderAsset renderer
 
             // categorize assets to load
@@ -1528,7 +1581,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                     let dirPath = PathF.GetDirectoryName asset.FilePath
                     let renderAsset =
                         match renderAsset with
-                        | RawAsset | TextureAsset _ | FontAsset _ | CubeMapAsset _ ->
+                        | RawAsset | TextureAsset _ | FontAsset _ | CubeMapAsset _ | VoxelModelAsset _ ->
                             renderAsset
                         | StaticModelAsset (userDefined, staticModel) ->
                             match staticModel.SceneOpt with
@@ -1780,6 +1833,88 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // attempted to replace a loaded asset
         else Log.info ("Cannot replace a loaded asset '" + scstring assetTag + "' with a user-created static model.")
+
+    static member private tryDestroyUserDefinedVoxelModel assetTag renderer =
+
+        // ensure target package is loaded if possible
+        if not (renderer.RenderPackages.ContainsKey assetTag.PackageName) then
+            GlRenderer3d.tryLoadRenderPackage assetTag.PackageName renderer
+
+        // free any existing user-created voxel model, also determining if target asset can be user-created
+        match renderer.RenderPackages.TryGetValue assetTag.PackageName with
+        | (true, package) ->
+            match package.Assets.TryGetValue assetTag.AssetName with
+            | (true, (_, _, asset)) ->
+                match asset with
+                | VoxelModelAsset (userDefined, _) when userDefined ->
+                    GlRenderer3d.freeRenderAsset asset renderer
+                    package.Assets.Remove assetTag.AssetName |> ignore<bool>
+                | _ -> ()
+            | (false, _) -> ()
+        | (false, _) -> ()
+
+    static member private tryCreateUserDefinedVoxelModel (voxelModelDescriptor : VoxelModelDescriptor) (assetTag : VoxelModel AssetTag) renderer =
+
+        // ensure target package is loaded if possible
+        if not (renderer.RenderPackages.ContainsKey assetTag.PackageName) then
+            GlRenderer3d.tryLoadRenderPackage assetTag.PackageName renderer
+
+        // determine if target asset can be created
+        let canCreateUserDefinedVoxelModel =
+            match renderer.RenderPackages.TryGetValue assetTag.PackageName with
+            | (true, package) -> not (package.Assets.ContainsKey assetTag.AssetName)
+            | (false, _) -> true
+
+        // ensure the user can create the voxel model
+        if canCreateUserDefinedVoxelModel then
+
+            // create vertex data
+            let splatCount = voxelModelDescriptor.Splats.Length
+            let elementCount = splatCount * 10
+            if renderer.UserDefinedVoxelModelFields.Length < elementCount then
+                renderer.UserDefinedVoxelModelFields <- Array.zeroCreate elementCount
+            let vertexData = renderer.UserDefinedVoxelModelFields.AsMemory (0, elementCount)
+            let vertexDataSpan = vertexData.Span
+            for i in 0 .. dec splatCount do
+                let splat = voxelModelDescriptor.Splats[i]
+                let normal =
+                    let normal = splat.Normal
+                    if normal.LengthSquared () > 0.0f then Vector3.Normalize normal else v3Up
+                let j = i * 10
+                vertexDataSpan[j] <- splat.Position.X
+                vertexDataSpan[j+1] <- splat.Position.Y
+                vertexDataSpan[j+2] <- splat.Position.Z
+                vertexDataSpan[j+3] <- splat.Albedo.R
+                vertexDataSpan[j+4] <- splat.Albedo.G
+                vertexDataSpan[j+5] <- splat.Albedo.B
+                vertexDataSpan[j+6] <- splat.Albedo.A
+                vertexDataSpan[j+7] <- normal.X
+                vertexDataSpan[j+8] <- normal.Y
+                vertexDataSpan[j+9] <- normal.Z
+
+            // create voxel model
+            let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelGeometry (true, OpenGL.PrimitiveType.Points, vertexData, voxelModelDescriptor.Bounds)
+            let model : OpenGL.PhysicallyBased.PhysicallyBasedVoxelModel =
+                { VoxelSize = voxelModelDescriptor.VoxelSize
+                  VoxelGeometry = geometry }
+
+            // assign model as appropriate render package asset
+            match renderer.RenderPackages.TryGetValue assetTag.PackageName with
+            | (true, package) ->
+                let asset = Asset.make assetTag "" [] (Set.singleton Constants.Associations.Render3d)
+                package.Assets[assetTag.AssetName] <- (DateTimeOffset.MinValue.DateTime, asset, VoxelModelAsset (true, model))
+            | (false, _) ->
+                let assetClient =
+                    AssetClient
+                        (OpenGL.Texture.TextureClient (Some renderer.LazyTextureQueues),
+                         OpenGL.CubeMap.CubeMapClient (),
+                         OpenGL.PhysicallyBased.PhysicallyBasedSceneClient ())
+                let asset = Asset.make assetTag "" [] (Set.singleton Constants.Associations.Render3d)
+                let package = { Assets = Dictionary.singleton StringComparer.Ordinal assetTag.AssetName (DateTimeOffset.MinValue.DateTime, asset, VoxelModelAsset (true, model)); PackageState = assetClient }
+                renderer.RenderPackages[assetTag.PackageName] <- package
+
+        // attempted to replace a loaded asset
+        else Log.info ("Cannot replace a loaded asset '" + scstring assetTag + "' with a user-created voxel model.")
 
     static member private getRenderTasks renderPass renderer =
         let mutable renderTasks = Unchecked.defaultof<RenderTasks> // OPTIMIZATION: seems like TryGetValue allocates here if we use the tupling idiom (this may only be the case in Debug builds tho).
@@ -2605,6 +2740,36 @@ type [<ReferenceEquality>] GlRenderer3d =
             | _ -> Log.infoOnce ("Cannot render static model with a non-static model asset for '" + scstring staticModel + "'.")
         | ValueNone -> Log.infoOnce ("Cannot render static model due to unloadable asset(s) for '" + scstring staticModel + "'.")
 
+    static member private categorizeVoxelModel
+        (frustumInterior : Frustum,
+         frustumExterior : Frustum,
+         frustumImposter : Frustum,
+         model : Matrix4x4 inref,
+         castShadow : bool,
+         presence : Presence,
+         properties : MaterialProperties inref,
+         voxelModel : VoxelModel AssetTag,
+         renderPass : RenderPass,
+         renderTasks : RenderTasks,
+         renderer) =
+        match GlRenderer3d.tryGetRenderAsset voxelModel renderer with
+        | ValueSome renderAsset ->
+            match renderAsset with
+            | VoxelModelAsset (_, voxelModelAsset) ->
+                let bounds = voxelModelAsset.VoxelGeometry.Bounds.Transform model
+                let unculled =
+                    match renderPass with
+                    | LightMapPass (_, _) -> true // TODO: see if we have enough context to cull here.
+                    | ShadowPass (_, _, shadowLightType, _, _, shadowFrustum) when castShadow ->
+                        let shadowFrustumInteriorOpt = if LightType.shouldShadowInterior shadowLightType then ValueSome shadowFrustum else ValueNone
+                        Presence.intersects3d shadowFrustumInteriorOpt shadowFrustum shadowFrustum false presence bounds
+                    | ShadowPass _ -> false
+                    | ReflectionPass (_, reflFrustum) -> Presence.intersects3d ValueNone reflFrustum reflFrustum false presence bounds
+                    | NormalPass -> Presence.intersects3d (ValueSome frustumInterior) frustumExterior frustumImposter false presence bounds
+                if unculled then renderTasks.DeferredVoxels.Add struct (model, castShadow, presence, properties, voxelModelAsset)
+            | _ -> Log.infoOnce ("Cannot render voxel model with a non-voxel model asset for '" + scstring voxelModel + "'.")
+        | ValueNone -> Log.infoOnce ("Cannot render voxel model due to unloadable asset(s) for '" + scstring voxelModel + "'.")
+
     static member private categorizeAnimatedModel
         (model : Matrix4x4 inref,
          castShadow : bool,
@@ -2860,12 +3025,17 @@ type [<ReferenceEquality>] GlRenderer3d =
         renderMessages
         renderer =
         let userDefinedStaticModelsToDestroy = SList.make ()
+        let userDefinedVoxelModelsToDestroy = SList.make ()
         for message in renderMessages do
             match message with
             | CreateUserDefinedStaticModel cudsm ->
                 GlRenderer3d.tryCreateUserDefinedStaticModel cudsm.StaticModelSurfaceDescriptors cudsm.Bounds cudsm.StaticModel renderer
             | DestroyUserDefinedStaticModel dudsm ->
                 userDefinedStaticModelsToDestroy.Add dudsm.StaticModel 
+            | CreateUserDefinedVoxelModel cudvm ->
+                GlRenderer3d.tryCreateUserDefinedVoxelModel cudvm.VoxelModelDescriptor cudvm.VoxelModel renderer
+            | DestroyUserDefinedVoxelModel dudvm ->
+                userDefinedVoxelModelsToDestroy.Add dudvm.VoxelModel
             | RenderSkyBox rsb ->
                 let renderTasks = GlRenderer3d.getRenderTasks rsb.RenderPass renderer
                 renderTasks.SkyBoxes.Add (rsb.AmbientColor, rsb.AmbientBrightness, rsb.CubeMapColor, rsb.CubeMapBrightness, rsb.CubeMap)
@@ -2951,6 +3121,12 @@ type [<ReferenceEquality>] GlRenderer3d =
                 GlRenderer3d.categorizeStaticModel (frustumInterior, frustumExterior, frustumImposter, &csmm.CachedStaticModelMatrix, csmm.CachedStaticModelCastShadow, csmm.CachedStaticModelPresence, &csmm.CachedStaticModelInsetOpt, &csmm.CachedStaticModelMaterialProperties, csmm.CachedStaticModel, csmm.CachedStaticModelClipped, csmm.CachedStaticModelDepthTest, csmm.CachedStaticModelRenderType, csmm.CachedStaticModelRenderPass, renderTasks, renderer)
             | RenderCachedStaticModelSurface csmsm ->
                 GlRenderer3d.categorizeStaticModelSurfaceByIndex (&csmsm.CachedStaticModelSurfaceMatrix, csmsm.CachedStaticModelSurfaceCastShadow, csmsm.CachedStaticModelSurfacePresence, &csmsm.CachedStaticModelSurfaceInsetOpt, &csmsm.CachedStaticModelSurfaceMaterialProperties, &csmsm.CachedStaticModelSurfaceMaterial, csmsm.CachedStaticModelSurfaceModel, csmsm.CachedStaticModelSurfaceIndex, csmsm.CachedStaticModelSurfaceDepthTest, csmsm.CachedStaticModelSurfaceRenderType, csmsm.CachedStaticModelSurfaceRenderPass, renderer)
+            | RenderVoxelModel rvm ->
+                let renderTasks = GlRenderer3d.getRenderTasks rvm.RenderPass renderer
+                GlRenderer3d.categorizeVoxelModel (frustumInterior, frustumExterior, frustumImposter, &rvm.ModelMatrix, rvm.CastShadow, rvm.Presence, &rvm.MaterialProperties, rvm.VoxelModel, rvm.RenderPass, renderTasks, renderer)
+            | RenderCachedVoxelModel cvmm ->
+                let renderTasks = GlRenderer3d.getRenderTasks cvmm.CachedVoxelModelRenderPass renderer
+                GlRenderer3d.categorizeVoxelModel (frustumInterior, frustumExterior, frustumImposter, &cvmm.CachedVoxelModelMatrix, cvmm.CachedVoxelModelCastShadow, cvmm.CachedVoxelModelPresence, &cvmm.CachedVoxelModelMaterialProperties, cvmm.CachedVoxelModel, cvmm.CachedVoxelModelRenderPass, renderTasks, renderer)
             | RenderUserDefinedStaticModel rudsm ->
                 let insetOpt = Option.toValueOption rudsm.InsetOpt
                 let assetTag = asset Assets.Default.PackageName Gen.name // TODO: see if we should instead use a specialized package for temporary assets like these.
@@ -2983,7 +3159,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                 GlRenderer3d.handleUnloadRenderPackage packageName renderer
             | ReloadRenderAssets3d ->
                 renderer.ReloadAssetsRequested <- true
-        userDefinedStaticModelsToDestroy
+        (userDefinedStaticModelsToDestroy, userDefinedVoxelModelsToDestroy)
 
     static member private renderPhysicallyBasedDepthSurfaces
         batchPhase eyeCenter viewArray projectionArray viewProjectionArray bonesArray (parameters : struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties) List)
@@ -3354,6 +3530,64 @@ type [<ReferenceEquality>] GlRenderer3d =
              instanceFields, lightShadowSamples, lightShadowBias, lightShadowSampleScalar, lightShadowExponent, lightShadowDensity,
              materials, geometry, shader, vao)
 
+    static member private renderPhysicallyBasedVoxel
+        (viewArray,
+         projectionArray,
+         viewProjectionArray,
+         viewInverseArray,
+         projectionInverseArray,
+         viewPort,
+         eyeCenter,
+         lightShadowExponent,
+         model : Matrix4x4 inref,
+         presence : Presence,
+         properties : MaterialProperties inref,
+         voxelModel : OpenGL.PhysicallyBased.PhysicallyBasedVoxelModel,
+         shader,
+         vao,
+         renderer) =
+
+        // ensure we have a large enough instance fields array
+        if renderer.InstanceFields.Length < Constants.Render.InstanceFieldCount then
+            renderer.InstanceFields <- Array.zeroCreate Constants.Render.InstanceFieldCount
+
+        // blit parameters to instance fields
+        model.ToArray (renderer.InstanceFields, 0)
+        renderer.InstanceFields[16] <- voxelModel.VoxelSize.X
+        renderer.InstanceFields[17] <- voxelModel.VoxelSize.Y
+        renderer.InstanceFields[18] <- voxelModel.VoxelSize.Z
+        renderer.InstanceFields[19] <- 0.0f
+        renderer.InstanceFields[20] <- properties.Albedo.R
+        renderer.InstanceFields[21] <- properties.Albedo.G
+        renderer.InstanceFields[22] <- properties.Albedo.B
+        renderer.InstanceFields[23] <- properties.Albedo.A
+        renderer.InstanceFields[24] <- properties.Roughness
+        renderer.InstanceFields[25] <- properties.Metallic
+        renderer.InstanceFields[26] <- properties.AmbientOcclusion
+        renderer.InstanceFields[27] <- properties.Emission
+        renderer.InstanceFields[28] <- properties.Height
+        renderer.InstanceFields[29] <- if properties.IgnoreLightMaps then 1.0f else 0.0f
+        renderer.InstanceFields[30] <- presence.DepthCutoff
+        renderer.InstanceFields[31] <- properties.OpaqueDistance
+        renderer.InstanceFields[32] <- properties.FinenessOffset
+        renderer.InstanceFields[33] <-
+            match properties.ScatterType with
+            | NoScatter -> 0.0f
+            | SkinScatter -> 0.1f
+            | FoliageScatter -> 0.2f
+            | WaxScatter -> 0.3f
+        renderer.InstanceFields[34] <- properties.SpecularScalar
+        renderer.InstanceFields[35] <- properties.RefractiveIndex
+        renderer.InstanceFields[36] <- properties.ClearCoat
+        renderer.InstanceFields[37] <- properties.ClearCoatRoughness
+        renderer.InstanceFields[38] <- 0.0f
+        renderer.InstanceFields[39] <- 0.0f
+
+        // draw voxel model
+        OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxel
+            (viewArray, projectionArray, viewProjectionArray, viewInverseArray, projectionInverseArray, viewPort, eyeCenter,
+             renderer.InstanceFields, lightShadowExponent, voxelModel, shader, vao)
+
     static member private renderShadow
         lightOrigin
         (lightView : Matrix4x4)
@@ -3361,6 +3595,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         (lightViewProjection : Matrix4x4)
         lightFrustum
         lightType
+        (shadowResolution : Vector2i)
         renderTasks
         renderer =
 
@@ -3368,22 +3603,28 @@ type [<ReferenceEquality>] GlRenderer3d =
         let lightViewArray = lightView.ToArray ()
         let lightProjectionArray = lightProjection.ToArray ()
         let lightViewProjectionArray = lightViewProjection.ToArray ()
+        let lightViewInverseArray = lightView.Inverted.ToArray ()
+        let lightProjectionInverseArray = lightProjection.Inverted.ToArray ()
+        let lightViewPort = v2 (single shadowResolution.X) (single shadowResolution.Y)
 
         // grab appropriate shaders
-        let (shadowStaticShader, shadowAnimatedShader, shadowTerrainShader) =
+        let (shadowStaticShader, shadowAnimatedShader, shadowTerrainShader, shadowVoxelShader) =
             match lightType with
             | PointLight ->
                 (renderer.PhysicallyBasedShaders.ShadowStaticPointShader,
                  renderer.PhysicallyBasedShaders.ShadowAnimatedPointShader,
-                 renderer.PhysicallyBasedShaders.ShadowTerrainPointShader)
+                 renderer.PhysicallyBasedShaders.ShadowTerrainPointShader,
+                 renderer.PhysicallyBasedShaders.ShadowVoxelShader)
             | SpotLight (_, _) ->
                 (renderer.PhysicallyBasedShaders.ShadowStaticSpotShader,
                  renderer.PhysicallyBasedShaders.ShadowAnimatedSpotShader,
-                 renderer.PhysicallyBasedShaders.ShadowTerrainSpotShader)
+                 renderer.PhysicallyBasedShaders.ShadowTerrainSpotShader,
+                 renderer.PhysicallyBasedShaders.ShadowVoxelShader)
             | DirectionalLight _ | CascadedLight ->
                 (renderer.PhysicallyBasedShaders.ShadowStaticDirectionalShader,
                  renderer.PhysicallyBasedShaders.ShadowAnimatedDirectionalShader,
-                 renderer.PhysicallyBasedShaders.ShadowTerrainDirectionalShader)
+                 renderer.PhysicallyBasedShaders.ShadowTerrainDirectionalShader,
+                 renderer.PhysicallyBasedShaders.ShadowVoxelShader)
 
         // deferred render static surface shadows
         let mutable i = 0
@@ -3450,6 +3691,13 @@ type [<ReferenceEquality>] GlRenderer3d =
                     renderer.LightingConfig.LightShadowSamples renderer.LightingConfig.LightShadowBias renderer.LightingConfig.LightShadowSampleScalar renderer.LightingConfig.LightShadowExponent renderer.LightingConfig.LightShadowDensity
                     descriptor geometry shadowTerrainShader renderer.PhysicallyBasedTerrainVao renderer
 
+        // attempt to deferred render voxel shadows
+        for struct (model, castShadow, presence, properties, voxelModel) in renderTasks.DeferredVoxels do
+            if castShadow && lightFrustum.Intersects (voxelModel.VoxelGeometry.Bounds.Transform model) then
+                GlRenderer3d.renderPhysicallyBasedVoxel
+                    (lightViewArray, lightProjectionArray, lightViewProjectionArray, lightViewInverseArray, lightProjectionInverseArray, lightViewPort, lightOrigin, renderer.LightingConfig.LightShadowExponent,
+                     &model, presence, &properties, voxelModel, shadowVoxelShader, renderer.PhysicallyBasedVoxelVao, renderer)
+
         // forward render surface shadows
         for struct (model, castShadow, presence, texCoordsOffset, properties, boneTransformsOpt, surface, _) in renderTasks.ForwardSorted do
             if castShadow then
@@ -3501,7 +3749,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         OpenGL.Hl.Assert ()
 
         // actually render shadow
-        GlRenderer3d.renderShadow lightOrigin lightView lightProjection lightViewProjection lightFrustum lightType renderTasks renderer
+        GlRenderer3d.renderShadow lightOrigin lightView lightProjection lightViewProjection lightFrustum lightType shadowResolution renderTasks renderer
         OpenGL.Hl.Assert ()
 
         // unbind shadow texture layer
@@ -3544,7 +3792,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         OpenGL.Hl.Assert ()
         
         // render to shadow cube map face
-        GlRenderer3d.renderShadow lightOrigin shadowView shadowProjection shadowViewProjection shadowFrustum PointLight renderTasks renderer
+        GlRenderer3d.renderShadow lightOrigin shadowView shadowProjection shadowViewProjection shadowFrustum PointLight shadowResolution renderTasks renderer
         OpenGL.Hl.Assert ()
         
         // unbind shadow cube map face
@@ -3586,7 +3834,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         OpenGL.Hl.Assert ()
 
         // render to shadow cascade
-        GlRenderer3d.renderShadow lightOrigin shadowView shadowProjection shadowViewProjection shadowFrustum CascadedLight renderTasks renderer
+        GlRenderer3d.renderShadow lightOrigin shadowView shadowProjection shadowViewProjection shadowFrustum CascadedLight shadowResolution renderTasks renderer
         OpenGL.Hl.Assert ()
 
         // unbind shadow cascade layer
@@ -3825,6 +4073,13 @@ type [<ReferenceEquality>] GlRenderer3d =
                 viewArray geometryProjectionArray geometryViewProjectionArray eyeCenter
                 renderer.LightingConfig.LightShadowSamples renderer.LightingConfig.LightShadowBias renderer.LightingConfig.LightShadowSampleScalar renderer.LightingConfig.LightShadowSampleScalar renderer.LightingConfig.LightShadowDensity
                 descriptor geometry renderer.PhysicallyBasedShaders.DeferredTerrainShader renderer.PhysicallyBasedTerrainVao renderer
+
+        // render voxels deferred
+        let geometryViewPort = v2 (single geometryResolution.X) (single geometryResolution.Y)
+        for struct (model, _, presence, properties, voxelModel) in renderTasks.DeferredVoxels do
+            GlRenderer3d.renderPhysicallyBasedVoxel
+                (viewArray, geometryProjectionArray, geometryViewProjectionArray, viewInverseArray, geometryProjectionInverseArray, geometryViewPort, eyeCenter, renderer.LightingConfig.LightShadowExponent,
+                 &model, presence, &properties, voxelModel, renderer.PhysicallyBasedShaders.DeferredVoxelShader, renderer.PhysicallyBasedVoxelVao, renderer)
 
         // run light mapping pass
         let lightMappingTexture =
@@ -4372,7 +4627,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         renderer.WindowViewport <- windowViewport
 
         // categorize messages
-        let userDefinedStaticModelsToDestroy =
+        let (userDefinedStaticModelsToDestroy, userDefinedVoxelModelsToDestroy) =
             GlRenderer3d.categorize frustumInterior frustumExterior frustumImposter eyeCenter eyeRotation renderMessages renderer
 
         // light map pre-passes
@@ -4718,6 +4973,10 @@ type [<ReferenceEquality>] GlRenderer3d =
         for staticModel in userDefinedStaticModelsToDestroy do
             GlRenderer3d.tryDestroyUserDefinedStaticModel staticModel renderer
 
+        // destroy user-defined voxel models
+        for voxelModel in userDefinedVoxelModelsToDestroy do
+            GlRenderer3d.tryDestroyUserDefinedVoxelModel voxelModel renderer
+
         // destroy cached terrain geometries that weren't rendered this frame
         for geometry in renderer.PhysicallyBasedTerrainGeometries do
             if not (renderer.PhysicallyBasedTerrainGeometriesUtilized.Contains geometry.Key) then
@@ -4786,6 +5045,10 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // create physically-based terrain vao
         let physicallyBasedTerrainVao = OpenGL.PhysicallyBased.CreatePhysicallyBasedTerrainVao ()
+        OpenGL.Hl.Assert ()
+
+        // create physically-based voxel vao
+        let physicallyBasedVoxelVao = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelVao ()
         OpenGL.Hl.Assert ()
 
         // create physically-based shaders
@@ -5035,6 +5298,7 @@ type [<ReferenceEquality>] GlRenderer3d =
               PhysicallyBasedStaticVao = physicallyBasedStaticVao
               PhysicallyBasedAnimatedVao = physicallyBasedAnimatedVao
               PhysicallyBasedTerrainVao = physicallyBasedTerrainVao
+              PhysicallyBasedVoxelVao = physicallyBasedVoxelVao
               PhysicallyBasedShaders = physicallyBasedShaders
               ShadowMatrices = shadowMatrices
               LightShadowIndices = dictPlus HashIdentity.Structural []
@@ -5065,6 +5329,7 @@ type [<ReferenceEquality>] GlRenderer3d =
               RendererConfigChanged = false
               InstanceFields = Array.zeroCreate<single> (Constants.Render.InstanceFieldCount * Constants.Render.InstanceBatchPrealloc)
               UserDefinedStaticModelFields = [||]
+              UserDefinedVoxelModelFields = [||]
               ForwardSurfacesComparer = forwardSurfacesComparer
               ForwardSurfacesSortBuffer = List ()
               RenderPackages = dictPlus StringComparer.Ordinal []
@@ -5101,6 +5366,7 @@ type [<ReferenceEquality>] GlRenderer3d =
             OpenGL.Gl.DeleteVertexArrays [|renderer.PhysicallyBasedStaticVao|]
             OpenGL.Gl.DeleteVertexArrays [|renderer.PhysicallyBasedAnimatedVao|]
             OpenGL.Gl.DeleteVertexArrays [|renderer.PhysicallyBasedTerrainVao|]
+            OpenGL.Gl.DeleteVertexArrays [|renderer.PhysicallyBasedVoxelVao|]
             OpenGL.Hl.Assert ()
 
             OpenGL.PhysicallyBased.DestroyPhysicallyBasedShaders renderer.PhysicallyBasedShaders

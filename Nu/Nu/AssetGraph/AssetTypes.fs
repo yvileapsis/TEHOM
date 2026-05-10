@@ -40,6 +40,9 @@ type Song = private { __ : unit }
 /// A phantom type to denote the type of an asset as a static model.
 type StaticModel = private { __ : unit }
 
+/// A phantom type to denote the type of an asset as a voxel model.
+type VoxelModel = private { __ : unit }
+
 /// A phantom type to denote the type of an asset as an animated model.
 type AnimatedModel = private { __ : unit }
 

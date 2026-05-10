@@ -414,6 +414,11 @@ module PhysicallyBased =
           SceneOpt : Assimp.Scene option
           PhysicallyBasedHierarchy : PhysicallyBasedPart array TreeNode }
 
+    /// A physically-based voxel model.
+    type PhysicallyBasedVoxelModel =
+        { VoxelSize : Vector3
+          VoxelGeometry : PhysicallyBasedGeometry }
+
     /// Describes a physically-based shader that's loaded into GPU.
     type PhysicallyBasedShader =
         { ViewUniform : int
@@ -516,6 +521,18 @@ module PhysicallyBased =
           AmbientOcclusionTexturesUniforms : int array
           NormalTexturesUniforms : int array
           HeightTexturesUniforms : int array
+          PhysicallyBasedShader : uint }
+
+    /// Describes a physically-based voxel shader that's loaded into GPU.
+    type PhysicallyBasedVoxelShader =
+        { ViewUniform : int
+          ProjectionUniform : int
+          ViewProjectionUniform : int
+          ViewInverseUniform : int
+          ProjectionInverseUniform : int
+          ViewPortUniform : int
+          EyeCenterUniform : int
+          LightShadowExponentUniform : int
           PhysicallyBasedShader : uint }
 
     /// Describes a light mapping pass of a deferred physically-based shader that's loaded into GPU.
@@ -1955,6 +1972,9 @@ module PhysicallyBased =
     let TerrainBlendsOffset =       (3 (*position*) + 2 (*tex coords*) + 3 (*normal*) + 3 (*tint*)) * sizeof<single>
     let TerrainBlends2Offset =      (3 (*position*) + 2 (*tex coords*) + 3 (*normal*) + 3 (*tint*) + 4 (*blends*)) * sizeof<single>
     let TerrainVertexSize =         (3 (*position*) + 2 (*tex coords*) + 3 (*normal*) + 3 (*tint*) + 4 (*blends*) + 4 (*blends2*)) * sizeof<single>
+    let VoxelAlbedoOffset =         (3 (*position*)) * sizeof<single>
+    let VoxelNormalOffset =         (3 (*position*) + 4 (*albedo*)) * sizeof<single>
+    let VoxelVertexSize =           (3 (*position*) + 4 (*albedo*) + 3 (*normal*)) * sizeof<single>
 
     let CreatePhysicallyBasedTerrainVao () =
 
@@ -2011,6 +2031,63 @@ module PhysicallyBased =
         Gl.EnableVertexArrayAttrib (vao, 12u)
         Gl.EnableVertexArrayAttrib (vao, 13u)
         Gl.EnableVertexArrayAttrib (vao, 14u)
+
+        // divisors
+        Gl.VertexArrayBindingDivisor (vao, 0u, 0u)
+        Gl.VertexArrayBindingDivisor (vao, 1u, 1u)
+
+        // fin
+        vao
+
+    let CreatePhysicallyBasedVoxelVao () =
+
+        // create vao
+        let vao =  [|0u|]
+        Gl.CreateVertexArrays vao
+        let vao = vao[0]
+
+        // per vertex
+        Gl.VertexArrayAttribFormat (vao, 0u, 3, VertexAttribType.Float, false, uint 0)
+        Gl.VertexArrayAttribFormat (vao, 1u, 4, VertexAttribType.Float, false, uint VoxelAlbedoOffset)
+        Gl.VertexArrayAttribFormat (vao, 2u, 3, VertexAttribType.Float, false, uint VoxelNormalOffset)
+        Gl.VertexArrayAttribBinding (vao, 0u, 0u)
+        Gl.VertexArrayAttribBinding (vao, 1u, 0u)
+        Gl.VertexArrayAttribBinding (vao, 2u, 0u)
+        Gl.EnableVertexArrayAttrib (vao, 0u)
+        Gl.EnableVertexArrayAttrib (vao, 1u)
+        Gl.EnableVertexArrayAttrib (vao, 2u)
+
+        // per instance
+        Gl.VertexArrayAttribFormat (vao, 3u, 4, VertexAttribType.Float, false, uint 0)
+        Gl.VertexArrayAttribFormat (vao, 4u, 4, VertexAttribType.Float, false, uint (4 * sizeof<single>))
+        Gl.VertexArrayAttribFormat (vao, 5u, 4, VertexAttribType.Float, false, uint (8 * sizeof<single>))
+        Gl.VertexArrayAttribFormat (vao, 6u, 4, VertexAttribType.Float, false, uint (12 * sizeof<single>))
+        Gl.VertexArrayAttribFormat (vao, 7u, 4, VertexAttribType.Float, false, uint (16 * sizeof<single>))
+        Gl.VertexArrayAttribFormat (vao, 8u, 4, VertexAttribType.Float, false, uint (20 * sizeof<single>))
+        Gl.VertexArrayAttribFormat (vao, 9u, 4, VertexAttribType.Float, false, uint (24 * sizeof<single>))
+        Gl.VertexArrayAttribFormat (vao, 10u, 4, VertexAttribType.Float, false, uint (28 * sizeof<single>))
+        Gl.VertexArrayAttribFormat (vao, 11u, 4, VertexAttribType.Float, false, uint (32 * sizeof<single>))
+        Gl.VertexArrayAttribFormat (vao, 12u, 4, VertexAttribType.Float, false, uint (36 * sizeof<single>))
+        Gl.VertexArrayAttribBinding (vao, 3u, 1u) // NOTE: different index for instance!
+        Gl.VertexArrayAttribBinding (vao, 4u, 1u)
+        Gl.VertexArrayAttribBinding (vao, 5u, 1u)
+        Gl.VertexArrayAttribBinding (vao, 6u, 1u)
+        Gl.VertexArrayAttribBinding (vao, 7u, 1u)
+        Gl.VertexArrayAttribBinding (vao, 8u, 1u)
+        Gl.VertexArrayAttribBinding (vao, 9u, 1u)
+        Gl.VertexArrayAttribBinding (vao, 10u, 1u)
+        Gl.VertexArrayAttribBinding (vao, 11u, 1u)
+        Gl.VertexArrayAttribBinding (vao, 12u, 1u)
+        Gl.EnableVertexArrayAttrib (vao, 3u)
+        Gl.EnableVertexArrayAttrib (vao, 4u)
+        Gl.EnableVertexArrayAttrib (vao, 5u)
+        Gl.EnableVertexArrayAttrib (vao, 6u)
+        Gl.EnableVertexArrayAttrib (vao, 7u)
+        Gl.EnableVertexArrayAttrib (vao, 8u)
+        Gl.EnableVertexArrayAttrib (vao, 9u)
+        Gl.EnableVertexArrayAttrib (vao, 10u)
+        Gl.EnableVertexArrayAttrib (vao, 11u)
+        Gl.EnableVertexArrayAttrib (vao, 12u)
 
         // divisors
         Gl.VertexArrayBindingDivisor (vao, 0u, 0u)
@@ -2085,6 +2162,65 @@ module PhysicallyBased =
               VertexBuffer = vertexBuffer
               InstanceBuffer = instanceBuffer
               IndexBuffer = indexBuffer }
+
+        // fin
+        geometry
+
+    /// Create physically-based voxel geometry.
+    let CreatePhysicallyBasedVoxelGeometry (renderable, primitiveType, vertexData : single Memory, bounds) =
+
+        // make buffers
+        let (vertices, vertexBuffer, instanceBuffer) =
+
+            // make renderable
+            if renderable then
+
+                // create vertex buffer
+                let vertexBuffer = Gl.GenBuffer ()
+                Gl.BindBuffer (BufferTarget.ArrayBuffer, vertexBuffer)
+                use vertexDataHnd = vertexData.Pin () in
+                    let vertexDataNint = vertexDataHnd.Pointer |> NativePtr.ofVoidPtr<single> |> NativePtr.toNativeInt
+                    Gl.BufferData (BufferTarget.ArrayBuffer, uint (vertexData.Length * sizeof<single>), vertexDataNint, BufferUsage.StaticDraw)
+
+                // create instance buffer
+                let instanceBuffer = Gl.GenBuffer ()
+                Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
+                let instanceData = Array.zeroCreate Constants.Render.InstanceFieldCount
+                m4Identity.ToArray (instanceData, 0)
+                let strideSize = instanceData.Length * sizeof<single>
+                let instanceDataPtr = GCHandle.Alloc (instanceData, GCHandleType.Pinned)
+                try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+                finally instanceDataPtr.Free ()
+                Hl.Assert ()
+
+                // fin
+                ([||], vertexBuffer, instanceBuffer)
+
+            // fake buffers
+            else
+
+                // compute vertices
+                let vertices = Array.zeroCreate (vertexData.Length / 10)
+                let vertexData = vertexData.Span
+                for i in 0 .. dec vertices.Length do
+                    let j = i * 10
+                    let vertex = v3 vertexData[j] vertexData[j+1] vertexData[j+2]
+                    vertices[i] <- vertex
+
+                // fin
+                (vertices, 0u, 0u)
+
+        // make physically-based geometry
+        let geometry =
+            { Bounds = bounds
+              PrimitiveType = primitiveType
+              ElementCount = vertexData.Length / 10
+              Vertices = vertices
+              Indices = [||]
+              TrianglesCached = None
+              VertexBuffer = vertexBuffer
+              InstanceBuffer = instanceBuffer
+              IndexBuffer = 0u }
 
         // fin
         geometry
@@ -2434,6 +2570,34 @@ module PhysicallyBased =
           NormalTexturesUniforms = normalTexturesUniforms
           HeightTexturesUniforms = heightTexturesUniforms
           PhysicallyBasedShader = shader } : PhysicallyBasedDeferredTerrainShader
+
+    /// Create a physically-based voxel shader.
+    let CreatePhysicallyBasedVoxelShader (shaderFilePath : string) =
+
+        // create shader
+        let shader = Shader.CreateShaderFromFilePath shaderFilePath
+        Hl.Assert ()
+
+        // retrieve uniforms
+        let viewUniform = Gl.GetUniformLocation (shader, "view")
+        let projectionUniform = Gl.GetUniformLocation (shader, "projection")
+        let viewProjectionUniform = Gl.GetUniformLocation (shader, "viewProjection")
+        let viewInverseUniform = Gl.GetUniformLocation (shader, "viewInverse")
+        let projectionInverseUniform = Gl.GetUniformLocation (shader, "projectionInverse")
+        let viewPortUniform = Gl.GetUniformLocation (shader, "viewPort")
+        let eyeCenterUniform = Gl.GetUniformLocation (shader, "eyeCenter")
+        let lightShadowExponentUniform = Gl.GetUniformLocation (shader, "lightShadowExponent")
+
+        // make shader record
+        { ViewUniform = viewUniform
+          ProjectionUniform = projectionUniform
+          ViewProjectionUniform = viewProjectionUniform
+          ViewInverseUniform = viewInverseUniform
+          ProjectionInverseUniform = projectionInverseUniform
+          ViewPortUniform = viewPortUniform
+          EyeCenterUniform = eyeCenterUniform
+          LightShadowExponentUniform = lightShadowExponentUniform
+          PhysicallyBasedShader = shader } : PhysicallyBasedVoxelShader
 
     /// Create a physically-based shader for the light mapping pass of deferred rendering.
     let CreatePhysicallyBasedDeferredLightMappingShader lightMapsMax (shaderFilePath : string) =
@@ -4310,6 +4474,75 @@ module PhysicallyBased =
         Gl.Disable EnableCap.DepthTest
         Gl.Disable EnableCap.CullFace
 
+    let DrawPhysicallyBasedVoxel
+        (view : single array,
+         projection : single array,
+         viewProjection : single array,
+         viewInverse : single array,
+         projectionInverse : single array,
+         viewPort : Vector2,
+         eyeCenter : Vector3,
+         instanceFields : single array,
+         lightShadowExponent : single,
+         voxelModel : PhysicallyBasedVoxelModel,
+         shader : PhysicallyBasedVoxelShader,
+         vao : uint) =
+
+        // setup state
+        Gl.DepthFunc DepthFunction.Lequal
+        Gl.Enable EnableCap.DepthTest
+        Gl.Enable EnableCap.VertexProgramPointSize
+        Gl.Disable EnableCap.CullFace
+        Hl.Assert ()
+
+        // setup vao
+        let geometry = voxelModel.VoxelGeometry
+        Gl.BindVertexArray vao
+        Hl.Assert ()
+
+        // setup shader
+        Gl.UseProgram shader.PhysicallyBasedShader
+        Gl.UniformMatrix4 (shader.ViewUniform, false, view)
+        Gl.UniformMatrix4 (shader.ProjectionUniform, false, projection)
+        Gl.UniformMatrix4 (shader.ViewProjectionUniform, false, viewProjection)
+        Gl.UniformMatrix4 (shader.ViewInverseUniform, false, viewInverse)
+        Gl.UniformMatrix4 (shader.ProjectionInverseUniform, false, projectionInverse)
+        Gl.Uniform2 (shader.ViewPortUniform, viewPort.X, viewPort.Y)
+        Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
+        Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)
+        Hl.Assert ()
+
+        // update instance buffer
+        let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
+        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
+            Gl.BufferData (BufferTarget.ArrayBuffer, uint (Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+            Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+            Hl.Assert ()
+        finally instanceFieldsPtr.Free ()
+
+        // setup geometry
+        Gl.VertexArrayVertexBuffer (vao, 0u, geometry.VertexBuffer, 0, VoxelVertexSize)
+        Gl.VertexArrayVertexBuffer (vao, 1u, geometry.InstanceBuffer, 0, Constants.Render.InstanceFieldCount * sizeof<single>)
+        Hl.Assert ()
+
+        // draw geometry
+        Gl.DrawArrays (geometry.PrimitiveType, 0, geometry.ElementCount)
+        Hl.ReportDrawCall 1
+        Hl.Assert ()
+
+        // teardown shader
+        Gl.UseProgram 0u
+        Hl.Assert ()
+
+        // teardown vao
+        Gl.BindVertexArray 0u
+        Hl.Assert ()
+
+        // teardown state
+        Gl.DepthFunc DepthFunction.Less
+        Gl.Disable EnableCap.DepthTest
+        Gl.Disable EnableCap.VertexProgramPointSize
+
     /// Draw the light mapping pass of a deferred physically-based surface.
     let DrawPhysicallyBasedDeferredLightMappingSurface
         (eyeCenter : Vector3,
@@ -5100,6 +5333,10 @@ module PhysicallyBased =
         for surface in model.Surfaces do
             DestroyPhysicallyBasedGeometry surface.PhysicallyBasedGeometry
 
+    /// Destroy physically-based voxel model resources.
+    let DestroyPhysicallyBasedVoxelModel (model : PhysicallyBasedVoxelModel) =
+        DestroyPhysicallyBasedGeometry model.VoxelGeometry
+
     /// Memoizes physically-based scene loads.
     type PhysicallyBasedSceneClient () =
 
@@ -5219,10 +5456,12 @@ module PhysicallyBased =
           ShadowTerrainPointShader : PhysicallyBasedDeferredTerrainShader
           ShadowTerrainSpotShader : PhysicallyBasedDeferredTerrainShader
           ShadowTerrainDirectionalShader : PhysicallyBasedDeferredTerrainShader
+          ShadowVoxelShader : PhysicallyBasedVoxelShader
           DeferredStaticShader : PhysicallyBasedShader
           DeferredStaticClippedShader : PhysicallyBasedShader
           DeferredAnimatedShader : PhysicallyBasedShader
           DeferredTerrainShader : PhysicallyBasedDeferredTerrainShader
+          DeferredVoxelShader : PhysicallyBasedVoxelShader
           DeferredLightMappingShader : PhysicallyBasedDeferredLightMappingShader
           DeferredAmbientShader : PhysicallyBasedDeferredAmbientShader
           DeferredIrradianceShader : PhysicallyBasedDeferredIrradianceShader
@@ -5247,12 +5486,14 @@ module PhysicallyBased =
         let shadowTerrainPointShader = CreatePhysicallyBasedTerrainShader Constants.Paths.PhysicallyBasedShadowTerrainPointShaderFilePath in Hl.Assert ()
         let shadowTerrainSpotShader = CreatePhysicallyBasedTerrainShader Constants.Paths.PhysicallyBasedShadowTerrainSpotShaderFilePath in Hl.Assert ()
         let shadowTerrainDirectionalShader = CreatePhysicallyBasedTerrainShader Constants.Paths.PhysicallyBasedShadowTerrainDirectionalShaderFilePath in Hl.Assert ()
+        let shadowVoxelShader = CreatePhysicallyBasedVoxelShader Constants.Paths.PhysicallyBasedShadowVoxelShaderFilePath in Hl.Assert ()
 
         // create deferred shaders
         let deferredStaticShader = CreatePhysicallyBasedShader lightMapsMax lightsMax Constants.Paths.PhysicallyBasedDeferredStaticShaderFilePath in Hl.Assert ()
         let deferredStaticClippedShader = CreatePhysicallyBasedShader lightMapsMax lightsMax Constants.Paths.PhysicallyBasedDeferredStaticClippedShaderFilePath in Hl.Assert ()
         let deferredAnimatedShader = CreatePhysicallyBasedShader lightMapsMax lightsMax Constants.Paths.PhysicallyBasedDeferredAnimatedShaderFilePath in Hl.Assert ()
         let deferredTerrainShader = CreatePhysicallyBasedTerrainShader Constants.Paths.PhysicallyBasedDeferredTerrainShaderFilePath in Hl.Assert ()
+        let deferredVoxelShader = CreatePhysicallyBasedVoxelShader Constants.Paths.PhysicallyBasedDeferredVoxelShaderFilePath in Hl.Assert ()
         let deferredLightMappingShader = CreatePhysicallyBasedDeferredLightMappingShader lightMapsMax Constants.Paths.PhysicallyBasedDeferredLightMappingShaderFilePath in Hl.Assert ()
         let deferredAmbientShader = CreatePhysicallyBasedDeferredAmbientShader lightMapsMax Constants.Paths.PhysicallyBasedDeferredAmbientShaderFilePath in Hl.Assert ()
         let deferredIrradianceShader = CreatePhysicallyBasedDeferredIrradianceShader Constants.Paths.PhysicallyBasedDeferredIrradianceShaderFilePath in Hl.Assert ()
@@ -5277,10 +5518,12 @@ module PhysicallyBased =
           ShadowTerrainPointShader = shadowTerrainPointShader
           ShadowTerrainSpotShader = shadowTerrainSpotShader
           ShadowTerrainDirectionalShader = shadowTerrainDirectionalShader
+          ShadowVoxelShader = shadowVoxelShader
           DeferredStaticShader = deferredStaticShader
           DeferredStaticClippedShader = deferredStaticClippedShader
           DeferredAnimatedShader = deferredAnimatedShader
           DeferredTerrainShader = deferredTerrainShader
+          DeferredVoxelShader = deferredVoxelShader
           DeferredLightMappingShader = deferredLightMappingShader
           DeferredIrradianceShader = deferredIrradianceShader
           DeferredEnvironmentFilterShader = deferredEnvironmentFilterShader
@@ -5303,10 +5546,12 @@ module PhysicallyBased =
         Gl.DeleteProgram shaders.ShadowTerrainPointShader.PhysicallyBasedShader
         Gl.DeleteProgram shaders.ShadowTerrainSpotShader.PhysicallyBasedShader
         Gl.DeleteProgram shaders.ShadowTerrainDirectionalShader.PhysicallyBasedShader
+        Gl.DeleteProgram shaders.ShadowVoxelShader.PhysicallyBasedShader
         Gl.DeleteProgram shaders.DeferredStaticShader.PhysicallyBasedShader
         Gl.DeleteProgram shaders.DeferredStaticClippedShader.PhysicallyBasedShader
         Gl.DeleteProgram shaders.DeferredAnimatedShader.PhysicallyBasedShader
         Gl.DeleteProgram shaders.DeferredTerrainShader.PhysicallyBasedShader
+        Gl.DeleteProgram shaders.DeferredVoxelShader.PhysicallyBasedShader
         Gl.DeleteProgram shaders.DeferredLightMappingShader.PhysicallyBasedDeferredLightMappingShader
         Gl.DeleteProgram shaders.DeferredIrradianceShader.PhysicallyBasedDeferredIrradianceShader
         Gl.DeleteProgram shaders.DeferredEnvironmentFilterShader.PhysicallyBasedDeferredEnvironmentFilterShader

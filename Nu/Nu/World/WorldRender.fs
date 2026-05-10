@@ -43,6 +43,10 @@ module WorldRender =
         static member renderStaticModelSurfaceFast (modelMatrix : Matrix4x4 inref, castShadow, presence, insetOpt, materialProperties : MaterialProperties inref, material : Material inref, staticModel, surfaceIndex, depthTest, renderType, renderPass, world) =
             (World.getRendererProcess world).RenderStaticModelSurfaceFast (&modelMatrix, castShadow, presence, insetOpt, &materialProperties, &material, staticModel, surfaceIndex, depthTest, renderType, renderPass)
 
+        /// Send a message to the render system to render a voxel model using a fast path.
+        static member renderVoxelModelFast (modelMatrix : Matrix4x4 inref, castShadow, presence, materialProperties : MaterialProperties inref, voxelModel, renderPass, world) =
+            (World.getRendererProcess world).RenderVoxelModelFast (&modelMatrix, castShadow, presence, &materialProperties, voxelModel, renderPass)
+
         /// Send a message to the render system to render an animated model using a fast path.
         static member renderAnimatedModelFast (modelMatrix : Matrix4x4 inref, castShadow, presence, insetOpt, materialProperties : MaterialProperties inref, animations, animatedModel, subsortOffsets, drsIndices, depthTest, renderType, renderPass, world) =
             (World.getRendererProcess world).RenderAnimatedModelFast (&modelMatrix, castShadow, presence, insetOpt, &materialProperties, animations, animatedModel, subsortOffsets, drsIndices, depthTest, renderType, renderPass)
@@ -71,6 +75,16 @@ module WorldRender =
         /// Send a message to the render to destroy the given user-defined static model.
         static member destroyUserDefinedStaticModel staticModel world =
             let message = DestroyUserDefinedStaticModel { StaticModel = staticModel }
+            World.enqueueRenderMessage3d message world
+
+        /// Send a message to the render to create the given user-defined voxel model.
+        static member createUserDefinedVoxelModel voxelModelDescriptor voxelModel world =
+            let message = CreateUserDefinedVoxelModel { VoxelModelDescriptor = voxelModelDescriptor; VoxelModel = voxelModel }
+            World.enqueueRenderMessage3d message world
+
+        /// Send a message to the render to destroy the given user-defined voxel model.
+        static member destroyUserDefinedVoxelModel voxelModel world =
+            let message = DestroyUserDefinedVoxelModel { VoxelModel = voxelModel }
             World.enqueueRenderMessage3d message world
 
         /// Enqueue a 2d rendering message.

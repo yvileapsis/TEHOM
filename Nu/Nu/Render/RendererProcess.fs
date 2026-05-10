@@ -36,6 +36,9 @@ type RendererProcess =
         
         /// Potential fast-path for rendering static model surfaces.
         abstract RenderStaticModelSurfaceFast : Matrix4x4 inref * bool * Presence * Box2 voption * MaterialProperties inref * Material inref * StaticModel AssetTag * int * DepthTest * RenderType * RenderPass -> unit
+
+        /// Potential fast-path for rendering voxel models.
+        abstract RenderVoxelModelFast : Matrix4x4 inref * bool * Presence * MaterialProperties inref * VoxelModel AssetTag * RenderPass -> unit
         
         /// Potential fast-path for rendering animated models.
         abstract RenderAnimatedModelFast : Matrix4x4 inref * bool * Presence * Box2 voption * MaterialProperties inref * Matrix4x4 array * AnimatedModel AssetTag * Map<int, single> * int Set * DepthTest * RenderType * RenderPass -> unit
@@ -148,6 +151,11 @@ type RendererInline () =
             | Some _ -> messages3d.Add (RenderStaticModelSurface { ModelMatrix = modelMatrix; CastShadow = castShadow; Presence = presence; InsetOpt = Option.ofValueOption insetOpt; MaterialProperties = materialProperties; Material = material; StaticModel = staticModel; SurfaceIndex = surfaceIndex; DepthTest = depthTest; RenderType = renderType; RenderPass = renderPass })
             | None -> raise (InvalidOperationException "Renderers are not yet or are no longer valid.")
 
+        member ri.RenderVoxelModelFast (modelMatrix, castShadow, presence, materialProperties, voxelModel, renderPass) =
+            match dependenciesOpt with
+            | Some _ -> messages3d.Add (RenderVoxelModel { ModelMatrix = modelMatrix; CastShadow = castShadow; Presence = presence; MaterialProperties = materialProperties; VoxelModel = voxelModel; RenderPass = renderPass })
+            | None -> raise (InvalidOperationException "Renderers are not yet or are no longer valid.")
+
         member ri.RenderAnimatedModelFast (modelMatrix, castShadow, presence, insetOpt, materialProperties, boneTransforms, animatedModel, subsortOffsets, drsIndices, depthTest, renderType, renderPass) =
             match dependenciesOpt with
             | Some _ -> messages3d.Add (RenderAnimatedModel { ModelMatrix = modelMatrix; CastShadow = castShadow; Presence = presence; InsetOpt = Option.ofValueOption insetOpt; MaterialProperties = materialProperties; BoneTransforms = boneTransforms; AnimatedModel = animatedModel; SubsortOffsets = subsortOffsets; DualRenderedSurfaceIndices = drsIndices; DepthTest = depthTest; RenderType = renderType; RenderPass = renderPass })
@@ -256,6 +264,9 @@ type RendererThread () =
     let cachedStaticModelSurfaceMessagesLock = obj ()
     let cachedStaticModelSurfaceMessages = System.Collections.Generic.Queue ()
     let [<VolatileField>] mutable cachedStaticModelSurfaceMessagesCapacity = Constants.Render.StaticModelSurfaceMessagesPrealloc
+    let cachedVoxelModelMessagesLock = obj ()
+    let cachedVoxelModelMessages = System.Collections.Generic.Queue ()
+    let [<VolatileField>] mutable cachedVoxelModelMessagesCapacity = Constants.Render.VoxelModelMessagesPrealloc
     let cachedAnimatedModelMessagesLock = obj ()
     let cachedAnimatedModelMessages = System.Collections.Generic.Queue ()
     let [<VolatileField>] mutable cachedAnimatedModelMessagesCapacity = Constants.Render.AnimatedModelMessagesPrealloc
@@ -306,6 +317,23 @@ type RendererThread () =
                 cachedStaticModelSurfaceMessages.Dequeue ()
             else cachedStaticModelSurfaceMessages.Dequeue ())
 
+    let allocVoxelModelMessage () =
+        lock cachedVoxelModelMessagesLock (fun () ->
+            if cachedVoxelModelMessages.Count = 0 then
+                for _ in 0 .. dec cachedVoxelModelMessagesCapacity do
+                    let voxelModelDescriptor =
+                        { CachedVoxelModelMatrix = Unchecked.defaultof<_>
+                          CachedVoxelModelCastShadow = Unchecked.defaultof<_>
+                          CachedVoxelModelPresence = Unchecked.defaultof<_>
+                          CachedVoxelModelMaterialProperties = Unchecked.defaultof<_>
+                          CachedVoxelModel = Unchecked.defaultof<_>
+                          CachedVoxelModelRenderPass = Unchecked.defaultof<_> }
+                    let cachedVoxelModelMessage = RenderCachedVoxelModel voxelModelDescriptor
+                    cachedVoxelModelMessages.Enqueue cachedVoxelModelMessage
+                cachedVoxelModelMessagesCapacity <- cachedVoxelModelMessagesCapacity * 2
+                cachedVoxelModelMessages.Dequeue ()
+            else cachedVoxelModelMessages.Dequeue ())
+
     let freeStaticModelMessages messages =
         lock cachedStaticModelMessagesLock (fun () ->
             for message in messages do
@@ -318,6 +346,13 @@ type RendererThread () =
             for message in messages do
                 match message with
                 | RenderCachedStaticModelSurface _ -> cachedStaticModelSurfaceMessages.Enqueue message
+                | _ -> ())
+
+    let freeVoxelModelMessages messages =
+        lock cachedVoxelModelMessagesLock (fun () ->
+            for message in messages do
+                match message with
+                | RenderCachedVoxelModel _ -> cachedVoxelModelMessages.Enqueue message
                 | _ -> ())
 
     let allocAnimatedModelMessage () =
@@ -414,6 +449,7 @@ type RendererThread () =
                 renderer3d.Render frustumInterior frustumExterior frustumImposter eye3dCenter eye3dRotation eye3dFieldOfView geometryViewport windowViewport messages3d
                 freeStaticModelMessages messages3d
                 freeStaticModelSurfaceMessages messages3d
+                freeVoxelModelMessages messages3d
                 freeAnimatedModelMessages messages3d
                 renderer3dConfig <- renderer3d.RendererConfig
                 OpenGL.Hl.Assert ()
@@ -546,6 +582,18 @@ type RendererThread () =
                     cachedMessage.CachedStaticModelSurfaceRenderPass <- rsms.RenderPass
                     messageBuffers3d[messageBufferIndex].Add cachedStaticModelSurfaceMessage
                 | _ -> failwithumf ()
+            | RenderVoxelModel rvm ->
+                let cachedVoxelModelMessage = allocVoxelModelMessage ()
+                match cachedVoxelModelMessage with
+                | RenderCachedVoxelModel cachedMessage ->
+                    cachedMessage.CachedVoxelModelMatrix <- rvm.ModelMatrix
+                    cachedMessage.CachedVoxelModelCastShadow <- rvm.CastShadow
+                    cachedMessage.CachedVoxelModelPresence <- rvm.Presence
+                    cachedMessage.CachedVoxelModelMaterialProperties <- rvm.MaterialProperties
+                    cachedMessage.CachedVoxelModel <- rvm.VoxelModel
+                    cachedMessage.CachedVoxelModelRenderPass <- rvm.RenderPass
+                    messageBuffers3d[messageBufferIndex].Add cachedVoxelModelMessage
+                | _ -> failwithumf ()
             | RenderAnimatedModel ram ->
                 let cachedAnimatedModelMessage = allocAnimatedModelMessage ()
                 match cachedAnimatedModelMessage with
@@ -598,6 +646,20 @@ type RendererThread () =
                 cachedMessage.CachedStaticModelSurfaceRenderType <- renderType
                 cachedMessage.CachedStaticModelSurfaceRenderPass <- renderPass
                 messageBuffers3d[messageBufferIndex].Add cachedStaticModelSurfaceMessage
+            | _ -> failwithumf ()
+
+        member rt.RenderVoxelModelFast (modelMatrix, castShadow, presence, materialProperties, voxelModel, renderPass) =
+            if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
+            let cachedVoxelModelMessage = allocVoxelModelMessage ()
+            match cachedVoxelModelMessage with
+            | RenderCachedVoxelModel cachedMessage ->
+                cachedMessage.CachedVoxelModelMatrix <- modelMatrix
+                cachedMessage.CachedVoxelModelCastShadow <- castShadow
+                cachedMessage.CachedVoxelModelPresence <- presence
+                cachedMessage.CachedVoxelModelMaterialProperties <- materialProperties
+                cachedMessage.CachedVoxelModel <- voxelModel
+                cachedMessage.CachedVoxelModelRenderPass <- renderPass
+                messageBuffers3d[messageBufferIndex].Add cachedVoxelModelMessage
             | _ -> failwithumf ()
 
         member rt.RenderAnimatedModelFast (modelMatrix, castShadow, presence, insetOpt, materialProperties, boneTransforms, animatedModel, subsortOffsets, drsIndices, depthTest, renderType, renderPass) =

@@ -211,6 +211,7 @@ type [<ReferenceEquality>] GlRenderer2d =
         | FontAsset (_, font) -> SDL3_ttf.TTF_CloseFont font
         | CubeMapAsset _ -> ()
         | StaticModelAsset _ -> ()
+        | VoxelModelAsset _ -> ()
         | AnimatedModelAsset _ -> ()
         OpenGL.Hl.Assert ()
 
@@ -290,7 +291,7 @@ type [<ReferenceEquality>] GlRenderer2d =
                 | TextureAsset _ -> renderPackage.PackageState.TextureClient.Textures.Remove filePath |> ignore<bool>
                 | FontAsset _ -> ()
                 | CubeMapAsset (cubeMapKey, _, _) -> renderPackage.PackageState.CubeMapClient.CubeMaps.Remove cubeMapKey |> ignore<bool>
-                | StaticModelAsset _ | AnimatedModelAsset _ -> ()
+                | StaticModelAsset _ | VoxelModelAsset _ | AnimatedModelAsset _ -> ()
                 GlRenderer2d.freeRenderAsset renderAsset renderer
 
             // categorize assets to load

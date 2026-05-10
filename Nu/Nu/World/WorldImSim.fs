@@ -743,6 +743,12 @@ module WorldImSim =
         static member doStaticModel name args world = World.doEntity<StaticModelDispatcher> name args world
 
         /// <summary>
+        /// ImSim declare a render-only voxel model with the given arguments.
+        /// See <see cref="VoxelDispatcher" />.
+        /// </summary>
+        static member doVoxel name args world = World.doEntity<VoxelDispatcher> name args world
+
+        /// <summary>
         /// ImSim declare a animated model with the given arguments.
         /// See <see cref="AnimatedModelDispatcher" />.
         /// </summary>

@@ -578,6 +578,12 @@ module Content =
     let staticModel entityName definitions = entity<StaticModelDispatcher> entityName definitions
 
     /// <summary>
+    /// Describe a render-only voxel model with the given definitions.
+    /// See <see cref="VoxelDispatcher"/>.
+    /// </summary>
+    let voxel entityName definitions = entity<VoxelDispatcher> entityName definitions
+
+    /// <summary>
     /// Describe an animated model with the given definitions.
     /// See <see cref="AnimatedModelDispatcher"/>.
     /// </summary>
