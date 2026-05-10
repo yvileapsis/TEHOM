@@ -27,3 +27,4 @@ module Assets =
         let Minecraft = asset<Image> PackageName "minecraft"
         let WoodBlock = asset<Image> PackageName "wood_block"
         let MinecraftLevelChunk x y z = asset<VoxelModel> PackageName ("MinecraftLevel" + string x + "_" + string y + "_" + string z)
+        let MinecraftLevelChunkRevision x y z revision = asset<VoxelModel> PackageName ("MinecraftLevel" + string x + "_" + string y + "_" + string z + "_" + string revision)

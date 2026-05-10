@@ -11,7 +11,8 @@ type VoxelColorByteOrder =
 
 type VoxelVolumeDescriptor =
     { VoxelModel : VoxelModelDescriptor
-      OccupiedCoords : Vector3i array }
+      OccupiedCoords : Vector3i array
+      OccupiedVoxels : struct (Vector3i * Color) array }
 
 [<RequireQualifiedAccess>]
 module VoxelBake =
@@ -96,7 +97,8 @@ module VoxelBake =
                         { Splats = splats.ToArray ()
                           Bounds = box3 (size * -0.5f) size
                           VoxelSize = voxelSize }
-                      OccupiedCoords = occupied.Keys |> Seq.toArray }
+                      OccupiedCoords = occupied.Keys |> Seq.toArray
+                      OccupiedVoxels = occupied |> Seq.map (fun entry -> struct (entry.Key, entry.Value)) |> Seq.toArray }
             | None -> None
 
     let tryDecodeSliceAtlasBytes byteOrder width height bytes voxelSize =
@@ -179,6 +181,169 @@ module VoxelBake =
                  { descriptor with
                     Splats = splats
                     Bounds = box3 (min - center) size })|]
+
+    let occupiedDictionary (volume : VoxelVolumeDescriptor) =
+        let occupied = Dictionary<Vector3i, Color> (HashIdentity.Structural)
+        for struct (coord, albedo) in volume.OccupiedVoxels do
+            occupied[coord] <- albedo
+        occupied
+
+    let private chunkMinCoord (chunkSize : Vector3i) (chunkCoord : Vector3i) =
+        v3i
+            (chunkCoord.X * chunkSize.X)
+            (chunkCoord.Y * chunkSize.Y)
+            (chunkCoord.Z * chunkSize.Z)
+
+    let private coordCenter (origin : Vector3) (voxelSize : Vector3) (coord : Vector3i) =
+        origin +
+        v3
+            ((single coord.X + 0.5f) * voxelSize.X)
+            ((single coord.Y + 0.5f) * voxelSize.Y)
+            ((single coord.Z + 0.5f) * voxelSize.Z)
+
+    let chunkModelFromOccupied (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (occupied : Dictionary<Vector3i, Color>) (chunkCoord : Vector3i) =
+        let chunkSize = v3i (max 1 chunkSize.X) (max 1 chunkSize.Y) (max 1 chunkSize.Z)
+        let origin = bounds.Min
+        let globalMinCoord = chunkMinCoord chunkSize chunkCoord
+        let chunkWorldSize =
+            v3
+                (single chunkSize.X * voxelSize.X)
+                (single chunkSize.Y * voxelSize.Y)
+                (single chunkSize.Z * voxelSize.Z)
+        let chunkMin =
+            origin +
+            v3
+                (single globalMinCoord.X * voxelSize.X)
+                (single globalMinCoord.Y * voxelSize.Y)
+                (single globalMinCoord.Z * voxelSize.Z)
+        let chunkCenter = chunkMin + chunkWorldSize * 0.5f
+        let splats = List ()
+        let mutable occupiedAny = false
+        for y in globalMinCoord.Y .. globalMinCoord.Y + chunkSize.Y - 1 do
+            for z in globalMinCoord.Z .. globalMinCoord.Z + chunkSize.Z - 1 do
+                for x in globalMinCoord.X .. globalMinCoord.X + chunkSize.X - 1 do
+                    let coord = v3i x y z
+                    match occupied.TryGetValue coord with
+                    | (true, albedo) ->
+                        occupiedAny <- true
+                        let mutable exposed = false
+                        let mutable normal = v3Zero
+                        for struct (offset, direction) in directions do
+                            if not (occupied.ContainsKey (coord + offset)) then
+                                exposed <- true
+                                normal <- normal + direction
+                        if exposed then
+                            let normal = if normal.LengthSquared () > 0.0f then normal.Normalized else v3Up
+                            splats.Add
+                                { Position = coordCenter origin voxelSize coord
+                                  Albedo = albedo
+                                  Normal = normal }
+                    | (false, _) -> ()
+        if occupiedAny then
+            let halfVoxelSize = voxelSize * 0.5f
+            let struct (center, descriptorBounds) =
+                if splats.Count > 0 then
+                    let mutable min = v3Dup Single.MaxValue
+                    let mutable max = v3Dup Single.MinValue
+                    for splat in splats do
+                        min <- Vector3.Min (min, splat.Position - halfVoxelSize)
+                        max <- Vector3.Max (max, splat.Position + halfVoxelSize)
+                    let size = max - min
+                    let center = min + size * 0.5f
+                    struct (center, box3 (min - center) size)
+                else
+                    struct (chunkCenter, box3 (chunkWorldSize * -0.5f) chunkWorldSize)
+            let splats =
+                splats
+                |> Seq.map (fun splat -> { splat with Position = splat.Position - center })
+                |> Array.ofSeq
+            Some
+                struct
+                    (center,
+                     { Splats = splats
+                       Bounds = descriptorBounds
+                       VoxelSize = voxelSize })
+        else None
+
+    let chunkBodyShapeFromOccupied (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (occupied : Dictionary<Vector3i, Color>) (chunkCoord : Vector3i) =
+        let chunkSize = v3i (max 1 chunkSize.X) (max 1 chunkSize.Y) (max 1 chunkSize.Z)
+        let filled = Array3D.zeroCreate<bool> chunkSize.X chunkSize.Y chunkSize.Z
+        let visited = Array3D.zeroCreate<bool> chunkSize.X chunkSize.Y chunkSize.Z
+        let globalMinCoord = chunkMinCoord chunkSize chunkCoord
+        let mutable occupiedAny = false
+        for y in 0 .. dec chunkSize.Y do
+            for z in 0 .. dec chunkSize.Z do
+                for x in 0 .. dec chunkSize.X do
+                    let coord = v3i (globalMinCoord.X + x) (globalMinCoord.Y + y) (globalMinCoord.Z + z)
+                    if occupied.ContainsKey coord then
+                        filled[x, y, z] <- true
+                        occupiedAny <- true
+        if occupiedAny then
+            let chunkMin =
+                bounds.Min +
+                v3
+                    (single globalMinCoord.X * voxelSize.X)
+                    (single globalMinCoord.Y * voxelSize.Y)
+                    (single globalMinCoord.Z * voxelSize.Z)
+            let chunkWorldSize =
+                v3
+                    (single chunkSize.X * voxelSize.X)
+                    (single chunkSize.Y * voxelSize.Y)
+                    (single chunkSize.Z * voxelSize.Z)
+            let chunkCenter = chunkMin + chunkWorldSize * 0.5f
+            let canUse x y z = filled[x, y, z] && not visited[x, y, z]
+            let canGrowZ x y z sizeX sizeZ =
+                let z = z + sizeZ
+                let mutable canGrow = z < chunkSize.Z
+                let mutable ix = 0
+                while canGrow && ix < sizeX do
+                    canGrow <- canUse (x + ix) y z
+                    ix <- inc ix
+                canGrow
+            let canGrowY x y z sizeX sizeY sizeZ =
+                let y = y + sizeY
+                let mutable canGrow = y < chunkSize.Y
+                let mutable iz = 0
+                while canGrow && iz < sizeZ do
+                    let mutable ix = 0
+                    while canGrow && ix < sizeX do
+                        canGrow <- canUse (x + ix) y (z + iz)
+                        ix <- inc ix
+                    iz <- inc iz
+                canGrow
+            let bodyShapes = List<BodyShape> ()
+            for y in 0 .. dec chunkSize.Y do
+                for z in 0 .. dec chunkSize.Z do
+                    for x in 0 .. dec chunkSize.X do
+                        if canUse x y z then
+                            let mutable sizeX = 1
+                            while x + sizeX < chunkSize.X && canUse (x + sizeX) y z do
+                                sizeX <- inc sizeX
+                            let mutable sizeZ = 1
+                            while canGrowZ x y z sizeX sizeZ do
+                                sizeZ <- inc sizeZ
+                            let mutable sizeY = 1
+                            while canGrowY x y z sizeX sizeY sizeZ do
+                                sizeY <- inc sizeY
+                            for iy in 0 .. dec sizeY do
+                                for iz in 0 .. dec sizeZ do
+                                    for ix in 0 .. dec sizeX do
+                                        visited[x + ix, y + iy, z + iz] <- true
+                            let boxSize =
+                                v3
+                                    (single sizeX * voxelSize.X)
+                                    (single sizeY * voxelSize.Y)
+                                    (single sizeZ * voxelSize.Z)
+                            let boxMin =
+                                chunkMin +
+                                v3
+                                    (single x * voxelSize.X)
+                                    (single y * voxelSize.Y)
+                                    (single z * voxelSize.Z)
+                            let boxCenter = boxMin + boxSize * 0.5f
+                            bodyShapes.Add (BoxShape { Size = boxSize; TransformOpt = Some (Affine.makeTranslation (boxCenter - chunkCenter)); PropertiesOpt = None })
+            Some struct (chunkCenter, BodyShapes (bodyShapes |> Seq.toList), bodyShapes.Count)
+        else None
 
     let chunkBodyShapes (chunkSize : Vector3i) (volume : VoxelVolumeDescriptor) =
         let chunkSize = v3i (max 1 chunkSize.X) (max 1 chunkSize.Y) (max 1 chunkSize.Z)
