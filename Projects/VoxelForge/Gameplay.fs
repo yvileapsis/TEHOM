@@ -86,9 +86,8 @@ module GameplayLogic =
         | BodyShapes bodyShapes -> BodyShapes (bodyShapes |> List.map (translateBodyShape translation))
         | EmptyShape -> EmptyShape
 
-    let tryPickGround world =
-        let mouseRay = World.getMouseRay3dWorld world
-        let pickRay = ray3 mouseRay.Origin (mouseRay.Direction * 1000.0f)
+    let tryPickForward (world : World) =
+        let pickRay = ray3 world.Eye3dCenter (world.Eye3dRotation.Forward * 1000.0f)
         World.rayCastBodies3d pickRay 2UL 2UL false world
         |> Array.tryHead
         |> Option.map (fun (intersection : BodyIntersection) -> intersection.Position)
@@ -160,7 +159,7 @@ type GameplayDispatcher () =
             let gameplay =
                 { gameplay with
                     GameplayTime = gameplay.GameplayTime + world.GameDelta.Updates
-                    RayPickPositionOpt = GameplayLogic.tryPickGround world }
+                    RayPickPositionOpt = GameplayLogic.tryPickForward world }
             if gameplay.GameplayState = Playing && not gameplay.VoxelModelReady then
                 withSignal (signal EnsureVoxelModel) { gameplay with VoxelModelReady = true }
             else just gameplay
@@ -200,18 +199,8 @@ type GameplayDispatcher () =
                                 ClearCoatOpt = ValueSome 0.0f
                                 ClearCoatRoughnessOpt = ValueSome 1.0f }]
 
-                 Content.boxBody3d Simulants.PhysicsTestCube.Name
-                    [Entity.Position == v3 0.0f 18.0f 0.0f
-                     Entity.Size == v3One
-                     Entity.BodyType == Dynamic
-                     Entity.BodyShape == BoxShape { Size = v3One; TransformOpt = None; PropertiesOpt = None }
-                     Entity.StaticModel == Assets.Default.StaticModel
-                     Entity.Substance == Mass 4.0f
-                     Entity.Friction == 0.8f
-                     Entity.MaterialProperties ==
-                        { MaterialProperties.empty with
-                            AlbedoOpt = ValueSome (color 0.85f 0.45f 0.35f 1.0f)
-                            RoughnessOpt = ValueSome 0.65f }]
+                 Content.entity<FirstPersonPlayerDispatcher> Simulants.GameplayPlayer.Name
+                    [Entity.Position == v3 0.0f 18.0f 0.0f]
 
                  match gameplay.RayPickPositionOpt with
                  | Some position ->
