@@ -21,6 +21,7 @@ Thumbs.db
 #######################
 *.suo
 *.tws
+.idea/
 
 #####################
 # Build Directories #
