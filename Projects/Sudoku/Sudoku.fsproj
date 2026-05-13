@@ -92,10 +92,15 @@
 		<Copy SourceFiles="@(RawShaderAsset)" DestinationFiles="@(RawShaderAsset->'refinement-out/$(TargetFramework)/Assets/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
 		<Error Text="Missing macOS Vulkan SDK glslc at '$(MacOSVulkanSdk)/macOS/bin/glslc'." Condition="'$(TargetPlatformIdentifier)'=='ios' And !Exists('$(MacOSVulkanSdk)/macOS/bin/glslc')" />
 		<Exec Condition="'$(TargetPlatformIdentifier)'=='ios'" Command="&quot;$(MacOSVulkanSdk)/macOS/bin/glslc&quot; &quot;%(RawShaderAsset.Identity)&quot; -o &quot;refinement-out/$(TargetFramework)/Assets/%(RawShaderAsset.RecursiveDir)%(RawShaderAsset.Filename)%(RawShaderAsset.Extension).spv&quot;" />
+		<Exec Condition="'$(TargetPlatformIdentifier)'=='ios' And Exists('refinement-out/$(TargetFramework)')" Command="/bin/chmod -R u+w &quot;refinement-out/$(TargetFramework)&quot;" />
 		<ItemGroup>
 			<MauiAsset Include="refinement-out/$(TargetFramework)/**/*.*" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 		</ItemGroup>
 		<Copy Condition="'$(TargetPlatformIdentifier)' == ''" SourceFiles="@(MauiAsset)" DestinationFolder="$(MSBuildProjectDirectory)/bin/$(Configuration)/$(TargetFramework)/%(RecursiveDir)" SkipUnchangedFiles="true" OverwriteReadOnlyFiles="true" />
+	</Target>
+
+	<Target Name="RemoveStaleSudokuIosBundledAssets" BeforeTargets="_CopyResourcesToBundle" Condition="'$(TargetPlatformIdentifier)'=='ios'">
+		<RemoveDir Directories="$(AppBundleDir)/refinement-out" Condition="Exists('$(AppBundleDir)/refinement-out')" />
 	</Target>
 
 	<Target Name="AfterCleanNuPipe" AfterTargets="Clean">
