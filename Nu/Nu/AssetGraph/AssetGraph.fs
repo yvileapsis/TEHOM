@@ -6,7 +6,9 @@
 
 namespace Nu
 open System
+open System.Configuration
 open System.Collections.Generic
+open System.Diagnostics
 open System.IO
 open ImageMagick
 open ImageMagick.Formats
@@ -19,12 +21,14 @@ open Nu.Vulkan
 type Refinement =
     | PsdToPng
     | BlockCompress
+    | MtsdfAtlas
 
     /// Convert a string to a refinement value.
     static member ofString str =
         match str with
         | nameof PsdToPng -> PsdToPng
         | nameof BlockCompress -> BlockCompress
+        | nameof MtsdfAtlas -> MtsdfAtlas
         | _ -> failwith ("Invalid refinement '" + str + "'.")
 
 /// Describes a game asset, such as an image, sound, or model in detail.
@@ -100,6 +104,7 @@ module AssetGraph =
     let private AssetGraphStr = """
 [[Default
  [[Assets Assets/Default [bmp png psd ttf skel json] [PsdToPng] [Render2d]]
+  [Asset FontMtsdf "Assets/Default/Font.ttf" [MtsdfAtlas] [Render2d]]
   [Assets Assets/Default [jpg jpeg tga tif tiff dds ktx] [BlockCompress] [Render3d]]
   [Assets Assets/Default [cbm fbx gltf glb dae obj mtl raw] [] [Render3d]]
   [Assets Assets/Default [wav ogg mp3] [] [Audio]]
@@ -114,11 +119,129 @@ module AssetGraph =
             match blockCompression with
             | BcCompression -> ".dds"
             | AstcCompression -> ".ktx"
+        | MtsdfAtlas -> if rawAssetExtension = ".ttf" || rawAssetExtension = ".otf" then ".mtsdffont" else rawAssetExtension
 
     let private getAssetExtension usingRawAssets blockCompression rawAssetExtension refinements =
         if usingRawAssets
         then List.fold (getAssetExtension2 blockCompression) rawAssetExtension refinements
         else rawAssetExtension
+
+    let private makeMtsdfSidecarSubpath intermediateFileSubpath suffix extension =
+        let directory = PathF.GetDirectoryName intermediateFileSubpath
+        let fileName = PathF.GetFileNameWithoutExtension intermediateFileSubpath + suffix + extension
+        if String.IsNullOrEmpty directory then fileName
+        else directory + "/" + fileName
+
+    let private tryGetMtsdfAtlasGenPath () =
+        let environmentPath = Environment.GetEnvironmentVariable "NU_MSDF_ATLAS_GEN"
+        if not (String.IsNullOrWhiteSpace environmentPath) then Some environmentPath
+        else
+            let configuredPath = ConfigurationManager.AppSettings.["MsdfAtlasGenPath"]
+            if not (String.IsNullOrWhiteSpace configuredPath) then Some configuredPath
+            else
+                let localPath =
+                    let homePath = Environment.GetFolderPath Environment.SpecialFolder.UserProfile
+                    if String.IsNullOrWhiteSpace homePath then ""
+                    else homePath + "/.local/bin/msdf-atlas-gen"
+                if File.Exists localPath then Some localPath
+                else Some "msdf-atlas-gen"
+
+    let private copyFileReplacing inputFilePath outputFilePath =
+        Directory.CreateDirectory (PathF.GetDirectoryName outputFilePath) |> ignore
+        try if File.Exists outputFilePath then File.SetAttributes (outputFilePath, FileAttributes.None)
+            File.Copy (inputFilePath, outputFilePath, true)
+            File.SetAttributes (outputFilePath, FileAttributes.ReadOnly) // prevents errors when accidentally altering output compressed image files and the like
+        with _ -> Log.info ("Resource lock on '" + outputFilePath + "' has prevented build.")
+
+    let private copyMtsdfAtlasSidecars inputFileExtension intermediateFileSubpath intermediateDirectory outputDirectory =
+        let atlasFileSubpath = makeMtsdfSidecarSubpath intermediateFileSubpath ".mtsdfAtlas" ".png"
+        let atlasFilePath = intermediateDirectory + "/" + atlasFileSubpath
+        let atlasOutputFilePath = outputDirectory + "/" + atlasFileSubpath
+        if File.Exists atlasFilePath then copyFileReplacing atlasFilePath atlasOutputFilePath
+        else Log.info ("Could not copy MTSDF atlas sidecar because '" + atlasFilePath + "' does not exist.")
+        let fontFileSubpath = makeMtsdfSidecarSubpath intermediateFileSubpath ".mtsdfSource" inputFileExtension
+        let fontFilePath = intermediateDirectory + "/" + fontFileSubpath
+        let fontOutputFilePath = outputDirectory + "/" + fontFileSubpath
+        if File.Exists fontFilePath then copyFileReplacing fontFilePath fontOutputFilePath
+        else Log.info ("Could not copy MTSDF font sidecar because '" + fontFilePath + "' does not exist.")
+
+    let private makeMtsdfAtlasGenOutput stdout stderr =
+        if String.IsNullOrWhiteSpace stderr then
+            if String.IsNullOrWhiteSpace stdout then "" else "\n" + stdout
+        else "\n" + stderr
+
+    let private runMtsdfAtlasGenProcess atlasGenPath intermediateFilePath refinementFilePath imageFilePath imageFormat =
+        let startInfo = ProcessStartInfo ()
+        startInfo.FileName <- atlasGenPath
+        startInfo.UseShellExecute <- false
+        startInfo.RedirectStandardOutput <- true
+        startInfo.RedirectStandardError <- true
+        startInfo.ArgumentList.Add "-font"
+        startInfo.ArgumentList.Add intermediateFilePath
+        startInfo.ArgumentList.Add "-allglyphs"
+        startInfo.ArgumentList.Add "-type"
+        startInfo.ArgumentList.Add "mtsdf"
+        startInfo.ArgumentList.Add "-format"
+        startInfo.ArgumentList.Add imageFormat
+        startInfo.ArgumentList.Add "-size"
+        startInfo.ArgumentList.Add "48"
+        startInfo.ArgumentList.Add "-pxrange"
+        startInfo.ArgumentList.Add "4"
+        startInfo.ArgumentList.Add "-yorigin"
+        startInfo.ArgumentList.Add "top"
+        startInfo.ArgumentList.Add "-scanline"
+        startInfo.ArgumentList.Add "-threads"
+        startInfo.ArgumentList.Add "0"
+        startInfo.ArgumentList.Add "-imageout"
+        startInfo.ArgumentList.Add imageFilePath
+        startInfo.ArgumentList.Add "-json"
+        startInfo.ArgumentList.Add refinementFilePath
+        use proc = new Process ()
+        proc.StartInfo <- startInfo
+        proc.Start () |> ignore<bool>
+        let stdoutTask = proc.StandardOutput.ReadToEndAsync ()
+        let stderrTask = proc.StandardError.ReadToEndAsync ()
+        proc.WaitForExit ()
+        let stdout = stdoutTask.Result
+        let stderr = stderrTask.Result
+        if proc.ExitCode = 0 && File.Exists refinementFilePath && File.Exists imageFilePath then Right ()
+        elif proc.ExitCode = 0 then
+            Left
+                ("MTSDF atlas generator completed with " + imageFormat + " output, but the expected metadata or atlas file was not produced." +
+                 makeMtsdfAtlasGenOutput stdout stderr)
+        else Left (makeMtsdfAtlasGenOutput stdout stderr)
+
+    let private convertMtsdfAtlasBmpToPng (bmpFilePath : string) (pngFilePath : string) =
+        use image = new MagickImage (bmpFilePath)
+        image.Format <- MagickFormat.Png32
+        image.Write (pngFilePath)
+        try File.Delete bmpFilePath
+        with _ -> ()
+
+    let private runMtsdfAtlasGen intermediateFilePath refinementFilePath atlasFilePath =
+        match tryGetMtsdfAtlasGenPath () with
+        | Some atlasGenPath ->
+            try
+                match runMtsdfAtlasGenProcess atlasGenPath intermediateFilePath refinementFilePath atlasFilePath "png" with
+                | Right () -> ()
+                | Left pngOutput ->
+                    let bmpAtlasFilePath = PathF.ChangeExtension (atlasFilePath, ".bmp")
+                    match runMtsdfAtlasGenProcess atlasGenPath intermediateFilePath refinementFilePath bmpAtlasFilePath "bmp" with
+                    | Right () ->
+                        convertMtsdfAtlasBmpToPng bmpAtlasFilePath atlasFilePath
+                        if not (File.Exists atlasFilePath) then
+                            failwith ("Failed to convert fallback MTSDF BMP atlas '" + bmpAtlasFilePath + "' to PNG '" + atlasFilePath + "'.")
+                    | Left bmpOutput ->
+                        failwith
+                            ("Failed to MtsdfAtlas refine asset '" + intermediateFilePath + "' with '" + atlasGenPath + "'." +
+                             "\nPNG output failed:" + pngOutput +
+                             "\nBMP fallback failed:" + bmpOutput)
+            with exn ->
+                if exn :? System.ComponentModel.Win32Exception then
+                    failwith ("Failed to launch MTSDF atlas generator '" + atlasGenPath + "'. Set NU_MSDF_ATLAS_GEN to a valid msdf-atlas-gen executable for NuPipe builds, or app setting MsdfAtlasGenPath for runtime asset reloads. Error: " + scstring exn)
+                else reraise ()
+        | None ->
+            failwith "MTSDF atlas generation requires NU_MSDF_ATLAS_GEN for NuPipe builds or app setting MsdfAtlasGenPath for runtime asset reloads."
 
     /// Apply a single refinement to an asset.
     let private refineAssetOnce (intermediateFileSubpath : string) intermediateDirectory refinementDirectory blockCompression refinement =
@@ -250,6 +373,19 @@ module AssetGraph =
                         | None -> Log.error ("Failed to " + scstring refinement + " refine asset '" + intermediateFilePath + "'.")
                     | None -> Log.error ("Failed to " + scstring refinement + " refine asset '" + intermediateFilePath + "'.")
 
+        | MtsdfAtlas ->
+            if intermediateFileExtension = ".ttf" || intermediateFileExtension = ".otf" then
+                let atlasFileSubpath = makeMtsdfSidecarSubpath refinementFileSubpath ".mtsdfAtlas" ".png"
+                let atlasFilePath = refinementDirectory + "/" + atlasFileSubpath
+                let fontFileSubpath = makeMtsdfSidecarSubpath refinementFileSubpath ".mtsdfSource" intermediateFileExtension
+                let fontFilePath = refinementDirectory + "/" + fontFileSubpath
+                Directory.CreateDirectory (PathF.GetDirectoryName atlasFilePath) |> ignore
+                Directory.CreateDirectory (PathF.GetDirectoryName fontFilePath) |> ignore
+                runMtsdfAtlasGen intermediateFilePath refinementFilePath atlasFilePath
+                if File.Exists refinementFilePath then copyFileReplacing intermediateFilePath fontFilePath
+            else
+                Log.error ("MtsdfAtlas refinement requires a .ttf or .otf asset, not '" + intermediateFilePath + "'.")
+
         // return the latest refinement localities
         (refinementFileSubpath, refinementDirectory)
 
@@ -275,11 +411,19 @@ module AssetGraph =
             let outputFileExtension = getAssetExtension true blockCompression inputFileExtension asset.Refinements
             let outputFileSubpath = PathF.ChangeExtension (asset.FilePath, outputFileExtension)
             let outputFilePath = outputDirectory + "/" + outputFileSubpath
+            let outputMtsdfAtlasPath = outputDirectory + "/" + makeMtsdfSidecarSubpath outputFileSubpath ".mtsdfAtlas" ".png"
+            let outputMtsdfFontPath = outputDirectory + "/" + makeMtsdfSidecarSubpath outputFileSubpath ".mtsdfSource" inputFileExtension
+            let hasMtsdfAtlas = List.contains MtsdfAtlas asset.Refinements
 
             // build the asset if fully building or if it's out of date
             if  fullBuild ||
                 not (File.Exists outputFilePath) ||
-                File.GetLastWriteTime inputFilePath > File.GetLastWriteTime outputFilePath then
+                File.GetLastWriteTime inputFilePath > File.GetLastWriteTime outputFilePath ||
+                hasMtsdfAtlas &&
+                (not (File.Exists outputMtsdfAtlasPath) ||
+                 not (File.Exists outputMtsdfFontPath) ||
+                 File.GetLastWriteTime inputFilePath > File.GetLastWriteTime outputMtsdfAtlasPath ||
+                 File.GetLastWriteTime inputFilePath > File.GetLastWriteTime outputMtsdfFontPath) then
 
                 // refine the asset
                 let (intermediateFileSubpath, intermediateDirectory) =
@@ -289,11 +433,10 @@ module AssetGraph =
                 // attempt to copy the intermediate asset if output file is out of date
                 let intermediateFilePath = intermediateDirectory + "/" + intermediateFileSubpath
                 let outputFilePath = outputDirectory + "/" + intermediateFileSubpath
-                Directory.CreateDirectory (PathF.GetDirectoryName outputFilePath) |> ignore
-                try if File.Exists outputFilePath then File.SetAttributes (outputFilePath, FileAttributes.None)
-                    File.Copy (intermediateFilePath, outputFilePath, true)
-                    File.SetAttributes (outputFilePath, FileAttributes.ReadOnly) // prevents errors when accidentally altering output compressed image files and the like
-                with _ -> Log.info ("Resource lock on '" + outputFilePath + "' has prevented build for asset '" + scstring asset.AssetTag + "'.")
+                if File.Exists intermediateFilePath then
+                    copyFileReplacing intermediateFilePath outputFilePath
+                    if hasMtsdfAtlas then copyMtsdfAtlasSidecars inputFileExtension intermediateFileSubpath intermediateDirectory outputDirectory
+                else Log.info ("Refined asset '" + intermediateFilePath + "' does not exist for asset '" + scstring asset.AssetTag + "'.")
 
     /// Collect the associated assets from package descriptor assets value.
     let private collectAssetsFromPackageDescriptorAssets packageName directory extensions associations refinements : Asset list =
@@ -318,19 +461,36 @@ module AssetGraph =
             | Assets (directory, extensions, associations, refinements) ->
                 yield! collectAssetsFromPackageDescriptorAssets packageName directory extensions refinements associations]
 
+    let private assetCollectionKey (asset : Asset) =
+        struct (asset.AssetTag.PackageName, asset.AssetTag.AssetName, asset.FilePath)
+
+    let private mergeCollectedAssets assets =
+        assets
+        |> List.groupBy assetCollectionKey
+        |> List.map snd
+        |> List.map (List.reduce (fun asset asset2 ->
+            { AssetTag = AssetTag.make asset.AssetTag.PackageName asset.AssetTag.AssetName
+              FilePath = asset.FilePath
+              Refinements = List.append asset.Refinements asset2.Refinements
+              Associations = Set.union asset.Associations asset2.Associations } :> Asset))
+
+    let private refineAssetForUse (asset : Asset) =
+        let assetExtension = PathF.GetExtensionMixed asset.FilePath
+        let assetExtensionRefined = getAssetExtension true Constants.Render.TextureBlockCompression assetExtension asset.Refinements
+        let assetFilePathRefined = PathF.ChangeExtension (asset.FilePath, assetExtensionRefined)
+        { AssetTag = AssetTag.make asset.AssetTag.PackageName asset.AssetTag.AssetName
+          FilePath = assetFilePathRefined
+          Refinements = asset.Refinements
+          Associations = asset.Associations } :> Asset
+
     /// Attempt to collect all the available assets from a package.
     let tryCollectAssetsFromPackage associationOpt packageName assetGraph =
         let mutable packageDescriptor = Unchecked.defaultof<PackageDescriptor>
         match Map.tryGetValue (packageName, assetGraph.PackageDescriptors_, &packageDescriptor) with
         | true ->
             collectAssetsFromPackageDescriptor packageName packageDescriptor
-            |> List.groupBy (fun asset -> asset.FilePath)
-            |> List.map snd
-            |> List.map (List.reduce (fun asset asset2 ->
-                { AssetTag = AssetTag.make asset.AssetTag.PackageName asset.AssetTag.AssetName
-                  FilePath = asset.FilePath
-                  Refinements = List.append asset.Refinements asset2.Refinements
-                  Associations = Set.union asset.Associations asset2.Associations } :> Asset))
+            |> mergeCollectedAssets
+            |> List.map refineAssetForUse
             |> List.filter (fun asset -> match associationOpt with Some association -> asset.Associations.Contains association | _ -> true)
             |> Right
         | false -> Left ("Could not find package '" + packageName + "' in asset graph.")
@@ -341,13 +501,7 @@ module AssetGraph =
             let packageName = entry.Key
             let packageDescriptor = entry.Value
             yield! collectAssetsFromPackageDescriptor packageName packageDescriptor]
-        |> List.groupBy (fun asset -> asset.FilePath)
-        |> List.map snd
-        |> List.map (List.reduce (fun asset asset2 ->
-            { AssetTag = AssetTag.make asset.AssetTag.PackageName asset.AssetTag.AssetName
-              FilePath = asset.FilePath
-              Refinements = List.append asset.Refinements asset2.Refinements
-              Associations = Set.union asset.Associations asset2.Associations } :> Asset))
+        |> mergeCollectedAssets
         |> List.filter (fun asset -> match associationOpt with Some association -> asset.Associations.Contains association | _ -> true)
 
     /// Build all the available assets described by an asset graph.

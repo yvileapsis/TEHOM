@@ -399,6 +399,18 @@ module Content =
     let label entityName definitions = entity<LabelDispatcher> entityName definitions
 
     /// <summary>
+    /// Describe an MTSDF text entity with the given definitions.
+    /// See <see cref="MsdfTextDispatcher"/>.
+    /// </summary>
+    let msdfText entityName definitions = entity<MsdfTextDispatcher> entityName definitions
+
+    /// <summary>
+    /// Describe an MTSDF label with the given definitions.
+    /// See <see cref="MsdfLabelDispatcher"/>.
+    /// </summary>
+    let msdfLabel entityName definitions = entity<MsdfLabelDispatcher> entityName definitions
+
+    /// <summary>
     /// Describe a button with the given definitions.
     /// See <see cref="ButtonDispatcher"/>.
     /// </summary>

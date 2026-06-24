@@ -1,4 +1,4 @@
-﻿// Nu Game Engine.
+// Nu Game Engine.
 // Required Notice:
 // Copyright (C) Bryan Edds.
 // Nu Game Engine is licensed under the Nu Game Engine Noncommercial License.
@@ -1452,6 +1452,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         | RawAsset -> () // nothing to do
         | TextureAsset texture -> Texture.destroy texture renderer.VulkanContext
         | FontAsset (_, font) -> SDL3_ttf.TTF_CloseFont font
+        | MsdfFontAsset (_, texture) -> Texture.destroy texture renderer.VulkanContext
         | CubeMapAsset (_, cubeMap, irradianceAndEnvironmentMapOptRef) ->
             Texture.destroy cubeMap renderer.VulkanContext
             match irradianceAndEnvironmentMapOptRef.Value with
@@ -1516,6 +1517,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 | RawAsset -> ()
                 | TextureAsset _ -> renderPackage.PackageState.TextureClient.Textures.Remove filePath |> ignore<bool>
                 | FontAsset _ -> ()
+                | MsdfFontAsset (fontData, _) -> renderPackage.PackageState.TextureClient.Textures.Remove fontData.AtlasFilePath |> ignore<bool>
                 | CubeMapAsset (cubeMapKey, _, _) -> renderPackage.PackageState.CubeMapClient.CubeMaps.Remove cubeMapKey |> ignore<bool>
                 | StaticModelAsset _ | AnimatedModelAsset _ -> ()
                 VulkanRenderer3d.freeRenderAsset renderAsset renderer
@@ -1548,7 +1550,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                     let dirPath = PathF.GetDirectoryName asset.FilePath
                     let renderAsset =
                         match renderAsset with
-                        | RawAsset | TextureAsset _ | FontAsset _ | CubeMapAsset _ ->
+                        | RawAsset | TextureAsset _ | FontAsset _ | MsdfFontAsset _ | CubeMapAsset _ ->
                             renderAsset
                         | StaticModelAsset (userDefined, staticModel) ->
                             match staticModel.SceneOpt with
@@ -3834,6 +3836,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         let renderPasses = renderer.RenderPasses
         renderer.RenderPasses <- renderer.RenderPasses2
         renderer.RenderPasses2 <- renderPasses
+
 
     /// Make a VulkanRenderer3d.
     static member make geometryViewport windowViewport context =

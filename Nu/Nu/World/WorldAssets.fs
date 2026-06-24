@@ -50,6 +50,7 @@ module Assets =
         let [<Uniform>] NuSlide = asset<Image> PackageName Assets.Default.NuSlideName
         let [<Uniform>] HeightMap = asset<Raw> PackageName Assets.Default.HeightMapName
         let [<Uniform>] Font = asset<Font> PackageName Assets.Default.FontName
+        let [<Uniform>] FontMtsdf = asset<MsdfFont> PackageName Assets.Default.FontMtsdfName
         let [<Uniform>] TileMap = asset<TileMap> PackageName Assets.Default.TileMapName
         let [<Uniform>] EmptyTileMap = asset<TileMap> PackageName Assets.Default.EmptyTileMapName
         let [<Uniform>] MaterialAlbedo = asset<Image> PackageName Assets.Default.MaterialAlbedoName

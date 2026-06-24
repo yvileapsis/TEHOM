@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -83,7 +83,9 @@
         <Compile Include="Physics\AetherPhysicsEngine.fs" />
         <Compile Include="Physics\Box2dNetPhysicsEngine.fs" />
         <Compile Include="Physics\JoltPhysicsEngine.fs" />
+        <Compile Include="Render\MsdfFont.fs" />
         <Compile Include="Render\RendererPrelude.fs" />
+        <Compile Include="Vulkan\Vulkan.MsdfText.fs" />
         <Compile Include="Render\Renderer2d.fs" />
         <Compile Include="Render\Renderer3d.fs" />
         <Compile Include="Render\RendererImGui.fs" />
@@ -153,6 +155,8 @@
         <PackageReference Include="BCnEncoder.Net" Version="2.2.1" />
         <PackageReference Include="DotRecast.Recast.Toolset" Version="2026.1.1" />
         <PackageReference Include="JoltPhysicsSharp" Version="2.19.5" />
+        <PackageReference Include="HarfBuzzSharp" Version="8.3.1.5" />
+        <PackageReference Include="LibTessDotNet" Version="1.1.15" />
         <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.14.0" />
         <PackageReference Include="Pfim" Version="0.11.4" />
         <PackageReference Include="Prime" Version="11.5.1" />

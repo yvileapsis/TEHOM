@@ -485,6 +485,83 @@ type TextFacet () =
         AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
+module MsdfTextFacetExtensions =
+    type Entity with
+        member this.GetMsdfFont world : MsdfFont AssetTag = this.Get (nameof this.MsdfFont) world
+        member this.SetMsdfFont (value : MsdfFont AssetTag) world = this.Set (nameof this.MsdfFont) value world
+        member this.MsdfFont = lens (nameof this.MsdfFont) this this.GetMsdfFont this.SetMsdfFont
+        member this.GetTextDirection world : TextDirection = this.Get (nameof this.TextDirection) world
+        member this.SetTextDirection (value : TextDirection) world = this.Set (nameof this.TextDirection) value world
+        member this.TextDirection = lens (nameof this.TextDirection) this this.GetTextDirection this.SetTextDirection
+        member this.GetLanguageOpt world : string option = this.Get (nameof this.LanguageOpt) world
+        member this.SetLanguageOpt (value : string option) world = this.Set (nameof this.LanguageOpt) value world
+        member this.LanguageOpt = lens (nameof this.LanguageOpt) this this.GetLanguageOpt this.SetLanguageOpt
+        member this.GetMsdfEdgeOffset world : single = this.Get (nameof this.MsdfEdgeOffset) world
+        member this.SetMsdfEdgeOffset (value : single) world = this.Set (nameof this.MsdfEdgeOffset) value world
+        member this.MsdfEdgeOffset = lens (nameof this.MsdfEdgeOffset) this this.GetMsdfEdgeOffset this.SetMsdfEdgeOffset
+        member this.GetMsdfSoftness world : single = this.Get (nameof this.MsdfSoftness) world
+        member this.SetMsdfSoftness (value : single) world = this.Set (nameof this.MsdfSoftness) value world
+        member this.MsdfSoftness = lens (nameof this.MsdfSoftness) this this.GetMsdfSoftness this.SetMsdfSoftness
+        member this.GetMsdfOutlineColor world : Color = this.Get (nameof this.MsdfOutlineColor) world
+        member this.SetMsdfOutlineColor (value : Color) world = this.Set (nameof this.MsdfOutlineColor) value world
+        member this.MsdfOutlineColor = lens (nameof this.MsdfOutlineColor) this this.GetMsdfOutlineColor this.SetMsdfOutlineColor
+        member this.GetMsdfOutlineThickness world : single = this.Get (nameof this.MsdfOutlineThickness) world
+        member this.SetMsdfOutlineThickness (value : single) world = this.Set (nameof this.MsdfOutlineThickness) value world
+        member this.MsdfOutlineThickness = lens (nameof this.MsdfOutlineThickness) this this.GetMsdfOutlineThickness this.SetMsdfOutlineThickness
+        member this.GetMsdfOutlineSoftness world : single = this.Get (nameof this.MsdfOutlineSoftness) world
+        member this.SetMsdfOutlineSoftness (value : single) world = this.Set (nameof this.MsdfOutlineSoftness) value world
+        member this.MsdfOutlineSoftness = lens (nameof this.MsdfOutlineSoftness) this this.GetMsdfOutlineSoftness this.SetMsdfOutlineSoftness
+
+/// Augments an entity with MTSDF-shaped text.
+type MsdfTextFacet () =
+    inherit Facet (false, false, false)
+
+    static member Properties =
+        [define Entity.Text ""
+         define Entity.MsdfFont Assets.Default.FontMtsdf
+         define Entity.FontSizing None
+         define Entity.Justification (Justified (JustifyCenter, JustifyMiddle))
+         define Entity.TextMargin v2Zero
+         define Entity.TextColor Color.White
+         define Entity.TextColorDisabled Constants.Gui.ColorDisabledDefault
+         define Entity.TextOffset v2Zero
+         define Entity.TextShift Constants.Gui.TextShiftDefault
+         define Entity.TextDirection TextDirectionAuto
+         define Entity.LanguageOpt None
+         define Entity.MsdfEdgeOffset MsdfTextShader.defaultShader.EdgeOffset
+         define Entity.MsdfSoftness MsdfTextShader.defaultShader.Softness
+         define Entity.MsdfOutlineColor MsdfTextShader.defaultShader.OutlineColor
+         define Entity.MsdfOutlineThickness MsdfTextShader.defaultShader.OutlineThickness
+         define Entity.MsdfOutlineSoftness MsdfTextShader.defaultShader.OutlineSoftness]
+
+    override this.Render (_, entity, world) =
+        let mutable transform = entity.GetTransform world
+        let absolute = transform.Absolute
+        let perimeter = transform.Perimeter
+        let offset = (entity.GetTextOffset world).V3
+        let elevation = transform.Elevation
+        let shift = entity.GetTextShift world
+        let clipOpt = ValueSome transform.Bounds2d.Box2
+        let justification = entity.GetJustification world
+        let margin = (entity.GetTextMargin world).V3
+        let color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
+        let msdfFont = entity.GetMsdfFont world
+        let fontSizing = entity.GetFontSizing world
+        let textDirection = entity.GetTextDirection world
+        let languageOpt = entity.GetLanguageOpt world
+        let shader =
+            { EdgeOffset = entity.GetMsdfEdgeOffset world
+              Softness = entity.GetMsdfSoftness world
+              OutlineColor = entity.GetMsdfOutlineColor world
+              OutlineThickness = entity.GetMsdfOutlineThickness world
+              OutlineSoftness = entity.GetMsdfOutlineSoftness world }
+        let text = entity.GetText world
+        World.renderGuiMsdfText absolute perimeter offset elevation shift clipOpt justification None margin color shader msdfFont fontSizing textDirection languageOpt text world
+
+    override this.GetAttributesInferred (_, _) =
+        AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+
+[<AutoOpen>]
 module BackdroppableFacetExtensions =
     type Entity with
         member this.GetColorDisabled world : Color = this.Get (nameof this.ColorDisabled) world

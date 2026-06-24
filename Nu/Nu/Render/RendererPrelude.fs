@@ -1,4 +1,4 @@
-﻿// Nu Game Engine.
+// Nu Game Engine.
 // Required Notice:
 // Copyright (C) Bryan Edds.
 // Nu Game Engine is licensed under the Nu Game Engine Noncommercial License.
@@ -132,6 +132,7 @@ type RenderAsset =
     | RawAsset
     | TextureAsset of Texture : Texture
     | FontAsset of FontSizeDefault : single * Font : TTF_Font nativeptr
+    | MsdfFontAsset of Font : MsdfFontAssetData * AtlasTexture : Texture
     | CubeMapAsset of FilePaths : CubeMapKey * CubeMap : Texture * IrradianceAndEnvironmentMapOptRef : (Texture * Texture) option ref
     | StaticModelAsset of UserDefined : bool * StaticModel : PhysicallyBasedModel
     | AnimatedModelAsset of AnimatedModel : PhysicallyBasedModel

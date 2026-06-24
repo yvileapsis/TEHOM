@@ -126,6 +126,25 @@ type LabelDispatcher () =
     static member Properties =
         [define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))]
 
+/// Gives an entity the base behavior of a gui MTSDF text control.
+type MsdfTextDispatcher () =
+    inherit GuiDispatcher ()
+
+    static member Facets =
+        [typeof<BackdroppableFacet>
+         typeof<MsdfTextFacet>]
+
+/// Gives an entity the base behavior of a gui MTSDF label.
+type MsdfLabelDispatcher () =
+    inherit GuiDispatcher ()
+
+    static member Facets =
+        [typeof<BackdroppableFacet>
+         typeof<MsdfTextFacet>]
+
+    static member Properties =
+        [define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))]
+
 /// Gives an entity the base behavior of a gui button.
 type ButtonDispatcher () =
     inherit GuiDispatcher ()

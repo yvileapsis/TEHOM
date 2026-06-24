@@ -13,7 +13,8 @@ module AssetPatterns =
 
     let (|RawExtension|_|) extension = match extension with ".raw" -> Some extension | _ -> None
     let (|ImageExtension|_|) extension = match extension with ".bmp" | ".png" | ".jpg" | ".jpeg" | ".tga" | ".tif" | ".tiff" | ".dds" | ".ktx" -> Some extension | _ -> None
-    let (|FontExtension|_|) extension = match extension with ".ttf" -> Some extension | _ -> None
+    let (|FontExtension|_|) extension = match extension with ".ttf" | ".otf" -> Some extension | _ -> None
+    let (|MsdfFontExtension|_|) extension = match extension with ".mtsdffont" -> Some extension | _ -> None
     let (|TileMapExtension|_|) extension = match extension with ".tmx" -> Some extension | _ -> None
     let (|SpineSkeletonExtension|_|) extension = match extension with ".skel" | ".json" -> Some extension | _ -> None
     let (|CubeMapExtension|_|) extension = match extension with ".cbm" -> Some extension | _ -> None
@@ -64,6 +65,7 @@ module Default =
     let [<Literal>] NuSlideName = "NuSlide"
     let [<Literal>] HeightMapName = "HeightMap"
     let [<Literal>] FontName = "Font"
+    let [<Literal>] FontMtsdfName = "FontMtsdf"
     let [<Literal>] TileMapName = "TileMap"
     let [<Literal>] EmptyTileMapName = "EmptyTileMap"
     let [<Literal>] SkyBoxMapName = "SkyBoxMap"

@@ -1,4 +1,4 @@
-﻿// Nu Game Engine.
+// Nu Game Engine.
 // Required Notice:
 // Copyright (C) Bryan Edds.
 // Nu Game Engine is licensed under the Nu Game Engine Noncommercial License.
@@ -481,6 +481,7 @@ module Paths =
     let [<Literal>] ImGuiShaderFilePath = "Assets/Default/ImGui"
     let [<Literal>] SpriteShaderFilePath = "Assets/Default/Sprite"
     let [<Literal>] SpriteBatchShaderFilePath = "Assets/Default/SpriteBatch"
+    let [<Literal>] MsdfTextShaderFilePath = "Assets/Default/MsdfText"
     let [<Literal>] ContourShaderFilePath = "Assets/Default/Contour"
     let [<Literal>] SkyBoxShaderFilePath = "Assets/Default/SkyBox"
     let [<Literal>] IrradianceShaderFilePath = "Assets/Default/Irradiance"

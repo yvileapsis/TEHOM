@@ -944,9 +944,45 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             entity.ResetProbeBounds world
         | Some _ | None -> ()
 
+    let private tryReloadAssets world =
+        let assetSourceDir = TargetDir + "/../../.."
+        let refinementDir = Constants.Engine.RefinementDir
+        let blockCompression = Constants.Render.TextureBlockCompression
+        match World.tryReloadAssetGraph assetSourceDir TargetDir refinementDir blockCompression world with
+        | Right assetGraph ->
+            let prettyPrinter = (SyntaxAttribute.defaultValue typeof<AssetGraph>).PrettyPrinter
+            AssetGraphStr <- PrettyPrinter.prettyPrint (scstring assetGraph) prettyPrinter
+            true
+        | Left error ->
+            MessageBoxOpt <- Some ("Asset reload error due to: " + error + "'.")
+            false
+
+    let private getDefaultMsdfFontAssetFilePaths () =
+        [|TargetDir + "/Assets/Default/Font.mtsdffont"
+          TargetDir + "/Assets/Default/Font.mtsdfAtlas.png"
+          TargetDir + "/Assets/Default/Font.mtsdfSource.ttf"|]
+
+    let private tryEnsureDefaultMsdfFontAssets world =
+        let filePaths = getDefaultMsdfFontAssetFilePaths ()
+        if Array.forall File.Exists filePaths then true
+        elif tryReloadAssets world && Array.forall File.Exists filePaths then true
+        else
+            let missingFilePaths =
+                filePaths
+                |> Array.filter (not << File.Exists)
+                |> Array.map (fun filePath -> PathF.GetRelativePath (TargetDir, filePath))
+            if Array.notEmpty missingFilePaths then
+                MessageBoxOpt <-
+                    Some
+                        ("Could not generate the default MTSDF font assets. Missing: " + String.Join (", ", missingFilePaths) +
+                         ". Install msdf-atlas-gen and set NU_MSDF_ATLAS_GEN for NuPipe builds or app setting MsdfAtlasGenPath for runtime asset reloads, then reload assets.")
+            false
+
     let private createEntity atMouse inHierarchy dispatcherNameOverride parentOverride world =
         snapshot CreateEntity world
         let dispatcherName = Option.defaultValue NewEntityDispatcherName dispatcherNameOverride
+        let msdfText = dispatcherName = nameof MsdfTextDispatcher || dispatcherName = nameof MsdfLabelDispatcher
+        if msdfText then tryEnsureDefaultMsdfFontAssets world |> ignore<bool>
         let overlayNameDescriptor =
             match NewEntityOverlayName with
             | "(Default Overlay)" -> DefaultOverlay
@@ -968,6 +1004,10 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             | None -> [|name|]
         let entity = World.createEntity7 false dispatcherName (Some Address.parent) overlayNameDescriptor (Some surnames) SelectedGroup world
         inductEntity atMouse entity world
+        if msdfText then
+            entity.SetText "MTSDF AV office\nsharp at any size" world
+            entity.SetFontSizing (Some 28.0f) world
+            entity.SetSize (v3 384.0f 80.0f 0.0f) world
         selectEntityOpt (Some entity) world
         ImGui.SetWindowFocus "Viewport"
         ShowSelectedEntity <- true
@@ -1225,17 +1265,6 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             MessageBoxOpt <- Some ("Could not load group file due to: " + scstring exn)
             false
 
-    let private tryReloadAssets world =
-        let assetSourceDir = TargetDir + "/../../.."
-        let refinementDir = Constants.Engine.RefinementDir
-        let blockCompression = Constants.Render.TextureBlockCompression
-        match World.tryReloadAssetGraph assetSourceDir TargetDir refinementDir blockCompression world with
-        | Right assetGraph ->
-            let prettyPrinter = (SyntaxAttribute.defaultValue typeof<AssetGraph>).PrettyPrinter
-            AssetGraphStr <- PrettyPrinter.prettyPrint (scstring assetGraph) prettyPrinter
-        | Left error ->
-            MessageBoxOpt <- Some ("Asset reload error due to: " + error + "'.")
-
     let private tryReloadCode initializing world =
         if World.getAllowCodeReload world then
             let worldStateOld = world.CurrentState
@@ -1391,7 +1420,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         else MessageBoxOpt <- Some "Code reloading not allowed by current plugin. This is likely because you're using the GaiaPlugin which doesn't allow it."
 
     let private tryReloadAll initializing world =
-        tryReloadAssets world
+        tryReloadAssets world |> ignore<bool>
         tryReloadCode initializing world
 
     let private resetEye () =
@@ -1410,18 +1439,63 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             World.setAdvancing true world
             Stepping <- true
 
+    let private requiredProjectRuntimeFilePaths =
+        let shaderPaths =
+            [|Constants.Paths.ImGuiShaderFilePath
+              Constants.Paths.SpriteShaderFilePath
+              Constants.Paths.SpriteBatchShaderFilePath
+              Constants.Paths.MsdfTextShaderFilePath
+              Constants.Paths.ContourShaderFilePath
+              Constants.Paths.SkyBoxShaderFilePath
+              Constants.Paths.IrradianceShaderFilePath
+              Constants.Paths.EnvironmentFilterShaderFilePath
+              Constants.Paths.PhysicallyBasedDeferredStaticShaderFilePath
+              Constants.Paths.PhysicallyBasedDeferredLightingShaderFilePath
+              Constants.Paths.PhysicallyBasedForwardStaticShaderFilePath|]
+            |> Array.collect (fun shaderPath -> [|shaderPath + ".vert"; shaderPath + ".frag"|])
+        Array.append [|Assets.Global.AssetGraphFilePath|] shaderPaths
+
+    let private tryValidateNuProjectOutput filePath =
+        try let targetDir = PathF.GetDirectoryName filePath
+            let sourceDir = PathF.GetFullPath (targetDir + "/../../..")
+            let sourceAssetGraphFilePath = sourceDir + "/" + Assets.Global.AssetGraphFilePath
+            if not (Directory.Exists sourceDir) then
+                Left ("source directory '" + sourceDir + "' does not exist.")
+            elif Array.isEmpty (Directory.GetFiles (sourceDir, "*.fsproj")) then
+                Left ("source directory '" + sourceDir + "' does not contain a project file.")
+            elif not (File.Exists sourceAssetGraphFilePath) then
+                Left ("source asset graph '" + sourceAssetGraphFilePath + "' does not exist.")
+            else
+                let missingRuntimeFilePaths =
+                    requiredProjectRuntimeFilePaths
+                    |> Array.map (fun filePath -> targetDir + "/" + filePath)
+                    |> Array.filter (not << File.Exists)
+                if Array.isEmpty missingRuntimeFilePaths then Right targetDir
+                else
+                    let missingRuntimeFileNames =
+                        missingRuntimeFilePaths
+                        |> Array.map (fun filePath -> PathF.GetRelativePath (targetDir, filePath))
+                    Left ("runtime output '" + targetDir + "' is stale or incomplete; missing " + String.Join (", ", missingRuntimeFileNames) + ".")
+        with exn ->
+            Left ("project output validation failed due to: " + scstring exn)
+
     let private trySelectTargetDirAndMakeNuPluginFromFilePathOpt filePathOpt =
         let gaiaDir = Directory.GetCurrentDirectory ()
         let filePathAndDirNameAndTypesOpt =
             if not (String.IsNullOrWhiteSpace filePathOpt) then
                 let filePath = filePathOpt
-                try let dirName = PathF.GetDirectoryName filePath
-                    try Directory.SetCurrentDirectory dirName
-                        let assembly = Assembly.Load (File.ReadAllBytes filePath)
-                        Right (Some (filePath, dirName, assembly.GetTypes ()))
-                    with _ ->
-                        let assembly = Assembly.LoadFrom filePath
-                        Right (Some (filePath, dirName, assembly.GetTypes ()))
+                try match tryValidateNuProjectOutput filePath with
+                    | Right dirName ->
+                        try Directory.SetCurrentDirectory dirName
+                            let assembly = Assembly.Load (File.ReadAllBytes filePath)
+                            Right (Some (filePath, dirName, assembly.GetTypes ()))
+                        with _ ->
+                            let assembly = Assembly.LoadFrom filePath
+                            Right (Some (filePath, dirName, assembly.GetTypes ()))
+                    | Left message ->
+                        Log.info ("Skipping Nu game project '" + filePath + "' because " + message)
+                        Directory.SetCurrentDirectory gaiaDir
+                        Left ()
                 with exn ->
                     Log.info ("Failed to load Nu game project from '" + filePath + "' due to: " + scstring exn)
                     Directory.SetCurrentDirectory gaiaDir
@@ -1461,7 +1535,10 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
         | Left () ->
             if not (String.IsNullOrWhiteSpace gaiaState.ProjectDllPath) then
                 Log.error ("Invalid Nu Assembly: " + gaiaState.ProjectDllPath)
-            (GaiaState.defaultState, ".", gaiaPlugin)
+            let gaiaStateDefault = GaiaState.defaultState
+            try File.WriteAllText (gaiaDirectory + "/" + Constants.Gaia.StateFilePath, printGaiaState gaiaStateDefault)
+            with _ -> Log.info "Could not save default gaia state."
+            (gaiaStateDefault, ".", gaiaPlugin)
 
     let private makeWorld sdlDeps worldConfig geometryViewport windowViewport (plugin : NuPlugin) =
 
@@ -3792,16 +3869,20 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 match OpenProjectDllsOpt with
                 | None ->
                     let openProjectDlls =
-                        gaiaDir + "../../../../../Projects" // scan project directories for DLLs
-                        |> PathF.GetFullPath
-                        |> Directory.GetDirectories 
-                        |> Array.collect (fun projectDir ->
-                            let projectDir = PathF.Normalize projectDir
-                            let projectName = PathF.GetFileName projectDir
-                            let dllDir = projectDir + "/bin/" + Constants.Gaia.BuildName + "/" + Constants.Engine.TargetFramework
-                            if Directory.Exists dllDir
-                            then Directory.GetFiles (dllDir, projectName + ".dll") |> Array.map PathF.Normalize
-                            else [||])
+                        Directory.EnumerateDirectories projectsDirPaths
+                        |> Seq.collect (fun dir -> Directory.EnumerateDirectories (dir, "bin"))
+                        |> Seq.collect (fun dir -> Directory.EnumerateDirectories (dir, Constants.Gaia.BuildName))
+                        |> Seq.collect (fun dir -> Directory.EnumerateDirectories dir)
+                        |> Seq.collect (fun dir -> Directory.EnumerateFiles (dir, "*.dll"))
+                        |> Seq.map PathF.Normalize // ensure we're in '/' mode
+                        |> Seq.filter (fun filePath ->
+                            match tryValidateNuProjectOutput filePath with
+                            | Right _ -> true
+                            | Left message ->
+                                Log.infoOnce ("Skipping Nu game project '" + filePath + "' because " + message)
+                                false)
+                        |> Seq.filter nuAssemblyFileFilter
+                        |> Seq.toArray
                     let openProjectNames =
                         Array.map PathF.GetFileNameWithoutExtension openProjectDlls
                     let (openProjectDlls, openProjectNames, openProjectIndex) =
@@ -4194,7 +4275,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             ImGui.EndPopup ()
         ReloadAssetsRequested <- inc ReloadAssetsRequested
         if ReloadAssetsRequested = 4 then // NOTE: takes multiple frames to see dialog.
-            tryReloadAssets world
+            tryReloadAssets world |> ignore<bool>
             ReloadAssetsRequested <- 0
 
     let private imGuiReloadingCodeDialog initializing world =
