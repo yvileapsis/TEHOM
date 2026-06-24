@@ -1440,7 +1440,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             Stepping <- true
 
     let private requiredProjectRuntimeFilePaths =
-        let shaderPaths =
+        let stagedShaderFilePaths =
             [|Constants.Paths.ImGuiShaderFilePath
               Constants.Paths.SpriteShaderFilePath
               Constants.Paths.SpriteBatchShaderFilePath
@@ -1450,10 +1450,11 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
               Constants.Paths.IrradianceShaderFilePath
               Constants.Paths.EnvironmentFilterShaderFilePath
               Constants.Paths.PhysicallyBasedDeferredStaticShaderFilePath
-              Constants.Paths.PhysicallyBasedDeferredLightingShaderFilePath
               Constants.Paths.PhysicallyBasedForwardStaticShaderFilePath|]
             |> Array.collect (fun shaderPath -> [|shaderPath + ".vert"; shaderPath + ".frag"|])
-        Array.append [|Assets.Global.AssetGraphFilePath|] shaderPaths
+        let sourceShaderFilePaths =
+            [|Constants.Paths.PhysicallyBasedDeferredLightingShaderFilePath + ".glsl"|]
+        Array.concat [|[|Assets.Global.AssetGraphFilePath|]; stagedShaderFilePaths; sourceShaderFilePaths|]
 
     let private tryValidateNuProjectOutput filePath =
         try let targetDir = PathF.GetDirectoryName filePath
@@ -3870,18 +3871,21 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 | None ->
                     let openProjectDlls =
                         Directory.EnumerateDirectories projectsDirPaths
+                        |> Seq.filter (fun dir -> not (Array.isEmpty (Directory.GetFiles (dir, "*.fsproj"))))
                         |> Seq.collect (fun dir -> Directory.EnumerateDirectories (dir, "bin"))
                         |> Seq.collect (fun dir -> Directory.EnumerateDirectories (dir, Constants.Gaia.BuildName))
-                        |> Seq.collect (fun dir -> Directory.EnumerateDirectories dir)
+                        |> Seq.map (fun dir -> dir + "/" + Constants.Engine.TargetFramework)
+                        |> Seq.filter Directory.Exists
                         |> Seq.collect (fun dir -> Directory.EnumerateFiles (dir, "*.dll"))
                         |> Seq.map PathF.Normalize // ensure we're in '/' mode
+                        |> Seq.filter nuAssemblyFileFilter
                         |> Seq.filter (fun filePath ->
                             match tryValidateNuProjectOutput filePath with
                             | Right _ -> true
                             | Left message ->
                                 Log.infoOnce ("Skipping Nu game project '" + filePath + "' because " + message)
                                 false)
-                        |> Seq.filter nuAssemblyFileFilter
+                        |> Seq.sort
                         |> Seq.toArray
                     let openProjectNames =
                         Array.map PathF.GetFileNameWithoutExtension openProjectDlls
@@ -3900,20 +3904,25 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                     OpenProjectIndex <- openProjectIndex
                     openProjectDlls
                 | Some openProjectDlls -> openProjectDlls
-            ImGui.Combo ("##openProjectFileSelector", &OpenProjectIndex, OpenProjectNames, OpenProjectNames.Length) |> ignore<bool>
+            if OpenProjectNames.Length = 0 then
+                ImGui.TextWrapped ("No loadable Nu game projects found. Build a game project for " + Constants.Engine.TargetFramework + " first.")
+            else
+                ImGui.Combo ("##openProjectFileSelector", &OpenProjectIndex, OpenProjectNames, OpenProjectNames.Length) |> ignore<bool>
             ImGui.Text "Edit Mode:"
             ImGui.SameLine ()
             ImGui.InputText ("##openProjectEditMode", &OpenProjectEditMode, 4096u) |> ignore<bool>
             ImGui.Checkbox ("Use Imperative Execution (faster, but no Undo / Redo)", &OpenProjectImperativeExecution) |> ignore<bool>
             if ImGui.Button "Open" || ImGui.IsKeyReleased ImGuiKey.Enter then
-                ShowOpenProjectDialog <- false
-                let gaiaState = makeGaiaState openProjectDlls[OpenProjectIndex] (Some OpenProjectEditMode) true world
-                try File.WriteAllText (gaiaDir + Constants.Gaia.StateFilePath, printGaiaState gaiaState)
-                    Directory.SetCurrentDirectory gaiaDir
-                    ShowRestartDialog <- true
-                with _ ->
-                    revertOpenProjectState world
-                    Log.info "Could not save editor state and open project."
+                if OpenProjectIndex >= 0 && OpenProjectIndex < openProjectDlls.Length then
+                    ShowOpenProjectDialog <- false
+                    let gaiaState = makeGaiaState openProjectDlls[OpenProjectIndex] (Some OpenProjectEditMode) true world
+                    try File.WriteAllText (gaiaDir + "/" + Constants.Gaia.StateFilePath, printGaiaState gaiaState)
+                        Directory.SetCurrentDirectory gaiaDir
+                        ShowRestartDialog <- true
+                    with _ ->
+                        revertOpenProjectState world
+                        Log.info "Could not save editor state and open project."
+                else MessageBoxOpt <- Some "No loadable Nu game project is selected."
             if ImGui.IsKeyReleased ImGuiKey.Escape then
                 revertOpenProjectState world
                 ShowOpenProjectDialog <- false

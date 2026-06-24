@@ -117,6 +117,28 @@ type MsdfTextDescriptor =
       TextDirection : TextDirection
       LanguageOpt : string option }
 
+/// A fixed-position MTSDF glyph in a glyph grid.
+type [<Struct>] MsdfGlyphValue =
+    { Text : string
+      Color : Color }
+
+/// Describes how to render a fixed-cell MTSDF glyph grid to a rendering subsystem.
+type [<NoEquality; NoComparison>] MsdfGlyphGridDescriptor =
+    { mutable Transform : Transform
+      ClipOpt : Box2 voption
+      Glyphs : MsdfGlyphValue array
+      Columns : int
+      Rows : int
+      CellSize : Vector2
+      GlyphScale : Vector2
+      GlyphCutTop : single
+      GlyphCutBottom : single
+      MsdfFont : MsdfFont AssetTag
+      FontSizing : single option
+      Shader : MsdfTextShader
+      TextDirection : TextDirection
+      LanguageOpt : string option }
+
 /// Describes how to render a vector graphics contour to a rendering subsystem.
 type [<NoEquality; NoComparison>] ContourDescriptor =
     { mutable Transform : Transform
@@ -132,6 +154,7 @@ type RenderOperation2d =
     | RenderCachedSprite of CachedSpriteDescriptor
     | RenderText of TextDescriptor
     | RenderMsdfText of MsdfTextDescriptor
+    | RenderMsdfGlyphGrid of MsdfGlyphGridDescriptor
     | RenderTiles of TilesDescriptor
     | RenderSpineSkeleton of SpineSkeletonDescriptor
     | RenderContour of ContourDescriptor
@@ -239,7 +262,8 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         | RawAsset -> ()
         | TextureAsset texture -> Texture.destroy texture renderer.VulkanContext
         | FontAsset (_, font) -> SDL3_ttf.TTF_CloseFont font
-        | MsdfFontAsset (_, texture) -> texture.Destroy renderer.VulkanContext
+        | MsdfFontAsset (_, textures) ->
+            for texture in textures do texture.Destroy renderer.VulkanContext
         | CubeMapAsset _ -> ()
         | StaticModelAsset _ -> ()
         | AnimatedModelAsset _ -> ()
@@ -277,12 +301,20 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         | MsdfFontExtension _ ->
             match MsdfFontRuntime.tryLoad asset.FilePath with
             | Some fontData ->
-                if File.Exists fontData.AtlasFilePath && File.Exists fontData.FontFilePath then
-                    match assetClient.TextureClient.TryCreateTexture (false, false, Texture.Uncompressed, fontData.AtlasFilePath, Texture.RenderThread, renderer.VulkanContext) with
-                    | Right atlasTexture -> Some (MsdfFontAsset (fontData, atlasTexture))
-                    | Left error ->
-                        Log.infoOnce ("Could not load MTSDF atlas '" + fontData.AtlasFilePath + "' due to '" + error + "'.")
+                if Array.forall (fun (atlas : MsdfFontAtlas) -> File.Exists atlas.FilePath) fontData.Atlases && File.Exists fontData.FontFilePath then
+                    let atlasTextures = List<_> ()
+                    let mutable errorOpt = None
+                    for atlas in fontData.Atlases do
+                        if Option.isNone errorOpt then
+                            match assetClient.TextureClient.TryCreateTexture (false, false, Texture.Uncompressed, atlas.FilePath, Texture.RenderThread, renderer.VulkanContext) with
+                            | Right atlasTexture -> atlasTextures.Add atlasTexture
+                            | Left error -> errorOpt <- Some (atlas.FilePath, error)
+                    match errorOpt with
+                    | Some (atlasFilePath, error) ->
+                        for atlasTexture in atlasTextures do atlasTexture.Destroy renderer.VulkanContext
+                        Log.infoOnce ("Could not load MTSDF atlas '" + atlasFilePath + "' due to '" + error + "'.")
                         None
+                    | None -> Some (MsdfFontAsset (fontData, atlasTextures.ToArray ()))
                 else
                     Log.infoOnce ("Could not load MTSDF font '" + asset.FilePath + "' because one or more sidecars are missing.")
                     None
@@ -332,7 +364,8 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                 | RawAsset -> ()
                 | TextureAsset _ -> renderPackage.PackageState.TextureClient.Textures.Remove filePath |> ignore<bool>
                 | FontAsset _ -> ()
-                | MsdfFontAsset (fontData, _) -> renderPackage.PackageState.TextureClient.Textures.Remove fontData.AtlasFilePath |> ignore<bool>
+                | MsdfFontAsset (fontData, _) ->
+                    for atlas in fontData.Atlases do renderPackage.PackageState.TextureClient.Textures.Remove atlas.FilePath |> ignore<bool>
                 | CubeMapAsset (cubeMapKey, _, _) -> renderPackage.PackageState.CubeMapClient.CubeMaps.Remove cubeMapKey |> ignore<bool>
                 | StaticModelAsset _ | AnimatedModelAsset _ -> ()
                 VulkanRenderer2d.freeRenderAsset renderAsset renderer
@@ -958,7 +991,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                 match VulkanRenderer2d.tryGetRenderAsset msdfFont renderer with
                 | ValueSome renderAsset ->
                     match renderAsset with
-                    | MsdfFontAsset (fontData, atlasTexture) ->
+                    | MsdfFontAsset (fontData, atlasTextures) ->
                         let msdfJustification =
                             match justification with
                             | Unjustified wrapped -> MsdfTextUnjustified wrapped
@@ -992,12 +1025,119 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                                      Pipeline.Transparent,
                                      glyph.DistanceRange,
                                      shader,
-                                     atlasTexture,
+                                     atlasTextures[glyph.AtlasIndex],
                                      renderer.Viewport,
                                      renderer.MsdfTextBatchEnv)
                             MsdfText.EndMsdfTextBatchFrame renderer.Viewport renderer.MsdfTextBatchEnv
                     | _ -> Log.infoOnce ("Cannot render MTSDF text with a non-MTSDF font asset for '" + scstring msdfFont + "'.")
                 | ValueNone -> Log.infoOnce ("MsdfTextDescriptor failed due to unloadable asset for '" + scstring msdfFont + "'.")
+
+    /// Render a fixed-cell MTSDF glyph grid.
+    static member renderMsdfGlyphGrid
+        (transform : Transform byref,
+         clipOpt : Box2 voption inref,
+         glyphs : MsdfGlyphValue array,
+         columns : int,
+         rows : int,
+         cellSize : Vector2,
+         glyphScale : Vector2,
+         glyphCutTop : single,
+         glyphCutBottom : single,
+         msdfFont : MsdfFont AssetTag,
+         fontSizing : single option,
+         shader : MsdfTextShader,
+         textDirection : TextDirection,
+         languageOpt : string option,
+         renderer : VulkanRenderer2d) =
+
+        if columns > 0 && rows > 0 && glyphs.Length > 0 then
+            let transform = transform
+            let clipOpt = clipOpt
+            let absolute = transform.Absolute
+            let perimeter = transform.Perimeter
+            let displayScalar = single renderer.Viewport.DisplayScalar
+            let virtualScalar = v2Dup displayScalar
+            let gridMin = perimeter.Min.V2 * virtualScalar
+            let gridTop = (perimeter.Min.Y + perimeter.Size.Y) * displayScalar
+            let cellSize = cellSize * virtualScalar
+            let fontSize = defaultArg fontSizing Constants.Render.FontSizeDefault * displayScalar
+            let cellSizeLayout = v2Dup fontSize
+            let glyphScaleManual = v2 (max 0.1f glyphScale.X) (max 0.1f glyphScale.Y)
+            let glyphCutTop = max 0.0f glyphCutTop
+            let glyphCutBottom = max 0.0f glyphCutBottom
+            match VulkanRenderer2d.tryGetRenderAsset msdfFont renderer with
+            | ValueSome renderAsset ->
+                match renderAsset with
+                | MsdfFontAsset (fontData, atlasTextures) ->
+                    flip3 SpriteBatch.InterruptSpriteBatchFrame renderer.Viewport renderer.SpriteBatchEnv $ fun () ->
+                        let justification = MsdfTextJustified (MsdfTextJustifyCenter, MsdfTextJustifyMiddle)
+                        let glyphScaleInferred = MsdfFontRuntime.inferGlyphGridScale fontData cellSizeLayout
+                        let glyphScale = glyphScaleManual * glyphScaleInferred
+                        let glyphCutTop = glyphCutTop * displayScalar * glyphScale.Y
+                        let glyphCutBottom = glyphCutBottom * displayScalar * glyphScale.Y
+                        let layoutCache = Dictionary<string, MsdfTextLayout> ()
+                        let glyphCount = min glyphs.Length (columns * rows)
+                        for index in 0 .. dec glyphCount do
+                            let cell = glyphs[index]
+                            if not (String.IsNullOrWhiteSpace cell.Text) && cell.Color.A8 <> 0uy then
+                                let mutable layout = Unchecked.defaultof<MsdfTextLayout>
+                                if not (layoutCache.TryGetValue (cell.Text, &layout)) then
+                                    layout <-
+                                        MsdfFontRuntime.layout
+                                            cell.Text fontData fontSizing Color.White justification None
+                                            textDirection languageOpt cellSizeLayout displayScalar
+                                    layoutCache.Add (cell.Text, layout)
+                                if layout.Glyphs.Length <> 0 then
+                                    let x = index % columns
+                                    let y = index / columns
+                                    let cellMin =
+                                        v2
+                                            (gridMin.X + single x * cellSize.X)
+                                            (gridTop - single (y + 1) * cellSize.Y)
+                                    let cellCenter = v2 (cellMin.X + cellSize.X * 0.5f) (cellMin.Y + cellSize.Y * 0.5f)
+                                    let glyphCellSize = cellSizeLayout * glyphScale
+                                    let glyphCellMin = cellCenter - glyphCellSize * 0.5f
+                                    let cellCutBottom = glyphCellMin.Y + glyphCutBottom
+                                    let cellCutTop = glyphCellMin.Y + glyphCellSize.Y - glyphCutTop
+                                    for glyph in layout.Glyphs do
+                                        let mutable glyphPosition =
+                                            v2
+                                                (cellCenter.X + (glyph.Position.X - cellSizeLayout.X * 0.5f) * glyphScale.X)
+                                                (cellCenter.Y + (glyph.Position.Y - cellSizeLayout.Y * 0.5f) * glyphScale.Y)
+                                        let mutable glyphSize = glyph.Size * glyphScale
+                                        let mutable texCoords = glyph.TexCoords
+                                        let glyphBottom = glyphPosition.Y
+                                        let glyphTop = glyphPosition.Y + glyphSize.Y
+                                        let glyphCutBottom = max 0.0f (cellCutBottom - glyphBottom)
+                                        let glyphCutTop = max 0.0f (glyphTop - cellCutTop)
+                                        let glyphCutTotal = glyphCutBottom + glyphCutTop
+                                        if cellCutTop > cellCutBottom && glyphCutTotal < glyphSize.Y then
+                                            if glyphCutTotal > 0.0f then
+                                                let glyphCutBottomRatio = glyphCutBottom / glyphSize.Y
+                                                let glyphRemainingRatio = (glyphSize.Y - glyphCutTotal) / glyphSize.Y
+                                                glyphPosition <- v2 glyphPosition.X (glyphPosition.Y + glyphCutBottom)
+                                                glyphSize <- v2 glyphSize.X (glyphSize.Y * glyphRemainingRatio)
+                                                texCoords <-
+                                                    box2
+                                                        (v2 texCoords.Min.X (texCoords.Min.Y + texCoords.Size.Y * glyphCutBottomRatio))
+                                                        (v2 texCoords.Size.X (texCoords.Size.Y * glyphRemainingRatio))
+                                            let mutable glyphColor = cell.Color
+                                            MsdfText.SubmitMsdfTextBatchGlyph
+                                                (absolute,
+                                                 glyphPosition,
+                                                 glyphSize,
+                                                 &texCoords,
+                                                 &clipOpt,
+                                                 &glyphColor,
+                                                 Pipeline.Transparent,
+                                                 glyph.DistanceRange,
+                                                 shader,
+                                                 atlasTextures[glyph.AtlasIndex],
+                                                 renderer.Viewport,
+                                                 renderer.MsdfTextBatchEnv)
+                        MsdfText.EndMsdfTextBatchFrame renderer.Viewport renderer.MsdfTextBatchEnv
+                | _ -> Log.infoOnce ("Cannot render MTSDF glyph grid with a non-MTSDF font asset for '" + scstring msdfFont + "'.")
+            | ValueNone -> Log.infoOnce ("MsdfGlyphGridDescriptor failed due to unloadable asset for '" + scstring msdfFont + "'.")
     
     static member private renderDescriptor descriptor eyeCenter eyeSize renderer =
         match descriptor with
@@ -1021,6 +1161,8 @@ type [<ReferenceEquality>] VulkanRenderer2d =
             VulkanRenderer2d.renderText (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Text, descriptor.Font, descriptor.FontSizing, descriptor.FontStyling, &descriptor.Color, descriptor.Justification, descriptor.CaretOpt, eyeCenter, eyeSize, renderer)
         | RenderMsdfText descriptor ->
             VulkanRenderer2d.renderMsdfText (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Text, descriptor.MsdfFont, descriptor.FontSizing, &descriptor.Color, descriptor.Shader, descriptor.Justification, descriptor.CaretOpt, descriptor.TextDirection, descriptor.LanguageOpt, renderer)
+        | RenderMsdfGlyphGrid descriptor ->
+            VulkanRenderer2d.renderMsdfGlyphGrid (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Glyphs, descriptor.Columns, descriptor.Rows, descriptor.CellSize, descriptor.GlyphScale, descriptor.GlyphCutTop, descriptor.GlyphCutBottom, descriptor.MsdfFont, descriptor.FontSizing, descriptor.Shader, descriptor.TextDirection, descriptor.LanguageOpt, renderer)
         | RenderTiles descriptor ->
             VulkanRenderer2d.renderTiles
                 (&descriptor.Transform, &descriptor.ClipOpt, &descriptor.Color, &descriptor.Emission,

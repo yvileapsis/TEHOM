@@ -1,0 +1,6 @@
+link hall_back 5 5 0 hub 5 0 0
+camera cam_hall_a 4 1 0 E 6
+camera cam_hall_b 9 4 0 W 5
+block hall_block 6 2 0
+enemy hall_guard 9 1 0 W 5
+pickup ammo_hall 2 4 0 ammo 8

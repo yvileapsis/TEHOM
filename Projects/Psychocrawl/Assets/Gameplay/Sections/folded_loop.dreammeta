@@ -1,0 +1,9 @@
+link folded_hub 1 0 0 hub 6 6 0
+link folded_mirror 11 3 0 mirror_room 11 3 0
+link folded_self_a 0 5 0 folded_loop 11 5 0
+link folded_self_b 11 5 0 folded_loop 0 5 0
+camera cam_folded 2 1 0 E 7
+turret turret_folded 9 4 0 N 5
+block folded_block 8 2 0
+enemy folded_guard 7 5 0 W 5
+pickup cell_folded 3 2 0 cell 1

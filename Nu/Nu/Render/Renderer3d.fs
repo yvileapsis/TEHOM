@@ -1452,7 +1452,8 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         | RawAsset -> () // nothing to do
         | TextureAsset texture -> Texture.destroy texture renderer.VulkanContext
         | FontAsset (_, font) -> SDL3_ttf.TTF_CloseFont font
-        | MsdfFontAsset (_, texture) -> Texture.destroy texture renderer.VulkanContext
+        | MsdfFontAsset (_, textures) ->
+            for texture in textures do Texture.destroy texture renderer.VulkanContext
         | CubeMapAsset (_, cubeMap, irradianceAndEnvironmentMapOptRef) ->
             Texture.destroy cubeMap renderer.VulkanContext
             match irradianceAndEnvironmentMapOptRef.Value with
@@ -1517,7 +1518,8 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 | RawAsset -> ()
                 | TextureAsset _ -> renderPackage.PackageState.TextureClient.Textures.Remove filePath |> ignore<bool>
                 | FontAsset _ -> ()
-                | MsdfFontAsset (fontData, _) -> renderPackage.PackageState.TextureClient.Textures.Remove fontData.AtlasFilePath |> ignore<bool>
+                | MsdfFontAsset (fontData, _) ->
+                    for atlas in fontData.Atlases do renderPackage.PackageState.TextureClient.Textures.Remove atlas.FilePath |> ignore<bool>
                 | CubeMapAsset (cubeMapKey, _, _) -> renderPackage.PackageState.CubeMapClient.CubeMaps.Remove cubeMapKey |> ignore<bool>
                 | StaticModelAsset _ | AnimatedModelAsset _ -> ()
                 VulkanRenderer3d.freeRenderAsset renderAsset renderer
@@ -3836,6 +3838,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         let renderPasses = renderer.RenderPasses
         renderer.RenderPasses <- renderer.RenderPasses2
         renderer.RenderPasses2 <- renderPasses
+
 
 
     /// Make a VulkanRenderer3d.

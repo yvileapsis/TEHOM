@@ -1,0 +1,8 @@
+link armory_west 0 3 0 hub 11 3 0
+link armory_east 9 3 0 mirror_room 0 3 0
+turret turret_armory 6 1 0 S 5
+camera cam_armory 2 5 0 E 5
+block armory_block 3 3 0
+enemy armory_guard 7 5 0 W 5
+pickup ammo_armory 2 1 0 ammo 12
+pickup med_armory 8 1 0 med 1

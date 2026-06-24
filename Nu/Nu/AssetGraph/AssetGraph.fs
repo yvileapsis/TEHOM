@@ -10,6 +10,8 @@ open System.Configuration
 open System.Collections.Generic
 open System.Diagnostics
 open System.IO
+open System.Text.Json
+open HarfBuzzSharp
 open ImageMagick
 open ImageMagick.Formats
 open BCnEncoder.Shared
@@ -92,6 +94,9 @@ type PackageDescriptor = AssetDescriptor list
 [<RequireQualifiedAccess>]
 module AssetGraph =
 
+    let [<Literal>] private MtsdfAtlasMaxDimension = 4096
+    let [<Literal>] private MtsdfAtlasGlyphsPerShard = 4096
+
     /// A graph of all the assets used in a game.
     type AssetGraph =
         private
@@ -132,6 +137,31 @@ module AssetGraph =
         if String.IsNullOrEmpty directory then fileName
         else directory + "/" + fileName
 
+    let private tryGetJsonProperty (propertyName : string) (element : JsonElement) =
+        let mutable property = Unchecked.defaultof<JsonElement>
+        if element.ValueKind = JsonValueKind.Object && element.TryGetProperty (propertyName, &property)
+        then Some property
+        else None
+
+    let private tryGetJsonInt propertyName element =
+        match tryGetJsonProperty propertyName element with
+        | Some property when property.ValueKind = JsonValueKind.Number -> Some (property.GetInt32 ())
+        | _ -> None
+
+    let private getMtsdfAtlasSidecarPaths directory intermediateFileSubpath =
+        let directorySubpath = PathF.GetDirectoryName intermediateFileSubpath
+        let sidecarDirectory =
+            if String.IsNullOrEmpty directorySubpath then directory
+            else directory + "/" + directorySubpath
+        let fileName = PathF.GetFileNameWithoutExtension intermediateFileSubpath
+        let exactAtlasFilePath = directory + "/" + makeMtsdfSidecarSubpath intermediateFileSubpath ".mtsdfAtlas" ".png"
+        let atlasFilePaths = List<string> ()
+        if File.Exists exactAtlasFilePath then atlasFilePaths.Add exactAtlasFilePath
+        if Directory.Exists sidecarDirectory then
+            for filePath in Directory.GetFiles (sidecarDirectory, fileName + ".mtsdfAtlas.*.png") do
+                if not (atlasFilePaths.Contains filePath) then atlasFilePaths.Add filePath
+        atlasFilePaths.ToArray ()
+
     let private tryGetMtsdfAtlasGenPath () =
         let environmentPath = Environment.GetEnvironmentVariable "NU_MSDF_ATLAS_GEN"
         if not (String.IsNullOrWhiteSpace environmentPath) then Some environmentPath
@@ -153,12 +183,19 @@ module AssetGraph =
             File.SetAttributes (outputFilePath, FileAttributes.ReadOnly) // prevents errors when accidentally altering output compressed image files and the like
         with _ -> Log.info ("Resource lock on '" + outputFilePath + "' has prevented build.")
 
+    let private copyMtsdfAtlasSidecarFiles intermediateFileSubpath intermediateDirectory outputDirectory =
+        let directorySubpath = PathF.GetDirectoryName intermediateFileSubpath
+        let atlasFilePaths = getMtsdfAtlasSidecarPaths intermediateDirectory intermediateFileSubpath
+        if Array.isEmpty atlasFilePaths then
+            Log.info ("Could not copy MTSDF atlas sidecar because no atlas files exist for '" + intermediateFileSubpath + "'.")
+        for atlasFilePath in atlasFilePaths do
+            let atlasFileSubpath =
+                if String.IsNullOrEmpty directorySubpath then PathF.GetFileName atlasFilePath
+                else directorySubpath + "/" + PathF.GetFileName atlasFilePath
+            copyFileReplacing atlasFilePath (outputDirectory + "/" + atlasFileSubpath)
+
     let private copyMtsdfAtlasSidecars inputFileExtension intermediateFileSubpath intermediateDirectory outputDirectory =
-        let atlasFileSubpath = makeMtsdfSidecarSubpath intermediateFileSubpath ".mtsdfAtlas" ".png"
-        let atlasFilePath = intermediateDirectory + "/" + atlasFileSubpath
-        let atlasOutputFilePath = outputDirectory + "/" + atlasFileSubpath
-        if File.Exists atlasFilePath then copyFileReplacing atlasFilePath atlasOutputFilePath
-        else Log.info ("Could not copy MTSDF atlas sidecar because '" + atlasFilePath + "' does not exist.")
+        copyMtsdfAtlasSidecarFiles intermediateFileSubpath intermediateDirectory outputDirectory
         let fontFileSubpath = makeMtsdfSidecarSubpath intermediateFileSubpath ".mtsdfSource" inputFileExtension
         let fontFilePath = intermediateDirectory + "/" + fontFileSubpath
         let fontOutputFilePath = outputDirectory + "/" + fontFileSubpath
@@ -170,7 +207,7 @@ module AssetGraph =
             if String.IsNullOrWhiteSpace stdout then "" else "\n" + stdout
         else "\n" + stderr
 
-    let private runMtsdfAtlasGenProcess atlasGenPath intermediateFilePath refinementFilePath imageFilePath imageFormat =
+    let private runMtsdfAtlasGenProcess atlasGenPath glyphSetFilePathOpt intermediateFilePath refinementFilePath imageFilePath imageFormat =
         let startInfo = ProcessStartInfo ()
         startInfo.FileName <- atlasGenPath
         startInfo.UseShellExecute <- false
@@ -178,7 +215,12 @@ module AssetGraph =
         startInfo.RedirectStandardError <- true
         startInfo.ArgumentList.Add "-font"
         startInfo.ArgumentList.Add intermediateFilePath
-        startInfo.ArgumentList.Add "-allglyphs"
+        match glyphSetFilePathOpt with
+        | Some glyphSetFilePath ->
+            startInfo.ArgumentList.Add "-glyphset"
+            startInfo.ArgumentList.Add glyphSetFilePath
+        | None ->
+            startInfo.ArgumentList.Add "-allglyphs"
         startInfo.ArgumentList.Add "-type"
         startInfo.ArgumentList.Add "mtsdf"
         startInfo.ArgumentList.Add "-format"
@@ -218,15 +260,15 @@ module AssetGraph =
         try File.Delete bmpFilePath
         with _ -> ()
 
-    let private runMtsdfAtlasGen intermediateFilePath refinementFilePath atlasFilePath =
+    let private runMtsdfAtlasGen glyphSetFilePathOpt intermediateFilePath refinementFilePath atlasFilePath =
         match tryGetMtsdfAtlasGenPath () with
         | Some atlasGenPath ->
             try
-                match runMtsdfAtlasGenProcess atlasGenPath intermediateFilePath refinementFilePath atlasFilePath "png" with
+                match runMtsdfAtlasGenProcess atlasGenPath glyphSetFilePathOpt intermediateFilePath refinementFilePath atlasFilePath "png" with
                 | Right () -> ()
                 | Left pngOutput ->
                     let bmpAtlasFilePath = PathF.ChangeExtension (atlasFilePath, ".bmp")
-                    match runMtsdfAtlasGenProcess atlasGenPath intermediateFilePath refinementFilePath bmpAtlasFilePath "bmp" with
+                    match runMtsdfAtlasGenProcess atlasGenPath glyphSetFilePathOpt intermediateFilePath refinementFilePath bmpAtlasFilePath "bmp" with
                     | Right () ->
                         convertMtsdfAtlasBmpToPng bmpAtlasFilePath atlasFilePath
                         if not (File.Exists atlasFilePath) then
@@ -242,6 +284,98 @@ module AssetGraph =
                 else reraise ()
         | None ->
             failwith "MTSDF atlas generation requires NU_MSDF_ATLAS_GEN for NuPipe builds or app setting MsdfAtlasGenPath for runtime asset reloads."
+
+    let private tryGetMtsdfGlyphCount fontFilePath =
+        try
+            use blob = Blob.FromFile fontFilePath
+            use face = new Face (blob, 0u)
+            Some (int face.GlyphCount)
+        with exn ->
+            Log.info ("Could not read glyph count from MTSDF font source '" + fontFilePath + "' due to: " + scstring exn)
+            None
+
+    let private validateMtsdfAtlasDimensions metadataFilePath =
+        use document = JsonDocument.Parse (File.ReadAllText metadataFilePath)
+        let root = document.RootElement
+        let atlas = defaultArg (tryGetJsonProperty "atlas" root) root
+        let width = defaultArg (tryGetJsonInt "width" atlas) 0
+        let height = defaultArg (tryGetJsonInt "height" atlas) 0
+        if width > MtsdfAtlasMaxDimension || height > MtsdfAtlasMaxDimension then
+            failwith
+                ("MTSDF atlas '" + metadataFilePath + "' exceeded the maximum size of " + string MtsdfAtlasMaxDimension + "x" + string MtsdfAtlasMaxDimension +
+                 " with generated size " + string width + "x" + string height + ". Reduce the glyph shard size or source font coverage.")
+
+    let private writeMtsdfGlyphSetFile glyphSetFilePath firstGlyphIndex lastGlyphIndex =
+        Directory.CreateDirectory (PathF.GetDirectoryName glyphSetFilePath) |> ignore
+        File.WriteAllText (glyphSetFilePath, "[" + string firstGlyphIndex + ", " + string lastGlyphIndex + "]")
+
+    let private writeMtsdfSplitManifest (metadataFilePaths : string array) (atlasFilePaths : string array) manifestFilePath =
+        Directory.CreateDirectory (PathF.GetDirectoryName manifestFilePath) |> ignore
+        use stream = File.Create manifestFilePath
+        let options = JsonWriterOptions ()
+        use writer = new Utf8JsonWriter (stream, options)
+        writer.WriteStartObject ()
+        writer.WriteString ("format", "NuMtsdfSplitAtlas")
+        writer.WriteNumber ("maxAtlasDimension", MtsdfAtlasMaxDimension)
+        writer.WriteStartArray "atlases"
+        for i in 0 .. dec metadataFilePaths.Length do
+            use document = JsonDocument.Parse (File.ReadAllText metadataFilePaths[i])
+            let root = document.RootElement
+            let atlas = defaultArg (tryGetJsonProperty "atlas" root) root
+            writer.WriteStartObject ()
+            writer.WriteNumber ("index", i)
+            writer.WriteString ("file", PathF.GetFileName atlasFilePaths[i])
+            for property in atlas.EnumerateObject () do property.WriteTo writer
+            writer.WriteEndObject ()
+        writer.WriteEndArray ()
+        if metadataFilePaths.Length > 0 then
+            use document = JsonDocument.Parse (File.ReadAllText metadataFilePaths[0])
+            let root = document.RootElement
+            match tryGetJsonProperty "metrics" root with
+            | Some metrics ->
+                writer.WritePropertyName "metrics"
+                metrics.WriteTo writer
+            | None -> ()
+        writer.WriteStartArray "glyphs"
+        for i in 0 .. dec metadataFilePaths.Length do
+            use document = JsonDocument.Parse (File.ReadAllText metadataFilePaths[i])
+            let root = document.RootElement
+            match tryGetJsonProperty "glyphs" root with
+            | Some glyphs when glyphs.ValueKind = JsonValueKind.Array ->
+                for glyph in glyphs.EnumerateArray () do
+                    writer.WriteStartObject ()
+                    writer.WriteNumber ("atlasIndex", i)
+                    for property in glyph.EnumerateObject () do property.WriteTo writer
+                    writer.WriteEndObject ()
+            | _ -> ()
+        writer.WriteEndArray ()
+        writer.WriteStartArray "kerning"
+        writer.WriteEndArray ()
+        writer.WriteEndObject ()
+
+    let private runMtsdfAtlasGenAll intermediateFilePath refinementFilePath atlasFilePath =
+        runMtsdfAtlasGen None intermediateFilePath refinementFilePath atlasFilePath
+        validateMtsdfAtlasDimensions refinementFilePath
+
+    let private runMtsdfAtlasGenSplit intermediateFilePath refinementDirectory refinementFileSubpath refinementFilePath glyphCount =
+        let shardCount = max 1 ((glyphCount + dec MtsdfAtlasGlyphsPerShard) / MtsdfAtlasGlyphsPerShard)
+        let shardMetadataFilePaths = Array.zeroCreate shardCount
+        let shardAtlasFilePaths = Array.zeroCreate shardCount
+        for shardIndex in 0 .. dec shardCount do
+            let firstGlyphIndex = shardIndex * MtsdfAtlasGlyphsPerShard
+            let lastGlyphIndex = min (dec glyphCount) (firstGlyphIndex + dec MtsdfAtlasGlyphsPerShard)
+            let glyphSetFileSubpath = makeMtsdfSidecarSubpath refinementFileSubpath (".mtsdfGlyphSet." + shardIndex.ToString "000") ".txt"
+            let shardMetadataFileSubpath = makeMtsdfSidecarSubpath refinementFileSubpath (".mtsdfShard." + shardIndex.ToString "000") ".json"
+            let shardAtlasFileSubpath = makeMtsdfSidecarSubpath refinementFileSubpath (".mtsdfAtlas." + shardIndex.ToString "000") ".png"
+            let glyphSetFilePath = refinementDirectory + "/" + glyphSetFileSubpath
+            let shardMetadataFilePath = refinementDirectory + "/" + shardMetadataFileSubpath
+            let shardAtlasFilePath = refinementDirectory + "/" + shardAtlasFileSubpath
+            writeMtsdfGlyphSetFile glyphSetFilePath firstGlyphIndex lastGlyphIndex
+            runMtsdfAtlasGen (Some glyphSetFilePath) intermediateFilePath shardMetadataFilePath shardAtlasFilePath
+            validateMtsdfAtlasDimensions shardMetadataFilePath
+            shardMetadataFilePaths[shardIndex] <- shardMetadataFilePath
+            shardAtlasFilePaths[shardIndex] <- shardAtlasFilePath
+        writeMtsdfSplitManifest shardMetadataFilePaths shardAtlasFilePaths refinementFilePath
 
     /// Apply a single refinement to an asset.
     let private refineAssetOnce (intermediateFileSubpath : string) intermediateDirectory refinementDirectory blockCompression refinement =
@@ -381,7 +515,11 @@ module AssetGraph =
                 let fontFilePath = refinementDirectory + "/" + fontFileSubpath
                 Directory.CreateDirectory (PathF.GetDirectoryName atlasFilePath) |> ignore
                 Directory.CreateDirectory (PathF.GetDirectoryName fontFilePath) |> ignore
-                runMtsdfAtlasGen intermediateFilePath refinementFilePath atlasFilePath
+                match tryGetMtsdfGlyphCount intermediateFilePath with
+                | Some glyphCount when glyphCount > MtsdfAtlasGlyphsPerShard ->
+                    runMtsdfAtlasGenSplit intermediateFilePath refinementDirectory refinementFileSubpath refinementFilePath glyphCount
+                | Some _ | None ->
+                    runMtsdfAtlasGenAll intermediateFilePath refinementFilePath atlasFilePath
                 if File.Exists refinementFilePath then copyFileReplacing intermediateFilePath fontFilePath
             else
                 Log.error ("MtsdfAtlas refinement requires a .ttf or .otf asset, not '" + intermediateFilePath + "'.")
@@ -411,7 +549,7 @@ module AssetGraph =
             let outputFileExtension = getAssetExtension true blockCompression inputFileExtension asset.Refinements
             let outputFileSubpath = PathF.ChangeExtension (asset.FilePath, outputFileExtension)
             let outputFilePath = outputDirectory + "/" + outputFileSubpath
-            let outputMtsdfAtlasPath = outputDirectory + "/" + makeMtsdfSidecarSubpath outputFileSubpath ".mtsdfAtlas" ".png"
+            let outputMtsdfAtlasPaths = getMtsdfAtlasSidecarPaths outputDirectory outputFileSubpath
             let outputMtsdfFontPath = outputDirectory + "/" + makeMtsdfSidecarSubpath outputFileSubpath ".mtsdfSource" inputFileExtension
             let hasMtsdfAtlas = List.contains MtsdfAtlas asset.Refinements
 
@@ -420,9 +558,9 @@ module AssetGraph =
                 not (File.Exists outputFilePath) ||
                 File.GetLastWriteTime inputFilePath > File.GetLastWriteTime outputFilePath ||
                 hasMtsdfAtlas &&
-                (not (File.Exists outputMtsdfAtlasPath) ||
+                (Array.isEmpty outputMtsdfAtlasPaths ||
                  not (File.Exists outputMtsdfFontPath) ||
-                 File.GetLastWriteTime inputFilePath > File.GetLastWriteTime outputMtsdfAtlasPath ||
+                 Array.exists (fun (outputMtsdfAtlasPath : string) -> File.GetLastWriteTime inputFilePath > File.GetLastWriteTime outputMtsdfAtlasPath) outputMtsdfAtlasPaths ||
                  File.GetLastWriteTime inputFilePath > File.GetLastWriteTime outputMtsdfFontPath) then
 
                 // refine the asset

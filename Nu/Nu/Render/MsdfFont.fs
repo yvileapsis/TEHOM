@@ -62,9 +62,18 @@ type [<Struct>] MsdfGlyphBounds =
 /// Metadata for one MSDF glyph.
 type [<NoEquality; NoComparison>] MsdfFontGlyph =
     { Index : uint32
+      AtlasIndex : int
       Advance : single
       PlaneBoundsOpt : MsdfGlyphBounds option
       AtlasBoundsOpt : MsdfGlyphBounds option }
+
+/// Metadata for one MSDF font atlas texture.
+type [<NoEquality; NoComparison>] MsdfFontAtlas =
+    { FilePath : string
+      Width : int
+      Height : int
+      DistanceRange : single
+      Size : single }
 
 /// Font-wide MSDF metrics in em units.
 type [<Struct>] MsdfFontMetrics =
@@ -76,6 +85,7 @@ type [<Struct>] MsdfFontMetrics =
 type [<NoEquality; NoComparison>] MsdfFontAssetData =
     { MetadataFilePath : string
       AtlasFilePath : string
+      Atlases : MsdfFontAtlas array
       FontFilePath : string
       AtlasWidth : int
       AtlasHeight : int
@@ -89,6 +99,7 @@ type [<Struct>] MsdfTextGlyph =
     { Position : Vector2
       Size : Vector2
       TexCoords : Box2
+      AtlasIndex : int
       Color : Color
       DistanceRange : single }
 
@@ -111,6 +122,35 @@ module MsdfFontRuntime =
         { Glyphs : ShapedGlyph array
           Width : single }
 
+    let private compressedCellFontAdvanceThreshold = 0.55f
+    let private glyphGridWidthScaleMax = 3.0f
+
+    let private clampSingle minimum maximum value =
+        max minimum (min maximum value)
+
+    let private median (values : single array) =
+        if values.Length = 0 then 0.0f
+        else
+            let values = Array.sort values
+            let middle = values.Length / 2
+            if values.Length % 2 = 0
+            then (values[middle - 1] + values[middle]) * 0.5f
+            else values[middle]
+
+    let inferGlyphGridScale (fontData : MsdfFontAssetData) (cellSize : Vector2) =
+        let advances =
+            [|for glyphIndex in 33u .. 126u do
+                let mutable glyph = Unchecked.defaultof<MsdfFontGlyph>
+                if fontData.Glyphs.TryGetValue (glyphIndex, &glyph) && glyph.Advance > 0.0f then
+                    yield glyph.Advance|]
+        let medianAdvance = median advances
+        if medianAdvance > 0.0f && medianAdvance <= compressedCellFontAdvanceThreshold then
+            let lineHeight = max 0.001f (abs fontData.Metrics.LineHeight)
+            let cellAspect = if cellSize.Y <> 0.0f then abs (cellSize.X / cellSize.Y) else 1.0f
+            let widthScale = clampSingle 1.0f glyphGridWidthScaleMax (cellAspect * lineHeight / medianAdvance)
+            v2 widthScale 1.0f
+        else v2 1.0f 1.0f
+
     let private tryGetProperty (propertyName : string) (element : JsonElement) =
         let mutable property = Unchecked.defaultof<JsonElement>
         if element.ValueKind = JsonValueKind.Object && element.TryGetProperty (propertyName, &property)
@@ -127,6 +167,11 @@ module MsdfFontRuntime =
         | Some property when property.ValueKind = JsonValueKind.Number -> Some (property.GetInt32 ())
         | _ -> None
 
+    let private tryGetString propertyName element =
+        match tryGetProperty propertyName element with
+        | Some property when property.ValueKind = JsonValueKind.String -> Some (property.GetString ())
+        | _ -> None
+
     let private tryGetUInt propertyName element =
         match tryGetProperty propertyName element with
         | Some property when property.ValueKind = JsonValueKind.Number -> Some (property.GetUInt32 ())
@@ -138,7 +183,7 @@ module MsdfFontRuntime =
             Some { Left = left; Bottom = bottom; Right = right; Top = top }
         | _ -> None
 
-    let private tryReadGlyph (glyphElement : JsonElement) =
+    let private tryReadGlyph defaultAtlasIndex (glyphElement : JsonElement) =
         let indexOpt =
             match tryGetUInt "index" glyphElement with
             | Some index -> Some index
@@ -147,6 +192,7 @@ module MsdfFontRuntime =
         | Some index ->
             Some
                 { Index = index
+                  AtlasIndex = max 0 (defaultArg (tryGetInt "atlasIndex" glyphElement) defaultAtlasIndex)
                   Advance = defaultArg (tryGetSingle "advance" glyphElement) 0.0f
                   PlaneBoundsOpt = Option.bind tryReadBounds (tryGetProperty "planeBounds" glyphElement)
                   AtlasBoundsOpt = Option.bind tryReadBounds (tryGetProperty "atlasBounds" glyphElement) }
@@ -158,16 +204,46 @@ module MsdfFontRuntime =
         if String.IsNullOrEmpty directory then fileName
         else directory + "/" + fileName
 
+    let private resolveSiblingFilePath metadataFilePath filePath =
+        if String.IsNullOrEmpty filePath then filePath
+        elif Path.IsPathRooted filePath then filePath
+        else
+            let directory = PathF.GetDirectoryName metadataFilePath
+            if String.IsNullOrEmpty directory then filePath
+            else directory + "/" + filePath
+
     let private inferFontSidecarPath metadataFilePath =
         let ttfFilePath = makeSidecarFilePath metadataFilePath ".mtsdfSource" ".ttf"
         if File.Exists ttfFilePath then ttfFilePath
         else makeSidecarFilePath metadataFilePath ".mtsdfSource" ".otf"
+
+    let private readAtlas metadataFilePath defaultFilePathOpt (atlasElement : JsonElement) =
+        let filePath =
+            match tryGetString "file" atlasElement with
+            | Some filePath -> resolveSiblingFilePath metadataFilePath filePath
+            | None -> defaultArg defaultFilePathOpt (makeSidecarFilePath metadataFilePath ".mtsdfAtlas" ".png")
+        { FilePath = filePath
+          Width = defaultArg (tryGetInt "width" atlasElement) 0
+          Height = defaultArg (tryGetInt "height" atlasElement) 0
+          DistanceRange = defaultArg (tryGetSingle "distanceRange" atlasElement) (defaultArg (tryGetSingle "pxRange" atlasElement) 4.0f)
+          Size = defaultArg (tryGetSingle "size" atlasElement) Constants.Render.FontSizeDefault }
 
     let tryLoad metadataFilePath =
         try
             use document = JsonDocument.Parse (File.ReadAllText metadataFilePath)
             let root = document.RootElement
             let atlas = defaultArg (tryGetProperty "atlas" root) root
+            let atlases =
+                match tryGetProperty "atlases" root with
+                | Some atlasesElement when atlasesElement.ValueKind = JsonValueKind.Array ->
+                    [|for atlasElement in atlasesElement.EnumerateArray () do
+                        yield readAtlas metadataFilePath None atlasElement|]
+                | _ ->
+                    [|readAtlas metadataFilePath (Some (makeSidecarFilePath metadataFilePath ".mtsdfAtlas" ".png")) atlas|]
+            let atlases =
+                if atlases.Length = 0
+                then [|readAtlas metadataFilePath (Some (makeSidecarFilePath metadataFilePath ".mtsdfAtlas" ".png")) atlas|]
+                else atlases
             let metricsElement = defaultArg (tryGetProperty "metrics" root) root
             let metrics =
                 { LineHeight = defaultArg (tryGetSingle "lineHeight" metricsElement) 1.2f
@@ -177,21 +253,22 @@ module MsdfFontRuntime =
             match tryGetProperty "glyphs" root with
             | Some glyphsElement when glyphsElement.ValueKind = JsonValueKind.Array ->
                 for glyphElement in glyphsElement.EnumerateArray () do
-                    match tryReadGlyph glyphElement with
+                    match tryReadGlyph 0 glyphElement with
                     | Some glyph -> glyphs[glyph.Index] <- glyph
                     | None -> ()
             | _ -> ()
             if glyphs.Count = 0 then Log.warn ("MSDF font metadata '" + metadataFilePath + "' contains no glyphs.")
-            let atlasFilePath = makeSidecarFilePath metadataFilePath ".mtsdfAtlas" ".png"
+            let atlas = if atlases.Length > 0 then atlases[0] else readAtlas metadataFilePath (Some (makeSidecarFilePath metadataFilePath ".mtsdfAtlas" ".png")) atlas
             let fontFilePath = inferFontSidecarPath metadataFilePath
             Some
                 { MetadataFilePath = metadataFilePath
-                  AtlasFilePath = atlasFilePath
+                  AtlasFilePath = atlas.FilePath
+                  Atlases = atlases
                   FontFilePath = fontFilePath
-                  AtlasWidth = defaultArg (tryGetInt "width" atlas) 0
-                  AtlasHeight = defaultArg (tryGetInt "height" atlas) 0
-                  DistanceRange = defaultArg (tryGetSingle "distanceRange" atlas) (defaultArg (tryGetSingle "pxRange" atlas) 4.0f)
-                  Size = defaultArg (tryGetSingle "size" atlas) Constants.Render.FontSizeDefault
+                  AtlasWidth = atlas.Width
+                  AtlasHeight = atlas.Height
+                  DistanceRange = atlas.DistanceRange
+                  Size = atlas.Size
                   Metrics = metrics
                   Glyphs = glyphs }
         with exn ->
@@ -404,12 +481,15 @@ module MsdfFontRuntime =
                                     ((planeRight - planeLeft) * fontSize)
                                     ((planeTop - planeBottom) * fontSize)
                             if glyphSize.X <> 0.0f && glyphSize.Y <> 0.0f then
+                                let atlasIndex = if glyph.AtlasIndex < fontData.Atlases.Length then glyph.AtlasIndex else 0
+                                let atlas = fontData.Atlases[atlasIndex]
                                 glyphs.Add
                                     { Position = glyphMin
                                       Size = glyphSize
-                                      TexCoords = atlasTexCoords fontData.AtlasWidth fontData.AtlasHeight atlasBounds
+                                      TexCoords = atlasTexCoords atlas.Width atlas.Height atlasBounds
+                                      AtlasIndex = atlasIndex
                                       Color = color
-                                      DistanceRange = fontData.DistanceRange }
+                                      DistanceRange = atlas.DistanceRange }
                         | _ -> ()
                     | None -> ()
                     pen <- pen + v2 shapedGlyph.XAdvance shapedGlyph.YAdvance

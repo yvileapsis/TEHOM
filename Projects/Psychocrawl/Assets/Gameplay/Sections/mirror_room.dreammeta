@@ -1,0 +1,8 @@
+link mirror_west 0 3 0 armory 9 3 0
+link mirror_east 11 3 0 folded_loop 11 3 0
+camera cam_mirror 2 1 0 E 6
+mirror mirror_a 5 3 0 slash
+turret turret_mirror 9 3 0 W 5
+block mirror_block 5 5 0
+enemy mirror_guard 3 5 0 E 5
+pickup cell_mirror 9 1 0 cell 1

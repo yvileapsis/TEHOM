@@ -132,7 +132,7 @@ type RenderAsset =
     | RawAsset
     | TextureAsset of Texture : Texture
     | FontAsset of FontSizeDefault : single * Font : TTF_Font nativeptr
-    | MsdfFontAsset of Font : MsdfFontAssetData * AtlasTexture : Texture
+    | MsdfFontAsset of Font : MsdfFontAssetData * AtlasTextures : Texture array
     | CubeMapAsset of FilePaths : CubeMapKey * CubeMap : Texture * IrradianceAndEnvironmentMapOptRef : (Texture * Texture) option ref
     | StaticModelAsset of UserDefined : bool * StaticModel : PhysicallyBasedModel
     | AnimatedModelAsset of AnimatedModel : PhysicallyBasedModel
