@@ -42,6 +42,10 @@ module WorldInputModule =
             let positionWindow = position + v2 (single boundsMin.X) (single boundsMin.Y)
             AmbientState.trySetMousePosition positionWindow world.AmbientState
 
+        /// Attempt to confine the mouse cursor to the window.
+        static member trySetMouseGrabbed grabbed (world : World) =
+            AmbientState.trySetMouseGrabbed grabbed world.AmbientState
+
         /// Get the 2d inset position of the mouse.
         static member getMousePosition2dInset (world : World) =
             let viewport = world.WindowViewport

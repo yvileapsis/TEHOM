@@ -710,6 +710,11 @@ module internal AmbientState =
         | Some window -> SDL3.SDL_WarpMouseInWindow (window, position.X, position.Y) |> ignore
         | None -> ()
 
+    let internal trySetMouseGrabbed grabbed state =
+        match Option.flatten (Option.map SdlDeps.getWindowOpt state.SdlDepsOpt) with
+        | Some window -> SDL3.SDL_SetWindowMouseGrab (window, grabbed) |> ignore<SDLBool>
+        | None -> ()
+
     let internal getSymbolicsBy by state =
         by state.Symbolics
 

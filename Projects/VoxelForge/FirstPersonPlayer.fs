@@ -78,6 +78,7 @@ module FirstPersonPlayerLogic =
 
     let private computeLook (player : FirstPersonPlayer) (world : World) =
         if world.Advancing then
+            World.trySetMouseGrabbed true world
             World.setCursorVisible false world
             let mouseCenter = World.getMouseCenter world
             let mousePosition = World.getMousePosition world
@@ -94,6 +95,7 @@ module FirstPersonPlayerLogic =
             World.trySetMousePosition mouseCenter world
             { player with Yaw = yaw; Pitch = pitch; PreviousMousePositionOpt = Some mouseCenter }
         else
+            World.trySetMouseGrabbed false world
             World.setCursorVisible true world
             { player with PreviousMousePositionOpt = None }
 
