@@ -102,6 +102,9 @@ module GameplayLogic =
     let private levelOffset = v3 0.0f (levelSize.Y * 0.5f) 0.0f
     let private editReach = 6.0f
     let private editEpsilon = 0.01f
+    let private portalRayPadding = 0.02f
+    let private portalRaySurfaceOffset = 0.02f
+    let private portalRayRecursionLimitMax = 8
     let private placeableBlockSources : struct (string * Image AssetTag) array =
         [|struct ("Grass", Assets.Voxels.GrassBlock)
           struct ("Dirt", Assets.Voxels.DirtBlock)
@@ -380,12 +383,55 @@ module GameplayLogic =
             | None ->
                 Log.warnOnce ("VoxelForge could not bake placeable block '" + name + "'.")|]
 
+    let private tryNearestPhysicsHit (origin : Vector3) (direction : Vector3) remainingDistance (world : World) =
+        let ray = ray3 origin (direction * remainingDistance)
+        World.rayCastBodies3d ray 2UL 2UL false world
+        |> Array.filter (fun intersection -> intersection.Progress >= 0.0f && intersection.Progress <= 1.0f)
+        |> Array.tryHead
+
+    let private tryNearestPortalIntersection (pair : PortalPair) (origin : Vector3) (direction : Vector3) remainingDistance =
+        let mutable nearestOpt = None
+        for portal in PortalLogic.portals pair do
+            let side = PortalLogic.signedDistance origin portal
+            let denominator = Vector3.Dot (direction, portal.Rotation.Forward)
+            if side > portalRaySurfaceOffset && denominator < -0.0001f then
+                let distance = -side / denominator
+                if distance > portalRaySurfaceOffset && distance <= remainingDistance then
+                    let point = origin + direction * distance
+                    if PortalLogic.isPointWithinAperture point portal portalRayPadding then
+                        match nearestOpt with
+                        | Some (struct (_, nearestDistance)) when nearestDistance <= distance -> ()
+                        | Some _ | None -> nearestOpt <- Some (struct (portal, distance))
+        nearestOpt
+
+    let private tryRayCastThroughPortals (pair : PortalPair) (origin : Vector3) (direction : Vector3) remainingDistance recursionLimit world =
+        let rec loop origin direction remainingDistance depth =
+            if depth <= 0 || remainingDistance <= editEpsilon then None
+            else
+                let physicsHitOpt = tryNearestPhysicsHit origin direction remainingDistance world
+                let portalHitOpt = tryNearestPortalIntersection pair origin direction remainingDistance
+                match physicsHitOpt, portalHitOpt with
+                | Some physicsHit, Some (struct (_, portalDistance)) when physicsHit.Progress * remainingDistance <= portalDistance + editEpsilon ->
+                    Some physicsHit
+                | _, Some (struct (portal, portalDistance)) ->
+                    let destination = PortalLogic.pairedPortal pair portal
+                    let portalPoint = origin + direction * portalDistance
+                    let direction' = PortalLogic.transferDirection portal destination direction
+                    let direction' = if direction'.LengthSquared () > 0.0f then direction'.Normalized else destination.Rotation.Forward
+                    let origin' = PortalLogic.transferPosition portal destination portalPoint + direction' * portalRaySurfaceOffset
+                    loop origin' direction' (remainingDistance - portalDistance - portalRaySurfaceOffset) (dec depth)
+                | Some physicsHit, None ->
+                    Some physicsHit
+                | None, None ->
+                    None
+        let direction = if direction.LengthSquared () > 0.0f then direction.Normalized else v3Forward
+        loop origin direction remainingDistance recursionLimit
+
     let tryPickForward (gameplay : Gameplay) (world : World) =
         match gameplay.VoxelLevelOpt with
         | Some level ->
-            let pickRay = ray3 world.Eye3dCenter (world.Eye3dRotation.Forward * editReach)
-            World.rayCastBodies3d pickRay 2UL 2UL false world
-            |> Array.tryHead
+            let recursionLimit = Math.Clamp (gameplay.PortalPair.RecursionLimit, 1, portalRayRecursionLimitMax)
+            tryRayCastThroughPortals gameplay.PortalPair world.Eye3dCenter world.Eye3dRotation.Forward editReach recursionLimit world
             |> Option.bind (fun (intersection : BodyIntersection) ->
                 let normal = if intersection.Normal.LengthSquared () > 0.0f then intersection.Normal.Normalized else v3Up
                 match tryWorldToBlockCoord level (intersection.Position - normal * editEpsilon) with
