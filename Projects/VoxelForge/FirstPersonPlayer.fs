@@ -8,6 +8,7 @@ type [<SymbolicExpansion>] FirstPersonPlayer =
     { Yaw : single
       Pitch : single
       PreviousMousePositionOpt : Vector2 option
+      DuckAmount : single
       LastGroundedTime : int64
       LastJumpTime : int64 }
 
@@ -15,6 +16,7 @@ type [<SymbolicExpansion>] FirstPersonPlayer =
         { Yaw = 0.0f
           Pitch = 0.0f
           PreviousMousePositionOpt = None
+          DuckAmount = 0.0f
           LastGroundedTime = Int64.MinValue
           LastJumpTime = Int64.MinValue }
 
@@ -28,18 +30,24 @@ module FirstPersonPlayerExtensions =
 [<RequireQualifiedAccess>]
 module FirstPersonPlayerLogic =
 
-    let [<Literal>] private EyeHeight = 1.62f
+    let [<Literal>] private StandingEyeHeight = 1.62f
+    let [<Literal>] private DuckEyeHeight = 1.0f
     let [<Literal>] private WalkSpeed = 5.0f
     let [<Literal>] private SprintSpeed = 8.0f
-    let [<Literal>] private AirControlScalar = 0.65f
+    let [<Literal>] private DuckSpeed = 2.0f
+    let [<Literal>] private GroundAcceleration = 10.0f
+    let [<Literal>] private AirAcceleration = 10.0f
+    let [<Literal>] private AirSpeedCap = 0.75f
+    let [<Literal>] private Friction = 4.0f
+    let [<Literal>] private StopSpeed = 2.0f
+    let [<Literal>] private SurfaceFriction = 1.0f
     let [<Literal>] private JumpSpeed = 5.5f
+    let [<Literal>] private DuckRate = 8.0f
     let [<Literal>] private MouseSensitivity = 0.0025f
     let [<Literal>] private MouseDeltaLimit = 250.0f
-    let [<Literal>] private CoyoteUpdates = 10L
-    let [<Literal>] private JumpCooldownUpdates = 12L
+    let [<Literal>] private JumpCooldownUpdates = 2L
 
     let private pitchLimit = degToRadF 85.0f
-    let private eyeOffset = v3 0.0f EyeHeight 0.0f
 
     let private characterProperties =
         StairSteppingCharacterProperties
@@ -66,36 +74,96 @@ module FirstPersonPlayerLogic =
             | Some _ | None -> struct (player.Yaw, player.Pitch)
         { player with Yaw = yaw; Pitch = pitch; PreviousMousePositionOpt = Some mousePosition }
 
-    let private computeMoveVelocity (grounded : bool) (rotation : Quaternion) (linearVelocity : Vector3) (world : World) =
+    let private getFrameTime (world : World) =
+        GameTime.toSeconds world.GameDelta |> single |> max 0.0f
+
+    let private getEyeOffset (player : FirstPersonPlayer) =
+        let eyeHeight = StandingEyeHeight + (DuckEyeHeight - StandingEyeHeight) * player.DuckAmount
+        v3 0.0f eyeHeight 0.0f
+
+    let private computeDuck (player : FirstPersonPlayer) (world : World) =
+        let target = if World.isKeyboardKeyDown KeyboardKey.LCtrl world then 1.0f else 0.0f
+        let step = DuckRate * getFrameTime world
+        let duckAmount =
+            if player.DuckAmount < target then min target (player.DuckAmount + step)
+            elif player.DuckAmount > target then max target (player.DuckAmount - step)
+            else player.DuckAmount
+        { player with DuckAmount = duckAmount }
+
+    let private computeWishMove (player : FirstPersonPlayer) (rotation : Quaternion) (world : World) =
         let forward = rotation.Forward.WithY 0.0f
         let right = rotation.Right.WithY 0.0f
         let forward = if forward.LengthSquared () > 0.0f then forward.Normalized else v3Forward
         let right = if right.LengthSquared () > 0.0f then right.Normalized else v3Right
-        let movement =
-            (if World.isKeyboardKeyDown KeyboardKey.W world then forward else v3Zero) +
-            (if World.isKeyboardKeyDown KeyboardKey.S world then -forward else v3Zero) +
-            (if World.isKeyboardKeyDown KeyboardKey.A world then -right else v3Zero) +
-            (if World.isKeyboardKeyDown KeyboardKey.D world then right else v3Zero)
-        let movement = if movement.LengthSquared () > 1.0f then movement.Normalized else movement
-        let speed = if World.isKeyboardKeyDown KeyboardKey.LShift world then SprintSpeed else WalkSpeed
-        let speed = speed * (if grounded then 1.0f else AirControlScalar)
-        movement * speed + linearVelocity * v3Up
+        let forwardMove =
+            (if World.isKeyboardKeyDown KeyboardKey.W world then 1.0f else 0.0f) -
+            (if World.isKeyboardKeyDown KeyboardKey.S world then 1.0f else 0.0f)
+        let sideMove =
+            (if World.isKeyboardKeyDown KeyboardKey.D world then 1.0f else 0.0f) -
+            (if World.isKeyboardKeyDown KeyboardKey.A world then 1.0f else 0.0f)
+        let wishVelocity = forward * forwardMove + right * sideMove
+        let wishMagnitude = min 1.0f (wishVelocity.Length ())
+        if wishMagnitude > 0.0f then
+            let wishDirection = wishVelocity / wishVelocity.Length ()
+            let standingSpeed = if World.isKeyboardKeyDown KeyboardKey.LShift world then SprintSpeed else WalkSpeed
+            let maxSpeed = standingSpeed + (DuckSpeed - standingSpeed) * player.DuckAmount
+            struct (wishDirection, wishMagnitude * maxSpeed)
+        else struct (v3Zero, 0.0f)
 
-    let private tryJump (grounded : bool) (player : FirstPersonPlayer) (entity : Entity) (world : World) =
-        if World.isKeyboardKeyPressed KeyboardKey.Space world then
-            let time = world.UpdateTime
-            let canJump =
-                time >= player.LastJumpTime + JumpCooldownUpdates &&
-                time <= player.LastGroundedTime + CoyoteUpdates
-            if canJump then
-                World.jumpBody (not grounded) JumpSpeed (entity.GetBodyId world) world
-                { player with LastJumpTime = time }
-            else player
-        else player
+    let private applyFriction (frameTime : single) (velocity : Vector3) =
+        let horizontalVelocity = velocity.WithY 0.0f
+        let speed = horizontalVelocity.Length ()
+        if speed <= 0.0001f then velocity.WithY velocity.Y
+        else
+            let control = if speed < StopSpeed then StopSpeed else speed
+            let drop = control * Friction * SurfaceFriction * frameTime
+            let newSpeed = max 0.0f (speed - drop)
+            let scale = newSpeed / speed
+            v3 (velocity.X * scale) velocity.Y (velocity.Z * scale)
+
+    let private accelerate (frameTime : single) (acceleration : single) (wishDirection : Vector3) (wishSpeed : single) (velocity : Vector3) =
+        if wishSpeed <= 0.0f then velocity
+        else
+            let currentSpeed = Vector3.Dot (velocity, wishDirection)
+            let addSpeed = wishSpeed - currentSpeed
+            if addSpeed <= 0.0f then velocity
+            else
+                let accelerationSpeed = min addSpeed (acceleration * frameTime * wishSpeed * SurfaceFriction)
+                velocity + wishDirection * accelerationSpeed
+
+    let private airAccelerate (frameTime : single) (wishDirection : Vector3) (wishSpeed : single) (velocity : Vector3) =
+        if wishSpeed <= 0.0f then velocity
+        else
+            let wishSpeedCapped = min AirSpeedCap wishSpeed
+            let currentSpeed = Vector3.Dot (velocity, wishDirection)
+            let addSpeed = wishSpeedCapped - currentSpeed
+            if addSpeed <= 0.0f then velocity
+            else
+                let accelerationSpeed = min addSpeed (AirAcceleration * frameTime * wishSpeed * SurfaceFriction)
+                velocity + wishDirection * accelerationSpeed
+
+    let private computeMoveVelocity (player : FirstPersonPlayer) (grounded : bool) (jumping : bool) (rotation : Quaternion) (linearVelocity : Vector3) (world : World) =
+        let frameTime = getFrameTime world
+        let struct (wishDirection, wishSpeed) = computeWishMove player rotation world
+        if grounded && not jumping then
+            linearVelocity
+            |> applyFriction frameTime
+            |> accelerate frameTime GroundAcceleration wishDirection wishSpeed
+        else airAccelerate frameTime wishDirection wishSpeed linearVelocity
+
+    let private tryJump (grounded : bool) (player : FirstPersonPlayer) (linearVelocity : Vector3) (world : World) =
+        let time = world.UpdateTime
+        let jumping =
+            grounded &&
+            World.isKeyboardKeyPressed KeyboardKey.Space world &&
+            time >= player.LastJumpTime + JumpCooldownUpdates
+        if jumping then
+            struct ({ player with LastJumpTime = time }, linearVelocity.WithY (max JumpSpeed linearVelocity.Y), true)
+        else struct (player, linearVelocity, false)
 
     let syncCamera (entity : Entity) (player : FirstPersonPlayer) (world : World) =
         let eyeRotation = Quaternion.CreateFromYawPitchRoll (player.Yaw, player.Pitch, 0.0f)
-        World.setEye3dCenter (entity.GetPosition world + eyeOffset) world
+        World.setEye3dCenter (entity.GetPosition world + getEyeOffset player) world
         World.setEye3dRotation eyeRotation world
         World.setEye3dFieldOfView 0.75f world
 
@@ -105,12 +173,14 @@ module FirstPersonPlayerLogic =
         let player = entity.GetFirstPersonPlayer world
         let player = if grounded then { player with LastGroundedTime = world.UpdateTime } else player
         let player = computeLook player world
+        let player = if world.Advancing then computeDuck player world else player
         let bodyRotation = Quaternion.CreateFromAxisAngle (v3Up, player.Yaw)
         entity.SetRotation bodyRotation world
         if world.Advancing then
             let linearVelocity = entity.GetLinearVelocity world
-            entity.SetLinearVelocity (computeMoveVelocity grounded bodyRotation linearVelocity world) world
-            let player = tryJump grounded player entity world
+            let struct (player, linearVelocity, jumping) = tryJump grounded player linearVelocity world
+            let linearVelocity = computeMoveVelocity player grounded jumping bodyRotation linearVelocity world
+            entity.SetLinearVelocity linearVelocity world
             entity.SetFirstPersonPlayer player world
             syncCamera entity player world
         else
