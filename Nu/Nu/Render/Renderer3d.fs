@@ -1568,7 +1568,7 @@ type [<ReferenceEquality>] GlRenderer3d =
             OpenGL.Gl.Disable OpenGL.EnableCap.CullFace
             OpenGL.Gl.Disable OpenGL.EnableCap.Blend
             OpenGL.Gl.Disable OpenGL.EnableCap.StencilTest
-            OpenGL.Gl.DepthMask false
+            OpenGL.Gl.DepthMask true
             OpenGL.Gl.ColorMask (true, true, true, true)
             for portalComposite in portalComposites do
                 GlRenderer3d.drawPortalQuad geometryViewProjection geometryViewPort portalComposite.Portal portalComposite.FillOnly portalComposite.Texture renderer
