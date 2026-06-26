@@ -532,6 +532,7 @@ module PhysicallyBased =
           ProjectionInverseUniform : int
           ViewPortUniform : int
           EyeCenterUniform : int
+          ClipPlaneUniform : int
           LightShadowExponentUniform : int
           PhysicallyBasedShader : uint }
 
@@ -945,7 +946,7 @@ module PhysicallyBased =
 
         // create gamma correction buffers
         let gammaCorrectionBuffers =
-            match OpenGL.Framebuffer.TryCreateColorBuffers (geometryViewport.Bounds.Size.X, geometryViewport.Bounds.Size.Y, false, false) with
+            match OpenGL.Framebuffer.TryCreateColorBuffers (geometryViewport.Bounds.Size.X, geometryViewport.Bounds.Size.Y, false, true) with
             | Right gammaCorrectionBuffers -> gammaCorrectionBuffers
             | Left error -> failwith ("Could not create buffers due to: " + error + ".")
         OpenGL.Hl.Assert ()
@@ -2586,6 +2587,7 @@ module PhysicallyBased =
         let projectionInverseUniform = Gl.GetUniformLocation (shader, "projectionInverse")
         let viewPortUniform = Gl.GetUniformLocation (shader, "viewPort")
         let eyeCenterUniform = Gl.GetUniformLocation (shader, "eyeCenter")
+        let clipPlaneUniform = Gl.GetUniformLocation (shader, "clipPlane")
         let lightShadowExponentUniform = Gl.GetUniformLocation (shader, "lightShadowExponent")
 
         // make shader record
@@ -2596,6 +2598,7 @@ module PhysicallyBased =
           ProjectionInverseUniform = projectionInverseUniform
           ViewPortUniform = viewPortUniform
           EyeCenterUniform = eyeCenterUniform
+          ClipPlaneUniform = clipPlaneUniform
           LightShadowExponentUniform = lightShadowExponentUniform
           PhysicallyBasedShader = shader } : PhysicallyBasedVoxelShader
 
@@ -4482,6 +4485,7 @@ module PhysicallyBased =
          projectionInverse : single array,
          viewPort : Vector2,
          eyeCenter : Vector3,
+         clipPlane : Vector4,
          instanceFields : single array,
          lightShadowExponent : single,
          voxelModel : PhysicallyBasedVoxelModel,
@@ -4509,6 +4513,7 @@ module PhysicallyBased =
         Gl.UniformMatrix4 (shader.ProjectionInverseUniform, false, projectionInverse)
         Gl.Uniform2 (shader.ViewPortUniform, viewPort.X, viewPort.Y)
         Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
+        Gl.Uniform4 (shader.ClipPlaneUniform, clipPlane.X, clipPlane.Y, clipPlane.Z, clipPlane.W)
         Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)
         Hl.Assert ()
 

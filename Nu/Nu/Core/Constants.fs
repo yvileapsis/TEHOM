@@ -511,5 +511,6 @@ module Paths =
     let [<Literal>] PhysicallyBasedDeferredFoggingShaderFilePath = "Assets/Default/PhysicallyBasedDeferredFogging.glsl"
     let [<Literal>] PhysicallyBasedDeferredColoringShaderFilePath = "Assets/Default/PhysicallyBasedDeferredColoring.glsl"
     let [<Literal>] PhysicallyBasedDeferredCompositionShaderFilePath = "Assets/Default/PhysicallyBasedDeferredComposition.glsl"
+    let [<Literal>] PortalCompositeShaderFilePath = "Assets/Default/PortalComposite.glsl"
     let [<Literal>] PhysicallyBasedForwardStaticShaderFilePath = "Assets/Default/PhysicallyBasedForwardStatic.glsl"
     let [<Literal>] PhysicallyBasedForwardAnimatedShaderFilePath = "Assets/Default/PhysicallyBasedForwardAnimated.glsl"

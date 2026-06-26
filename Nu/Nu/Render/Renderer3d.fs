@@ -629,6 +629,19 @@ type RenderVoxelModel =
       VoxelModel : VoxelModel AssetTag
       RenderPass : RenderPass }
 
+/// Describes how to render a portal aperture.
+type RenderPortal3d =
+    { SourcePortalId : int64
+      SourceCenter : Vector3
+      SourceRotation : Quaternion
+      SourceModelMatrix : Matrix4x4
+      SourceHalfExtents : Vector2
+      DestinationCenter : Vector3
+      DestinationRotation : Quaternion
+      RecursionLimit : int
+      Tint : Color
+      RenderPass : RenderPass }
+
 /// Describes how to render an animated model.
 type RenderAnimatedModel =
     { ModelMatrix : Matrix4x4
@@ -879,6 +892,7 @@ type RenderMessage3d =
     | RenderCachedStaticModelSurface of CachedStaticModelSurfaceMessage
     | RenderVoxelModel of RenderVoxelModel
     | RenderCachedVoxelModel of CachedVoxelModelMessage
+    | RenderPortal3d of RenderPortal3d
     | RenderUserDefinedStaticModel of RenderUserDefinedStaticModel
     | RenderAnimatedModel of RenderAnimatedModel
     | RenderAnimatedModels of RenderAnimatedModels
@@ -1109,6 +1123,7 @@ type [<ReferenceEquality>] private RenderTasks =
       DeferredAnimated : Dictionary<AnimatedModelSurfaceKey, struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties) List>
       DeferredTerrains : struct (TerrainDescriptor * TerrainPatchDescriptor * OpenGL.PhysicallyBased.PhysicallyBasedGeometry) List
       DeferredVoxels : struct (Matrix4x4 * bool * Presence * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedVoxelModel) List
+      Portals : RenderPortal3d List
       Forward : struct (single * single * Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * OpenGL.PhysicallyBased.PhysicallyBasedSurface * DepthTest) List
       ForwardSorted : struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * OpenGL.PhysicallyBased.PhysicallyBasedSurface * DepthTest) List
       DeferredStaticRemovals : OpenGL.PhysicallyBased.PhysicallyBasedSurface List
@@ -1129,6 +1144,7 @@ type [<ReferenceEquality>] private RenderTasks =
           DeferredAnimated = dictPlus AnimatedModelSurfaceKey.comparer []
           DeferredTerrains = List ()
           DeferredVoxels = List ()
+          Portals = List ()
           Forward = List ()
           ForwardSorted = List ()
           DeferredStaticRemovals = List ()
@@ -1174,6 +1190,7 @@ type [<ReferenceEquality>] private RenderTasks =
         renderTasks.ForwardSorted.Clear ()
         renderTasks.DeferredTerrains.Clear ()
         renderTasks.DeferredVoxels.Clear ()
+        renderTasks.Portals.Clear ()
 
         renderTasks.ShadowBufferIndexOpt <- None
 
@@ -1279,6 +1296,19 @@ type [<ReferenceEquality>] StubRenderer3d =
         member renderer.Render _ _ _ _ _ _ _ _ _ = ()
         member renderer.CleanUp () = ()
 
+type [<ReferenceEquality>] private PortalCompositeShader =
+    { PortalCompositeShader : uint
+      ModelUniform : int
+      ViewProjectionUniform : int
+      PortalTextureUniform : int
+      ViewPortUniform : int
+      TintUniform : int }
+
+type [<Struct>] private PortalComposite =
+    { Portal : RenderPortal3d
+      Texture : OpenGL.Texture.Texture
+      BufferIndex : int }
+
 /// The OpenGL implementation of Renderer3d.
 type [<ReferenceEquality>] GlRenderer3d =
     private
@@ -1291,6 +1321,8 @@ type [<ReferenceEquality>] GlRenderer3d =
           mutable IrradianceShader : OpenGL.CubeMap.CubeMapShader
           mutable EnvironmentFilterShader : OpenGL.LightMap.EnvironmentFilterShader
           mutable FilterShaders : OpenGL.Filter.FilterShaders
+          mutable PortalCompositeShader : PortalCompositeShader
+          PortalCompositeVao : uint
           PhysicallyBasedStaticVao : uint
           PhysicallyBasedAnimatedVao : uint
           PhysicallyBasedTerrainVao : uint
@@ -1318,6 +1350,7 @@ type [<ReferenceEquality>] GlRenderer3d =
           EnvironmentFilterMap : OpenGL.Texture.Texture
           PhysicallyBasedMaterial : OpenGL.PhysicallyBased.PhysicallyBasedMaterial
           mutable PhysicallyBasedBuffers : OpenGL.PhysicallyBased.PhysicallyBasedBuffers
+          mutable PortalColorBuffers : (OpenGL.Texture.Texture * uint * uint) array
           LightMaps : Dictionary<uint64, OpenGL.LightMap.LightMap>
           mutable LightingConfig : Lighting3dConfig
           mutable LightingConfigChanged : bool
@@ -1341,6 +1374,133 @@ type [<ReferenceEquality>] GlRenderer3d =
             "Render asset " + assetTag.AssetName + " is not available from " + assetTag.PackageName + " package in a " + Constants.Associations.Render3d + " context. " +
             "Note that images from a " + Constants.Associations.Render2d + " context are usually not available in a " + Constants.Associations.Render3d + " context."
         Log.warnOnce message
+
+    static member private PortalBuffersMax = 16
+
+    static member private PortalRecursionLimitMax = 8
+
+    static member private PortalCompositeSurfaceOffset = 0.03f
+
+    static member private createPortalCompositeShader () =
+        let shader = OpenGL.Shader.CreateShaderFromFilePath Constants.Paths.PortalCompositeShaderFilePath
+        { PortalCompositeShader = shader
+          ModelUniform = OpenGL.Gl.GetUniformLocation (shader, "model")
+          ViewProjectionUniform = OpenGL.Gl.GetUniformLocation (shader, "viewProjection")
+          PortalTextureUniform = OpenGL.Gl.GetUniformLocation (shader, "portalTexture")
+          ViewPortUniform = OpenGL.Gl.GetUniformLocation (shader, "viewPort")
+          TintUniform = OpenGL.Gl.GetUniformLocation (shader, "tint") }
+
+    static member private createPortalCompositeVao (portalQuad : OpenGL.PhysicallyBased.PhysicallyBasedGeometry) =
+        let vao = [|0u|]
+        OpenGL.Gl.CreateVertexArrays vao
+        let vao = vao[0]
+        OpenGL.Gl.VertexArrayAttribFormat (vao, 0u, 3, OpenGL.VertexAttribType.Float, false, uint 0)
+        OpenGL.Gl.VertexArrayAttribBinding (vao, 0u, 0u)
+        OpenGL.Gl.VertexArrayBindingDivisor (vao, 0u, 0u)
+        OpenGL.Gl.EnableVertexArrayAttrib (vao, 0u)
+        OpenGL.Gl.VertexArrayVertexBuffer (vao, 0u, portalQuad.VertexBuffer, 0, OpenGL.PhysicallyBased.StaticVertexSize)
+        OpenGL.Gl.VertexArrayElementBuffer (vao, portalQuad.IndexBuffer)
+        vao
+
+    static member private createPortalColorBuffers (geometryViewport : Viewport) =
+        let resolution = geometryViewport.Bounds.Size
+        [|for _ in 0 .. dec GlRenderer3d.PortalBuffersMax do
+            match OpenGL.Framebuffer.TryCreateColorBuffers (resolution.X, resolution.Y, true, false) with
+            | Right buffers -> buffers
+            | Left error -> failwith ("Could not create portal buffers due to: " + error + ".")|]
+
+    static member private destroyPortalColorBuffers portalColorBuffers =
+        for buffers in portalColorBuffers do
+            OpenGL.Framebuffer.DestroyColorBuffers buffers
+
+    static member private makePortalModelMatrix (portal : RenderPortal3d) =
+        let modelScale = Matrix4x4.CreateScale (0.5f, 0.5f, 1.0f)
+        let mutable model = modelScale * portal.SourceModelMatrix
+        model.Translation <- portal.SourceCenter + portal.SourceRotation.Forward * GlRenderer3d.PortalCompositeSurfaceOffset
+        model
+
+    static member private getPortalCompositeTint (portal : RenderPortal3d) =
+        if portal.Tint.R > 0.001f || portal.Tint.G > 0.001f || portal.Tint.B > 0.001f then portal.Tint
+        elif portal.SourcePortalId = 1L then color 0.35f 0.7f 1.0f 1.0f
+        elif portal.SourcePortalId = 2L then color 1.0f 0.55f 0.18f 1.0f
+        else Color.White
+
+    static member private makeLookRotation (forward : Vector3) (up : Vector3) =
+        let forward = if forward.LengthSquared () > 0.0f then forward.Normalized else v3Forward
+        let up = if up.LengthSquared () > 0.0f then up.Normalized else v3Up
+        Quaternion.CreateFromRotationMatrix (Matrix4x4.CreateWorld (v3Zero, forward, up))
+
+    static member private transferPortalEye
+        (eyeCenter : Vector3)
+        (eyeRotation : Quaternion)
+        (sourceCenter : Vector3)
+        (sourceRotation : Quaternion)
+        (destinationCenter : Vector3)
+        (destinationRotation : Quaternion) =
+        let mutable sourceMatrix = Matrix4x4.CreateFromQuaternion sourceRotation
+        sourceMatrix.Translation <- sourceCenter
+        let mutable destinationMatrix = Matrix4x4.CreateFromQuaternion destinationRotation
+        destinationMatrix.Translation <- destinationCenter
+        let (_, sourceInverse) = Matrix4x4.Invert sourceMatrix
+        let flip = Matrix4x4.CreateRotationY MathF.PI
+        let transfer = sourceInverse * flip * destinationMatrix
+        let rotationTransfer = Matrix4x4.CreateFromQuaternion sourceRotation.Inverted * flip * Matrix4x4.CreateFromQuaternion destinationRotation
+        let eyeCenter = Vector3.Transform (eyeCenter, transfer)
+        let eyeForward = Vector3.TransformNormal (eyeRotation.Forward, rotationTransfer)
+        let eyeUp = Vector3.TransformNormal (eyeRotation.Up, rotationTransfer)
+        let eyeForward = if eyeForward.LengthSquared () > 0.0f then eyeForward.Normalized else destinationRotation.Forward
+        let eyeUp = if eyeUp.LengthSquared () > 0.0f then eyeUp.Normalized else destinationRotation.Up
+        let eyeRotation = GlRenderer3d.makeLookRotation eyeForward eyeUp
+        struct (eyeCenter, eyeRotation)
+
+    static member private makePortalClipPlane (eyeCenter : Vector3) (destinationCenter : Vector3) (destinationRotation : Quaternion) =
+        let normal = destinationRotation.Forward
+        let side = Vector3.Dot (eyeCenter - destinationCenter, normal)
+        let keepNormal = normal * (if side >= 0.0f then -1.0f else 1.0f)
+        v4 keepNormal.X keepNormal.Y keepNormal.Z (-Vector3.Dot (keepNormal, destinationCenter))
+
+    static member private isPortalAtDestination (destinationCenter : Vector3) (destinationRotation : Quaternion) (portal : RenderPortal3d) =
+        Vector3.DistanceSquared (portal.SourceCenter, destinationCenter) <= 0.0001f &&
+        MathF.Abs (Quaternion.Dot (portal.SourceRotation, destinationRotation)) >= 0.999f
+
+    static member private drawPortalQuad (viewProjection : single array) (viewPort : Vector2) (portal : RenderPortal3d) (texture : OpenGL.Texture.Texture) (renderer : GlRenderer3d) =
+        let shader = renderer.PortalCompositeShader
+        let model = GlRenderer3d.makePortalModelMatrix portal
+        let model = model.ToArray ()
+        OpenGL.Gl.BindVertexArray renderer.PortalCompositeVao
+        OpenGL.Gl.UseProgram shader.PortalCompositeShader
+        OpenGL.Gl.UniformMatrix4 (shader.ModelUniform, false, model)
+        OpenGL.Gl.UniformMatrix4 (shader.ViewProjectionUniform, false, viewProjection)
+        OpenGL.Gl.Uniform1 (shader.PortalTextureUniform, 0)
+        OpenGL.Gl.Uniform2 (shader.ViewPortUniform, viewPort.X, viewPort.Y)
+        let tint = GlRenderer3d.getPortalCompositeTint portal
+        OpenGL.Gl.Uniform4 (shader.TintUniform, tint.R, tint.G, tint.B, tint.A)
+        OpenGL.Gl.ActiveTexture OpenGL.TextureUnit.Texture0
+        OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, texture.TextureId)
+        OpenGL.Gl.DrawElements (renderer.PhysicallyBasedQuad.PrimitiveType, renderer.PhysicallyBasedQuad.ElementCount, OpenGL.DrawElementsType.UnsignedInt, nativeint 0)
+        OpenGL.Hl.ReportDrawCall 1
+        OpenGL.Gl.BindTexture (OpenGL.TextureTarget.Texture2d, 0u)
+        OpenGL.Gl.UseProgram 0u
+        OpenGL.Gl.BindVertexArray 0u
+
+    static member private drawPortalComposites (geometryViewProjection : single array) (geometryViewPort : Vector2) (portalComposites : PortalComposite array) (renderer : GlRenderer3d) =
+        if portalComposites.Length > 0 then
+            Log.infoOnce ("Nu renderer drawing " + string portalComposites.Length + " portal composite(s).")
+            OpenGL.Gl.Viewport (0, 0, int geometryViewPort.X, int geometryViewPort.Y)
+            OpenGL.Gl.Enable OpenGL.EnableCap.DepthTest
+            OpenGL.Gl.DepthFunc OpenGL.DepthFunction.Lequal
+            OpenGL.Gl.Disable OpenGL.EnableCap.CullFace
+            OpenGL.Gl.Disable OpenGL.EnableCap.Blend
+            OpenGL.Gl.Disable OpenGL.EnableCap.StencilTest
+            OpenGL.Gl.Disable OpenGL.EnableCap.ScissorTest
+            OpenGL.Gl.DepthMask false
+            OpenGL.Gl.ColorMask (true, true, true, true)
+            for portalComposite in portalComposites do
+                GlRenderer3d.drawPortalQuad geometryViewProjection geometryViewPort portalComposite.Portal portalComposite.Texture renderer
+            OpenGL.Gl.DepthMask true
+            OpenGL.Gl.DepthFunc OpenGL.DepthFunction.Less
+            OpenGL.Gl.Disable OpenGL.EnableCap.DepthTest
+            OpenGL.Hl.Assert ()
 
     static member private radicalInverse (bits : uint) =
         let mutable bits = bits
@@ -2371,6 +2531,8 @@ type [<ReferenceEquality>] GlRenderer3d =
     static member private handleReloadShaders renderer =
         renderer.SkyBoxShader <- OpenGL.SkyBox.CreateSkyBoxShader Constants.Paths.SkyBoxShaderFilePath
         OpenGL.Hl.Assert ()
+        renderer.PortalCompositeShader <- GlRenderer3d.createPortalCompositeShader ()
+        OpenGL.Hl.Assert ()
         renderer.IrradianceShader <- OpenGL.CubeMap.CreateCubeMapShader Constants.Paths.IrradianceShaderFilePath
         OpenGL.Hl.Assert ()
         renderer.EnvironmentFilterShader <- OpenGL.LightMap.CreateEnvironmentFilterShader Constants.Paths.EnvironmentFilterShaderFilePath
@@ -2547,7 +2709,7 @@ type [<ReferenceEquality>] GlRenderer3d =
          renderType : RenderType,
          renderPass : RenderPass,
          renderTasksOpt : RenderTasks voption,
-         renderer) =
+         renderer : GlRenderer3d) =
 
         // compute tex coords offset
         let texCoordsOffset =
@@ -3127,6 +3289,10 @@ type [<ReferenceEquality>] GlRenderer3d =
             | RenderCachedVoxelModel cvmm ->
                 let renderTasks = GlRenderer3d.getRenderTasks cvmm.CachedVoxelModelRenderPass renderer
                 GlRenderer3d.categorizeVoxelModel (frustumInterior, frustumExterior, frustumImposter, &cvmm.CachedVoxelModelMatrix, cvmm.CachedVoxelModelCastShadow, cvmm.CachedVoxelModelPresence, &cvmm.CachedVoxelModelMaterialProperties, cvmm.CachedVoxelModel, cvmm.CachedVoxelModelRenderPass, renderTasks, renderer)
+            | RenderPortal3d rp ->
+                if rp.RenderPass.IsNormalPass then
+                    let renderTasks = GlRenderer3d.getRenderTasks rp.RenderPass renderer
+                    renderTasks.Portals.Add rp
             | RenderUserDefinedStaticModel rudsm ->
                 let insetOpt = Option.toValueOption rudsm.InsetOpt
                 let assetTag = asset Assets.Default.PackageName Gen.name // TODO: see if we should instead use a specialized package for temporary assets like these.
@@ -3538,6 +3704,7 @@ type [<ReferenceEquality>] GlRenderer3d =
          projectionInverseArray,
          viewPort,
          eyeCenter,
+         clipPlane : Vector4,
          lightShadowExponent,
          model : Matrix4x4 inref,
          presence : Presence,
@@ -3545,7 +3712,7 @@ type [<ReferenceEquality>] GlRenderer3d =
          voxelModel : OpenGL.PhysicallyBased.PhysicallyBasedVoxelModel,
          shader,
          vao,
-         renderer) =
+         renderer : GlRenderer3d) =
 
         // ensure we have a large enough instance fields array
         if renderer.InstanceFields.Length < Constants.Render.InstanceFieldCount then
@@ -3586,7 +3753,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         // draw voxel model
         OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxel
             (viewArray, projectionArray, viewProjectionArray, viewInverseArray, projectionInverseArray, viewPort, eyeCenter,
-             renderer.InstanceFields, lightShadowExponent, voxelModel, shader, vao)
+             clipPlane, renderer.InstanceFields, lightShadowExponent, voxelModel, shader, vao)
 
     static member private renderShadow
         lightOrigin
@@ -3695,7 +3862,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         for struct (model, castShadow, presence, properties, voxelModel) in renderTasks.DeferredVoxels do
             if castShadow && lightFrustum.Intersects (voxelModel.VoxelGeometry.Bounds.Transform model) then
                 GlRenderer3d.renderPhysicallyBasedVoxel
-                    (lightViewArray, lightProjectionArray, lightViewProjectionArray, lightViewInverseArray, lightProjectionInverseArray, lightViewPort, lightOrigin, renderer.LightingConfig.LightShadowExponent,
+                    (lightViewArray, lightProjectionArray, lightViewProjectionArray, lightViewInverseArray, lightProjectionInverseArray, lightViewPort, lightOrigin, v4Zero, renderer.LightingConfig.LightShadowExponent,
                      &model, presence, &properties, voxelModel, shadowVoxelShader, renderer.PhysicallyBasedVoxelVao, renderer)
 
         // forward render surface shadows
@@ -3718,8 +3885,8 @@ type [<ReferenceEquality>] GlRenderer3d =
                     OpenGL.Hl.Assert ()
 
     static member private renderShadowTexture
-        renderTasks
-        renderer
+        (renderTasks : RenderTasks)
+        (renderer : GlRenderer3d)
         (lightOrigin : Vector3)
         (lightView : Matrix4x4)
         (lightProjection : Matrix4x4)
@@ -3760,8 +3927,8 @@ type [<ReferenceEquality>] GlRenderer3d =
         OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.Framebuffer, 0u)
 
     static member private renderShadowMapFace
-        renderTasks
-        renderer
+        (renderTasks : RenderTasks)
+        (renderer : GlRenderer3d)
         (lightOrigin : Vector3)
         (lightCutoff : single)
         (shadowFace : int)
@@ -3849,8 +4016,8 @@ type [<ReferenceEquality>] GlRenderer3d =
         frustumExterior
         frustumImposter
         renderPass
-        renderTasks
-        renderer
+        (renderTasks : RenderTasks)
+        (renderer : GlRenderer3d)
         topLevelRender
         lightAmbientOverride
         (eyeCenter : Vector3)
@@ -3861,6 +4028,8 @@ type [<ReferenceEquality>] GlRenderer3d =
         (geometryViewProjection : Matrix4x4)
         (windowInset : Box2i)
         (windowProjection : Matrix4x4)
+        (portalClipPlaneOpt : Vector4 option)
+        (portalComposites : PortalComposite array)
         (framebuffer : uint) =
 
         // compute matrix arrays
@@ -3872,6 +4041,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         let geometryProjectionInverse = geometryProjection.Inverted
         let geometryProjectionInverseArray = geometryProjectionInverse.ToArray ()
         let geometryViewProjectionArray = geometryViewProjection.ToArray ()
+        let voxelClipPlane = Option.defaultValue v4Zero portalClipPlaneOpt
         let windowProjectionArray = windowProjection.ToArray ()
         let windowProjectionInverse = windowProjection.Inverted
         let windowProjectionInverseArray = windowProjectionInverse.ToArray ()
@@ -3890,6 +4060,10 @@ type [<ReferenceEquality>] GlRenderer3d =
                     | None -> (renderer.IrradianceMap, renderer.EnvironmentFilterMap)
                 OpenGL.LightMap.CreateLightMap true v3Zero ambientColor ambientBrightness box3Zero irradianceMap environmentFilterMap
             | None -> OpenGL.LightMap.CreateLightMap true v3Zero Color.White 1.0f box3Zero renderer.IrradianceMap renderer.EnvironmentFilterMap
+
+        // clear per-geometry transient task lists; portal rendering reuses render tasks multiple times per frame.
+        renderTasks.LightMaps.Clear ()
+        renderTasks.ForwardSorted.Clear ()
 
         // destroy cached light maps whose originating probe no longer exists
         for lightMapKvp in renderer.LightMaps do
@@ -4078,7 +4252,7 @@ type [<ReferenceEquality>] GlRenderer3d =
         let geometryViewPort = v2 (single geometryResolution.X) (single geometryResolution.Y)
         for struct (model, _, presence, properties, voxelModel) in renderTasks.DeferredVoxels do
             GlRenderer3d.renderPhysicallyBasedVoxel
-                (viewArray, geometryProjectionArray, geometryViewProjectionArray, viewInverseArray, geometryProjectionInverseArray, geometryViewPort, eyeCenter, renderer.LightingConfig.LightShadowExponent,
+                (viewArray, geometryProjectionArray, geometryViewProjectionArray, viewInverseArray, geometryProjectionInverseArray, geometryViewPort, eyeCenter, voxelClipPlane, renderer.LightingConfig.LightShadowExponent,
                  &model, presence, &properties, voxelModel, renderer.PhysicallyBasedShaders.DeferredVoxelShader, renderer.PhysicallyBasedVoxelVao, renderer)
 
         // run light mapping pass
@@ -4593,6 +4767,20 @@ type [<ReferenceEquality>] GlRenderer3d =
             (toneMappingTexture, renderer.PhysicallyBasedQuad, renderer.FilterShaders.FilterGammaCorrectionShader, renderer.PhysicallyBasedStaticVao)
         OpenGL.Hl.Assert ()
 
+        // copy scene depth so portal stencil masks respect foreground occluders.
+        OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.ReadFramebuffer, geometryFramebuffer)
+        OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.DrawFramebuffer, gammaCorrectionFramebuffer)
+        OpenGL.Gl.BlitFramebuffer
+            (0, 0, geometryResolution.X, geometryResolution.Y,
+             0, 0, geometryResolution.X, geometryResolution.Y,
+             OpenGL.ClearBufferMask.DepthBufferBit,
+             OpenGL.BlitFramebufferFilter.Nearest)
+        OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.Framebuffer, gammaCorrectionFramebuffer)
+        OpenGL.Hl.Assert ()
+
+        // composite portal views into the gamma-corrected target.
+        GlRenderer3d.drawPortalComposites geometryViewProjectionArray geometryViewPort portalComposites renderer
+
         // blit gamma correction buffer to window buffer
         OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.ReadFramebuffer, gammaCorrectionFramebuffer)
         OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.DrawFramebuffer, framebuffer)
@@ -4602,6 +4790,81 @@ type [<ReferenceEquality>] GlRenderer3d =
              OpenGL.ClearBufferMask.ColorBufferBit,
              OpenGL.BlitFramebufferFilter.Nearest)
         OpenGL.Hl.Assert ()
+
+    static member private renderPortalCompositesForView
+        (eyeCenter : Vector3)
+        (eyeRotation : Quaternion)
+        eyeFieldOfView
+        geometryViewport
+        (renderTasks : RenderTasks)
+        (renderer : GlRenderer3d) =
+        let portals =
+            renderTasks.Portals
+            |> Seq.truncate GlRenderer3d.PortalBuffersMax
+            |> Seq.toArray
+        if portals.Length = 0 then [||]
+        else
+            Log.infoOnce ("Nu renderer received " + string portals.Length + " portal render message(s).")
+            let bufferLimitPerPath = max 1 (GlRenderer3d.PortalBuffersMax / portals.Length)
+            let usedBuffers = Array.zeroCreate<bool> renderer.PortalColorBuffers.Length
+            let allocateBuffer () =
+                let mutable found = ValueNone
+                let mutable i = 0
+                while found.IsNone && i < usedBuffers.Length do
+                    if not usedBuffers[i] then
+                        usedBuffers[i] <- true
+                        found <- ValueSome i
+                    i <- inc i
+                found
+            let releaseBuffer index =
+                if index >= 0 && index < usedBuffers.Length then usedBuffers[index] <- false
+            let rec renderPortalView (depth : int) (eyeCenter : Vector3) (eyeRotation : Quaternion) (portal : RenderPortal3d) =
+                if depth <= 0 then ValueNone
+                else
+                    match allocateBuffer () with
+                    | ValueSome bufferIndex ->
+                        let struct (portalEyeCenter, portalEyeRotation) =
+                            GlRenderer3d.transferPortalEye
+                                eyeCenter
+                                eyeRotation
+                                portal.SourceCenter
+                                portal.SourceRotation
+                                portal.DestinationCenter
+                                portal.DestinationRotation
+                        let childComposites =
+                            if depth > 1 then
+                                let children = List<PortalComposite> ()
+                                for childPortal in portals do
+                                    if not (GlRenderer3d.isPortalAtDestination portal.DestinationCenter portal.DestinationRotation childPortal) then
+                                        match renderPortalView (dec depth) portalEyeCenter portalEyeRotation childPortal with
+                                        | ValueSome childComposite -> children.Add childComposite
+                                        | ValueNone -> ()
+                                children.ToArray ()
+                            else [||]
+                        let portalView = Viewport.getView3d portalEyeCenter portalEyeRotation
+                        let portalViewSkyBox = Matrix4x4.CreateFromQuaternion portalEyeRotation.Inverted
+                        let portalFrustum = Viewport.getFrustum portalEyeCenter portalEyeRotation eyeFieldOfView geometryViewport
+                        let portalProjection = Viewport.getProjection3d eyeFieldOfView geometryViewport
+                        let portalViewProjection = portalView * portalProjection
+                        let portalInset = box2i v2iZero geometryViewport.Bounds.Size
+                        let portalClipPlane =
+                            GlRenderer3d.makePortalClipPlane portalEyeCenter portal.DestinationCenter portal.DestinationRotation
+                        let (texture, _, framebuffer) = renderer.PortalColorBuffers[bufferIndex]
+                        GlRenderer3d.renderGeometry
+                            portalFrustum portalFrustum portalFrustum NormalPass renderTasks renderer
+                            false None portalEyeCenter portalView portalViewSkyBox portalFrustum portalProjection portalViewProjection portalInset portalProjection (Some portalClipPlane) childComposites framebuffer
+                        for childComposite in childComposites do
+                            releaseBuffer childComposite.BufferIndex
+                        ValueSome { Portal = portal; Texture = texture; BufferIndex = bufferIndex }
+                    | ValueNone -> ValueNone
+            let composites = List<PortalComposite> ()
+            for portal in portals do
+                let depth =
+                    Math.Clamp (max 1 portal.RecursionLimit, 1, min GlRenderer3d.PortalRecursionLimitMax bufferLimitPerPath)
+                match renderPortalView depth eyeCenter eyeRotation portal with
+                | ValueSome composite -> composites.Add composite
+                | ValueNone -> ()
+            composites.ToArray ()
 
     /// Render 3d surfaces.
     static member render
@@ -4622,7 +4885,9 @@ type [<ReferenceEquality>] GlRenderer3d =
             GlRenderer3d.invalidateCaches renderer
             GlRenderer3d.clearRenderPasses renderer // force shadows to rerender
             OpenGL.PhysicallyBased.DestroyPhysicallyBasedBuffers renderer.PhysicallyBasedBuffers
+            GlRenderer3d.destroyPortalColorBuffers renderer.PortalColorBuffers
             renderer.PhysicallyBasedBuffers <- OpenGL.PhysicallyBased.CreatePhysicallyBasedBuffers geometryViewport
+            renderer.PortalColorBuffers <- GlRenderer3d.createPortalColorBuffers geometryViewport
             renderer.GeometryViewport <- geometryViewport
         renderer.WindowViewport <- windowViewport
 
@@ -4684,8 +4949,12 @@ type [<ReferenceEquality>] GlRenderer3d =
 
                         // create reflection map
                         let reflectionMap =
+                            let renderReflection topLevelRender lightAmbientOverride eyeCenter view viewSkyBox geometryFrustum geometryProjection geometryViewProjection windowInset windowProjection framebuffer =
+                                GlRenderer3d.renderGeometry
+                                    frustumInterior frustumExterior frustumImposter renderPass (GlRenderer3d.getRenderTasks renderPass renderer) renderer
+                                    topLevelRender lightAmbientOverride eyeCenter view viewSkyBox geometryFrustum geometryProjection geometryViewProjection windowInset windowProjection None [||] framebuffer
                             OpenGL.LightMap.CreateReflectionMap
-                                (GlRenderer3d.renderGeometry frustumInterior frustumExterior frustumImposter renderPass (GlRenderer3d.getRenderTasks renderPass renderer) renderer,
+                                (renderReflection,
                                  Constants.Render.ReflectionMapResolution,
                                  lightProbeOrigin,
                                  lightProbeAmbientColor,
@@ -4958,9 +5227,14 @@ type [<ReferenceEquality>] GlRenderer3d =
             let geometryViewProjection = view * geometryProjection
             let windowProjection = Viewport.getProjection3d eyeFieldOfView windowViewport
             let inner = windowViewport.Inner
+            let portalComposites =
+                GlRenderer3d.renderPortalCompositesForView
+                    eyeCenter eyeRotation eyeFieldOfView geometryViewport normalTasks renderer
             GlRenderer3d.renderGeometry
                 frustumInterior frustumExterior frustumImposter normalPass normalTasks renderer
                 true None eyeCenter view viewSkyBox frustum geometryProjection geometryViewProjection inner windowProjection
+                None
+                portalComposites
                 framebuffer
 
         // clear light shadow indices
@@ -5035,6 +5309,10 @@ type [<ReferenceEquality>] GlRenderer3d =
         let filterShaders = OpenGL.Filter.CreateFilterShaders ()
         OpenGL.Hl.Assert ()
 
+        // create portal composite shader
+        let portalCompositeShader = GlRenderer3d.createPortalCompositeShader ()
+        OpenGL.Hl.Assert ()
+
         // create physically-based static vao
         let physicallyBasedStaticVao = OpenGL.PhysicallyBased.CreatePhysicallyBasedStaticVao ()
         OpenGL.Hl.Assert ()
@@ -5077,6 +5355,10 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // create physically-based quad
         let physicallyBasedQuad = OpenGL.PhysicallyBased.CreatePhysicallyBasedQuad true
+        OpenGL.Hl.Assert ()
+
+        // create portal composite vao
+        let portalCompositeVao = GlRenderer3d.createPortalCompositeVao physicallyBasedQuad
         OpenGL.Hl.Assert ()
 
         // create cube map surface
@@ -5270,6 +5552,10 @@ type [<ReferenceEquality>] GlRenderer3d =
         let physicallyBasedBuffers = OpenGL.PhysicallyBased.CreatePhysicallyBasedBuffers geometryViewport
         OpenGL.Hl.Assert ()
 
+        // create portal color buffers
+        let portalColorBuffers = GlRenderer3d.createPortalColorBuffers geometryViewport
+        OpenGL.Hl.Assert ()
+
         // create forward surfaces comparer
         let forwardSurfacesComparer =
             { new IComparer<struct (single * single * Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * OpenGL.PhysicallyBased.PhysicallyBasedSurface * DepthTest * single * int)> with
@@ -5295,6 +5581,8 @@ type [<ReferenceEquality>] GlRenderer3d =
               IrradianceShader = irradianceShader
               EnvironmentFilterShader = environmentFilterShader
               FilterShaders = filterShaders
+              PortalCompositeShader = portalCompositeShader
+              PortalCompositeVao = portalCompositeVao
               PhysicallyBasedStaticVao = physicallyBasedStaticVao
               PhysicallyBasedAnimatedVao = physicallyBasedAnimatedVao
               PhysicallyBasedTerrainVao = physicallyBasedTerrainVao
@@ -5322,6 +5610,7 @@ type [<ReferenceEquality>] GlRenderer3d =
               EnvironmentFilterMap = environmentFilterMap
               PhysicallyBasedMaterial = physicallyBasedMaterial
               PhysicallyBasedBuffers = physicallyBasedBuffers
+              PortalColorBuffers = portalColorBuffers
               LightMaps = dictPlus HashIdentity.Structural []
               LightingConfig = Lighting3dConfig.defaultConfig
               LightingConfigChanged = false
@@ -5361,6 +5650,12 @@ type [<ReferenceEquality>] GlRenderer3d =
             OpenGL.Hl.Assert ()
 
             OpenGL.Filter.DestroyFilterShaders renderer.FilterShaders
+            OpenGL.Hl.Assert ()
+
+            OpenGL.Gl.DeleteProgram renderer.PortalCompositeShader.PortalCompositeShader
+            OpenGL.Hl.Assert ()
+
+            OpenGL.Gl.DeleteVertexArrays [|renderer.PortalCompositeVao|]
             OpenGL.Hl.Assert ()
 
             OpenGL.Gl.DeleteVertexArrays [|renderer.PhysicallyBasedStaticVao|]
@@ -5405,6 +5700,9 @@ type [<ReferenceEquality>] GlRenderer3d =
             OpenGL.Hl.Assert ()
 
             OpenGL.PhysicallyBased.DestroyPhysicallyBasedBuffers renderer.PhysicallyBasedBuffers
+            OpenGL.Hl.Assert ()
+
+            GlRenderer3d.destroyPortalColorBuffers renderer.PortalColorBuffers
             OpenGL.Hl.Assert ()
 
             for lightMap in renderer.LightMaps.Values do OpenGL.LightMap.DestroyLightMap lightMap

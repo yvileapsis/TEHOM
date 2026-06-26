@@ -52,6 +52,7 @@
 		<Compile Include="Simulants.fs" />
 		<Compile Include="Events.fs" />
 		<Compile Include="VoxelBake.fs" />
+		<Compile Include="Portals.fs" />
 		<Compile Include="FirstPersonPlayer.fs" />
 		<Compile Include="Gameplay.fs" />
 		<Compile Include="VoxelForge.fs" />

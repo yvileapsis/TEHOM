@@ -66,6 +66,7 @@ uniform mat4 projection;
 uniform mat4 viewInverse;
 uniform mat4 projectionInverse;
 uniform vec2 viewPort;
+uniform vec4 clipPlane;
 
 flat in vec3 centerOut;
 flat in vec3 axisXOut;
@@ -145,6 +146,8 @@ void main()
     vec3 faceNormal = normalize(localNormal.x * xDir + localNormal.y * yDir + localNormal.z * zDir);
 
     vec3 hitWorld = rayOriginWorld + rayDirectionWorld * hitDistance;
+    if (dot(clipPlane.xyz, clipPlane.xyz) > 0.0 && dot(vec4(hitWorld, 1.0), clipPlane) < 0.0)
+        discard;
     vec4 hitClip = projection * view * vec4(hitWorld, 1.0);
     float hitDepth = hitClip.z / hitClip.w * 0.5 + 0.5;
     if (hitDepth < 0.0 || hitDepth > 1.0)

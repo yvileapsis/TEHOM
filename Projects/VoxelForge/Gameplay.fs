@@ -44,7 +44,9 @@ type Gameplay =
       VoxelChunks : VoxelChunk array
       AimPickOpt : VoxelAimPick option
       SelectedBlockIndex : int
-      SelectedBlockPreviewPositionOpt : Vector3 option }
+      SelectedBlockPreviewPositionOpt : Vector3 option
+      PortalPair : PortalPair
+      PortalPlayerTracking : PortalPlayerTracking }
 
     static member val empty =
         { GameplayTime = 0L
@@ -54,7 +56,9 @@ type Gameplay =
           VoxelChunks = [||]
           AimPickOpt = None
           SelectedBlockIndex = 0
-          SelectedBlockPreviewPositionOpt = None }
+          SelectedBlockPreviewPositionOpt = None
+          PortalPair = PortalLogic.defaultPair
+          PortalPlayerTracking = PortalPlayerTracking.empty }
 
     static member val initial =
         { Gameplay.empty with
@@ -73,6 +77,7 @@ type GameplayCommand =
     | DestroyVoxelModel of VoxelChunk array * PlaceableBlock array
     | DestroyBlock of VoxelAimPick
     | PlaceBlock of VoxelAimPick
+    | ResolvePortalTraversal
     | StartQuitting
     interface Command
 
@@ -457,6 +462,29 @@ module GameplayLogic =
             destroyVoxelChunks chunksToDestroy world
         | _ -> ()
 
+    let resolvePortalTraversal (gameplay : Gameplay) (screen : Screen) (world : World) =
+        if world.Advancing && Simulants.GameplayPlayer.GetExists world then
+            let playerEntity = Simulants.GameplayPlayer
+            let player = playerEntity.GetFirstPersonPlayer world
+            let result =
+                PortalLogic.tryResolvePlayerTraversal
+                    gameplay.PortalPair
+                    gameplay.PortalPlayerTracking
+                    world.UpdateTime
+                    (playerEntity.GetPosition world)
+                    world.Eye3dCenter
+                    world.Eye3dRotation
+                    (playerEntity.GetLinearVelocity world)
+            screen.SetGameplay { gameplay with PortalPlayerTracking = result.Tracking } world
+            if result.Tracking.LastTeleportTime = world.UpdateTime then
+                let struct (yaw, pitch) = PortalLogic.yawPitchFromRotation result.EyeRotation
+                let player = { player with Yaw = yaw; Pitch = pitch; PreviousMousePositionOpt = None }
+                playerEntity.SetPosition result.Position world
+                playerEntity.SetRotation (Quaternion.CreateFromAxisAngle (v3Up, yaw)) world
+                playerEntity.SetLinearVelocity result.LinearVelocity world
+                playerEntity.SetFirstPersonPlayer player world
+                FirstPersonPlayerLogic.syncCamera playerEntity player world
+
     let setInitialCamera (world : World) =
         let eyeCenter = v3 12.0f 12.0f 14.0f
         let eyeTarget = v3 0.0f 5.0f 0.0f
@@ -557,8 +585,15 @@ type GameplayDispatcher () =
             GameplayLogic.tryDestroyBlock pick gameplay screen world
         | PlaceBlock pick ->
             GameplayLogic.tryPlaceBlock pick gameplay screen world
+        | ResolvePortalTraversal ->
+            GameplayLogic.resolvePortalTraversal gameplay screen world
         | StartQuitting ->
             World.publish () screen.QuitEvent screen world
+
+    override this.PostUpdate (screen, world) =
+        let gameplay = screen.GetGameplay world
+        if gameplay.GameplayState = Playing then
+            GameplayLogic.resolvePortalTraversal gameplay screen world
 
     override this.Content (gameplay, _) =
 
@@ -571,6 +606,8 @@ type GameplayDispatcher () =
                          Entity.Position := voxelChunk.ChunkCenter
                          Entity.Size := voxelChunk.ChunkSize
                          Entity.VoxelModel := voxelChunk.VoxelModel
+                         Entity.Presence == Omnipresent
+                         Entity.AlwaysRender == true
                          Entity.BodyType == Static
                          Entity.BodyShape := voxelChunk.BodyShape
                          Entity.CollisionCategories == "10"
@@ -584,8 +621,49 @@ type GameplayDispatcher () =
                                 ClearCoatOpt = ValueSome 0.0f
                                 ClearCoatRoughnessOpt = ValueSome 1.0f }]
 
-                 Content.entity<FirstPersonPlayerDispatcher> Simulants.GameplayPlayer.Name
+                 Content.composite<FirstPersonPlayerDispatcher> Simulants.GameplayPlayer.Name
                     [Entity.Position == v3 0.0f 18.0f 0.0f]
+                    [Content.staticModel Simulants.GameplayPlayerBody.Name
+                        [Entity.PositionLocal == v3 0.0f 0.85f 0.0f
+                         Entity.Size == v3 0.7f 1.7f 0.7f
+                         Entity.Scale == v3 0.7f 1.7f 0.7f
+                         Entity.Presence == Omnipresent
+                         Entity.AlwaysRender == true
+                         Entity.Static == false
+                         Entity.Pickable == false
+                         Entity.CastShadow == false
+                         Entity.StaticModel == Assets.Default.BallModel
+                         Entity.MaterialProperties ==
+                            { MaterialProperties.empty with
+                                AlbedoOpt = ValueSome (color 0.28f 0.9f 0.65f 1.0f)
+                                RoughnessOpt = ValueSome 0.8f
+                                MetallicOpt = ValueSome 0.0f
+                                AmbientOcclusionOpt = ValueSome 1.0f
+                                EmissionOpt = ValueSome 0.08f }]]
+
+                 for portal in PortalLogic.portals gameplay.PortalPair do
+                    let destination = PortalLogic.pairedPortal gameplay.PortalPair portal
+                    let aperture =
+                        match portal.Id with
+                        | Blue -> Simulants.BluePortalAperture
+                        | Orange -> Simulants.OrangePortalAperture
+                    let portalSize = v3 (portal.HalfExtents.X * 2.0f) (portal.HalfExtents.Y * 2.0f) 0.035f
+                    Content.entity<PortalApertureDispatcher> aperture.Name
+                        [Entity.Position := portal.Center
+                         Entity.Rotation := portal.Rotation
+                         Entity.Size := portalSize
+                         Entity.Scale := portalSize
+                         Entity.Presence == Omnipresent
+                         Entity.AlwaysRender == true
+                         Entity.Static == true
+                         Entity.Pickable == false
+                         Entity.CastShadow == false
+                         Entity.PortalSourceId := PortalLogic.portalIdToInt64 portal.Id
+                         Entity.PortalDestinationCenter := destination.Center
+                         Entity.PortalDestinationRotation := destination.Rotation
+                         Entity.PortalHalfExtents := portal.HalfExtents
+                         Entity.PortalRecursionLimit := gameplay.PortalPair.RecursionLimit
+                         Entity.PortalTint := PortalLogic.portalTint portal.Id]
 
                  match gameplay.SelectedBlockPreviewPositionOpt, GameplayLogic.tryGetSelectedBlock gameplay with
                  | Some position, Some placeableBlock ->
