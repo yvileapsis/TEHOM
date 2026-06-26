@@ -105,6 +105,8 @@ module GameplayLogic =
     let private portalRayPadding = 0.02f
     let private portalRaySurfaceOffset = 0.02f
     let private portalRayRecursionLimitMax = 8
+    let private aimBlockHighlightPadding = 0.01f
+    let private aimBlockHighlightThickness = 0.0125f
     let private placeableBlockSources : struct (string * Image AssetTag) array =
         [|struct ("Grass", Assets.Voxels.GrassBlock)
           struct ("Dirt", Assets.Voxels.DirtBlock)
@@ -246,6 +248,17 @@ module GameplayLogic =
                 (single start.Z * level.VoxelSize.Z)
         box3 min v3One
 
+    let getAimBlockHighlightFace (bounds : Box3) (faceIndex : int) =
+        let bounds = box3 (bounds.Min - v3Dup aimBlockHighlightPadding) (bounds.Size + v3Dup (aimBlockHighlightPadding * 2.0f))
+        match faceIndex with
+        | 0 -> struct (bounds.Center + v3Forward * bounds.Depth * 0.5f, quatIdentity, v3 bounds.Width bounds.Height aimBlockHighlightThickness)
+        | 1 -> struct (bounds.Center + v3Back * bounds.Depth * 0.5f, Quaternion.CreateFromAxisAngle (v3Up, MathF.PI), v3 bounds.Width bounds.Height aimBlockHighlightThickness)
+        | 2 -> struct (bounds.Center + v3Left * bounds.Width * 0.5f, Quaternion.CreateFromAxisAngle (v3Up, MathF.PI_OVER_2), v3 bounds.Depth bounds.Height aimBlockHighlightThickness)
+        | 3 -> struct (bounds.Center + v3Right * bounds.Width * 0.5f, Quaternion.CreateFromAxisAngle (v3Up, -MathF.PI_OVER_2), v3 bounds.Depth bounds.Height aimBlockHighlightThickness)
+        | 4 -> struct (bounds.Center + v3Up * bounds.Height * 0.5f, Quaternion.CreateFromAxisAngle (v3Right, MathF.PI_OVER_2), v3 bounds.Width bounds.Depth aimBlockHighlightThickness)
+        | 5 -> struct (bounds.Center + v3Down * bounds.Height * 0.5f, Quaternion.CreateFromAxisAngle (v3Right, -MathF.PI_OVER_2), v3 bounds.Width bounds.Depth aimBlockHighlightThickness)
+        | _ -> failwithumf ()
+
     let private boxesIntersect (box : Box3) (box2 : Box3) =
         box.Min.X < box2.Max.X && box.Max.X > box2.Min.X &&
         box.Min.Y < box2.Max.Y && box.Max.Y > box2.Min.Y &&
@@ -272,6 +285,13 @@ module GameplayLogic =
                 z <- inc z
             y <- inc y
         contains
+
+    let tryGetAimBlockBounds (gameplay : Gameplay) =
+        match gameplay.VoxelLevelOpt, gameplay.AimPickOpt with
+        | Some level, Some pick when blockContainsVoxel level pick.DestroyBlockCoord ->
+            Some (blockBounds level pick.DestroyBlockCoord)
+        | Some _, Some _ | Some _, None | None, _ ->
+            None
 
     let private blockIsEmpty (level : VoxelLevel) (blockCoord : Vector3i) =
         not (blockContainsVoxel level blockCoord)
@@ -730,14 +750,44 @@ type GameplayDispatcher () =
                                 ClearCoatRoughnessOpt = ValueSome 1.0f }]
                  | _, _ -> ()
 
-                 match gameplay.AimPickOpt with
-                 | Some pick ->
-                    Content.staticModel Simulants.RayPickMarker.Name
-                        [Entity.Position := pick.Position + pick.Normal * 0.08f
-                         Entity.Size := v3Dup 0.08f
-                         Entity.Scale := v3Dup 0.08f
-                         Entity.StaticModel == Assets.Default.BallModel
-                         Entity.MaterialProperties == { MaterialProperties.empty with AlbedoOpt = ValueSome Color.Cyan; EmissionOpt = ValueSome 0.35f }]
+                 match GameplayLogic.tryGetAimBlockBounds gameplay with
+                 | Some bounds ->
+                    Content.light3d Simulants.AimBlockHighlightLight.Name
+                        [Entity.Position := bounds.Center
+                         Entity.Presence == Omnipresent
+                         Entity.AlwaysRender == true
+                         Entity.Static == true
+                         Entity.LightType == PointLight
+                         Entity.Color == color 0.18f 0.95f 1.0f 1.0f
+                         Entity.Brightness == 1.25f
+                         Entity.LightCutoff == 2.5f
+                         Entity.AutoAttenuate == true
+                         Entity.DesireShadows == false
+                         Entity.DesireFog == false]
+                    for i in 0 .. dec 6 do
+                        let struct (position, rotation, scale) = GameplayLogic.getAimBlockHighlightFace bounds i
+                        Content.staticModel (Simulants.AimBlockHighlightFace i).Name
+                            [Entity.Position := position
+                             Entity.Rotation := rotation
+                             Entity.Size := scale
+                             Entity.Scale := scale
+                             Entity.Presence == Omnipresent
+                             Entity.AlwaysRender == true
+                             Entity.Static == true
+                             Entity.Pickable == false
+                             Entity.CastShadow == false
+                             Entity.Clipped == true
+                             Entity.DepthTest == LessThanOrEqualTest
+                             Entity.RenderStyle == Deferred
+                             Entity.StaticModel == Assets.Default.HighlightModel
+                             Entity.MaterialProperties ==
+                                { MaterialProperties.defaultProperties with
+                                    AlbedoOpt = ValueSome (color 0.18f 0.95f 1.0f 1.0f)
+                                    RoughnessOpt = ValueSome 0.25f
+                                    MetallicOpt = ValueSome 0.0f
+                                    AmbientOcclusionOpt = ValueSome 1.0f
+                                    EmissionOpt = ValueSome 1.65f
+                                    SpecularScalarOpt = ValueSome 0.0f }]
                  | None -> ()
 
                  Content.button Simulants.GameplayQuit.Name
