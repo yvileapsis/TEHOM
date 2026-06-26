@@ -65,7 +65,6 @@ module PortalApertureExtensions =
 module PortalLogic =
 
     let [<Literal>] TeleportCooldownUpdates = 5L
-    let [<Literal>] EntrySurfaceDistance = 0.05f
     let [<Literal>] ExitSurfaceDistance = 0.04f
     let [<Literal>] ExitRearmDistance = 0.25f
     let [<Literal>] CapsulePadding = 0.18f
@@ -199,9 +198,8 @@ module PortalLogic =
                 | Some exitPortalId when exitPortalId = portal.Id && currentDistance <= ExitRearmDistance -> true
                 | Some _ | None -> false
             let crossing = previousDistance > 0.0f && currentDistance <= 0.0f
-            let alreadyPenetrating = previousDistance <= 0.0f && currentDistance <= -EntrySurfaceDistance
             let triggerPoint = pointOnPortalPlane eyePosition currentDistance portal
-            if canTeleport && not exitingPortal && (crossing || alreadyPenetrating) && isPointWithinAperture triggerPoint portal CapsulePadding then
+            if canTeleport && not exitingPortal && crossing && isPointWithinAperture triggerPoint portal CapsulePadding then
                 let transformedEyePosition =
                     transferPosition portal destination eyePosition
                     |> fun position -> clampToPortalFront ExitSurfaceDistance position destination
