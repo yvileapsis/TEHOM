@@ -19,6 +19,7 @@ void main()
 
 uniform sampler2D portalTexture;
 uniform vec2 viewPort;
+uniform bool fillOnly;
 uniform vec4 tint;
 
 in vec2 localPosition;
@@ -27,6 +28,12 @@ layout(location = 0) out vec4 frag;
 
 void main()
 {
+    if (fillOnly)
+    {
+        frag = vec4(tint.rgb, 1.0);
+        return;
+    }
+
     vec2 texCoords = gl_FragCoord.xy / viewPort;
     vec3 portalColor = texture(portalTexture, texCoords).rgb;
     if (any(isnan(portalColor)) || dot(portalColor, portalColor) < 0.00001)

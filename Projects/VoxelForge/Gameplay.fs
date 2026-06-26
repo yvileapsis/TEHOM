@@ -663,6 +663,7 @@ type GameplayDispatcher () =
                          Entity.PortalDestinationRotation := destination.Rotation
                          Entity.PortalHalfExtents := portal.HalfExtents
                          Entity.PortalRecursionLimit := gameplay.PortalPair.RecursionLimit
+                         Entity.PortalOneSided := true
                          Entity.PortalTint := PortalLogic.portalTint portal.Id]
 
                  match gameplay.SelectedBlockPreviewPositionOpt, GameplayLogic.tryGetSelectedBlock gameplay with

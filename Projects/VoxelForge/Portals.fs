@@ -54,6 +54,9 @@ module PortalApertureExtensions =
         member this.GetPortalRecursionLimit world : int = this.Get (nameof this.PortalRecursionLimit) world
         member this.SetPortalRecursionLimit value world = this.Set (nameof this.PortalRecursionLimit) value world
         member this.PortalRecursionLimit = lens (nameof this.PortalRecursionLimit) this this.GetPortalRecursionLimit this.SetPortalRecursionLimit
+        member this.GetPortalOneSided world : bool = this.Get (nameof this.PortalOneSided) world
+        member this.SetPortalOneSided value world = this.Set (nameof this.PortalOneSided) value world
+        member this.PortalOneSided = lens (nameof this.PortalOneSided) this this.GetPortalOneSided this.SetPortalOneSided
         member this.GetPortalTint world : Color = this.Get (nameof this.PortalTint) world
         member this.SetPortalTint value world = this.Set (nameof this.PortalTint) value world
         member this.PortalTint = lens (nameof this.PortalTint) this this.GetPortalTint this.SetPortalTint
@@ -241,6 +244,15 @@ type PortalApertureDispatcher () =
     static member Facets =
         []
 
+    static member Properties =
+        [define Entity.PortalSourceId 0L
+         define Entity.PortalDestinationCenter v3Zero
+         define Entity.PortalDestinationRotation Quaternion.Identity
+         define Entity.PortalHalfExtents PortalLogic.defaultHalfExtents
+         define Entity.PortalRecursionLimit 2
+         define Entity.PortalOneSided true
+         define Entity.PortalTint Color.White]
+
     override this.Definitions (_, _) =
         [Entity.Presence == Omnipresent
          Entity.AlwaysRender == true
@@ -254,6 +266,7 @@ type PortalApertureDispatcher () =
          Entity.PortalDestinationRotation == Quaternion.Identity
          Entity.PortalHalfExtents == PortalLogic.defaultHalfExtents
          Entity.PortalRecursionLimit == 2
+         Entity.PortalOneSided == true
          Entity.PortalTint == Color.White]
 
     override this.Render (renderPass, entity, world) =
@@ -265,7 +278,7 @@ type PortalApertureDispatcher () =
                 if entity.Name = Simulants.BluePortalAperture.Name then Some pair.Blue
                 elif entity.Name = Simulants.OrangePortalAperture.Name then Some pair.Orange
                 else None
-            let struct (sourcePortalId, destinationCenter, destinationRotation, halfExtents, recursionLimit, tint) =
+            let struct (sourcePortalId, destinationCenter, destinationRotation, halfExtents, recursionLimit, oneSided, tint) =
                 if sourcePortalId <> 0L then
                     struct
                         (entity.GetPortalSourceId world,
@@ -273,6 +286,7 @@ type PortalApertureDispatcher () =
                          entity.GetPortalDestinationRotation world,
                          entity.GetPortalHalfExtents world,
                          entity.GetPortalRecursionLimit world,
+                         entity.GetPortalOneSided world,
                          entity.GetPortalTint world)
                 else
                     match defaultPortalOpt with
@@ -284,6 +298,7 @@ type PortalApertureDispatcher () =
                              destination.Rotation,
                              portal.HalfExtents,
                              pair.RecursionLimit,
+                             entity.GetPortalOneSided world,
                              PortalLogic.portalTint portal.Id)
                     | None ->
                         struct
@@ -292,6 +307,7 @@ type PortalApertureDispatcher () =
                              entity.GetPortalDestinationRotation world,
                              entity.GetPortalHalfExtents world,
                              entity.GetPortalRecursionLimit world,
+                             entity.GetPortalOneSided world,
                              entity.GetPortalTint world)
             let transform = entity.GetTransform world
             World.enqueueRenderMessage3d
@@ -304,6 +320,7 @@ type PortalApertureDispatcher () =
                       DestinationCenter = destinationCenter
                       DestinationRotation = destinationRotation
                       RecursionLimit = recursionLimit
+                      OneSided = oneSided
                       Tint = tint
                       RenderPass = renderPass })
                 world
