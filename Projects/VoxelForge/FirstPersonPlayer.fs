@@ -56,7 +56,8 @@ module FirstPersonPlayerLogic =
     let [<Literal>] private StandingBodyCenter = 0.85f
     let [<Literal>] private DuckBodyHeight = 0.4f
     let [<Literal>] private DuckBodyCenter = 0.55f
-    let [<Literal>] private UnduckProbeDistance = 0.02f
+    let [<Literal>] private UnduckProbeRadiusScalar = 0.8f
+    let [<Literal>] private UnduckProbePadding = 0.03f
 
     let private pitchLimit = degToRadF 85.0f
     let private standingBodyShape =
@@ -76,18 +77,25 @@ module FirstPersonPlayerLogic =
         Math.Clamp (pitch, -pitchLimit, pitchLimit)
 
     let private computeLook (player : FirstPersonPlayer) (world : World) =
-        let mousePosition = World.getMousePosition world
-        let struct (yaw, pitch) =
-            match player.PreviousMousePositionOpt with
-            | Some previousMousePosition when world.Advancing ->
-                let mouseDelta = mousePosition - previousMousePosition
-                if abs mouseDelta.X <= MouseDeltaLimit && abs mouseDelta.Y <= MouseDeltaLimit then
-                    struct
-                        (player.Yaw - mouseDelta.X * MouseSensitivity,
-                         clampPitch (player.Pitch - mouseDelta.Y * MouseSensitivity))
-                else struct (player.Yaw, player.Pitch)
-            | Some _ | None -> struct (player.Yaw, player.Pitch)
-        { player with Yaw = yaw; Pitch = pitch; PreviousMousePositionOpt = Some mousePosition }
+        if world.Advancing then
+            World.setCursorVisible false world
+            let mouseCenter = World.getMouseCenter world
+            let mousePosition = World.getMousePosition world
+            let struct (yaw, pitch) =
+                match player.PreviousMousePositionOpt with
+                | Some previousMousePosition ->
+                    let mouseDelta = mousePosition - previousMousePosition
+                    if abs mouseDelta.X <= MouseDeltaLimit && abs mouseDelta.Y <= MouseDeltaLimit then
+                        struct
+                            (player.Yaw - mouseDelta.X * MouseSensitivity,
+                             clampPitch (player.Pitch - mouseDelta.Y * MouseSensitivity))
+                    else struct (player.Yaw, player.Pitch)
+                | None -> struct (player.Yaw, player.Pitch)
+            World.trySetMousePosition mouseCenter world
+            { player with Yaw = yaw; Pitch = pitch; PreviousMousePositionOpt = Some mouseCenter }
+        else
+            World.setCursorVisible true world
+            { player with PreviousMousePositionOpt = None }
 
     let private getFrameTime (world : World) =
         GameTime.toSeconds world.GameDelta |> single |> max 0.0f
@@ -100,9 +108,22 @@ module FirstPersonPlayerLogic =
         let bodyId = entity.GetBodyId world
         let collisionCategory = Physics.categorizeCollisionMask (entity.GetCollisionCategories world)
         let collisionMask = Physics.categorizeCollisionMask (entity.GetCollisionMask world)
-        let castRay = ray3 (entity.GetPosition world) (v3 0.0f UnduckProbeDistance 0.0f)
-        World.shapeCastBodies3d standingBodyShape None castRay collisionCategory collisionMask false world
-        |> Array.forall (fun intersection -> intersection.BodyShapeIntersected.BodyId = bodyId)
+        let position = entity.GetPosition world
+        let duckTop = DuckBodyCenter + DuckBodyHeight * 0.5f + CharacterRadius + UnduckProbePadding
+        let standingTop = StandingBodyCenter + StandingBodyHeight * 0.5f + CharacterRadius + UnduckProbePadding
+        let probeHeight = standingTop - duckTop
+        let probeRadius = CharacterRadius * UnduckProbeRadiusScalar
+        let probeOffsets =
+            [|v3Zero
+              v3 probeRadius 0.0f 0.0f
+              v3 -probeRadius 0.0f 0.0f
+              v3 0.0f 0.0f probeRadius
+              v3 0.0f 0.0f -probeRadius|]
+        probeOffsets
+        |> Array.forall (fun offset ->
+            let probeRay = ray3 (position + offset + v3 0.0f duckTop 0.0f) (v3 0.0f probeHeight 0.0f)
+            World.rayCastBodies3d probeRay collisionCategory collisionMask false world
+            |> Array.forall (fun intersection -> intersection.BodyShapeIntersected.BodyId = bodyId))
 
     let private applyDuckBodyShape (entity : Entity) (ducked : bool) (world : World) =
         let desiredBodyShape = if ducked then duckBodyShape else standingBodyShape

@@ -31,6 +31,17 @@ module WorldInputModule =
             let margin = v2 (single offset.X) (single offset.Y)
             MouseState.getPosition () - margin
 
+        /// Get the center of the mouse-constrained window viewport.
+        static member getMouseCenter (world : World) =
+            let viewportSize = world.WindowViewport.Bounds.Size
+            v2 (single viewportSize.X * 0.5f) (single viewportSize.Y * 0.5f)
+
+        /// Attempt to set the mouse position relative to the mouse-constrained window viewport.
+        static member trySetMousePosition (position : Vector2) (world : World) =
+            let boundsMin = world.WindowViewport.Bounds.Min
+            let positionWindow = position + v2 (single boundsMin.X) (single boundsMin.Y)
+            AmbientState.trySetMousePosition positionWindow world.AmbientState
+
         /// Get the 2d inset position of the mouse.
         static member getMousePosition2dInset (world : World) =
             let viewport = world.WindowViewport
