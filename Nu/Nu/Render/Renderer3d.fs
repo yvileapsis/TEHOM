@@ -1463,6 +1463,69 @@ type [<ReferenceEquality>] GlRenderer3d =
         Vector3.DistanceSquared (portal.SourceCenter, destinationCenter) <= 0.0001f &&
         MathF.Abs (Quaternion.Dot (portal.SourceRotation, destinationRotation)) >= 0.999f
 
+    static member private getPortalBounds (portal : RenderPortal3d) =
+        let right = portal.SourceRotation.Right * (portal.SourceHalfExtents.X + GlRenderer3d.PortalCompositeSurfaceOffset)
+        let up = portal.SourceRotation.Up * (portal.SourceHalfExtents.Y + GlRenderer3d.PortalCompositeSurfaceOffset)
+        let forward = portal.SourceRotation.Forward * GlRenderer3d.PortalCompositeSurfaceOffset
+        let corners =
+            [|portal.SourceCenter - right - up - forward
+              portal.SourceCenter - right - up + forward
+              portal.SourceCenter - right + up - forward
+              portal.SourceCenter - right + up + forward
+              portal.SourceCenter + right - up - forward
+              portal.SourceCenter + right - up + forward
+              portal.SourceCenter + right + up - forward
+              portal.SourceCenter + right + up + forward|]
+        let mutable min = corners[0]
+        let mutable max = corners[0]
+        for i in 1 .. dec corners.Length do
+            min <- Vector3.Min (min, corners[i])
+            max <- Vector3.Max (max, corners[i])
+        box3 min (max - min)
+
+    static member private portalIntersectsView (frustum : Frustum) (portal : RenderPortal3d) =
+        portal.SourceHalfExtents.X > 0.0f &&
+        portal.SourceHalfExtents.Y > 0.0f &&
+        frustum.Intersects (GlRenderer3d.getPortalBounds portal)
+
+    static member private tryGetPortalScissor (viewProjection : Matrix4x4) (geometryViewport : Viewport) (portal : RenderPortal3d) =
+        let resolution = geometryViewport.Bounds.Size
+        if resolution.X <= 0 || resolution.Y <= 0 then ValueNone
+        else
+            let right = portal.SourceRotation.Right * portal.SourceHalfExtents.X
+            let up = portal.SourceRotation.Up * portal.SourceHalfExtents.Y
+            let corners =
+                [|portal.SourceCenter - right - up
+                  portal.SourceCenter - right + up
+                  portal.SourceCenter + right - up
+                  portal.SourceCenter + right + up|]
+            let mutable valid = true
+            let mutable minX = Single.MaxValue
+            let mutable minY = Single.MaxValue
+            let mutable maxX = Single.MinValue
+            let mutable maxY = Single.MinValue
+            for corner in corners do
+                let clip = Vector4.Transform (Vector4 (corner, 1.0f), viewProjection)
+                if clip.W <= 0.0001f then valid <- false
+                else
+                    let invW = 1.0f / clip.W
+                    let screenX = (clip.X * invW + 1.0f) * 0.5f * single resolution.X
+                    let screenY = (clip.Y * invW + 1.0f) * 0.5f * single resolution.Y
+                    minX <- min minX screenX
+                    minY <- min minY screenY
+                    maxX <- max maxX screenX
+                    maxY <- max maxY screenY
+            if not valid then ValueSome struct (0, 0, resolution.X, resolution.Y)
+            else
+                let padding = 2
+                let minXi = Math.Clamp (int (MathF.Floor minX) - padding, 0, resolution.X)
+                let minYi = Math.Clamp (int (MathF.Floor minY) - padding, 0, resolution.Y)
+                let maxXi = Math.Clamp (int (MathF.Ceiling maxX) + padding, 0, resolution.X)
+                let maxYi = Math.Clamp (int (MathF.Ceiling maxY) + padding, 0, resolution.Y)
+                if maxXi > minXi && maxYi > minYi
+                then ValueSome struct (minXi, minYi, maxXi - minXi, maxYi - minYi)
+                else ValueNone
+
     static member private drawPortalQuad (viewProjection : single array) (viewPort : Vector2) (portal : RenderPortal3d) (texture : OpenGL.Texture.Texture) (renderer : GlRenderer3d) =
         let shader = renderer.PortalCompositeShader
         let model = GlRenderer3d.makePortalModelMatrix portal
@@ -1492,7 +1555,6 @@ type [<ReferenceEquality>] GlRenderer3d =
             OpenGL.Gl.Disable OpenGL.EnableCap.CullFace
             OpenGL.Gl.Disable OpenGL.EnableCap.Blend
             OpenGL.Gl.Disable OpenGL.EnableCap.StencilTest
-            OpenGL.Gl.Disable OpenGL.EnableCap.ScissorTest
             OpenGL.Gl.DepthMask false
             OpenGL.Gl.ColorMask (true, true, true, true)
             for portalComposite in portalComposites do
@@ -4818,50 +4880,63 @@ type [<ReferenceEquality>] GlRenderer3d =
                 found
             let releaseBuffer index =
                 if index >= 0 && index < usedBuffers.Length then usedBuffers[index] <- false
-            let rec renderPortalView (depth : int) (eyeCenter : Vector3) (eyeRotation : Quaternion) (portal : RenderPortal3d) =
+            let rec renderPortalView (depth : int) (eyeCenter : Vector3) (eyeRotation : Quaternion) (frustum : Frustum) (viewProjection : Matrix4x4) (portal : RenderPortal3d) =
                 if depth <= 0 then ValueNone
+                elif not (GlRenderer3d.portalIntersectsView frustum portal) then ValueNone
                 else
-                    match allocateBuffer () with
-                    | ValueSome bufferIndex ->
-                        let struct (portalEyeCenter, portalEyeRotation) =
-                            GlRenderer3d.transferPortalEye
-                                eyeCenter
-                                eyeRotation
-                                portal.SourceCenter
-                                portal.SourceRotation
-                                portal.DestinationCenter
-                                portal.DestinationRotation
-                        let childComposites =
-                            if depth > 1 then
-                                let children = List<PortalComposite> ()
-                                for childPortal in portals do
-                                    if not (GlRenderer3d.isPortalAtDestination portal.DestinationCenter portal.DestinationRotation childPortal) then
-                                        match renderPortalView (dec depth) portalEyeCenter portalEyeRotation childPortal with
-                                        | ValueSome childComposite -> children.Add childComposite
-                                        | ValueNone -> ()
-                                children.ToArray ()
-                            else [||]
-                        let portalView = Viewport.getView3d portalEyeCenter portalEyeRotation
-                        let portalViewSkyBox = Matrix4x4.CreateFromQuaternion portalEyeRotation.Inverted
-                        let portalFrustum = Viewport.getFrustum portalEyeCenter portalEyeRotation eyeFieldOfView geometryViewport
-                        let portalProjection = Viewport.getProjection3d eyeFieldOfView geometryViewport
-                        let portalViewProjection = portalView * portalProjection
-                        let portalInset = box2i v2iZero geometryViewport.Bounds.Size
-                        let portalClipPlane =
-                            GlRenderer3d.makePortalClipPlane portalEyeCenter portal.DestinationCenter portal.DestinationRotation
-                        let (texture, _, framebuffer) = renderer.PortalColorBuffers[bufferIndex]
-                        GlRenderer3d.renderGeometry
-                            portalFrustum portalFrustum portalFrustum NormalPass renderTasks renderer
-                            false None portalEyeCenter portalView portalViewSkyBox portalFrustum portalProjection portalViewProjection portalInset portalProjection (Some portalClipPlane) childComposites framebuffer
-                        for childComposite in childComposites do
-                            releaseBuffer childComposite.BufferIndex
-                        ValueSome { Portal = portal; Texture = texture; BufferIndex = bufferIndex }
+                    match GlRenderer3d.tryGetPortalScissor viewProjection geometryViewport portal with
+                    | ValueSome (struct (scissorX, scissorY, scissorW, scissorH)) ->
+                        match allocateBuffer () with
+                        | ValueSome bufferIndex ->
+                            let struct (portalEyeCenter, portalEyeRotation) =
+                                GlRenderer3d.transferPortalEye
+                                    eyeCenter
+                                    eyeRotation
+                                    portal.SourceCenter
+                                    portal.SourceRotation
+                                    portal.DestinationCenter
+                                    portal.DestinationRotation
+                            let portalView = Viewport.getView3d portalEyeCenter portalEyeRotation
+                            let portalViewSkyBox = Matrix4x4.CreateFromQuaternion portalEyeRotation.Inverted
+                            let portalFrustum = Viewport.getFrustum portalEyeCenter portalEyeRotation eyeFieldOfView geometryViewport
+                            let portalProjection = Viewport.getProjection3d eyeFieldOfView geometryViewport
+                            let portalViewProjection = portalView * portalProjection
+                            let childComposites =
+                                if depth > 1 then
+                                    let children = List<PortalComposite> ()
+                                    for childPortal in portals do
+                                        if not (GlRenderer3d.isPortalAtDestination portal.DestinationCenter portal.DestinationRotation childPortal) then
+                                            match renderPortalView (dec depth) portalEyeCenter portalEyeRotation portalFrustum portalViewProjection childPortal with
+                                            | ValueSome childComposite -> children.Add childComposite
+                                            | ValueNone -> ()
+                                    children.ToArray ()
+                                else [||]
+                            let portalInset = box2i v2iZero geometryViewport.Bounds.Size
+                            let portalClipPlane =
+                                GlRenderer3d.makePortalClipPlane portalEyeCenter portal.DestinationCenter portal.DestinationRotation
+                            let (texture, _, framebuffer) = renderer.PortalColorBuffers[bufferIndex]
+                            OpenGL.Gl.Enable OpenGL.EnableCap.ScissorTest
+                            OpenGL.Gl.Scissor (scissorX, scissorY, scissorW, scissorH)
+                            try
+                                GlRenderer3d.renderGeometry
+                                    portalFrustum portalFrustum portalFrustum NormalPass renderTasks renderer
+                                    false None portalEyeCenter portalView portalViewSkyBox portalFrustum portalProjection portalViewProjection portalInset portalProjection (Some portalClipPlane) childComposites framebuffer
+                            finally
+                                OpenGL.Gl.Disable OpenGL.EnableCap.ScissorTest
+                            for childComposite in childComposites do
+                                releaseBuffer childComposite.BufferIndex
+                            ValueSome { Portal = portal; Texture = texture; BufferIndex = bufferIndex }
+                        | ValueNone -> ValueNone
                     | ValueNone -> ValueNone
+            let view = Viewport.getView3d eyeCenter eyeRotation
+            let projection = Viewport.getProjection3d eyeFieldOfView geometryViewport
+            let viewProjection = view * projection
+            let frustum = Viewport.getFrustum eyeCenter eyeRotation eyeFieldOfView geometryViewport
             let composites = List<PortalComposite> ()
             for portal in portals do
                 let depth =
                     Math.Clamp (max 1 portal.RecursionLimit, 1, min GlRenderer3d.PortalRecursionLimitMax bufferLimitPerPath)
-                match renderPortalView depth eyeCenter eyeRotation portal with
+                match renderPortalView depth eyeCenter eyeRotation frustum viewProjection portal with
                 | ValueSome composite -> composites.Add composite
                 | ValueNone -> ()
             composites.ToArray ()

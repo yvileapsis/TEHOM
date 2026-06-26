@@ -62,9 +62,10 @@ module PortalApertureExtensions =
 module PortalLogic =
 
     let [<Literal>] TeleportCooldownUpdates = 5L
-    let [<Literal>] EntrySurfaceDistance = 0.16f
-    let [<Literal>] ExitRearmDistance = 0.35f
-    let [<Literal>] CapsulePadding = 0.38f
+    let [<Literal>] EntrySurfaceDistance = 0.05f
+    let [<Literal>] ExitSurfaceDistance = 0.04f
+    let [<Literal>] ExitRearmDistance = 0.25f
+    let [<Literal>] CapsulePadding = 0.18f
 
     let defaultHalfExtents = v2 0.75f 1.15f
 
@@ -116,8 +117,8 @@ module PortalLogic =
         then position + portal.Rotation.Forward * (minimumDistance - distance)
         else position
 
-    let private pointOnPortalEntrySurface (position : Vector3) (signedDistance : single) (portal : PortalSurface) =
-        position - portal.Rotation.Forward * (signedDistance - EntrySurfaceDistance)
+    let private pointOnPortalPlane (position : Vector3) (signedDistance : single) (portal : PortalSurface) =
+        position - portal.Rotation.Forward * signedDistance
 
     let isPointWithinAperture (point : Vector3) (portal : PortalSurface) padding =
         let offset = point - portal.Center
@@ -194,13 +195,13 @@ module PortalLogic =
                 match tracking.LastExitPortalOpt with
                 | Some exitPortalId when exitPortalId = portal.Id && currentDistance <= ExitRearmDistance -> true
                 | Some _ | None -> false
-            let crossing = previousDistance > EntrySurfaceDistance && currentDistance <= EntrySurfaceDistance
-            let alreadyPenetrating = previousDistance <= EntrySurfaceDistance && currentDistance <= 0.0f
-            let triggerPoint = pointOnPortalEntrySurface eyePosition currentDistance portal
+            let crossing = previousDistance > 0.0f && currentDistance <= 0.0f
+            let alreadyPenetrating = previousDistance <= 0.0f && currentDistance <= -EntrySurfaceDistance
+            let triggerPoint = pointOnPortalPlane eyePosition currentDistance portal
             if canTeleport && not exitingPortal && (crossing || alreadyPenetrating) && isPointWithinAperture triggerPoint portal CapsulePadding then
                 let transformedEyePosition =
                     transferPosition portal destination eyePosition
-                    |> fun position -> clampToPortalFront EntrySurfaceDistance position destination
+                    |> fun position -> clampToPortalFront ExitSurfaceDistance position destination
                 let transformedEyeOffset = transferDirection portal destination (eyePosition - playerPosition)
                 let transformedPosition = transformedEyePosition - transformedEyeOffset
                 let transformedRotation = transferRotation portal destination eyeRotation
