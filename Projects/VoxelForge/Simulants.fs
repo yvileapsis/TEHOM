@@ -24,3 +24,4 @@ module Simulants =
     let VoxelLevelChunk x y z = GameplayScene / ("VoxelLevel" + string x + "_" + string y + "_" + string z)
     let GameplayPlayer = GameplayScene / "GameplayPlayer"
     let RayPickMarker = GameplayScene / "RayPickMarker"
+    let SelectedBlockPreview = GameplayScene / "SelectedBlockPreview"

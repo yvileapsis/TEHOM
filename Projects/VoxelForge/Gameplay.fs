@@ -18,11 +18,16 @@ type VoxelChunk =
       BoxCount : int
       VoxelModel : VoxelModel AssetTag }
 
+type PlaceableBlock =
+    { Name : string
+      Voxels : struct (Vector3i * Color) array
+      PreviewModel : VoxelModel AssetTag }
+
 type VoxelLevel =
     { Bounds : Box3
       VoxelSize : Vector3
       OccupiedVoxels : Dictionary<Vector3i, Color>
-      GrassVoxels : struct (Vector3i * Color) array
+      PlaceableBlocks : PlaceableBlock array
       NextRevision : int ref }
 
 type VoxelAimPick =
@@ -37,7 +42,9 @@ type Gameplay =
       VoxelModelReady : bool
       VoxelLevelOpt : VoxelLevel option
       VoxelChunks : VoxelChunk array
-      AimPickOpt : VoxelAimPick option }
+      AimPickOpt : VoxelAimPick option
+      SelectedBlockIndex : int
+      SelectedBlockPreviewPositionOpt : Vector3 option }
 
     static member val empty =
         { GameplayTime = 0L
@@ -45,7 +52,9 @@ type Gameplay =
           VoxelModelReady = false
           VoxelLevelOpt = None
           VoxelChunks = [||]
-          AimPickOpt = None }
+          AimPickOpt = None
+          SelectedBlockIndex = 0
+          SelectedBlockPreviewPositionOpt = None }
 
     static member val initial =
         { Gameplay.empty with
@@ -61,7 +70,7 @@ type GameplayMessage =
 
 type GameplayCommand =
     | EnsureVoxelModel
-    | DestroyVoxelModel of VoxelChunk array
+    | DestroyVoxelModel of VoxelChunk array * PlaceableBlock array
     | DestroyBlock of VoxelAimPick
     | PlaceBlock of VoxelAimPick
     | StartQuitting
@@ -88,6 +97,18 @@ module GameplayLogic =
     let private levelOffset = v3 0.0f (levelSize.Y * 0.5f) 0.0f
     let private editReach = 6.0f
     let private editEpsilon = 0.01f
+    let private placeableBlockSources : struct (string * Image AssetTag) array =
+        [|struct ("Grass", Assets.Voxels.GrassBlock)
+          struct ("Dirt", Assets.Voxels.DirtBlock)
+          struct ("Stone", Assets.Voxels.StoneBlock)
+          struct ("Cobblestone", Assets.Voxels.CobblestoneBlock)
+          struct ("Sand", Assets.Voxels.SandBlock)
+          struct ("Oak Log", Assets.Voxels.OakLogBlock)
+          struct ("Oak Planks", Assets.Voxels.OakPlanksBlock)
+          struct ("Leaves", Assets.Voxels.LeavesBlock)
+          struct ("Glass", Assets.Voxels.GlassBlock)
+          struct ("Water", Assets.Voxels.WaterBlock)
+          struct ("Brick", Assets.Voxels.BrickBlock)|]
 
     let private freshRevisionSeed () =
         int (Gen.id64 % uint64 (Int32.MaxValue - 1))
@@ -101,6 +122,37 @@ module GameplayLogic =
         if dividend >= 0
         then dividend / divisor
         else -((-dividend + divisor - 1) / divisor)
+
+    let private wrapIndex count index =
+        if count <= 0 then 0
+        else
+            let index = index % count
+            if index < 0 then index + count else index
+
+    let updateSelectedBlockFromInput (gameplay : Gameplay) (world : World) =
+        match gameplay.VoxelLevelOpt with
+        | Some level when world.Advancing && level.PlaceableBlocks.Length > 0 ->
+            let scroll = World.getMouseScrolled world
+            let delta =
+                if scroll > 0.0f then -1
+                elif scroll < 0.0f then 1
+                else 0
+            if delta <> 0 then
+                { gameplay with SelectedBlockIndex = wrapIndex level.PlaceableBlocks.Length (gameplay.SelectedBlockIndex + delta) }
+            else gameplay
+        | Some _ | None -> gameplay
+
+    let updateSelectedBlockPreviewPosition (gameplay : Gameplay) (world : World) =
+        let rotation = world.Eye3dRotation
+        { gameplay with
+            SelectedBlockPreviewPositionOpt =
+                Some (world.Eye3dCenter + rotation.Forward * 1.25f + rotation.Right * 0.55f + rotation.Down * 0.35f) }
+
+    let tryGetSelectedBlock (gameplay : Gameplay) =
+        match gameplay.VoxelLevelOpt with
+        | Some level when level.PlaceableBlocks.Length > 0 ->
+            Some level.PlaceableBlocks[wrapIndex level.PlaceableBlocks.Length gameplay.SelectedBlockIndex]
+        | Some _ | None -> None
 
     let rec private translateBodyShape translation bodyShape =
         let translateTransform transformOpt =
@@ -223,9 +275,9 @@ module GameplayLogic =
                 for x in 0 .. dec minecraftBlockSideVoxels do
                     level.OccupiedVoxels.Remove (v3i (start.X + x) (start.Y + y) (start.Z + z)) |> ignore<bool>
 
-    let private placeGrassBlock (level : VoxelLevel) (blockCoord : Vector3i) =
+    let private placeBlock (level : VoxelLevel) (placeableBlock : PlaceableBlock) (blockCoord : Vector3i) =
         let start = blockStartCoord blockCoord
-        for struct (localCoord, albedo) in level.GrassVoxels do
+        for struct (localCoord, albedo) in placeableBlock.Voxels do
             let coord = v3i (start.X + localCoord.X) (start.Y + localCoord.Y) (start.Z + localCoord.Z)
             if isSourceCoordInBounds coord then
                 level.OccupiedVoxels[coord] <- albedo
@@ -309,6 +361,20 @@ module GameplayLogic =
                 for x in 0 .. dec levelChunkCounts.X do
                     v3i x y z|]
 
+    let private createPlaceableBlocks (world : World) =
+        [|for i in 0 .. dec placeableBlockSources.Length do
+            let struct (name, image) = placeableBlockSources[i]
+            match VoxelBake.tryBakeSliceAtlasVolume image sourceVoxelSize with
+            | Some volume ->
+                let previewModel = Assets.Voxels.PlaceableBlockPreview i
+                World.createUserDefinedVoxelModel volume.VoxelModel previewModel world
+                yield
+                    { Name = name
+                      Voxels = volume.OccupiedVoxels
+                      PreviewModel = previewModel }
+            | None ->
+                Log.warnOnce ("VoxelForge could not bake placeable block '" + name + "'.")|]
+
     let tryPickForward (gameplay : Gameplay) (world : World) =
         match gameplay.VoxelLevelOpt with
         | Some level ->
@@ -328,15 +394,14 @@ module GameplayLogic =
         | None -> None
 
     let createVoxelLevel (world : World) =
-        match
-            VoxelBake.tryBakeSliceAtlasVolume Assets.Voxels.Minecraft sourceVoxelSize,
-            VoxelBake.tryBakeSliceAtlasVolume Assets.Voxels.GrassBlock sourceVoxelSize with
-        | (Some minecraftLevel, Some grassBlock) ->
+        match VoxelBake.tryBakeSliceAtlasVolume Assets.Voxels.Minecraft sourceVoxelSize with
+        | Some minecraftLevel ->
+            let placeableBlocks = createPlaceableBlocks world
             let level =
                 { Bounds = minecraftLevel.VoxelModel.Bounds
                   VoxelSize = minecraftLevel.VoxelModel.VoxelSize
                   OccupiedVoxels = VoxelBake.occupiedDictionary minecraftLevel
-                  GrassVoxels = grassBlock.OccupiedVoxels
+                  PlaceableBlocks = placeableBlocks
                   NextRevision = ref (freshRevisionSeed ()) }
             let voxelChunks =
                 allChunkCoords
@@ -345,19 +410,18 @@ module GameplayLogic =
             let bodyShapeCount = voxelChunks |> Array.sumBy (fun (voxelChunk : VoxelChunk) -> voxelChunk.BoxCount)
             Log.infoOnce ("VoxelForge generated " + scstring voxelChunks.Length + " voxel chunks with " + scstring bodyShapeCount + " merged physics boxes.")
             Some (level, voxelChunks)
-        | (None, _) ->
+        | None ->
             Log.warnOnce "VoxelForge could not bake the minecraft voxel slice atlas."
-            None
-        | (_, None) ->
-            Log.warnOnce "VoxelForge could not bake the grass block voxel slice atlas."
             None
 
     let private destroyVoxelChunks (voxelChunks : VoxelChunk array) (world : World) =
         for chunk in voxelChunks do
             World.destroyUserDefinedVoxelModel chunk.VoxelModel world
 
-    let destroyVoxelModel (voxelChunks : VoxelChunk array) (world : World) =
+    let destroyVoxelModel (voxelChunks : VoxelChunk array) (placeableBlocks : PlaceableBlock array) (world : World) =
         destroyVoxelChunks voxelChunks world
+        for placeableBlock in placeableBlocks do
+            World.destroyUserDefinedVoxelModel placeableBlock.PreviewModel world
         for z in 0 .. dec levelChunkCounts.Z do
             for y in 0 .. dec levelChunkCounts.Y do
                 for x in 0 .. dec levelChunkCounts.X do
@@ -377,13 +441,13 @@ module GameplayLogic =
         | Some _ | None -> ()
 
     let tryPlaceBlock (pick : VoxelAimPick) (gameplay : Gameplay) (screen : Screen) (world : World) =
-        match gameplay.VoxelLevelOpt, pick.PlaceBlockCoordOpt with
-        | (Some level, Some placeBlockCoord)
+        match gameplay.VoxelLevelOpt, pick.PlaceBlockCoordOpt, tryGetSelectedBlock gameplay with
+        | (Some level, Some placeBlockCoord, Some placeableBlock)
             when world.Advancing &&
                  isBlockCoordInBounds placeBlockCoord &&
                  blockIsEmpty level placeBlockCoord &&
                  not (blockIntersectsPlayer level placeBlockCoord world) ->
-            placeGrassBlock level placeBlockCoord
+            placeBlock level placeableBlock placeBlockCoord
             let struct (rebuilt, chunksToDestroy) = rebuildChunks (affectedChunksForBlock placeBlockCoord) { gameplay with AimPickOpt = None } world
             screen.SetGameplay
                 { gameplay with
@@ -433,13 +497,19 @@ type GameplayDispatcher () =
             withSignal (signal EnsureVoxelModel) gameplay
 
         | FinishQuitting ->
-            withSignal (signal (DestroyVoxelModel gameplay.VoxelChunks)) Gameplay.empty
+            let placeableBlocks =
+                match gameplay.VoxelLevelOpt with
+                | Some level -> level.PlaceableBlocks
+                | None -> [||]
+            withSignal (signal (DestroyVoxelModel (gameplay.VoxelChunks, placeableBlocks))) Gameplay.empty
 
         | TimeUpdate ->
             let gameplay =
                 { gameplay with
                     GameplayTime = gameplay.GameplayTime + world.GameDelta.Updates
                     AimPickOpt = GameplayLogic.tryPickForward gameplay world }
+                |> fun gameplay -> GameplayLogic.updateSelectedBlockFromInput gameplay world
+                |> fun gameplay -> GameplayLogic.updateSelectedBlockPreviewPosition gameplay world
             if gameplay.GameplayState = Playing && not gameplay.VoxelModelReady then
                 withSignal (signal EnsureVoxelModel) { gameplay with VoxelModelReady = true }
             else just gameplay
@@ -465,13 +535,24 @@ type GameplayDispatcher () =
                         VoxelModelReady = true
                         VoxelLevelOpt = Some voxelLevel
                         VoxelChunks = voxelChunks
-                        AimPickOpt = None }
+                        AimPickOpt = None
+                        SelectedBlockIndex = 0
+                        SelectedBlockPreviewPositionOpt = None }
                     world
             | None ->
-                screen.SetGameplay { gameplay with GameplayState = Playing; VoxelModelReady = true; VoxelLevelOpt = None; VoxelChunks = [||]; AimPickOpt = None } world
+                screen.SetGameplay
+                    { gameplay with
+                        GameplayState = Playing
+                        VoxelModelReady = true
+                        VoxelLevelOpt = None
+                        VoxelChunks = [||]
+                        AimPickOpt = None
+                        SelectedBlockIndex = 0
+                        SelectedBlockPreviewPositionOpt = None }
+                    world
             if world.Unaccompanied then GameplayLogic.setInitialCamera world
-        | DestroyVoxelModel voxelChunks ->
-            GameplayLogic.destroyVoxelModel voxelChunks world
+        | DestroyVoxelModel (voxelChunks, placeableBlocks) ->
+            GameplayLogic.destroyVoxelModel voxelChunks placeableBlocks world
         | DestroyBlock pick ->
             GameplayLogic.tryDestroyBlock pick gameplay screen world
         | PlaceBlock pick ->
@@ -505,6 +586,24 @@ type GameplayDispatcher () =
 
                  Content.entity<FirstPersonPlayerDispatcher> Simulants.GameplayPlayer.Name
                     [Entity.Position == v3 0.0f 18.0f 0.0f]
+
+                 match gameplay.SelectedBlockPreviewPositionOpt, GameplayLogic.tryGetSelectedBlock gameplay with
+                 | Some position, Some placeableBlock ->
+                    Content.voxel Simulants.SelectedBlockPreview.Name
+                        [Entity.Position := position
+                         Entity.Size := v3One
+                         Entity.Scale := v3Dup 0.35f
+                         Entity.VoxelModel := placeableBlock.PreviewModel
+                         Entity.Static == true
+                         Entity.MaterialProperties ==
+                            { MaterialProperties.empty with
+                                RoughnessOpt = ValueSome 0.88f
+                                MetallicOpt = ValueSome 0.0f
+                                AmbientOcclusionOpt = ValueSome 1.0f
+                                EmissionOpt = ValueSome 0.0f
+                                ClearCoatOpt = ValueSome 0.0f
+                                ClearCoatRoughnessOpt = ValueSome 1.0f }]
+                 | _, _ -> ()
 
                  match gameplay.AimPickOpt with
                  | Some pick ->
