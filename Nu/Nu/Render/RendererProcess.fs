@@ -39,6 +39,9 @@ type RendererProcess =
 
         /// Potential fast-path for rendering voxel models.
         abstract RenderVoxelModelFast : Matrix4x4 inref * bool * Presence * MaterialProperties inref * VoxelModel AssetTag * RenderPass -> unit
+
+        /// Potential fast-path for rendering multiple voxel models.
+        abstract RenderVoxelModelsFast : (Matrix4x4 * bool * Presence * MaterialProperties * VoxelModel AssetTag) SList * RenderPass -> unit
         
         /// Potential fast-path for rendering animated models.
         abstract RenderAnimatedModelFast : Matrix4x4 inref * bool * Presence * Box2 voption * MaterialProperties inref * Matrix4x4 array * AnimatedModel AssetTag * Map<int, single> * int Set * DepthTest * RenderType * RenderPass -> unit
@@ -65,6 +68,30 @@ type RendererProcess =
         abstract Terminate : unit -> unit
         end
 
+type private VoxelModelBatchEntry = Matrix4x4 * bool * Presence * MaterialProperties * VoxelModel AssetTag
+
+[<RequireQualifiedAccess>]
+module private RendererProcessVoxelBatch =
+
+    let add (batches : Dictionary<RenderPass, ResizeArray<VoxelModelBatchEntry>>) (modelMatrix : Matrix4x4) castShadow presence (materialProperties : MaterialProperties) (voxelModel : VoxelModel AssetTag) renderPass =
+        let mutable batch = Unchecked.defaultof<ResizeArray<VoxelModelBatchEntry>>
+        if batches.TryGetValue (renderPass, &batch) then
+            batch.Add (modelMatrix, castShadow, presence, materialProperties, voxelModel)
+        else
+            let batch = ResizeArray<VoxelModelBatchEntry> ()
+            batch.Add (modelMatrix, castShadow, presence, materialProperties, voxelModel)
+            batches.Add (renderPass, batch)
+
+    let addMany (batches : Dictionary<RenderPass, ResizeArray<VoxelModelBatchEntry>>) (voxelModels : VoxelModelBatchEntry SList) renderPass =
+        for (modelMatrix, castShadow, presence, materialProperties, voxelModel) in voxelModels do
+            add batches modelMatrix castShadow presence materialProperties voxelModel renderPass
+
+    let flush (batches : Dictionary<RenderPass, ResizeArray<VoxelModelBatchEntry>>) (messages3d : RenderMessage3d List) =
+        for batch in batches do
+            if batch.Value.Count > 0 then
+                messages3d.Add (RenderVoxelModels { VoxelModels = SList.ofSeq batch.Value; RenderPass = batch.Key })
+        batches.Clear ()
+
 /// A non-threaded render process.
 type RendererInline () =
 
@@ -74,6 +101,7 @@ type RendererInline () =
     let mutable messages3d = List ()
     let mutable messages2d = List ()
     let mutable messagesImGui = List ()
+    let voxelModelBatches3d = Dictionary<RenderPass, ResizeArray<VoxelModelBatchEntry>> HashIdentity.Structural
     let mutable dependenciesOpt = Option<SDL_GLContextState nativeptr * Renderer3d * Renderer2d * RendererImGui>.None
     let assetTextureRequests = ConcurrentDictionary<AssetTag, unit> HashIdentity.Structural
     let assetTextureOpts = ConcurrentDictionary<AssetTag, uint32 voption> HashIdentity.Structural
@@ -153,7 +181,12 @@ type RendererInline () =
 
         member ri.RenderVoxelModelFast (modelMatrix, castShadow, presence, materialProperties, voxelModel, renderPass) =
             match dependenciesOpt with
-            | Some _ -> messages3d.Add (RenderVoxelModel { ModelMatrix = modelMatrix; CastShadow = castShadow; Presence = presence; MaterialProperties = materialProperties; VoxelModel = voxelModel; RenderPass = renderPass })
+            | Some _ -> RendererProcessVoxelBatch.add voxelModelBatches3d modelMatrix castShadow presence materialProperties voxelModel renderPass
+            | None -> raise (InvalidOperationException "Renderers are not yet or are no longer valid.")
+
+        member ri.RenderVoxelModelsFast (voxelModels, renderPass) =
+            match dependenciesOpt with
+            | Some _ -> RendererProcessVoxelBatch.addMany voxelModelBatches3d voxelModels renderPass
             | None -> raise (InvalidOperationException "Renderers are not yet or are no longer valid.")
 
         member ri.RenderAnimatedModelFast (modelMatrix, castShadow, presence, insetOpt, materialProperties, boneTransforms, animatedModel, subsortOffsets, drsIndices, depthTest, renderType, renderPass) =
@@ -178,6 +211,7 @@ type RendererInline () =
 
         member ri.ClearMessages () =
             messages3d.Clear ()
+            voxelModelBatches3d.Clear ()
             messages2d.Clear ()
             messagesImGui.Clear ()
 
@@ -190,6 +224,7 @@ type RendererInline () =
                 OpenGL.Hl.Assert ()
 
                 // render 3d
+                RendererProcessVoxelBatch.flush voxelModelBatches3d messages3d
                 renderer3d.Render frustumInterior frustumExterior frustumImposter eye3dCenter eye3dRotation eye3dFieldOfView geometryViewport windowViewport messages3d
                 messages3d.Clear ()
                 OpenGL.Hl.Assert ()
@@ -254,6 +289,9 @@ type RendererThread () =
     let [<VolatileField>] mutable renderer3dConfig = Renderer3dConfig.defaultConfig
     let [<VolatileField>] mutable messageBufferIndex = 0
     let messageBuffers3d = [|List (); List ()|]
+    let voxelModelBatchBuffers3d =
+        [|Dictionary<RenderPass, ResizeArray<VoxelModelBatchEntry>> HashIdentity.Structural
+          Dictionary<RenderPass, ResizeArray<VoxelModelBatchEntry>> HashIdentity.Structural|]
     let messageBuffers2d = [|List (); List ()|]
     let messageBuffersImGui = [|List (); List ()|]
     let assetTextureRequests = ConcurrentDictionary<AssetTag, unit> HashIdentity.Structural
@@ -650,17 +688,11 @@ type RendererThread () =
 
         member rt.RenderVoxelModelFast (modelMatrix, castShadow, presence, materialProperties, voxelModel, renderPass) =
             if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
-            let cachedVoxelModelMessage = allocVoxelModelMessage ()
-            match cachedVoxelModelMessage with
-            | RenderCachedVoxelModel cachedMessage ->
-                cachedMessage.CachedVoxelModelMatrix <- modelMatrix
-                cachedMessage.CachedVoxelModelCastShadow <- castShadow
-                cachedMessage.CachedVoxelModelPresence <- presence
-                cachedMessage.CachedVoxelModelMaterialProperties <- materialProperties
-                cachedMessage.CachedVoxelModel <- voxelModel
-                cachedMessage.CachedVoxelModelRenderPass <- renderPass
-                messageBuffers3d[messageBufferIndex].Add cachedVoxelModelMessage
-            | _ -> failwithumf ()
+            RendererProcessVoxelBatch.add voxelModelBatchBuffers3d[messageBufferIndex] modelMatrix castShadow presence materialProperties voxelModel renderPass
+
+        member rt.RenderVoxelModelsFast (voxelModels, renderPass) =
+            if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
+            RendererProcessVoxelBatch.addMany voxelModelBatchBuffers3d[messageBufferIndex] voxelModels renderPass
 
         member rt.RenderAnimatedModelFast (modelMatrix, castShadow, presence, insetOpt, materialProperties, boneTransforms, animatedModel, subsortOffsets, drsIndices, depthTest, renderType, renderPass) =
             if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
@@ -738,16 +770,19 @@ type RendererThread () =
         member rt.ClearMessages () =
             if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
             messageBuffers3d[messageBufferIndex].Clear ()
+            voxelModelBatchBuffers3d[messageBufferIndex].Clear ()
             messageBuffers2d[messageBufferIndex].Clear ()
             messageBuffersImGui[messageBufferIndex].Clear ()
 
         member rt.SubmitMessages frustumInterior frustumExterior frustumImposter eye3dCenter eye3dRotation eye3dFieldOfView eye2dCenter eye2dSize eyeMargin geometryViewport windowViewport drawData =
             if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
+            RendererProcessVoxelBatch.flush voxelModelBatchBuffers3d[messageBufferIndex] messageBuffers3d[messageBufferIndex]
             let messages3d = messageBuffers3d[messageBufferIndex]
             let messages2d = messageBuffers2d[messageBufferIndex]
             let messagesImGui = messageBuffersImGui[messageBufferIndex]
             messageBufferIndex <- if messageBufferIndex = 0 then 1 else 0
             messageBuffers3d[messageBufferIndex].Clear ()
+            voxelModelBatchBuffers3d[messageBufferIndex].Clear ()
             messageBuffers2d[messageBufferIndex].Clear ()
             messageBuffersImGui[messageBufferIndex].Clear ()
             submissionOpt <- Some (frustumInterior, frustumExterior, frustumImposter, messages3d, messages2d, messagesImGui, eye3dCenter, eye3dRotation, eye3dFieldOfView, eye2dCenter, eye2dSize, eyeMargin, geometryViewport, windowViewport, drawData)

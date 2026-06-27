@@ -629,6 +629,11 @@ type RenderVoxelModel =
       VoxelModel : VoxelModel AssetTag
       RenderPass : RenderPass }
 
+/// Describes how to render multiple voxel models.
+type RenderVoxelModels =
+    { VoxelModels : (Matrix4x4 * bool * Presence * MaterialProperties * VoxelModel AssetTag) SList
+      RenderPass : RenderPass }
+
 /// Describes how to render a portal aperture.
 type RenderPortal3d =
     { SourcePortalId : int64
@@ -892,6 +897,7 @@ type RenderMessage3d =
     | RenderCachedStaticModel of CachedStaticModelMessage
     | RenderCachedStaticModelSurface of CachedStaticModelSurfaceMessage
     | RenderVoxelModel of RenderVoxelModel
+    | RenderVoxelModels of RenderVoxelModels
     | RenderCachedVoxelModel of CachedVoxelModelMessage
     | RenderPortal3d of RenderPortal3d
     | RenderUserDefinedStaticModel of RenderUserDefinedStaticModel
@@ -3361,6 +3367,10 @@ type [<ReferenceEquality>] GlRenderer3d =
             | RenderVoxelModel rvm ->
                 let renderTasks = GlRenderer3d.getRenderTasks rvm.RenderPass renderer
                 GlRenderer3d.categorizeVoxelModel (frustumInterior, frustumExterior, frustumImposter, &rvm.ModelMatrix, rvm.CastShadow, rvm.Presence, &rvm.MaterialProperties, rvm.VoxelModel, rvm.RenderPass, renderTasks, renderer)
+            | RenderVoxelModels rvms ->
+                let renderTasks = GlRenderer3d.getRenderTasks rvms.RenderPass renderer
+                for (model, castShadow, presence, properties, voxelModel) in rvms.VoxelModels do
+                    GlRenderer3d.categorizeVoxelModel (frustumInterior, frustumExterior, frustumImposter, &model, castShadow, presence, &properties, voxelModel, rvms.RenderPass, renderTasks, renderer)
             | RenderCachedVoxelModel cvmm ->
                 let renderTasks = GlRenderer3d.getRenderTasks cvmm.CachedVoxelModelRenderPass renderer
                 GlRenderer3d.categorizeVoxelModel (frustumInterior, frustumExterior, frustumImposter, &cvmm.CachedVoxelModelMatrix, cvmm.CachedVoxelModelCastShadow, cvmm.CachedVoxelModelPresence, &cvmm.CachedVoxelModelMaterialProperties, cvmm.CachedVoxelModel, cvmm.CachedVoxelModelRenderPass, renderTasks, renderer)
@@ -3771,27 +3781,12 @@ type [<ReferenceEquality>] GlRenderer3d =
              instanceFields, lightShadowSamples, lightShadowBias, lightShadowSampleScalar, lightShadowExponent, lightShadowDensity,
              materials, geometry, shader, vao)
 
-    static member private renderPhysicallyBasedVoxel
-        (viewArray,
-         projectionArray,
-         viewProjectionArray,
-         viewInverseArray,
-         projectionInverseArray,
-         viewPort,
-         eyeCenter,
-         clipPlane : Vector4,
-         lightShadowExponent,
-         model : Matrix4x4 inref,
+    static member private blitPhysicallyBasedVoxelFields
+        (model : Matrix4x4 inref,
          presence : Presence,
          properties : MaterialProperties inref,
          voxelModel : OpenGL.PhysicallyBased.PhysicallyBasedVoxelModel,
-         shader,
-         vao,
          renderer : GlRenderer3d) =
-
-        // ensure we have a large enough instance fields array
-        if renderer.InstanceFields.Length < Constants.Render.InstanceFieldCount then
-            renderer.InstanceFields <- Array.zeroCreate Constants.Render.InstanceFieldCount
 
         // blit parameters to instance fields
         model.ToArray (renderer.InstanceFields, 0)
@@ -3825,10 +3820,59 @@ type [<ReferenceEquality>] GlRenderer3d =
         renderer.InstanceFields[38] <- 0.0f
         renderer.InstanceFields[39] <- 0.0f
 
-        // draw voxel model
-        OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxel
-            (viewArray, projectionArray, viewProjectionArray, viewInverseArray, projectionInverseArray, viewPort, eyeCenter,
-             clipPlane, renderer.InstanceFields, lightShadowExponent, voxelModel, shader, vao)
+    static member private renderPhysicallyBasedVoxels
+        (viewArray,
+         projectionArray,
+         viewProjectionArray,
+         viewInverseArray,
+         projectionInverseArray,
+         viewPort,
+         eyeCenter,
+         clipPlane : Vector4,
+         lightShadowExponent,
+         voxelTasks : struct (Matrix4x4 * bool * Presence * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedVoxelModel) List,
+         shader,
+         vao,
+         renderer : GlRenderer3d) =
+
+        if voxelTasks.Count > 0 then
+            if renderer.InstanceFields.Length < Constants.Render.InstanceFieldCount then
+                renderer.InstanceFields <- Array.zeroCreate Constants.Render.InstanceFieldCount
+            OpenGL.PhysicallyBased.BeginPhysicallyBasedVoxel
+                (viewArray, projectionArray, viewProjectionArray, viewInverseArray, projectionInverseArray, viewPort, eyeCenter, clipPlane, lightShadowExponent, shader, vao)
+            for struct (model, _, presence, properties, voxelModel) in voxelTasks do
+                GlRenderer3d.blitPhysicallyBasedVoxelFields (&model, presence, &properties, voxelModel, renderer)
+                OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxelGeometry (renderer.InstanceFields, voxelModel, vao)
+            OpenGL.PhysicallyBased.EndPhysicallyBasedVoxel (shader, vao)
+
+    static member private renderPhysicallyBasedVoxelShadows
+        (viewArray,
+         projectionArray,
+         viewProjectionArray,
+         viewInverseArray,
+         projectionInverseArray,
+         viewPort,
+         eyeCenter,
+         lightShadowExponent,
+         lightFrustum : Frustum,
+         voxelTasks : struct (Matrix4x4 * bool * Presence * MaterialProperties * OpenGL.PhysicallyBased.PhysicallyBasedVoxelModel) List,
+         shader,
+         vao,
+         renderer : GlRenderer3d) =
+
+        if voxelTasks.Count > 0 then
+            if renderer.InstanceFields.Length < Constants.Render.InstanceFieldCount then
+                renderer.InstanceFields <- Array.zeroCreate Constants.Render.InstanceFieldCount
+            let mutable begun = false
+            for struct (model, castShadow, presence, properties, voxelModel) in voxelTasks do
+                if castShadow && lightFrustum.Intersects (voxelModel.VoxelGeometry.Bounds.Transform model) then
+                    if not begun then
+                        OpenGL.PhysicallyBased.BeginPhysicallyBasedVoxel
+                            (viewArray, projectionArray, viewProjectionArray, viewInverseArray, projectionInverseArray, viewPort, eyeCenter, v4Zero, lightShadowExponent, shader, vao)
+                        begun <- true
+                    GlRenderer3d.blitPhysicallyBasedVoxelFields (&model, presence, &properties, voxelModel, renderer)
+                    OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxelGeometry (renderer.InstanceFields, voxelModel, vao)
+            if begun then OpenGL.PhysicallyBased.EndPhysicallyBasedVoxel (shader, vao)
 
     static member private renderShadow
         lightOrigin
@@ -3934,11 +3978,9 @@ type [<ReferenceEquality>] GlRenderer3d =
                     descriptor geometry shadowTerrainShader renderer.PhysicallyBasedTerrainVao renderer
 
         // attempt to deferred render voxel shadows
-        for struct (model, castShadow, presence, properties, voxelModel) in renderTasks.DeferredVoxels do
-            if castShadow && lightFrustum.Intersects (voxelModel.VoxelGeometry.Bounds.Transform model) then
-                GlRenderer3d.renderPhysicallyBasedVoxel
-                    (lightViewArray, lightProjectionArray, lightViewProjectionArray, lightViewInverseArray, lightProjectionInverseArray, lightViewPort, lightOrigin, v4Zero, renderer.LightingConfig.LightShadowExponent,
-                     &model, presence, &properties, voxelModel, shadowVoxelShader, renderer.PhysicallyBasedVoxelVao, renderer)
+        GlRenderer3d.renderPhysicallyBasedVoxelShadows
+            (lightViewArray, lightProjectionArray, lightViewProjectionArray, lightViewInverseArray, lightProjectionInverseArray, lightViewPort, lightOrigin,
+             renderer.LightingConfig.LightShadowExponent, lightFrustum, renderTasks.DeferredVoxels, shadowVoxelShader, renderer.PhysicallyBasedVoxelVao, renderer)
 
         // forward render surface shadows
         for struct (model, castShadow, presence, texCoordsOffset, properties, boneTransformsOpt, surface, _) in renderTasks.ForwardSorted do
@@ -4325,10 +4367,9 @@ type [<ReferenceEquality>] GlRenderer3d =
 
         // render voxels deferred
         let geometryViewPort = v2 (single geometryResolution.X) (single geometryResolution.Y)
-        for struct (model, _, presence, properties, voxelModel) in renderTasks.DeferredVoxels do
-            GlRenderer3d.renderPhysicallyBasedVoxel
-                (viewArray, geometryProjectionArray, geometryViewProjectionArray, viewInverseArray, geometryProjectionInverseArray, geometryViewPort, eyeCenter, voxelClipPlane, renderer.LightingConfig.LightShadowExponent,
-                 &model, presence, &properties, voxelModel, renderer.PhysicallyBasedShaders.DeferredVoxelShader, renderer.PhysicallyBasedVoxelVao, renderer)
+        GlRenderer3d.renderPhysicallyBasedVoxels
+            (viewArray, geometryProjectionArray, geometryViewProjectionArray, viewInverseArray, geometryProjectionInverseArray, geometryViewPort, eyeCenter, voxelClipPlane,
+             renderer.LightingConfig.LightShadowExponent, renderTasks.DeferredVoxels, renderer.PhysicallyBasedShaders.DeferredVoxelShader, renderer.PhysicallyBasedVoxelVao, renderer)
 
         // run light mapping pass
         let lightMappingTexture =

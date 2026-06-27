@@ -36,7 +36,12 @@ type VoxelChunk =
       BoxCount : int
       OcclusionBoundsOpt : Box3 option
       SolidBlockCoords : Vector3i array
-      VoxelModel : VoxelModel AssetTag }
+      SplatCount : int
+      VoxelModelOpt : VoxelModel AssetTag option
+      OpaqueBlockCoords : Vector3i array
+      OpaqueOccluderBoxes : Box3 array
+      OpaqueFaceMask : int
+      FullOpaqueChunk : bool }
 
 type VoxelBlockTemplate =
     { Name : string

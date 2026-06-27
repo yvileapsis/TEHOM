@@ -47,6 +47,10 @@ module WorldRender =
         static member renderVoxelModelFast (modelMatrix : Matrix4x4 inref, castShadow, presence, materialProperties : MaterialProperties inref, voxelModel, renderPass, world) =
             (World.getRendererProcess world).RenderVoxelModelFast (&modelMatrix, castShadow, presence, &materialProperties, voxelModel, renderPass)
 
+        /// Send a message to the render system to render multiple voxel models using a fast path.
+        static member renderVoxelModelsFast (voxelModels, renderPass, world) =
+            (World.getRendererProcess world).RenderVoxelModelsFast (voxelModels, renderPass)
+
         /// Send a message to the render system to render an animated model using a fast path.
         static member renderAnimatedModelFast (modelMatrix : Matrix4x4 inref, castShadow, presence, insetOpt, materialProperties : MaterialProperties inref, animations, animatedModel, subsortOffsets, drsIndices, depthTest, renderType, renderPass, world) =
             (World.getRendererProcess world).RenderAnimatedModelFast (&modelMatrix, castShadow, presence, insetOpt, &materialProperties, animations, animatedModel, subsortOffsets, drsIndices, depthTest, renderType, renderPass)

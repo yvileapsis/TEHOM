@@ -103,14 +103,149 @@ module VoxelRuntime =
             y <- inc y
         solidCount >= solidTarget
 
+    let private isOpaqueCell (cell : VoxelCell) =
+        cell.Solid &&
+        match cell.Material with
+        | Grass | Dirt | Stone | Sand | Wood | Ore | Brick | Crafted -> true
+        | Leaves | Glass | Water | Lava -> false
+
+    let private blockFaceOpaque (level : VoxelLevel) (blockCoord : Vector3i) faceIndex =
+        let side = max 1 level.BlockSideVoxels
+        let start = VoxelWorld.blockStartCoord level blockCoord
+        let isOpaque x y z =
+            match VoxelWorld.tryGetCell level (v3i (start.X + x) (start.Y + y) (start.Z + z)) with
+            | Some cell when isOpaqueCell cell -> true
+            | Some _ | None -> false
+        let mutable opaque = true
+        match faceIndex with
+        | 0 ->
+            let mutable y = 0
+            while opaque && y < side do
+                let mutable z = 0
+                while opaque && z < side do
+                    opaque <- isOpaque 0 y z
+                    z <- inc z
+                y <- inc y
+        | 1 ->
+            let mutable y = 0
+            while opaque && y < side do
+                let mutable z = 0
+                while opaque && z < side do
+                    opaque <- isOpaque (dec side) y z
+                    z <- inc z
+                y <- inc y
+        | 2 ->
+            let mutable z = 0
+            while opaque && z < side do
+                let mutable x = 0
+                while opaque && x < side do
+                    opaque <- isOpaque x 0 z
+                    x <- inc x
+                z <- inc z
+        | 3 ->
+            let mutable z = 0
+            while opaque && z < side do
+                let mutable x = 0
+                while opaque && x < side do
+                    opaque <- isOpaque x (dec side) z
+                    x <- inc x
+                z <- inc z
+        | 4 ->
+            let mutable y = 0
+            while opaque && y < side do
+                let mutable x = 0
+                while opaque && x < side do
+                    opaque <- isOpaque x y 0
+                    x <- inc x
+                y <- inc y
+        | 5 ->
+            let mutable y = 0
+            while opaque && y < side do
+                let mutable x = 0
+                while opaque && x < side do
+                    opaque <- isOpaque x y (dec side)
+                    x <- inc x
+                y <- inc y
+        | _ -> opaque <- false
+        opaque
+
+    let private blockIsOpaqueOccluder level blockCoord =
+        blockFaceOpaque level blockCoord 0 &&
+        blockFaceOpaque level blockCoord 1 &&
+        blockFaceOpaque level blockCoord 2 &&
+        blockFaceOpaque level blockCoord 3 &&
+        blockFaceOpaque level blockCoord 4 &&
+        blockFaceOpaque level blockCoord 5
+
+    let private computeFaceMask (filled : bool[,,]) (blockCounts : Vector3i) =
+        let mutable mask = 0
+        let mutable faceCovered = blockCounts.X > 0 && blockCounts.Y > 0 && blockCounts.Z > 0
+        let mutable y = 0
+        while faceCovered && y < blockCounts.Y do
+            let mutable z = 0
+            while faceCovered && z < blockCounts.Z do
+                faceCovered <- filled[0, y, z]
+                z <- inc z
+            y <- inc y
+        if faceCovered then mask <- mask ||| 1
+        faceCovered <- blockCounts.X > 0 && blockCounts.Y > 0 && blockCounts.Z > 0
+        y <- 0
+        while faceCovered && y < blockCounts.Y do
+            let mutable z = 0
+            while faceCovered && z < blockCounts.Z do
+                faceCovered <- filled[dec blockCounts.X, y, z]
+                z <- inc z
+            y <- inc y
+        if faceCovered then mask <- mask ||| 2
+        faceCovered <- blockCounts.X > 0 && blockCounts.Y > 0 && blockCounts.Z > 0
+        let mutable z = 0
+        while faceCovered && z < blockCounts.Z do
+            let mutable x = 0
+            while faceCovered && x < blockCounts.X do
+                faceCovered <- filled[x, 0, z]
+                x <- inc x
+            z <- inc z
+        if faceCovered then mask <- mask ||| 4
+        faceCovered <- blockCounts.X > 0 && blockCounts.Y > 0 && blockCounts.Z > 0
+        z <- 0
+        while faceCovered && z < blockCounts.Z do
+            let mutable x = 0
+            while faceCovered && x < blockCounts.X do
+                faceCovered <- filled[x, dec blockCounts.Y, z]
+                x <- inc x
+            z <- inc z
+        if faceCovered then mask <- mask ||| 8
+        faceCovered <- blockCounts.X > 0 && blockCounts.Y > 0 && blockCounts.Z > 0
+        y <- 0
+        while faceCovered && y < blockCounts.Y do
+            let mutable x = 0
+            while faceCovered && x < blockCounts.X do
+                faceCovered <- filled[x, y, 0]
+                x <- inc x
+            y <- inc y
+        if faceCovered then mask <- mask ||| 16
+        faceCovered <- blockCounts.X > 0 && blockCounts.Y > 0 && blockCounts.Z > 0
+        y <- 0
+        while faceCovered && y < blockCounts.Y do
+            let mutable x = 0
+            while faceCovered && x < blockCounts.X do
+                faceCovered <- filled[x, y, dec blockCounts.Z]
+                x <- inc x
+            y <- inc y
+        if faceCovered then mask <- mask ||| 32
+        mask
+
     let private chunkBodyShapeFromBlocks (level : VoxelLevel) (chunkCoord : Vector3i) (renderCenter : Vector3) =
         match tryChunkBlockRange level chunkCoord with
         | Some (struct (minBlock, maxBlock)) ->
             let blockCounts = maxBlock - minBlock + v3iOne
             let filled = Array3D.zeroCreate<bool> blockCounts.X blockCounts.Y blockCounts.Z
+            let opaque = Array3D.zeroCreate<bool> blockCounts.X blockCounts.Y blockCounts.Z
             let visited = Array3D.zeroCreate<bool> blockCounts.X blockCounts.Y blockCounts.Z
             let solidBlockCoords = ResizeArray<Vector3i> ()
+            let opaqueBlockCoords = ResizeArray<Vector3i> ()
             let mutable occupiedAny = false
+            let mutable opaqueAny = false
             for y in 0 .. dec blockCounts.Y do
                 for z in 0 .. dec blockCounts.Z do
                     for x in 0 .. dec blockCounts.X do
@@ -119,6 +254,10 @@ module VoxelRuntime =
                             filled[x, y, z] <- true
                             solidBlockCoords.Add blockCoord
                             occupiedAny <- true
+                        if blockIsOpaqueOccluder level blockCoord then
+                            opaque[x, y, z] <- true
+                            opaqueBlockCoords.Add blockCoord
+                            opaqueAny <- true
             if occupiedAny then
                 let canUse x y z = filled[x, y, z] && not visited[x, y, z]
                 let canGrowZ x y z sizeX sizeZ =
@@ -186,18 +325,80 @@ module VoxelRuntime =
                     if bodyShapes.Count > 0
                     then Some (box3 occlusionMin (occlusionMax - occlusionMin))
                     else None
-                struct (BodyShapes (bodyShapes |> Seq.toList), bodyShapes.Count, occlusionBoundsOpt, solidBlockCoords.ToArray ())
-            else struct (EmptyShape, 0, None, [||])
-        | None -> struct (EmptyShape, 0, None, [||])
+                let opaqueOccluderBoxes =
+                    if opaqueAny then
+                        let visitedOpaque = Array3D.zeroCreate<bool> blockCounts.X blockCounts.Y blockCounts.Z
+                        let canUseOpaque x y z = opaque[x, y, z] && not visitedOpaque[x, y, z]
+                        let canGrowOpaqueZ x y z sizeX sizeZ =
+                            let z = z + sizeZ
+                            let mutable canGrow = z < blockCounts.Z
+                            let mutable ix = 0
+                            while canGrow && ix < sizeX do
+                                canGrow <- canUseOpaque (x + ix) y z
+                                ix <- inc ix
+                            canGrow
+                        let canGrowOpaqueY x y z sizeX sizeY sizeZ =
+                            let y = y + sizeY
+                            let mutable canGrow = y < blockCounts.Y
+                            let mutable iz = 0
+                            while canGrow && iz < sizeZ do
+                                let mutable ix = 0
+                                while canGrow && ix < sizeX do
+                                    canGrow <- canUseOpaque (x + ix) y (z + iz)
+                                    ix <- inc ix
+                                iz <- inc iz
+                            canGrow
+                        [|for y in 0 .. dec blockCounts.Y do
+                            for z in 0 .. dec blockCounts.Z do
+                                for x in 0 .. dec blockCounts.X do
+                                    if canUseOpaque x y z then
+                                        let mutable sizeX = 1
+                                        while x + sizeX < blockCounts.X && canUseOpaque (x + sizeX) y z do
+                                            sizeX <- inc sizeX
+                                        let mutable sizeZ = 1
+                                        while canGrowOpaqueZ x y z sizeX sizeZ do
+                                            sizeZ <- inc sizeZ
+                                        let mutable sizeY = 1
+                                        while canGrowOpaqueY x y z sizeX sizeY sizeZ do
+                                            sizeY <- inc sizeY
+                                        for iy in 0 .. dec sizeY do
+                                            for iz in 0 .. dec sizeZ do
+                                                for ix in 0 .. dec sizeX do
+                                                    visitedOpaque[x + ix, y + iy, z + iz] <- true
+                                        let blockCoord = minBlock + v3i x y z
+                                        let start = VoxelWorld.blockStartCoord level blockCoord
+                                        let boxSize =
+                                            v3
+                                                (single sizeX * blockWorldSize.X)
+                                                (single sizeY * blockWorldSize.Y)
+                                                (single sizeZ * blockWorldSize.Z)
+                                        let boxMin =
+                                            level.Bounds.Min + level.LevelOffset +
+                                            v3
+                                                (single start.X * level.VoxelSize.X)
+                                                (single start.Y * level.VoxelSize.Y)
+                                                (single start.Z * level.VoxelSize.Z)
+                                        yield box3 boxMin boxSize|]
+                    else [||]
+                let opaqueFaceMask = computeFaceMask opaque blockCounts
+                let fullOpaqueChunk = opaqueBlockCoords.Count = blockCounts.X * blockCounts.Y * blockCounts.Z
+                struct (BodyShapes (bodyShapes |> Seq.toList), bodyShapes.Count, occlusionBoundsOpt, solidBlockCoords.ToArray (), opaqueBlockCoords.ToArray (), opaqueOccluderBoxes, opaqueFaceMask, fullOpaqueChunk)
+            else struct (EmptyShape, 0, None, [||], [||], [||], 0, false)
+        | None -> struct (EmptyShape, 0, None, [||], [||], [||], 0, false)
 
     let rebuildChunk (level : VoxelLevel) (chunkCoord : Vector3i) (world : World) =
         let tryGetCell coord = VoxelWorld.tryGetCell level coord
         match VoxelBake.chunkModelFromCells level.ChunkSizeVoxels level.Bounds level.VoxelSize tryGetCell chunkCoord with
         | Some struct (renderCenter, voxelModelDescriptor) ->
-            let struct (bodyShape, boxCount, occlusionBoundsOpt, solidBlockCoords) = chunkBodyShapeFromBlocks level chunkCoord renderCenter
+            let struct (bodyShape, boxCount, occlusionBoundsOpt, solidBlockCoords, opaqueBlockCoords, opaqueOccluderBoxes, opaqueFaceMask, fullOpaqueChunk) = chunkBodyShapeFromBlocks level chunkCoord renderCenter
+            let splatCount = voxelModelDescriptor.Splats.Length
             let revision = nextRevision level
-            let voxelModel = chunkAssetTag chunkCoord revision
-            World.createUserDefinedVoxelModel voxelModelDescriptor voxelModel world
+            let voxelModelOpt =
+                if splatCount > 0 then
+                    let voxelModel = chunkAssetTag chunkCoord revision
+                    World.createUserDefinedVoxelModel voxelModelDescriptor voxelModel world
+                    Some voxelModel
+                else None
             Some
                 { ChunkCoord = chunkCoord
                   ChunkCenter = renderCenter + level.LevelOffset
@@ -206,7 +407,12 @@ module VoxelRuntime =
                   BoxCount = boxCount
                   OcclusionBoundsOpt = occlusionBoundsOpt |> Option.map (fun bounds -> box3 (bounds.Min + level.LevelOffset) bounds.Size)
                   SolidBlockCoords = solidBlockCoords
-                  VoxelModel = voxelModel }
+                  SplatCount = splatCount
+                  VoxelModelOpt = voxelModelOpt
+                  OpaqueBlockCoords = opaqueBlockCoords
+                  OpaqueOccluderBoxes = opaqueOccluderBoxes
+                  OpaqueFaceMask = opaqueFaceMask
+                  FullOpaqueChunk = fullOpaqueChunk }
         | None -> None
 
     let rebuildChunks (chunkCoords : Vector3i seq) (level : VoxelLevel) (currentChunks : VoxelChunk array) (world : World) =
@@ -225,7 +431,9 @@ module VoxelRuntime =
 
     let destroyVoxelChunks (voxelChunks : VoxelChunk array) (world : World) =
         for chunk in voxelChunks do
-            World.destroyUserDefinedVoxelModel chunk.VoxelModel world
+            match chunk.VoxelModelOpt with
+            | Some voxelModel -> World.destroyUserDefinedVoxelModel voxelModel world
+            | None -> ()
 
     let destroyVoxelModel (voxelChunks : VoxelChunk array) (placeableBlocks : PlaceableBlock array) (levelOpt : VoxelLevel option) (world : World) =
         destroyVoxelChunks voxelChunks world

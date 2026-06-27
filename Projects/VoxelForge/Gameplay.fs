@@ -1,5 +1,6 @@
 namespace VoxelForge
 open System
+open System.Collections.Generic
 open System.Numerics
 open Prime
 open Nu
@@ -71,96 +72,160 @@ module GameplayExtensions =
         member this.QuitEvent = Events.QuitEvent --> this
 
 [<RequireQualifiedAccess>]
-module VoxelChunkCulling =
+module VoxelChunkVisibility =
 
-    let private nearAlwaysVisibleDistance = 6.0f
-    let private rayStartOffset = 0.35f
-    let private targetBoundsPadding = 0.25f
+    let private depthWidth = 160
+    let private depthHeight = 90
+    let private depthBias = 0.00075f
     let private portalEyeRecursionLimitMax = 8
 
-    let private expandBounds amount (bounds : Box3) =
-        box3 (bounds.Min - v3Dup amount) (bounds.Size + v3Dup (amount * 2.0f))
+    type private ProjectedBounds =
+        { MinX : int
+          MaxX : int
+          MinY : int
+          MaxY : int
+          NearDepth : single
+          FarDepth : single }
 
-    let private containsPoint (bounds : Box3) (point : Vector3) =
-        point.X >= bounds.Min.X && point.X <= bounds.Max.X &&
-        point.Y >= bounds.Min.Y && point.Y <= bounds.Max.Y &&
-        point.Z >= bounds.Min.Z && point.Z <= bounds.Max.Z
+        member this.Area =
+            (this.MaxX - this.MinX + 1) * (this.MaxY - this.MinY + 1)
 
-    let private blockStep (level : VoxelLevel) =
-        let blockSize =
-            v3
-                (single level.BlockSideVoxels * level.VoxelSize.X)
-                (single level.BlockSideVoxels * level.VoxelSize.Y)
-                (single level.BlockSideVoxels * level.VoxelSize.Z)
-        max 0.25f (min blockSize.X (min blockSize.Y blockSize.Z) * 0.5f)
+    let chunkBounds (voxelChunk : VoxelChunk) =
+        box3 (voxelChunk.ChunkCenter - voxelChunk.ChunkSize * 0.5f) voxelChunk.ChunkSize
 
-    let private sampleBounds (bounds : Box3) =
-        let min = bounds.Min
-        let max = bounds.Max
-        let center = bounds.Center
-        [|center
-          v3 center.X max.Y center.Z
-          v3 min.X max.Y min.Z
-          v3 min.X max.Y max.Z
-          v3 max.X max.Y min.Z
-          v3 max.X max.Y max.Z
-          v3 min.X center.Y center.Z
-          v3 max.X center.Y center.Z
-          v3 center.X center.Y min.Z
-          v3 center.X center.Y max.Z|]
-
-    let private rayToSampleBlocked (level : VoxelLevel) (solidBlockCoords : Set<Vector3i>) (eyeCenter : Vector3) (targetBounds : Box3) (sample : Vector3) =
-        let offset = sample - eyeCenter
-        let distance = offset.Length ()
-        if distance <= nearAlwaysVisibleDistance then false
+    let private tryProjectBounds (viewProjection : Matrix4x4) (bounds : Box3) =
+        let mutable minX = Single.PositiveInfinity
+        let mutable maxX = Single.NegativeInfinity
+        let mutable minY = Single.PositiveInfinity
+        let mutable maxY = Single.NegativeInfinity
+        let mutable nearDepth = Single.PositiveInfinity
+        let mutable farDepth = Single.NegativeInfinity
+        let mutable valid = true
+        for corner in bounds.Corners do
+            let clip = Vector4.Transform (Vector4 (corner, 1.0f), viewProjection)
+            if clip.W <= 0.001f then valid <- false
+            else
+                let invW = 1.0f / clip.W
+                let ndcX = clip.X * invW
+                let ndcY = clip.Y * invW
+                let ndcZ = clip.Z * invW
+                minX <- min minX ndcX
+                maxX <- max maxX ndcX
+                minY <- min minY ndcY
+                maxY <- max maxY ndcY
+                nearDepth <- min nearDepth ndcZ
+                farDepth <- max farDepth ndcZ
+        if not valid || maxX < -1.0f || minX > 1.0f || maxY < -1.0f || minY > 1.0f then None
         else
-            let direction = offset / distance
-            let step = blockStep level
-            let mutable travelled = min distance rayStartOffset
-            let mutable blocked = false
-            let mutable reachedTarget = false
-            while not blocked && not reachedTarget && travelled < distance do
-                let point = eyeCenter + direction * travelled
-                if containsPoint targetBounds point then reachedTarget <- true
-                else
-                    match VoxelWorld.tryWorldToBlockCoord level point with
-                    | Some blockCoord when solidBlockCoords.Contains blockCoord -> blocked <- true
-                    | Some _ | None -> ()
-                travelled <- travelled + step
-            blocked
+            let screenMinX = Math.Clamp (int (MathF.Floor (((minX * 0.5f) + 0.5f) * single depthWidth)), 0, dec depthWidth)
+            let screenMaxX = Math.Clamp (int (MathF.Ceiling (((maxX * 0.5f) + 0.5f) * single depthWidth)), 0, dec depthWidth)
+            let screenMinY = Math.Clamp (int (MathF.Floor ((1.0f - ((maxY * 0.5f) + 0.5f)) * single depthHeight)), 0, dec depthHeight)
+            let screenMaxY = Math.Clamp (int (MathF.Ceiling ((1.0f - ((minY * 0.5f) + 0.5f)) * single depthHeight)), 0, dec depthHeight)
+            let screenWidth = screenMaxX - screenMinX + 1
+            let screenHeight = screenMaxY - screenMinY + 1
+            if screenMinX > screenMaxX || screenMinY > screenMaxY || screenWidth <= 1 || screenHeight <= 1 || Single.IsNaN nearDepth || Single.IsNaN farDepth
+            then None
+            else Some { MinX = screenMinX; MaxX = screenMaxX; MinY = screenMinY; MaxY = screenMaxY; NearDepth = nearDepth; FarDepth = farDepth }
 
-    let private portalEyeCenters (pair : PortalPair) (eyeCenter : Vector3) =
+    let private isCovered (depths : single array) (bounds : ProjectedBounds) =
+        if bounds.Area <= 0 then false
+        else
+            let mutable covered = true
+            let mutable y = bounds.MinY
+            while covered && y <= bounds.MaxY do
+                let row = y * depthWidth
+                let mutable x = bounds.MinX
+                while covered && x <= bounds.MaxX do
+                    let depth = depths[row + x]
+                    covered <- depth < Single.PositiveInfinity && bounds.NearDepth > depth + depthBias
+                    x <- inc x
+                y <- inc y
+            covered
+
+    let private rasterize (depths : single array) (bounds : ProjectedBounds) =
+        if bounds.Area > 0 && not (Single.IsNaN bounds.FarDepth) then
+            let mutable y = bounds.MinY
+            while y <= bounds.MaxY do
+                let row = y * depthWidth
+                let mutable x = bounds.MinX
+                while x <= bounds.MaxX do
+                    let i = row + x
+                    if bounds.FarDepth < depths[i] then depths[i] <- bounds.FarDepth
+                    x <- inc x
+                y <- inc y
+
+    let private portalEyePoses (pair : PortalPair) (eyeCenter : Vector3) (eyeRotation : Quaternion) =
         let recursionLimit = Math.Clamp (pair.RecursionLimit, 0, portalEyeRecursionLimitMax)
-        let eyeCenters = ResizeArray<Vector3> ()
-        eyeCenters.Add eyeCenter
+        let poses = ResizeArray<struct (Vector3 * Quaternion)> ()
+        poses.Add (struct (eyeCenter, eyeRotation))
         for portal in PortalLogic.portals pair do
             let mutable source = portal
             let mutable currentEyeCenter = eyeCenter
+            let mutable currentEyeRotation = eyeRotation
             for _ in 1 .. recursionLimit do
                 let destination = PortalLogic.pairedPortal pair source
                 currentEyeCenter <- PortalLogic.transferPosition source destination currentEyeCenter
-                eyeCenters.Add currentEyeCenter
+                currentEyeRotation <- PortalLogic.transferRotation source destination currentEyeRotation
+                poses.Add (struct (currentEyeCenter, currentEyeRotation))
                 source <- destination
-        eyeCenters.ToArray ()
+        poses.ToArray ()
 
-    let private isChunkOccludedFromEye (level : VoxelLevel) (solidBlockCoords : Set<Vector3i>) (bounds : Box3) (targetBounds : Box3) (eyeCenter : Vector3) =
-        if containsPoint targetBounds eyeCenter ||
-           Vector3.DistanceSquared (eyeCenter, bounds.Center) <= nearAlwaysVisibleDistance * nearAlwaysVisibleDistance then
-            false
-        else
-            match VoxelWorld.tryWorldToBlockCoord level eyeCenter with
-            | Some eyeBlockCoord when solidBlockCoords.Contains eyeBlockCoord -> false
-            | Some _ | None ->
-                sampleBounds bounds
-                |> Array.forall (rayToSampleBlocked level solidBlockCoords eyeCenter targetBounds)
-
-    let isChunkOccluded (gameplay : Gameplay) (bounds : Box3) (world : World) =
+    let private computeVisibleChunksUncached (gameplay : Gameplay) (world : World) =
+        let visible = HashSet<Vector3i> (HashIdentity.Structural)
         match gameplay.VoxelLevelOpt with
-        | Some level when gameplay.OcclusionBlockCoords.Count > 0 ->
-            let targetBounds = expandBounds targetBoundsPadding bounds
-            portalEyeCenters gameplay.PortalPair world.Eye3dCenter
-            |> Array.forall (isChunkOccludedFromEye level gameplay.OcclusionBlockCoords bounds targetBounds)
-        | Some _ | None -> false
+        | Some _ ->
+            let candidates =
+                gameplay.VoxelChunks
+                |> Array.filter (fun (chunk : VoxelChunk) ->
+                    (Option.isSome chunk.VoxelModelOpt || Array.notEmpty chunk.OpaqueOccluderBoxes) &&
+                    World.boundsInView3d false Exterior (chunkBounds chunk) world)
+            let depths = Array.zeroCreate<single> (depthWidth * depthHeight)
+            for struct (eyeCenter, eyeRotation) in portalEyePoses gameplay.PortalPair world.Eye3dCenter world.Eye3dRotation do
+                Array.Fill (depths, Single.PositiveInfinity)
+                let viewProjection = Viewport.getViewProjection3d eyeCenter eyeRotation world.Eye3dFieldOfView world.WindowViewport
+                let candidates =
+                    candidates
+                    |> Array.sortBy (fun chunk -> Vector3.DistanceSquared (eyeCenter, chunk.ChunkCenter))
+                for chunk in candidates do
+                    let renderable = Option.isSome chunk.VoxelModelOpt && chunk.SplatCount > 0
+                    let bounds = chunkBounds chunk
+                    match tryProjectBounds viewProjection bounds with
+                    | Some projectedBounds ->
+                        let occluded = isCovered depths projectedBounds
+                        if not occluded then
+                            if renderable then visible.Add chunk.ChunkCoord |> ignore<bool>
+                            for occluderBox in chunk.OpaqueOccluderBoxes do
+                                match tryProjectBounds viewProjection occluderBox with
+                                | Some projectedOccluder -> rasterize depths projectedOccluder
+                                | None -> ()
+                    | None ->
+                        if renderable then visible.Add chunk.ChunkCoord |> ignore<bool>
+        | None -> ()
+        visible
+
+    let mutable private visibleChunksCacheOpt : ((int64 * int64 * Vector3 * Quaternion * int) * HashSet<Vector3i>) option = None
+
+    let getVisibleChunks (gameplay : Gameplay) (world : World) =
+        let key = (world.UpdateTime, gameplay.GameplayTime, world.Eye3dCenter, world.Eye3dRotation, gameplay.VoxelChunks.Length)
+        match visibleChunksCacheOpt with
+        | Some (keyCached, visibleChunks) when keyCached = key -> visibleChunks
+        | Some _ | None ->
+            let visibleChunks = computeVisibleChunksUncached gameplay world
+            visibleChunksCacheOpt <- Some (key, visibleChunks)
+            visibleChunks
+
+    let isChunkVisible (gameplay : Gameplay) chunkCoord (world : World) =
+        (getVisibleChunks gameplay world).Contains chunkCoord
+
+[<AutoOpen>]
+module VoxelChunkFacetExtensions =
+    type Entity with
+        member this.GetVoxelChunkCoord world : Vector3i = this.Get (nameof this.VoxelChunkCoord) world
+        member this.SetVoxelChunkCoord (value : Vector3i) world = this.Set (nameof this.VoxelChunkCoord) value world
+        member this.VoxelChunkCoord = lens (nameof this.VoxelChunkCoord) this this.GetVoxelChunkCoord this.SetVoxelChunkCoord
+        member this.GetVoxelModelOpt world : VoxelModel AssetTag option = this.Get (nameof this.VoxelModelOpt) world
+        member this.SetVoxelModelOpt (value : VoxelModel AssetTag option) world = this.Set (nameof this.VoxelModelOpt) value world
+        member this.VoxelModelOpt = lens (nameof this.VoxelModelOpt) this this.GetVoxelModelOpt this.SetVoxelModelOpt
 
 type VoxelChunkFacet () =
     inherit Facet (false, false, false)
@@ -171,21 +236,24 @@ type VoxelChunkFacet () =
          define Entity.Static true
          define Entity.AlwaysRender false
          define Entity.MaterialProperties MaterialProperties.empty
-         define Entity.VoxelModel Assets.Default.VoxelModel]
+         define Entity.VoxelChunkCoord v3iZero
+         define Entity.VoxelModelOpt (None : VoxelModel AssetTag option)]
 
     override this.Render (renderPass, entity, world) =
-        let mutable transform = entity.GetTransform world
-        let castShadow = (World.getRenderer3dConfig world).LightShadowingEnabled && transform.CastShadow
-        let occluded =
-            if renderPass.IsNormalPass && Simulants.Gameplay.GetExists world
-            then VoxelChunkCulling.isChunkOccluded (Simulants.Gameplay.GetGameplay world) transform.Bounds3d world
-            else false
-        if transform.Visible && not occluded && (not renderPass.IsShadowPass || castShadow) then
-            let affineMatrix = transform.AffineMatrix
-            let presence = transform.Presence
-            let properties = entity.GetMaterialProperties world
-            let voxelModel = entity.GetVoxelModel world
-            World.renderVoxelModelFast (&affineMatrix, castShadow, presence, &properties, voxelModel, renderPass, world)
+        match entity.GetVoxelModelOpt world with
+        | Some voxelModel ->
+            let mutable transform = entity.GetTransform world
+            let castShadow = (World.getRenderer3dConfig world).LightShadowingEnabled && transform.CastShadow
+            let visibleByGameplay =
+                if renderPass.IsNormalPass && Simulants.Gameplay.GetExists world then
+                    VoxelChunkVisibility.isChunkVisible (Simulants.Gameplay.GetGameplay world) (entity.GetVoxelChunkCoord world) world
+                else true
+            if transform.Visible && visibleByGameplay && (not renderPass.IsShadowPass || castShadow) then
+                let affineMatrix = transform.AffineMatrix
+                let presence = transform.Presence
+                let properties = entity.GetMaterialProperties world
+                World.renderVoxelModelFast (&affineMatrix, castShadow, presence, &properties, voxelModel, renderPass, world)
+        | None -> ()
 
     override this.GetAttributesInferred (entity, world) =
         let size = entity.GetSize world
@@ -194,6 +262,13 @@ type VoxelChunkFacet () =
     override this.RayCast (ray, entity, world) =
         let intersectionOpt = ray.Intersects (entity.GetBounds world)
         [|Intersection.ofNullable intersectionOpt|]
+
+type VoxelChunkDispatcher () =
+    inherit Entity3dDispatcher (true, false, false)
+
+    static member Facets =
+        [typeof<VoxelChunkFacet>
+         typeof<RigidBodyFacet>]
 
 [<RequireQualifiedAccess>]
 module GameplayLogic =
@@ -240,8 +315,16 @@ module GameplayLogic =
 
     let computeOcclusionBlockCoords (voxelChunks : VoxelChunk array) =
         voxelChunks
-        |> Seq.collect (fun (chunk : VoxelChunk) -> chunk.SolidBlockCoords)
+        |> Seq.collect (fun (chunk : VoxelChunk) -> chunk.OpaqueBlockCoords)
         |> Set.ofSeq
+
+    let private replaceOcclusionBlockCoords (current : Set<Vector3i>) (chunksToDestroy : VoxelChunk array) (chunksToAdd : VoxelChunk array) =
+        let removed =
+            chunksToDestroy
+            |> Seq.collect (fun (chunk : VoxelChunk) -> chunk.OpaqueBlockCoords)
+            |> Set.ofSeq
+        let added = computeOcclusionBlockCoords chunksToAdd
+        Set.union (Set.difference current removed) added
 
     let getAimBlockHighlightFace (bounds : Box3) (faceIndex : int) =
         let bounds = box3 (bounds.Min - v3Dup aimBlockHighlightPadding) (bounds.Size + v3Dup (aimBlockHighlightPadding * 2.0f))
@@ -276,8 +359,14 @@ module GameplayLogic =
     let private rebuildChunks (chunkCoords : Vector3i seq) (gameplay : Gameplay) (world : World) =
         match gameplay.VoxelLevelOpt with
         | Some level ->
+            let chunkCoords = Seq.toArray chunkCoords
+            let chunkCoordSet = Set.ofArray chunkCoords
             let struct (voxelChunks, chunksToDestroy) = VoxelRuntime.rebuildChunks chunkCoords level gameplay.VoxelChunks world
-            struct ({ gameplay with VoxelChunks = voxelChunks; OcclusionBlockCoords = computeOcclusionBlockCoords voxelChunks }, chunksToDestroy)
+            let chunksToAdd =
+                voxelChunks
+                |> Array.filter (fun (chunk : VoxelChunk) -> Set.contains chunk.ChunkCoord chunkCoordSet)
+            let occlusionBlockCoords = replaceOcclusionBlockCoords gameplay.OcclusionBlockCoords chunksToDestroy chunksToAdd
+            struct ({ gameplay with VoxelChunks = voxelChunks; OcclusionBlockCoords = occlusionBlockCoords }, chunksToDestroy)
         | None -> struct (gameplay, [||])
 
     let private tryNearestPhysicsHit (origin : Vector3) (direction : Vector3) remainingDistance (world : World) =
@@ -626,12 +715,12 @@ type GameplayDispatcher () =
                             MetallicOpt = ValueSome 0.0f }]
 
                  for voxelChunk in gameplay.VoxelChunks do
-                    Content.voxel (Simulants.VoxelLevelChunk voxelChunk.ChunkCoord.X voxelChunk.ChunkCoord.Y voxelChunk.ChunkCoord.Z).Name
-                        [Entity.FacetNames == Set.ofList [nameof VoxelChunkFacet; nameof RigidBodyFacet]
-                         Entity.Position := voxelChunk.ChunkCenter
+                    Content.entity<VoxelChunkDispatcher> (Simulants.VoxelLevelChunk voxelChunk.ChunkCoord.X voxelChunk.ChunkCoord.Y voxelChunk.ChunkCoord.Z).Name
+                        [Entity.Position := voxelChunk.ChunkCenter
                          Entity.Size := voxelChunk.ChunkSize
-                         Entity.VoxelModel := voxelChunk.VoxelModel
-                         Entity.Visible == true
+                         Entity.VoxelChunkCoord := voxelChunk.ChunkCoord
+                         Entity.VoxelModelOpt := voxelChunk.VoxelModelOpt
+                         Entity.Visible == Option.isSome voxelChunk.VoxelModelOpt
                          Entity.Presence == Exterior
                          Entity.AlwaysRender == false
                          Entity.CastShadow == false

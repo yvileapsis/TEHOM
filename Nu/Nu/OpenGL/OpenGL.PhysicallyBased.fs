@@ -4477,7 +4477,7 @@ module PhysicallyBased =
         Gl.Disable EnableCap.DepthTest
         Gl.Disable EnableCap.CullFace
 
-    let DrawPhysicallyBasedVoxel
+    let BeginPhysicallyBasedVoxel
         (view : single array,
          projection : single array,
          viewProjection : single array,
@@ -4486,9 +4486,7 @@ module PhysicallyBased =
          viewPort : Vector2,
          eyeCenter : Vector3,
          clipPlane : Vector4,
-         instanceFields : single array,
          lightShadowExponent : single,
-         voxelModel : PhysicallyBasedVoxelModel,
          shader : PhysicallyBasedVoxelShader,
          vao : uint) =
 
@@ -4500,7 +4498,6 @@ module PhysicallyBased =
         Hl.Assert ()
 
         // setup vao
-        let geometry = voxelModel.VoxelGeometry
         Gl.BindVertexArray vao
         Hl.Assert ()
 
@@ -4517,23 +4514,34 @@ module PhysicallyBased =
         Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)
         Hl.Assert ()
 
-        // update instance buffer
-        let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
-        try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
-            Gl.BufferData (BufferTarget.ArrayBuffer, uint (Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-            Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+    let DrawPhysicallyBasedVoxelGeometry
+        (instanceFields : single array,
+        voxelModel : PhysicallyBasedVoxelModel,
+         vao : uint) =
+
+        // skip empty geometry
+        let geometry = voxelModel.VoxelGeometry
+        if geometry.ElementCount > 0 then
+
+            // update instance buffer
+            let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
+            try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
+                Gl.BufferSubData (BufferTarget.ArrayBuffer, nativeint 0, uint (Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject ())
+                Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+                Hl.Assert ()
+            finally instanceFieldsPtr.Free ()
+
+            // setup geometry
+            Gl.VertexArrayVertexBuffer (vao, 0u, geometry.VertexBuffer, 0, VoxelVertexSize)
+            Gl.VertexArrayVertexBuffer (vao, 1u, geometry.InstanceBuffer, 0, Constants.Render.InstanceFieldCount * sizeof<single>)
             Hl.Assert ()
-        finally instanceFieldsPtr.Free ()
 
-        // setup geometry
-        Gl.VertexArrayVertexBuffer (vao, 0u, geometry.VertexBuffer, 0, VoxelVertexSize)
-        Gl.VertexArrayVertexBuffer (vao, 1u, geometry.InstanceBuffer, 0, Constants.Render.InstanceFieldCount * sizeof<single>)
-        Hl.Assert ()
+            // draw geometry
+            Gl.DrawArrays (geometry.PrimitiveType, 0, geometry.ElementCount)
+            Hl.ReportDrawCall 1
+            Hl.Assert ()
 
-        // draw geometry
-        Gl.DrawArrays (geometry.PrimitiveType, 0, geometry.ElementCount)
-        Hl.ReportDrawCall 1
-        Hl.Assert ()
+    let EndPhysicallyBasedVoxel (_ : PhysicallyBasedVoxelShader, _ : uint) =
 
         // teardown shader
         Gl.UseProgram 0u
@@ -4547,6 +4555,26 @@ module PhysicallyBased =
         Gl.DepthFunc DepthFunction.Less
         Gl.Disable EnableCap.DepthTest
         Gl.Disable EnableCap.VertexProgramPointSize
+
+    let DrawPhysicallyBasedVoxel
+        (view : single array,
+         projection : single array,
+         viewProjection : single array,
+         viewInverse : single array,
+         projectionInverse : single array,
+         viewPort : Vector2,
+         eyeCenter : Vector3,
+         clipPlane : Vector4,
+         instanceFields : single array,
+         lightShadowExponent : single,
+         voxelModel : PhysicallyBasedVoxelModel,
+         shader : PhysicallyBasedVoxelShader,
+         vao : uint) =
+
+        BeginPhysicallyBasedVoxel
+            (view, projection, viewProjection, viewInverse, projectionInverse, viewPort, eyeCenter, clipPlane, lightShadowExponent, shader, vao)
+        DrawPhysicallyBasedVoxelGeometry (instanceFields, voxelModel, vao)
+        EndPhysicallyBasedVoxel (shader, vao)
 
     /// Draw the light mapping pass of a deferred physically-based surface.
     let DrawPhysicallyBasedDeferredLightMappingSurface
