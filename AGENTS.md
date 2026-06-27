@@ -31,6 +31,7 @@ This workspace contains the Nu engine plus the active game project at `Projects/
 ## Validation Policy
 
 - Do not run local `dotnet build`, `dotnet test`, compile checks, or Nu.Pipe unless the user explicitly requests them.
+- For `Projects/VoxelForge` implementation work, run `dotnet build Projects\VoxelForge\VoxelForge.fsproj` outside the sandbox after edits and fix compilation errors, unless the user explicitly says not to.
 - Validation is expected to happen through Gaia editor.
 - Do not provide detailed Gaia testing instructions by default.
 - When local validation is skipped because of this policy, state that plainly in the final response.

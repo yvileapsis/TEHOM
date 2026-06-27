@@ -85,22 +85,27 @@ module PortalLogic =
         let forward = if forward.LengthSquared () > 0.0f then forward.Normalized else v3Forward
         Quaternion.CreateFromRotationMatrix (Matrix4x4.CreateWorld (v3Zero, forward, v3Up))
 
-    let defaultPair =
+    let pairAtGround (groundCenter : Vector3) =
+        let centerY = groundCenter.Y + defaultHalfExtents.Y
+        let centerZ = groundCenter.Z - 4.0f
         let blue =
             { Id = Blue
-              Center = v3 -4.5f 8.17f -4.0f
+              Center = v3 (groundCenter.X - 2.0f) centerY centerZ
               Rotation = lookRotation v3Right
               HalfExtents = defaultHalfExtents
               PairId = Orange }
         let orange =
             { Id = Orange
-              Center = v3 -1.5f 8.17f -4.0f
+              Center = v3 (groundCenter.X + 2.0f) centerY centerZ
               Rotation = lookRotation v3Left
               HalfExtents = defaultHalfExtents
               PairId = Blue }
         { Blue = blue
           Orange = orange
           RecursionLimit = 2 }
+
+    let defaultPair =
+        pairAtGround (v3 0.0f 7.02f 0.0f)
 
     let portals pair =
         [|pair.Blue; pair.Orange|]

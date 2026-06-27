@@ -201,7 +201,7 @@ module VoxelBake =
             ((single coord.Y + 0.5f) * voxelSize.Y)
             ((single coord.Z + 0.5f) * voxelSize.Z)
 
-    let chunkModelFromOccupied (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (occupied : Dictionary<Vector3i, Color>) (chunkCoord : Vector3i) =
+    let chunkModelFromCells (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (tryGetCell : Vector3i -> VoxelCell option) (chunkCoord : Vector3i) =
         let chunkSize = v3i (max 1 chunkSize.X) (max 1 chunkSize.Y) (max 1 chunkSize.Z)
         let origin = bounds.Min
         let globalMinCoord = chunkMinCoord chunkSize chunkCoord
@@ -223,22 +223,24 @@ module VoxelBake =
             for z in globalMinCoord.Z .. globalMinCoord.Z + chunkSize.Z - 1 do
                 for x in globalMinCoord.X .. globalMinCoord.X + chunkSize.X - 1 do
                     let coord = v3i x y z
-                    match occupied.TryGetValue coord with
-                    | (true, albedo) ->
+                    match tryGetCell coord with
+                    | Some cell ->
                         occupiedAny <- true
                         let mutable exposed = false
                         let mutable normal = v3Zero
                         for struct (offset, direction) in directions do
-                            if not (occupied.ContainsKey (coord + offset)) then
+                            match tryGetCell (coord + offset) with
+                            | Some _ -> ()
+                            | None ->
                                 exposed <- true
                                 normal <- normal + direction
                         if exposed then
                             let normal = if normal.LengthSquared () > 0.0f then normal.Normalized else v3Up
                             splats.Add
                                 { Position = coordCenter origin voxelSize coord
-                                  Albedo = albedo
+                                  Albedo = cell.Albedo
                                   Normal = normal }
-                    | (false, _) -> ()
+                    | None -> ()
         if occupiedAny then
             let halfVoxelSize = voxelSize * 0.5f
             let struct (center, descriptorBounds) =
@@ -265,7 +267,14 @@ module VoxelBake =
                        VoxelSize = voxelSize })
         else None
 
-    let chunkBodyShapeFromOccupied (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (occupied : Dictionary<Vector3i, Color>) (chunkCoord : Vector3i) =
+    let chunkModelFromOccupied (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (occupied : Dictionary<Vector3i, Color>) (chunkCoord : Vector3i) =
+        let tryGetCell coord =
+            match occupied.TryGetValue coord with
+            | (true, albedo) -> Some { Albedo = albedo; Solid = true; Material = Crafted }
+            | (false, _) -> None
+        chunkModelFromCells chunkSize bounds voxelSize tryGetCell chunkCoord
+
+    let chunkBodyShapeFromCells (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (tryGetCell : Vector3i -> VoxelCell option) (chunkCoord : Vector3i) =
         let chunkSize = v3i (max 1 chunkSize.X) (max 1 chunkSize.Y) (max 1 chunkSize.Z)
         let filled = Array3D.zeroCreate<bool> chunkSize.X chunkSize.Y chunkSize.Z
         let visited = Array3D.zeroCreate<bool> chunkSize.X chunkSize.Y chunkSize.Z
@@ -275,9 +284,11 @@ module VoxelBake =
             for z in 0 .. dec chunkSize.Z do
                 for x in 0 .. dec chunkSize.X do
                     let coord = v3i (globalMinCoord.X + x) (globalMinCoord.Y + y) (globalMinCoord.Z + z)
-                    if occupied.ContainsKey coord then
+                    match tryGetCell coord with
+                    | Some cell when cell.Solid ->
                         filled[x, y, z] <- true
                         occupiedAny <- true
+                    | Some _ | None -> ()
         if occupiedAny then
             let chunkMin =
                 bounds.Min +
@@ -344,6 +355,13 @@ module VoxelBake =
                             bodyShapes.Add (BoxShape { Size = boxSize; TransformOpt = Some (Affine.makeTranslation (boxCenter - chunkCenter)); PropertiesOpt = None })
             Some struct (chunkCenter, BodyShapes (bodyShapes |> Seq.toList), bodyShapes.Count)
         else None
+
+    let chunkBodyShapeFromOccupied (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (occupied : Dictionary<Vector3i, Color>) (chunkCoord : Vector3i) =
+        let tryGetCell coord =
+            match occupied.TryGetValue coord with
+            | (true, albedo) -> Some { Albedo = albedo; Solid = true; Material = Crafted }
+            | (false, _) -> None
+        chunkBodyShapeFromCells chunkSize bounds voxelSize tryGetCell chunkCoord
 
     let chunkBodyShapes (chunkSize : Vector3i) (volume : VoxelVolumeDescriptor) =
         let chunkSize = v3i (max 1 chunkSize.X) (max 1 chunkSize.Y) (max 1 chunkSize.Z)

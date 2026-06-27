@@ -1,34 +1,12 @@
 namespace VoxelForge
 open System
-open System.Collections.Generic
 open System.Numerics
 open Prime
 open Nu
-open VoxelForge
 
 type GameplayState =
     | Playing
     | Quit
-
-type VoxelChunk =
-    { ChunkCoord : Vector3i
-      ChunkCenter : Vector3
-      ChunkSize : Vector3
-      BodyShape : BodyShape
-      BoxCount : int
-      VoxelModel : VoxelModel AssetTag }
-
-type PlaceableBlock =
-    { Name : string
-      Voxels : struct (Vector3i * Color) array
-      PreviewModel : VoxelModel AssetTag }
-
-type VoxelLevel =
-    { Bounds : Box3
-      VoxelSize : Vector3
-      OccupiedVoxels : Dictionary<Vector3i, Color>
-      PlaceableBlocks : PlaceableBlock array
-      NextRevision : int ref }
 
 type VoxelAimPick =
     { Position : Vector3
@@ -42,6 +20,7 @@ type Gameplay =
       VoxelModelReady : bool
       VoxelLevelOpt : VoxelLevel option
       VoxelChunks : VoxelChunk array
+      OcclusionBlockCoords : Set<Vector3i>
       AimPickOpt : VoxelAimPick option
       SelectedBlockIndex : int
       SelectedBlockPreviewPositionOpt : Vector3 option
@@ -54,6 +33,7 @@ type Gameplay =
           VoxelModelReady = false
           VoxelLevelOpt = None
           VoxelChunks = [||]
+          OcclusionBlockCoords = Set.empty
           AimPickOpt = None
           SelectedBlockIndex = 0
           SelectedBlockPreviewPositionOpt = None
@@ -74,7 +54,8 @@ type GameplayMessage =
 
 type GameplayCommand =
     | EnsureVoxelModel
-    | DestroyVoxelModel of VoxelChunk array * PlaceableBlock array
+    | UseGeneratedWorld of GeneratedWorldPackage
+    | DestroyVoxelModel of VoxelChunk array * PlaceableBlock array * VoxelLevel option
     | DestroyBlock of VoxelAimPick
     | PlaceBlock of VoxelAimPick
     | ResolvePortalTraversal
@@ -90,16 +71,135 @@ module GameplayExtensions =
         member this.QuitEvent = Events.QuitEvent --> this
 
 [<RequireQualifiedAccess>]
+module VoxelChunkCulling =
+
+    let private nearAlwaysVisibleDistance = 6.0f
+    let private rayStartOffset = 0.35f
+    let private targetBoundsPadding = 0.25f
+    let private portalEyeRecursionLimitMax = 8
+
+    let private expandBounds amount (bounds : Box3) =
+        box3 (bounds.Min - v3Dup amount) (bounds.Size + v3Dup (amount * 2.0f))
+
+    let private containsPoint (bounds : Box3) (point : Vector3) =
+        point.X >= bounds.Min.X && point.X <= bounds.Max.X &&
+        point.Y >= bounds.Min.Y && point.Y <= bounds.Max.Y &&
+        point.Z >= bounds.Min.Z && point.Z <= bounds.Max.Z
+
+    let private blockStep (level : VoxelLevel) =
+        let blockSize =
+            v3
+                (single level.BlockSideVoxels * level.VoxelSize.X)
+                (single level.BlockSideVoxels * level.VoxelSize.Y)
+                (single level.BlockSideVoxels * level.VoxelSize.Z)
+        max 0.25f (min blockSize.X (min blockSize.Y blockSize.Z) * 0.5f)
+
+    let private sampleBounds (bounds : Box3) =
+        let min = bounds.Min
+        let max = bounds.Max
+        let center = bounds.Center
+        [|center
+          v3 center.X max.Y center.Z
+          v3 min.X max.Y min.Z
+          v3 min.X max.Y max.Z
+          v3 max.X max.Y min.Z
+          v3 max.X max.Y max.Z
+          v3 min.X center.Y center.Z
+          v3 max.X center.Y center.Z
+          v3 center.X center.Y min.Z
+          v3 center.X center.Y max.Z|]
+
+    let private rayToSampleBlocked (level : VoxelLevel) (solidBlockCoords : Set<Vector3i>) (eyeCenter : Vector3) (targetBounds : Box3) (sample : Vector3) =
+        let offset = sample - eyeCenter
+        let distance = offset.Length ()
+        if distance <= nearAlwaysVisibleDistance then false
+        else
+            let direction = offset / distance
+            let step = blockStep level
+            let mutable travelled = min distance rayStartOffset
+            let mutable blocked = false
+            let mutable reachedTarget = false
+            while not blocked && not reachedTarget && travelled < distance do
+                let point = eyeCenter + direction * travelled
+                if containsPoint targetBounds point then reachedTarget <- true
+                else
+                    match VoxelWorld.tryWorldToBlockCoord level point with
+                    | Some blockCoord when solidBlockCoords.Contains blockCoord -> blocked <- true
+                    | Some _ | None -> ()
+                travelled <- travelled + step
+            blocked
+
+    let private portalEyeCenters (pair : PortalPair) (eyeCenter : Vector3) =
+        let recursionLimit = Math.Clamp (pair.RecursionLimit, 0, portalEyeRecursionLimitMax)
+        let eyeCenters = ResizeArray<Vector3> ()
+        eyeCenters.Add eyeCenter
+        for portal in PortalLogic.portals pair do
+            let mutable source = portal
+            let mutable currentEyeCenter = eyeCenter
+            for _ in 1 .. recursionLimit do
+                let destination = PortalLogic.pairedPortal pair source
+                currentEyeCenter <- PortalLogic.transferPosition source destination currentEyeCenter
+                eyeCenters.Add currentEyeCenter
+                source <- destination
+        eyeCenters.ToArray ()
+
+    let private isChunkOccludedFromEye (level : VoxelLevel) (solidBlockCoords : Set<Vector3i>) (bounds : Box3) (targetBounds : Box3) (eyeCenter : Vector3) =
+        if containsPoint targetBounds eyeCenter ||
+           Vector3.DistanceSquared (eyeCenter, bounds.Center) <= nearAlwaysVisibleDistance * nearAlwaysVisibleDistance then
+            false
+        else
+            match VoxelWorld.tryWorldToBlockCoord level eyeCenter with
+            | Some eyeBlockCoord when solidBlockCoords.Contains eyeBlockCoord -> false
+            | Some _ | None ->
+                sampleBounds bounds
+                |> Array.forall (rayToSampleBlocked level solidBlockCoords eyeCenter targetBounds)
+
+    let isChunkOccluded (gameplay : Gameplay) (bounds : Box3) (world : World) =
+        match gameplay.VoxelLevelOpt with
+        | Some level when gameplay.OcclusionBlockCoords.Count > 0 ->
+            let targetBounds = expandBounds targetBoundsPadding bounds
+            portalEyeCenters gameplay.PortalPair world.Eye3dCenter
+            |> Array.forall (isChunkOccludedFromEye level gameplay.OcclusionBlockCoords bounds targetBounds)
+        | Some _ | None -> false
+
+type VoxelChunkFacet () =
+    inherit Facet (false, false, false)
+
+    static member Properties =
+        [define Entity.Size (v3Dup 1.0f)
+         define Entity.Presence Exterior
+         define Entity.Static true
+         define Entity.AlwaysRender false
+         define Entity.MaterialProperties MaterialProperties.empty
+         define Entity.VoxelModel Assets.Default.VoxelModel]
+
+    override this.Render (renderPass, entity, world) =
+        let mutable transform = entity.GetTransform world
+        let castShadow = (World.getRenderer3dConfig world).LightShadowingEnabled && transform.CastShadow
+        let occluded =
+            if renderPass.IsNormalPass && Simulants.Gameplay.GetExists world
+            then VoxelChunkCulling.isChunkOccluded (Simulants.Gameplay.GetGameplay world) transform.Bounds3d world
+            else false
+        if transform.Visible && not occluded && (not renderPass.IsShadowPass || castShadow) then
+            let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
+            let properties = entity.GetMaterialProperties world
+            let voxelModel = entity.GetVoxelModel world
+            World.renderVoxelModelFast (&affineMatrix, castShadow, presence, &properties, voxelModel, renderPass, world)
+
+    override this.GetAttributesInferred (entity, world) =
+        let size = entity.GetSize world
+        AttributesInferred.important size v3Zero
+
+    override this.RayCast (ray, entity, world) =
+        let intersectionOpt = ray.Intersects (entity.GetBounds world)
+        [|Intersection.ofNullable intersectionOpt|]
+
+[<RequireQualifiedAccess>]
 module GameplayLogic =
 
-    let private minecraftBlockSideVoxels = 16
-    let private minecraftLevelSideVoxels = 256
-    let private minecraftBlockGridOffsetVoxels = v3i 8 0 8
-    let private sourceVoxelSize = v3Dup (1.0f / single minecraftBlockSideVoxels)
-    let private levelChunkSizeVoxels = v3i 64 64 64
-    let private levelChunkCounts = v3i 4 4 4
-    let private levelSize = sourceVoxelSize * single minecraftLevelSideVoxels
-    let private levelOffset = v3 0.0f (levelSize.Y * 0.5f) 0.0f
+    let private defaultWorldSettings = WorldGenSettings.defaultSettings
+    let private sourceVoxelSize = defaultWorldSettings.VoxelSize
     let private editReach = 6.0f
     let private editEpsilon = 0.01f
     let private portalRayPadding = 0.02f
@@ -107,32 +207,6 @@ module GameplayLogic =
     let private portalRayRecursionLimitMax = 8
     let private aimBlockHighlightPadding = 0.01f
     let private aimBlockHighlightThickness = 0.0125f
-    let private placeableBlockSources : struct (string * Image AssetTag) array =
-        [|struct ("Grass", Assets.Voxels.GrassBlock)
-          struct ("Dirt", Assets.Voxels.DirtBlock)
-          struct ("Stone", Assets.Voxels.StoneBlock)
-          struct ("Cobblestone", Assets.Voxels.CobblestoneBlock)
-          struct ("Sand", Assets.Voxels.SandBlock)
-          struct ("Oak Log", Assets.Voxels.OakLogBlock)
-          struct ("Oak Planks", Assets.Voxels.OakPlanksBlock)
-          struct ("Leaves", Assets.Voxels.LeavesBlock)
-          struct ("Glass", Assets.Voxels.GlassBlock)
-          struct ("Water", Assets.Voxels.WaterBlock)
-          struct ("Brick", Assets.Voxels.BrickBlock)|]
-
-    let private freshRevisionSeed () =
-        int (Gen.id64 % uint64 (Int32.MaxValue - 1))
-
-    let private nextRevision (level : VoxelLevel) =
-        let revision = level.NextRevision.Value
-        level.NextRevision.Value <- if revision = Int32.MaxValue then 1 else inc revision
-        revision
-
-    let private divFloor dividend divisor =
-        if dividend >= 0
-        then dividend / divisor
-        else -((-dividend + divisor - 1) / divisor)
-
     let private wrapIndex count index =
         if count <= 0 then 0
         else
@@ -164,89 +238,10 @@ module GameplayLogic =
             Some level.PlaceableBlocks[wrapIndex level.PlaceableBlocks.Length gameplay.SelectedBlockIndex]
         | Some _ | None -> None
 
-    let rec private translateBodyShape translation bodyShape =
-        let translateTransform transformOpt =
-            match transformOpt with
-            | Some (transform : Affine) -> Some { transform with Translation = transform.Translation + translation }
-            | None -> Some (Affine.makeTranslation translation)
-        match bodyShape with
-        | BoxShape boxShape -> BoxShape { boxShape with TransformOpt = translateTransform boxShape.TransformOpt }
-        | SphereShape sphereShape -> SphereShape { sphereShape with TransformOpt = translateTransform sphereShape.TransformOpt }
-        | CapsuleShape capsuleShape -> CapsuleShape { capsuleShape with TransformOpt = translateTransform capsuleShape.TransformOpt }
-        | BoxRoundedShape boxRoundedShape -> BoxRoundedShape { boxRoundedShape with TransformOpt = translateTransform boxRoundedShape.TransformOpt }
-        | EdgeShape edgeShape -> EdgeShape { edgeShape with TransformOpt = translateTransform edgeShape.TransformOpt }
-        | ContourShape contourShape -> ContourShape { contourShape with TransformOpt = translateTransform contourShape.TransformOpt }
-        | PointsShape pointsShape -> PointsShape { pointsShape with TransformOpt = translateTransform pointsShape.TransformOpt }
-        | GeometryShape geometryShape -> GeometryShape { geometryShape with TransformOpt = translateTransform geometryShape.TransformOpt }
-        | StaticModelShape staticModelShape -> StaticModelShape { staticModelShape with TransformOpt = translateTransform staticModelShape.TransformOpt }
-        | StaticModelSurfaceShape staticModelSurfaceShape -> StaticModelSurfaceShape { staticModelSurfaceShape with TransformOpt = translateTransform staticModelSurfaceShape.TransformOpt }
-        | TerrainShape terrainShape -> TerrainShape { terrainShape with TransformOpt = translateTransform terrainShape.TransformOpt }
-        | BodyShapes bodyShapes -> BodyShapes (bodyShapes |> List.map (translateBodyShape translation))
-        | EmptyShape -> EmptyShape
-
-    let private chunkAssetTag (chunkCoord : Vector3i) revision =
-        Assets.Voxels.MinecraftLevelChunkRevision chunkCoord.X chunkCoord.Y chunkCoord.Z revision
-
-    let private sourceCoordToChunkCoord (coord : Vector3i) =
-        v3i
-            (coord.X / levelChunkSizeVoxels.X)
-            (coord.Y / levelChunkSizeVoxels.Y)
-            (coord.Z / levelChunkSizeVoxels.Z)
-
-    let private blockStartCoord (blockCoord : Vector3i) =
-        v3i
-            (minecraftBlockGridOffsetVoxels.X + blockCoord.X * minecraftBlockSideVoxels)
-            (minecraftBlockGridOffsetVoxels.Y + blockCoord.Y * minecraftBlockSideVoxels)
-            (minecraftBlockGridOffsetVoxels.Z + blockCoord.Z * minecraftBlockSideVoxels)
-
-    let private sourceCoordToBlockCoord (coord : Vector3i) =
-        v3i
-            (divFloor (coord.X - minecraftBlockGridOffsetVoxels.X) minecraftBlockSideVoxels)
-            (divFloor (coord.Y - minecraftBlockGridOffsetVoxels.Y) minecraftBlockSideVoxels)
-            (divFloor (coord.Z - minecraftBlockGridOffsetVoxels.Z) minecraftBlockSideVoxels)
-
-    let private isSourceCoordInBounds (coord : Vector3i) =
-        coord.X >= 0 && coord.X < minecraftLevelSideVoxels &&
-        coord.Y >= 0 && coord.Y < minecraftLevelSideVoxels &&
-        coord.Z >= 0 && coord.Z < minecraftLevelSideVoxels
-
-    let private isBlockCoordInBounds (coord : Vector3i) =
-        let start = blockStartCoord coord
-        start.X >= 0 && start.X + minecraftBlockSideVoxels <= minecraftLevelSideVoxels &&
-        start.Y >= 0 && start.Y + minecraftBlockSideVoxels <= minecraftLevelSideVoxels &&
-        start.Z >= 0 && start.Z + minecraftBlockSideVoxels <= minecraftLevelSideVoxels
-
-    let private isChunkCoordInBounds (coord : Vector3i) =
-        coord.X >= 0 && coord.X < levelChunkCounts.X &&
-        coord.Y >= 0 && coord.Y < levelChunkCounts.Y &&
-        coord.Z >= 0 && coord.Z < levelChunkCounts.Z
-
-    let private tryWorldToSourceCoord (level : VoxelLevel) (position : Vector3) =
-        let local = position - levelOffset
-        let origin = level.Bounds.Min
-        let coord =
-            v3i
-                (int (floor ((local.X - origin.X) / level.VoxelSize.X)))
-                (int (floor ((local.Y - origin.Y) / level.VoxelSize.Y)))
-                (int (floor ((local.Z - origin.Z) / level.VoxelSize.Z)))
-        if isSourceCoordInBounds coord then Some coord else None
-
-    let private tryWorldToBlockCoord (level : VoxelLevel) (position : Vector3) =
-        match tryWorldToSourceCoord level position with
-        | Some coord ->
-            let blockCoord = sourceCoordToBlockCoord coord
-            if isBlockCoordInBounds blockCoord then Some blockCoord else None
-        | None -> None
-
-    let private blockBounds (level : VoxelLevel) (blockCoord : Vector3i) =
-        let start = blockStartCoord blockCoord
-        let min =
-            level.Bounds.Min + levelOffset +
-            v3
-                (single start.X * level.VoxelSize.X)
-                (single start.Y * level.VoxelSize.Y)
-                (single start.Z * level.VoxelSize.Z)
-        box3 min v3One
+    let computeOcclusionBlockCoords (voxelChunks : VoxelChunk array) =
+        voxelChunks
+        |> Seq.collect (fun (chunk : VoxelChunk) -> chunk.SolidBlockCoords)
+        |> Set.ofSeq
 
     let getAimBlockHighlightFace (bounds : Box3) (faceIndex : int) =
         let bounds = box3 (bounds.Min - v3Dup aimBlockHighlightPadding) (bounds.Size + v3Dup (aimBlockHighlightPadding * 2.0f))
@@ -268,140 +263,22 @@ module GameplayLogic =
         if Simulants.GameplayPlayer.GetExists world then
             let position = Simulants.GameplayPlayer.GetPosition world
             let playerBounds = box3 (position + v3 -0.45f 0.0f -0.45f) (v3 0.9f 1.9f 0.9f)
-            boxesIntersect (blockBounds level blockCoord) playerBounds
+            boxesIntersect (VoxelWorld.blockBounds level blockCoord) playerBounds
         else false
-
-    let private blockContainsVoxel (level : VoxelLevel) (blockCoord : Vector3i) =
-        let start = blockStartCoord blockCoord
-        let mutable contains = false
-        let mutable y = 0
-        while not contains && y < minecraftBlockSideVoxels do
-            let mutable z = 0
-            while not contains && z < minecraftBlockSideVoxels do
-                let mutable x = 0
-                while not contains && x < minecraftBlockSideVoxels do
-                    contains <- level.OccupiedVoxels.ContainsKey (v3i (start.X + x) (start.Y + y) (start.Z + z))
-                    x <- inc x
-                z <- inc z
-            y <- inc y
-        contains
 
     let tryGetAimBlockBounds (gameplay : Gameplay) =
         match gameplay.VoxelLevelOpt, gameplay.AimPickOpt with
-        | Some level, Some pick when blockContainsVoxel level pick.DestroyBlockCoord ->
-            Some (blockBounds level pick.DestroyBlockCoord)
+        | Some level, Some pick when VoxelWorld.blockContainsCell level pick.DestroyBlockCoord ->
+            Some (VoxelWorld.blockBounds level pick.DestroyBlockCoord)
         | Some _, Some _ | Some _, None | None, _ ->
             None
-
-    let private blockIsEmpty (level : VoxelLevel) (blockCoord : Vector3i) =
-        not (blockContainsVoxel level blockCoord)
-
-    let private removeBlock (level : VoxelLevel) (blockCoord : Vector3i) =
-        let start = blockStartCoord blockCoord
-        for y in 0 .. dec minecraftBlockSideVoxels do
-            for z in 0 .. dec minecraftBlockSideVoxels do
-                for x in 0 .. dec minecraftBlockSideVoxels do
-                    level.OccupiedVoxels.Remove (v3i (start.X + x) (start.Y + y) (start.Z + z)) |> ignore<bool>
-
-    let private placeBlock (level : VoxelLevel) (placeableBlock : PlaceableBlock) (blockCoord : Vector3i) =
-        let start = blockStartCoord blockCoord
-        for struct (localCoord, albedo) in placeableBlock.Voxels do
-            let coord = v3i (start.X + localCoord.X) (start.Y + localCoord.Y) (start.Z + localCoord.Z)
-            if isSourceCoordInBounds coord then
-                level.OccupiedVoxels[coord] <- albedo
-
-    let private affectedChunksForBlock (blockCoord : Vector3i) =
-        let affected = HashSet<Vector3i> (HashIdentity.Structural)
-        let start = blockStartCoord blockCoord
-        let finish =
-            start +
-            v3i
-                (minecraftBlockSideVoxels - 1)
-                (minecraftBlockSideVoxels - 1)
-                (minecraftBlockSideVoxels - 1)
-        let minCoord =
-            v3i
-                (max 0 (start.X - 1))
-                (max 0 (start.Y - 1))
-                (max 0 (start.Z - 1))
-        let maxCoord =
-            v3i
-                (min (minecraftLevelSideVoxels - 1) (finish.X + 1))
-                (min (minecraftLevelSideVoxels - 1) (finish.Y + 1))
-                (min (minecraftLevelSideVoxels - 1) (finish.Z + 1))
-        let minChunkCoord = sourceCoordToChunkCoord minCoord
-        let maxChunkCoord = sourceCoordToChunkCoord maxCoord
-        for z in minChunkCoord.Z .. maxChunkCoord.Z do
-            for y in minChunkCoord.Y .. maxChunkCoord.Y do
-                for x in minChunkCoord.X .. maxChunkCoord.X do
-                    let coord = v3i x y z
-                    if isChunkCoordInBounds coord then affected.Add coord |> ignore<bool>
-        affected |> Seq.toArray
-
-    let private sortVoxelChunks chunks =
-        chunks
-        |> Seq.sortBy (fun (chunk : VoxelChunk) -> struct (chunk.ChunkCoord.Z, chunk.ChunkCoord.Y, chunk.ChunkCoord.X))
-        |> Seq.toArray
-
-    let private rebuildChunk (level : VoxelLevel) (chunkCoord : Vector3i) (world : World) =
-        match VoxelBake.chunkModelFromOccupied levelChunkSizeVoxels level.Bounds level.VoxelSize level.OccupiedVoxels chunkCoord with
-        | Some struct (renderCenter, voxelModelDescriptor) ->
-            let struct (bodyCenter, bodyShape, boxCount) =
-                match VoxelBake.chunkBodyShapeFromOccupied levelChunkSizeVoxels level.Bounds level.VoxelSize level.OccupiedVoxels chunkCoord with
-                | Some bodyShape -> bodyShape
-                | None -> struct (renderCenter, EmptyShape, 0)
-            let revision = nextRevision level
-            let voxelModel = chunkAssetTag chunkCoord revision
-            World.createUserDefinedVoxelModel voxelModelDescriptor voxelModel world
-            Some
-                { ChunkCoord = chunkCoord
-                  ChunkCenter = renderCenter + levelOffset
-                  ChunkSize = voxelModelDescriptor.Bounds.Size
-                  BodyShape = translateBodyShape (bodyCenter - renderCenter) bodyShape
-                  BoxCount = boxCount
-                  VoxelModel = voxelModel }
-        | None -> None
 
     let private rebuildChunks (chunkCoords : Vector3i seq) (gameplay : Gameplay) (world : World) =
         match gameplay.VoxelLevelOpt with
         | Some level ->
-            let chunks = Dictionary<Vector3i, VoxelChunk> (HashIdentity.Structural)
-            let chunksToDestroy = ResizeArray<VoxelChunk> ()
-            for chunk in gameplay.VoxelChunks do
-                chunks[chunk.ChunkCoord] <- chunk
-            for chunkCoord in chunkCoords do
-                let oldChunkOpt =
-                    match chunks.TryGetValue chunkCoord with
-                    | (true, chunk) -> Some chunk
-                    | (false, _) -> None
-                match oldChunkOpt with
-                | Some oldChunk -> chunksToDestroy.Add oldChunk
-                | None -> ()
-                match rebuildChunk level chunkCoord world with
-                | Some chunk -> chunks[chunkCoord] <- chunk
-                | None -> chunks.Remove chunkCoord |> ignore<bool>
-            struct ({ gameplay with VoxelChunks = sortVoxelChunks chunks.Values }, chunksToDestroy.ToArray ())
+            let struct (voxelChunks, chunksToDestroy) = VoxelRuntime.rebuildChunks chunkCoords level gameplay.VoxelChunks world
+            struct ({ gameplay with VoxelChunks = voxelChunks; OcclusionBlockCoords = computeOcclusionBlockCoords voxelChunks }, chunksToDestroy)
         | None -> struct (gameplay, [||])
-
-    let private allChunkCoords =
-        [|for z in 0 .. dec levelChunkCounts.Z do
-            for y in 0 .. dec levelChunkCounts.Y do
-                for x in 0 .. dec levelChunkCounts.X do
-                    v3i x y z|]
-
-    let private createPlaceableBlocks (world : World) =
-        [|for i in 0 .. dec placeableBlockSources.Length do
-            let struct (name, image) = placeableBlockSources[i]
-            match VoxelBake.tryBakeSliceAtlasVolume image sourceVoxelSize with
-            | Some volume ->
-                let previewModel = Assets.Voxels.PlaceableBlockPreview i
-                World.createUserDefinedVoxelModel volume.VoxelModel previewModel world
-                yield
-                    { Name = name
-                      Voxels = volume.OccupiedVoxels
-                      PreviewModel = previewModel }
-            | None ->
-                Log.warnOnce ("VoxelForge could not bake placeable block '" + name + "'.")|]
 
     let private tryNearestPhysicsHit (origin : Vector3) (direction : Vector3) remainingDistance (world : World) =
         let ray = ray3 origin (direction * remainingDistance)
@@ -454,58 +331,47 @@ module GameplayLogic =
             tryRayCastThroughPortals gameplay.PortalPair world.Eye3dCenter world.Eye3dRotation.Forward editReach recursionLimit world
             |> Option.bind (fun (intersection : BodyIntersection) ->
                 let normal = if intersection.Normal.LengthSquared () > 0.0f then intersection.Normal.Normalized else v3Up
-                match tryWorldToBlockCoord level (intersection.Position - normal * editEpsilon) with
+                match VoxelWorld.tryWorldToBlockCoord level (intersection.Position - normal * editEpsilon) with
                 | Some destroyBlockCoord ->
                     Some
                         { Position = intersection.Position
                           Normal = normal
                           DestroyBlockCoord = destroyBlockCoord
-                          PlaceBlockCoordOpt = tryWorldToBlockCoord level (intersection.Position + normal * editEpsilon) }
+                          PlaceBlockCoordOpt = VoxelWorld.tryWorldToBlockCoord level (intersection.Position + normal * editEpsilon) }
                 | None -> None)
         | None -> None
 
     let createVoxelLevel (world : World) =
         match VoxelBake.tryBakeSliceAtlasVolume Assets.Voxels.Minecraft sourceVoxelSize with
         | Some minecraftLevel ->
-            let placeableBlocks = createPlaceableBlocks world
-            let level =
-                { Bounds = minecraftLevel.VoxelModel.Bounds
-                  VoxelSize = minecraftLevel.VoxelModel.VoxelSize
-                  OccupiedVoxels = VoxelBake.occupiedDictionary minecraftLevel
-                  PlaceableBlocks = placeableBlocks
-                  NextRevision = ref (freshRevisionSeed ()) }
+            let placeableBlocks = VoxelPalettes.createPlaceableBlocks sourceVoxelSize world
+            let level = VoxelWorld.createEmptyLevel defaultWorldSettings placeableBlocks (v3 0.0f 18.0f 0.0f) (VoxelRuntime.freshRevisionSeed ())
+            for struct (coord, albedo) in minecraftLevel.OccupiedVoxels do
+                VoxelWorld.setSourceCell level coord { Albedo = albedo; Solid = true; Material = Crafted }
             let voxelChunks =
-                allChunkCoords
-                |> Array.choose (fun chunkCoord -> rebuildChunk level chunkCoord world)
-                |> sortVoxelChunks
+                VoxelWorld.allChunkCoords level
+                |> Array.choose (fun chunkCoord -> VoxelRuntime.rebuildChunk level chunkCoord world)
+                |> VoxelRuntime.sortVoxelChunks
             let bodyShapeCount = voxelChunks |> Array.sumBy (fun (voxelChunk : VoxelChunk) -> voxelChunk.BoxCount)
-            Log.infoOnce ("VoxelForge generated " + scstring voxelChunks.Length + " voxel chunks with " + scstring bodyShapeCount + " merged physics boxes.")
+            Log.infoOnce ("VoxelForge baked fallback atlas into " + scstring voxelChunks.Length + " voxel chunks with " + scstring bodyShapeCount + " merged physics boxes.")
             Some (level, voxelChunks)
         | None ->
             Log.warnOnce "VoxelForge could not bake the minecraft voxel slice atlas."
             None
 
     let private destroyVoxelChunks (voxelChunks : VoxelChunk array) (world : World) =
-        for chunk in voxelChunks do
-            World.destroyUserDefinedVoxelModel chunk.VoxelModel world
+        VoxelRuntime.destroyVoxelChunks voxelChunks world
 
-    let destroyVoxelModel (voxelChunks : VoxelChunk array) (placeableBlocks : PlaceableBlock array) (world : World) =
-        destroyVoxelChunks voxelChunks world
-        for placeableBlock in placeableBlocks do
-            World.destroyUserDefinedVoxelModel placeableBlock.PreviewModel world
-        for z in 0 .. dec levelChunkCounts.Z do
-            for y in 0 .. dec levelChunkCounts.Y do
-                for x in 0 .. dec levelChunkCounts.X do
-                    World.destroyUserDefinedVoxelModel (Assets.Voxels.MinecraftLevelChunk x y z) world
+    let destroyVoxelModel (voxelChunks : VoxelChunk array) (placeableBlocks : PlaceableBlock array) (levelOpt : VoxelLevel option) (world : World) =
+        VoxelRuntime.destroyVoxelModel voxelChunks placeableBlocks levelOpt world
 
     let tryDestroyBlock (pick : VoxelAimPick) (gameplay : Gameplay) (screen : Screen) (world : World) =
         match gameplay.VoxelLevelOpt with
-        | Some level when world.Advancing && blockContainsVoxel level pick.DestroyBlockCoord ->
-            removeBlock level pick.DestroyBlockCoord
-            let struct (rebuilt, chunksToDestroy) = rebuildChunks (affectedChunksForBlock pick.DestroyBlockCoord) { gameplay with AimPickOpt = None } world
+        | Some level when world.Advancing && VoxelWorld.blockContainsSolidCell level pick.DestroyBlockCoord ->
+            VoxelWorld.removeBlock level pick.DestroyBlockCoord
+            let struct (rebuilt, chunksToDestroy) = rebuildChunks (VoxelWorld.affectedChunksForBlock level pick.DestroyBlockCoord) { gameplay with AimPickOpt = None } world
             screen.SetGameplay
-                { gameplay with
-                    VoxelChunks = rebuilt.VoxelChunks
+                { rebuilt with
                     AimPickOpt = None }
                 world
             destroyVoxelChunks chunksToDestroy world
@@ -515,14 +381,13 @@ module GameplayLogic =
         match gameplay.VoxelLevelOpt, pick.PlaceBlockCoordOpt, tryGetSelectedBlock gameplay with
         | (Some level, Some placeBlockCoord, Some placeableBlock)
             when world.Advancing &&
-                 isBlockCoordInBounds placeBlockCoord &&
-                 blockIsEmpty level placeBlockCoord &&
+                 VoxelWorld.isBlockCoordInBounds level placeBlockCoord &&
+                 VoxelWorld.blockIsEmpty level placeBlockCoord &&
                  not (blockIntersectsPlayer level placeBlockCoord world) ->
-            placeBlock level placeableBlock placeBlockCoord
-            let struct (rebuilt, chunksToDestroy) = rebuildChunks (affectedChunksForBlock placeBlockCoord) { gameplay with AimPickOpt = None } world
+            VoxelWorld.placeBlock level placeableBlock placeBlockCoord
+            let struct (rebuilt, chunksToDestroy) = rebuildChunks (VoxelWorld.affectedChunksForBlock level placeBlockCoord) { gameplay with AimPickOpt = None } world
             screen.SetGameplay
-                { gameplay with
-                    VoxelChunks = rebuilt.VoxelChunks
+                { rebuilt with
                     AimPickOpt = None }
                 world
             destroyVoxelChunks chunksToDestroy world
@@ -551,9 +416,9 @@ module GameplayLogic =
                 playerEntity.SetFirstPersonPlayer player world
                 FirstPersonPlayerLogic.syncCamera playerEntity player world
 
-    let setInitialCamera (world : World) =
-        let eyeCenter = v3 12.0f 12.0f 14.0f
-        let eyeTarget = v3 0.0f 5.0f 0.0f
+    let setInitialCamera spawnPosition (world : World) =
+        let eyeCenter = spawnPosition + v3 10.0f 8.0f 12.0f
+        let eyeTarget = spawnPosition + v3 0.0f 1.5f 0.0f
         let eyeRotation = Quaternion.CreateLookAt ((eyeTarget - eyeCenter).Normalized, v3Up)
         World.setEye3dCenter eyeCenter world
         World.setEye3dRotation eyeRotation world
@@ -570,12 +435,14 @@ type GameplayDispatcher () =
     override this.TruncateModel gameplay =
         { gameplay with
             VoxelLevelOpt = None
-            VoxelChunks = [||] }
+            VoxelChunks = [||]
+            OcclusionBlockCoords = Set.empty }
 
     override this.UntruncateModel (current, incoming) =
         { incoming with
             VoxelLevelOpt = current.VoxelLevelOpt
-            VoxelChunks = current.VoxelChunks }
+            VoxelChunks = current.VoxelChunks
+            OcclusionBlockCoords = current.OcclusionBlockCoords }
 
     override this.Definitions (_, _) =
         [Screen.SelectEvent => StartPlaying
@@ -588,14 +455,16 @@ type GameplayDispatcher () =
         match message with
         | StartPlaying ->
             let gameplay = { Gameplay.initial with VoxelModelReady = true }
-            withSignal (signal EnsureVoxelModel) gameplay
+            match (Game.GetVoxelForge world).GeneratedWorldPackageOpt with
+            | Some package -> withSignal (signal (UseGeneratedWorld package)) gameplay
+            | None -> withSignal (signal EnsureVoxelModel) gameplay
 
         | FinishQuitting ->
             let placeableBlocks =
                 match gameplay.VoxelLevelOpt with
                 | Some level -> level.PlaceableBlocks
                 | None -> [||]
-            withSignal (signal (DestroyVoxelModel (gameplay.VoxelChunks, placeableBlocks))) Gameplay.empty
+            withSignal (signal (DestroyVoxelModel (gameplay.VoxelChunks, placeableBlocks, gameplay.VoxelLevelOpt))) Gameplay.empty
 
         | TimeUpdate ->
             let gameplay =
@@ -623,30 +492,57 @@ type GameplayDispatcher () =
         | EnsureVoxelModel ->
             match GameplayLogic.createVoxelLevel world with
             | Some (voxelLevel, voxelChunks) ->
+                if world.Unaccompanied then GameplayLogic.setInitialCamera voxelLevel.SpawnPosition world
+                let portalPair = PortalLogic.pairAtGround voxelLevel.SpawnPosition
                 screen.SetGameplay
                     { gameplay with
                         GameplayState = Playing
                         VoxelModelReady = true
                         VoxelLevelOpt = Some voxelLevel
                         VoxelChunks = voxelChunks
+                        OcclusionBlockCoords = GameplayLogic.computeOcclusionBlockCoords voxelChunks
+                        PortalPair = portalPair
                         AimPickOpt = None
                         SelectedBlockIndex = 0
                         SelectedBlockPreviewPositionOpt = None }
                     world
             | None ->
+                let fallbackSpawn = v3 0.0f 18.0f 0.0f
+                if world.Unaccompanied then GameplayLogic.setInitialCamera fallbackSpawn world
                 screen.SetGameplay
                     { gameplay with
                         GameplayState = Playing
                         VoxelModelReady = true
                         VoxelLevelOpt = None
                         VoxelChunks = [||]
+                        OcclusionBlockCoords = Set.empty
+                        PortalPair = PortalLogic.pairAtGround fallbackSpawn
                         AimPickOpt = None
                         SelectedBlockIndex = 0
                         SelectedBlockPreviewPositionOpt = None }
                     world
-            if world.Unaccompanied then GameplayLogic.setInitialCamera world
-        | DestroyVoxelModel (voxelChunks, placeableBlocks) ->
-            GameplayLogic.destroyVoxelModel voxelChunks placeableBlocks world
+        | UseGeneratedWorld package ->
+            Log.infoOnce
+                ("VoxelForge entering generated world with " +
+                 scstring package.Stats.SourceVoxelCount + " source voxels, " +
+                 scstring package.Chunks.Length + " chunks, and " +
+                 scstring package.Stats.BodyShapeCount + " merged physics boxes.")
+            if world.Unaccompanied then GameplayLogic.setInitialCamera package.SpawnPosition world
+            let portalPair = PortalLogic.pairAtGround package.SpawnPosition
+            screen.SetGameplay
+                { gameplay with
+                    GameplayState = Playing
+                    VoxelModelReady = true
+                    VoxelLevelOpt = Some package.Level
+                    VoxelChunks = package.Chunks
+                    OcclusionBlockCoords = GameplayLogic.computeOcclusionBlockCoords package.Chunks
+                    PortalPair = portalPair
+                    AimPickOpt = None
+                    SelectedBlockIndex = 0
+                    SelectedBlockPreviewPositionOpt = None }
+                world
+        | DestroyVoxelModel (voxelChunks, placeableBlocks, levelOpt) ->
+            GameplayLogic.destroyVoxelModel voxelChunks placeableBlocks levelOpt world
         | DestroyBlock pick ->
             GameplayLogic.tryDestroyBlock pick gameplay screen world
         | PlaceBlock pick ->
@@ -664,16 +560,81 @@ type GameplayDispatcher () =
     override this.Content (gameplay, _) =
 
         [if gameplay.GameplayState = Playing then
+            let playerSpawnPosition =
+                match gameplay.VoxelLevelOpt with
+                | Some level -> level.SpawnPosition
+                | None -> v3 0.0f 18.0f 0.0f
             Content.groupFromFile Simulants.GameplayScene.Name "Assets/Gameplay/Scene.nugroup" []
 
-                [for voxelChunk in gameplay.VoxelChunks do
+                [let environmentBounds =
+                    match gameplay.VoxelLevelOpt with
+                    | Some level ->
+                        box3
+                            (level.Bounds.Min + level.LevelOffset - v3 48.0f 24.0f 48.0f)
+                            (level.Bounds.Size + v3 96.0f 96.0f 96.0f)
+                    | None ->
+                        box3 (v3 -96.0f -16.0f -96.0f) (v3 192.0f 128.0f 192.0f)
+                 let sunPosition = playerSpawnPosition + v3 -96.0f 128.0f -96.0f
+
+                 Content.skyBox Simulants.GameplaySkyBox.Name
+                    [Entity.Absolute == true
+                     Entity.AmbientColor == color 0.86f 0.93f 1.0f 1.0f
+                     Entity.AmbientBrightness == 0.72f
+                     Entity.Color == color 0.72f 0.86f 1.0f 1.0f
+                     Entity.Brightness == 1.15f
+                     Entity.Presence == Omnipresent
+                     Entity.Static == true]
+
+                 Content.light3d Simulants.GameplaySunLight.Name
+                    [Entity.Position := sunPosition
+                     Entity.Rotation == Quaternion.CreateFromYawPitchRoll (-0.55f, -0.85f, 0.0f)
+                     Entity.Presence == Omnipresent
+                     Entity.AlwaysRender == true
+                     Entity.Static == true
+                     Entity.LightType == DirectionalLight 20.0f
+                     Entity.Color == color 1.0f 0.94f 0.82f 1.0f
+                     Entity.Brightness == 4.0f
+                     Entity.LightCutoff == 160.0f
+                     Entity.AutoAttenuate == false
+                     Entity.DesireShadows == false
+                     Entity.DesireFog == false]
+
+                 Content.lightProbe3d Simulants.GameplayLightProbe.Name
+                    [Entity.Position := environmentBounds.Center
+                     Entity.Presence == Omnipresent
+                     Entity.AlwaysRender == true
+                     Entity.Static == true
+                     Entity.AmbientColor == color 0.86f 0.93f 1.0f 1.0f
+                     Entity.AmbientBrightness == 0.72f
+                     Entity.ProbeBounds := environmentBounds]
+
+                 Content.staticModel Simulants.GameplaySun.Name
+                    [Entity.Position := sunPosition
+                     Entity.Size == v3Dup 10.0f
+                     Entity.Scale == v3Dup 10.0f
+                     Entity.Presence == Omnipresent
+                     Entity.AlwaysRender == true
+                     Entity.Static == true
+                     Entity.Pickable == false
+                     Entity.CastShadow == false
+                     Entity.StaticModel == Assets.Default.BallModel
+                     Entity.MaterialProperties ==
+                        { MaterialProperties.defaultProperties with
+                            AlbedoOpt = ValueSome (color 1.0f 0.92f 0.65f 1.0f)
+                            EmissionOpt = ValueSome 3.0f
+                            RoughnessOpt = ValueSome 0.45f
+                            MetallicOpt = ValueSome 0.0f }]
+
+                 for voxelChunk in gameplay.VoxelChunks do
                     Content.voxel (Simulants.VoxelLevelChunk voxelChunk.ChunkCoord.X voxelChunk.ChunkCoord.Y voxelChunk.ChunkCoord.Z).Name
-                        [Entity.FacetNames == Set.ofList [nameof VoxelFacet; nameof RigidBodyFacet]
+                        [Entity.FacetNames == Set.ofList [nameof VoxelChunkFacet; nameof RigidBodyFacet]
                          Entity.Position := voxelChunk.ChunkCenter
                          Entity.Size := voxelChunk.ChunkSize
                          Entity.VoxelModel := voxelChunk.VoxelModel
-                         Entity.Presence == Omnipresent
-                         Entity.AlwaysRender == true
+                         Entity.Visible == true
+                         Entity.Presence == Exterior
+                         Entity.AlwaysRender == false
+                         Entity.CastShadow == false
                          Entity.BodyType == Static
                          Entity.BodyShape := voxelChunk.BodyShape
                          Entity.CollisionCategories == "10"
@@ -688,7 +649,7 @@ type GameplayDispatcher () =
                                 ClearCoatRoughnessOpt = ValueSome 1.0f }]
 
                  Content.composite<FirstPersonPlayerDispatcher> Simulants.GameplayPlayer.Name
-                    [Entity.Position == v3 0.0f 18.0f 0.0f]
+                    [Entity.Position == playerSpawnPosition]
                     [Content.staticModel Simulants.GameplayPlayerBody.Name
                         [Entity.PositionLocal == v3 0.0f 0.85f 0.0f
                          Entity.Size == v3 0.7f 1.7f 0.7f
