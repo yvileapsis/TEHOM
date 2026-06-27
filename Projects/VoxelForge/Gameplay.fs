@@ -439,7 +439,9 @@ module GameplayLogic =
                 VoxelWorld.setSourceCell level coord { Albedo = albedo; Solid = true; Material = Crafted }
             let voxelChunks =
                 VoxelWorld.allChunkCoords level
-                |> Array.choose (fun chunkCoord -> VoxelRuntime.rebuildChunk level chunkCoord world)
+                |> Array.Parallel.map (fun chunkCoord -> VoxelRuntime.tryBuildChunk level chunkCoord)
+                |> Array.choose id
+                |> Array.map (fun chunkBuild -> VoxelRuntime.realizeChunk level chunkBuild world)
                 |> VoxelRuntime.sortVoxelChunks
             let bodyShapeCount = voxelChunks |> Array.sumBy (fun (voxelChunk : VoxelChunk) -> voxelChunk.BoxCount)
             Log.infoOnce ("VoxelForge baked fallback atlas into " + scstring voxelChunks.Length + " voxel chunks with " + scstring bodyShapeCount + " merged physics boxes.")

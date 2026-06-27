@@ -540,12 +540,15 @@ type WorldGenerationDispatcher () =
             | Some level, Some stats ->
                 let chunksPerUpdate = max 1 generation.Settings.ChunksPerUpdate
                 let buildCount = min chunksPerUpdate generation.PendingChunks.Length
-                let chunksBuiltNow = ResizeArray<VoxelChunk> ()
-                for i in 0 .. dec buildCount do
-                    match VoxelRuntime.rebuildChunk level generation.PendingChunks[i] world with
-                    | Some chunk -> chunksBuiltNow.Add chunk
-                    | None -> ()
-                let builtChunks = Array.append generation.BuiltChunks (chunksBuiltNow.ToArray ())
+                let chunkBuilds =
+                    generation.PendingChunks
+                    |> Array.take buildCount
+                    |> Array.Parallel.map (fun chunkCoord -> VoxelRuntime.tryBuildChunk level chunkCoord)
+                    |> Array.choose id
+                let chunksBuiltNow =
+                    chunkBuilds
+                    |> Array.map (fun chunkBuild -> VoxelRuntime.realizeChunk level chunkBuild world)
+                let builtChunks = Array.append generation.BuiltChunks chunksBuiltNow
                 let pendingChunks = generation.PendingChunks |> Array.skip buildCount
                 let totalChunks = max 1 (builtChunks.Length + pendingChunks.Length)
                 let progress = 0.08f + 0.92f * (single builtChunks.Length / single totalChunks)

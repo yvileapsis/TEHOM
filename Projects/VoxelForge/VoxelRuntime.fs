@@ -8,6 +8,21 @@ open Nu
 [<RequireQualifiedAccess>]
 module VoxelRuntime =
 
+    type VoxelChunkBuild =
+        { ChunkCoord : Vector3i
+          ChunkCenter : Vector3
+          ChunkSize : Vector3
+          VoxelModelDescriptor : VoxelModelDescriptor
+          BodyShape : BodyShape
+          BoxCount : int
+          OcclusionBoundsOpt : Box3 option
+          SolidBlockCoords : Vector3i array
+          SplatCount : int
+          OpaqueBlockCoords : Vector3i array
+          OpaqueOccluderBoxes : Box3 array
+          OpaqueFaceMask : int
+          FullOpaqueChunk : bool }
+
     let freshRevisionSeed () =
         int (Gen.id64 % uint64 (Int32.MaxValue - 1))
 
@@ -386,33 +401,55 @@ module VoxelRuntime =
             else struct (EmptyShape, 0, None, [||], [||], [||], 0, false)
         | None -> struct (EmptyShape, 0, None, [||], [||], [||], 0, false)
 
-    let rebuildChunk (level : VoxelLevel) (chunkCoord : Vector3i) (world : World) =
+    let tryBuildChunk (level : VoxelLevel) (chunkCoord : Vector3i) =
         let tryGetCell coord = VoxelWorld.tryGetCell level coord
         match VoxelBake.chunkModelFromCells level.ChunkSizeVoxels level.Bounds level.VoxelSize tryGetCell chunkCoord with
         | Some struct (renderCenter, voxelModelDescriptor) ->
             let struct (bodyShape, boxCount, occlusionBoundsOpt, solidBlockCoords, opaqueBlockCoords, opaqueOccluderBoxes, opaqueFaceMask, fullOpaqueChunk) = chunkBodyShapeFromBlocks level chunkCoord renderCenter
             let splatCount = voxelModelDescriptor.Splats.Length
-            let revision = nextRevision level
-            let voxelModelOpt =
-                if splatCount > 0 then
-                    let voxelModel = chunkAssetTag chunkCoord revision
-                    World.createUserDefinedVoxelModel voxelModelDescriptor voxelModel world
-                    Some voxelModel
-                else None
             Some
                 { ChunkCoord = chunkCoord
                   ChunkCenter = renderCenter + level.LevelOffset
                   ChunkSize = voxelModelDescriptor.Bounds.Size
+                  VoxelModelDescriptor = voxelModelDescriptor
                   BodyShape = bodyShape
                   BoxCount = boxCount
                   OcclusionBoundsOpt = occlusionBoundsOpt |> Option.map (fun bounds -> box3 (bounds.Min + level.LevelOffset) bounds.Size)
                   SolidBlockCoords = solidBlockCoords
                   SplatCount = splatCount
-                  VoxelModelOpt = voxelModelOpt
                   OpaqueBlockCoords = opaqueBlockCoords
                   OpaqueOccluderBoxes = opaqueOccluderBoxes
                   OpaqueFaceMask = opaqueFaceMask
                   FullOpaqueChunk = fullOpaqueChunk }
+        | None -> None
+
+    let realizeChunk (level : VoxelLevel) (chunkBuild : VoxelChunkBuild) (world : World) =
+        let splatCount = chunkBuild.SplatCount
+        let voxelModelOpt =
+            if splatCount > 0 then
+                let revision = nextRevision level
+                let voxelModel = chunkAssetTag chunkBuild.ChunkCoord revision
+                World.createUserDefinedVoxelModel chunkBuild.VoxelModelDescriptor voxelModel world
+                Some voxelModel
+            else None
+        { ChunkCoord = chunkBuild.ChunkCoord
+          ChunkCenter = chunkBuild.ChunkCenter
+          ChunkSize = chunkBuild.ChunkSize
+          BodyShape = chunkBuild.BodyShape
+          BoxCount = chunkBuild.BoxCount
+          OcclusionBoundsOpt = chunkBuild.OcclusionBoundsOpt
+          SolidBlockCoords = chunkBuild.SolidBlockCoords
+          SplatCount = splatCount
+          VoxelModelOpt = voxelModelOpt
+          OpaqueBlockCoords = chunkBuild.OpaqueBlockCoords
+          OpaqueOccluderBoxes = chunkBuild.OpaqueOccluderBoxes
+          OpaqueFaceMask = chunkBuild.OpaqueFaceMask
+          FullOpaqueChunk = chunkBuild.FullOpaqueChunk }
+
+    let rebuildChunk (level : VoxelLevel) (chunkCoord : Vector3i) (world : World) =
+        match tryBuildChunk level chunkCoord with
+        | Some chunkBuild ->
+            Some (realizeChunk level chunkBuild world)
         | None -> None
 
     let rebuildChunks (chunkCoords : Vector3i seq) (level : VoxelLevel) (currentChunks : VoxelChunk array) (world : World) =
@@ -424,8 +461,8 @@ module VoxelRuntime =
             match chunks.TryGetValue chunkCoord with
             | (true, oldChunk) -> chunksToDestroy.Add oldChunk
             | (false, _) -> ()
-            match rebuildChunk level chunkCoord world with
-            | Some chunk -> chunks[chunkCoord] <- chunk
+            match tryBuildChunk level chunkCoord with
+            | Some chunkBuild -> chunks[chunkCoord] <- realizeChunk level chunkBuild world
             | None -> chunks.Remove chunkCoord |> ignore<bool>
         struct (sortVoxelChunks chunks.Values, chunksToDestroy.ToArray ())
 

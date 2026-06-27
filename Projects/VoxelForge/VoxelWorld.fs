@@ -123,7 +123,7 @@ module WorldGenSettings =
           CaveThreshold = 0.70f
           OreRate = 0.035f
           TreeRate = 0.10f
-          ChunksPerUpdate = 2 }
+          ChunksPerUpdate = 32 }
 
 [<RequireQualifiedAccess>]
 module VoxelWorld =
