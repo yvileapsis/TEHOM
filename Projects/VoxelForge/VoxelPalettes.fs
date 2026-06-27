@@ -1,5 +1,6 @@
 namespace VoxelForge
 open System
+open System.Collections.Generic
 open System.Numerics
 open Prime
 open Nu
@@ -29,14 +30,22 @@ module VoxelPalettes =
         volume.OccupiedVoxels
         |> Array.map (fun struct (coord, albedo) -> struct (coord, cell material solid albedo))
 
+    let private cellMap (voxels : struct (Vector3i * VoxelCell) array) =
+        let cells = Dictionary<Vector3i, VoxelCell> (HashIdentity.Structural)
+        for struct (coord, cell) in voxels do
+            cells[coord] <- cell
+        cells
+
     let tryBakeBlockTemplate name material solid image voxelSize =
         match VoxelBake.tryBakeSliceAtlasVolume image voxelSize with
         | Some volume ->
+            let voxels = cellsFromVolume material solid volume
             Some
                 { Name = name
                   Material = material
                   Solid = solid
-                  Voxels = cellsFromVolume material solid volume }
+                  Voxels = voxels
+                  Cells = cellMap voxels }
         | None -> None
 
     let createBlockTemplates voxelSize =
@@ -74,10 +83,7 @@ module VoxelPalettes =
             albedo.A
 
     let deriveTintedTemplate name material solid (tint : Color) (amount : single) (template : VoxelBlockTemplate) =
-        { Name = name
-          Material = material
-          Solid = solid
-          Voxels =
+        let voxels =
             template.Voxels
             |> Array.map (fun struct (coord, cell) ->
                 struct
@@ -85,4 +91,9 @@ module VoxelPalettes =
                      { cell with
                         Albedo = tintColor amount tint cell.Albedo
                         Solid = solid
-                        Material = material })) }
+                        Material = material }))
+        { Name = name
+          Material = material
+          Solid = solid
+          Voxels = voxels
+          Cells = cellMap voxels }

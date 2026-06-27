@@ -1,6 +1,7 @@
 namespace VoxelForge
 open System
 open System.Collections.Generic
+open System.IO
 open System.Numerics
 open Prime
 open Nu
@@ -98,7 +99,7 @@ module VoxelRuntime =
         then Some struct (minBlock, maxBlock)
         else None
 
-    let private blockHasCollision (level : VoxelLevel) (blockCoord : Vector3i) =
+    let private blockHasCollision (tryGetCell : Vector3i -> VoxelCell voption) (level : VoxelLevel) (blockCoord : Vector3i) =
         let side = max 1 level.BlockSideVoxels
         let solidTarget =
             max 1 (int (MathF.Ceiling (single (side * side * side) * collisionSolidThreshold)))
@@ -110,9 +111,9 @@ module VoxelRuntime =
             while solidCount < solidTarget && z < side do
                 let mutable x = 0
                 while solidCount < solidTarget && x < side do
-                    match VoxelWorld.tryGetCell level (v3i (start.X + x) (start.Y + y) (start.Z + z)) with
-                    | Some cell when cell.Solid -> solidCount <- inc solidCount
-                    | Some _ | None -> ()
+                    match tryGetCell (v3i (start.X + x) (start.Y + y) (start.Z + z)) with
+                    | ValueSome cell when cell.Solid -> solidCount <- inc solidCount
+                    | ValueSome _ | ValueNone -> ()
                     x <- inc x
                 z <- inc z
             y <- inc y
@@ -124,13 +125,13 @@ module VoxelRuntime =
         | Grass | Dirt | Stone | Sand | Wood | Ore | Brick | Crafted -> true
         | Leaves | Glass | Water | Lava -> false
 
-    let private blockFaceOpaque (level : VoxelLevel) (blockCoord : Vector3i) faceIndex =
+    let private blockFaceOpaque (tryGetCell : Vector3i -> VoxelCell voption) (level : VoxelLevel) (blockCoord : Vector3i) faceIndex =
         let side = max 1 level.BlockSideVoxels
         let start = VoxelWorld.blockStartCoord level blockCoord
         let isOpaque x y z =
-            match VoxelWorld.tryGetCell level (v3i (start.X + x) (start.Y + y) (start.Z + z)) with
-            | Some cell when isOpaqueCell cell -> true
-            | Some _ | None -> false
+            match tryGetCell (v3i (start.X + x) (start.Y + y) (start.Z + z)) with
+            | ValueSome cell when isOpaqueCell cell -> true
+            | ValueSome _ | ValueNone -> false
         let mutable opaque = true
         match faceIndex with
         | 0 ->
@@ -184,13 +185,13 @@ module VoxelRuntime =
         | _ -> opaque <- false
         opaque
 
-    let private blockIsOpaqueOccluder level blockCoord =
-        blockFaceOpaque level blockCoord 0 &&
-        blockFaceOpaque level blockCoord 1 &&
-        blockFaceOpaque level blockCoord 2 &&
-        blockFaceOpaque level blockCoord 3 &&
-        blockFaceOpaque level blockCoord 4 &&
-        blockFaceOpaque level blockCoord 5
+    let private blockIsOpaqueOccluder tryGetCell level blockCoord =
+        blockFaceOpaque tryGetCell level blockCoord 0 &&
+        blockFaceOpaque tryGetCell level blockCoord 1 &&
+        blockFaceOpaque tryGetCell level blockCoord 2 &&
+        blockFaceOpaque tryGetCell level blockCoord 3 &&
+        blockFaceOpaque tryGetCell level blockCoord 4 &&
+        blockFaceOpaque tryGetCell level blockCoord 5
 
     let private computeFaceMask (filled : bool[,,]) (blockCounts : Vector3i) =
         let mutable mask = 0
@@ -250,7 +251,7 @@ module VoxelRuntime =
         if faceCovered then mask <- mask ||| 32
         mask
 
-    let private chunkBodyShapeFromBlocks (level : VoxelLevel) (chunkCoord : Vector3i) (renderCenter : Vector3) =
+    let private chunkBodyShapeFromBlocks (tryGetCell : Vector3i -> VoxelCell voption) (level : VoxelLevel) (chunkCoord : Vector3i) (renderCenter : Vector3) =
         match tryChunkBlockRange level chunkCoord with
         | Some (struct (minBlock, maxBlock)) ->
             let blockCounts = maxBlock - minBlock + v3iOne
@@ -265,11 +266,11 @@ module VoxelRuntime =
                 for z in 0 .. dec blockCounts.Z do
                     for x in 0 .. dec blockCounts.X do
                         let blockCoord = minBlock + v3i x y z
-                        if blockHasCollision level blockCoord then
+                        if blockHasCollision tryGetCell level blockCoord then
                             filled[x, y, z] <- true
                             solidBlockCoords.Add blockCoord
                             occupiedAny <- true
-                        if blockIsOpaqueOccluder level blockCoord then
+                        if blockIsOpaqueOccluder tryGetCell level blockCoord then
                             opaque[x, y, z] <- true
                             opaqueBlockCoords.Add blockCoord
                             opaqueAny <- true
@@ -401,11 +402,10 @@ module VoxelRuntime =
             else struct (EmptyShape, 0, None, [||], [||], [||], 0, false)
         | None -> struct (EmptyShape, 0, None, [||], [||], [||], 0, false)
 
-    let tryBuildChunk (level : VoxelLevel) (chunkCoord : Vector3i) =
-        let tryGetCell coord = VoxelWorld.tryGetCell level coord
+    let tryBuildChunkWithCellLookup (level : VoxelLevel) (tryGetCell : Vector3i -> VoxelCell voption) (chunkCoord : Vector3i) =
         match VoxelBake.chunkModelFromCells level.ChunkSizeVoxels level.Bounds level.VoxelSize tryGetCell chunkCoord with
         | Some struct (renderCenter, voxelModelDescriptor) ->
-            let struct (bodyShape, boxCount, occlusionBoundsOpt, solidBlockCoords, opaqueBlockCoords, opaqueOccluderBoxes, opaqueFaceMask, fullOpaqueChunk) = chunkBodyShapeFromBlocks level chunkCoord renderCenter
+            let struct (bodyShape, boxCount, occlusionBoundsOpt, solidBlockCoords, opaqueBlockCoords, opaqueOccluderBoxes, opaqueFaceMask, fullOpaqueChunk) = chunkBodyShapeFromBlocks tryGetCell level chunkCoord renderCenter
             let splatCount = voxelModelDescriptor.Splats.Length
             Some
                 { ChunkCoord = chunkCoord
@@ -422,6 +422,316 @@ module VoxelRuntime =
                   OpaqueFaceMask = opaqueFaceMask
                   FullOpaqueChunk = fullOpaqueChunk }
         | None -> None
+
+    let tryBuildChunk (level : VoxelLevel) (chunkCoord : Vector3i) =
+        let tryGetCell coord = VoxelWorld.tryGetCellValue level coord
+        tryBuildChunkWithCellLookup level tryGetCell chunkCoord
+
+    let private chunkBuildCacheMagic = "VFCB"
+    let private chunkBuildCacheVersion = 1
+
+    let private writeVector3i (writer : BinaryWriter) (value : Vector3i) =
+        writer.Write value.X
+        writer.Write value.Y
+        writer.Write value.Z
+
+    let private readVector3i (reader : BinaryReader) =
+        v3i (reader.ReadInt32 ()) (reader.ReadInt32 ()) (reader.ReadInt32 ())
+
+    let private writeVector3 (writer : BinaryWriter) (value : Vector3) =
+        writer.Write value.X
+        writer.Write value.Y
+        writer.Write value.Z
+
+    let private readVector3 (reader : BinaryReader) =
+        v3 (reader.ReadSingle ()) (reader.ReadSingle ()) (reader.ReadSingle ())
+
+    let private writeColor (writer : BinaryWriter) (value : Color) =
+        writer.Write value.R
+        writer.Write value.G
+        writer.Write value.B
+        writer.Write value.A
+
+    let private readColor (reader : BinaryReader) =
+        color (reader.ReadSingle ()) (reader.ReadSingle ()) (reader.ReadSingle ()) (reader.ReadSingle ())
+
+    let private writeBox3 (writer : BinaryWriter) (value : Box3) =
+        writeVector3 writer value.Min
+        writeVector3 writer value.Size
+
+    let private readBox3 (reader : BinaryReader) =
+        let min = readVector3 reader
+        let size = readVector3 reader
+        box3 min size
+
+    let private chunkBuildCacheSignature (level : VoxelLevel) =
+        match level.GenerationOpt with
+        | Some generation ->
+            String.Join
+                ("|",
+                 [|string level.WorldSizeBlocks.X; string level.WorldSizeBlocks.Y; string level.WorldSizeBlocks.Z
+                   string level.ActiveBlockOrigin.X; string level.ActiveBlockOrigin.Y; string level.ActiveBlockOrigin.Z
+                   string level.SourceSizeVoxels.X; string level.SourceSizeVoxels.Y; string level.SourceSizeVoxels.Z
+                   string level.ChunkCounts.X; string level.ChunkCounts.Y; string level.ChunkCounts.Z
+                   string level.ChunkSizeVoxels.X; string level.ChunkSizeVoxels.Y; string level.ChunkSizeVoxels.Z
+                   string level.BlockSideVoxels
+                   string level.BlockGridOffsetVoxels.X; string level.BlockGridOffsetVoxels.Y; string level.BlockGridOffsetVoxels.Z
+                   string level.VoxelSize.X; string level.VoxelSize.Y; string level.VoxelSize.Z
+                   string generation.Seed
+                   string generation.SeaLevelBlocks
+                   string generation.LavaLevelBlocks
+                   string generation.TerrainScale
+                   string generation.MountainStrength
+                   string generation.CaveThreshold
+                   string generation.OreRate
+                   string generation.TreeRate|])
+        | None -> String.Empty
+
+    let private safePathPart (value : string) =
+        let invalidChars = Path.GetInvalidFileNameChars ()
+        let chars = value.ToCharArray ()
+        for i in 0 .. dec chars.Length do
+            if Array.contains chars[i] invalidChars then chars[i] <- '_'
+        String (chars)
+
+    let private canUseChunkBuildCache (level : VoxelLevel) =
+        Option.isSome level.GenerationOpt
+
+    let private chunkBuildCacheFilePath (level : VoxelLevel) (chunkCoord : Vector3i) =
+        let signature = chunkBuildCacheSignature level
+        let safeSignature =
+            signature.Replace("|", "_").Replace("-", "m").Replace(".", "p").Replace(",", "p")
+            |> safePathPart
+        let directoryPath =
+            Path.Combine
+                (Environment.GetFolderPath Environment.SpecialFolder.LocalApplicationData,
+                 "VoxelForge",
+                 "ChunkBuilds",
+                 "v" + string chunkBuildCacheVersion,
+                 safeSignature)
+        Path.Combine (directoryPath, "chunk_" + string chunkCoord.X + "_" + string chunkCoord.Y + "_" + string chunkCoord.Z + ".vfcb")
+
+    let private tryGetBodyShapeBoxes (bodyShape : BodyShape) =
+        let boxes = ResizeArray<struct (Vector3 * Vector3)> ()
+        let rec appendBodyShape bodyShape =
+            match bodyShape with
+            | EmptyShape -> true
+            | BoxShape boxShape ->
+                match boxShape.TransformOpt, boxShape.PropertiesOpt with
+                | Some transform, None ->
+                    boxes.Add (struct (boxShape.Size, transform.Translation))
+                    true
+                | None, None ->
+                    boxes.Add (struct (boxShape.Size, v3Zero))
+                    true
+                | _ -> false
+            | BodyShapes bodyShapes ->
+                let mutable valid = true
+                for bodyShape in bodyShapes do
+                    if valid then valid <- appendBodyShape bodyShape
+                valid
+            | SphereShape _
+            | CapsuleShape _
+            | BoxRoundedShape _
+            | EdgeShape _
+            | ContourShape _
+            | PointsShape _
+            | GeometryShape _
+            | StaticModelShape _
+            | StaticModelSurfaceShape _
+            | TerrainShape _ -> false
+        if appendBodyShape bodyShape then Some (boxes.ToArray ())
+        else None
+
+    let private writeVector3iArray (writer : BinaryWriter) (values : Vector3i array) =
+        writer.Write values.Length
+        for value in values do
+            writeVector3i writer value
+
+    let private readVector3iArray (reader : BinaryReader) =
+        let count = reader.ReadInt32 ()
+        let values = Array.zeroCreate<Vector3i> count
+        for i in 0 .. dec count do
+            values[i] <- readVector3i reader
+        values
+
+    let private writeBox3Array (writer : BinaryWriter) (values : Box3 array) =
+        writer.Write values.Length
+        for value in values do
+            writeBox3 writer value
+
+    let private readBox3Array (reader : BinaryReader) =
+        let count = reader.ReadInt32 ()
+        let values = Array.zeroCreate<Box3> count
+        for i in 0 .. dec count do
+            values[i] <- readBox3 reader
+        values
+
+    let private writeVoxelModelDescriptor (writer : BinaryWriter) (descriptor : VoxelModelDescriptor) =
+        writeBox3 writer descriptor.Bounds
+        writeVector3 writer descriptor.VoxelSize
+        writer.Write descriptor.Splats.Length
+        for splat in descriptor.Splats do
+            writeVector3 writer splat.Position
+            writeColor writer splat.Albedo
+            writeVector3 writer splat.Normal
+
+    let private readVoxelModelDescriptor (reader : BinaryReader) =
+        let bounds = readBox3 reader
+        let voxelSize = readVector3 reader
+        let splatCount = reader.ReadInt32 ()
+        let splats = Array.zeroCreate<VoxelSplat> splatCount
+        for i in 0 .. dec splatCount do
+            splats[i] <-
+                { Position = readVector3 reader
+                  Albedo = readColor reader
+                  Normal = readVector3 reader }
+        { Splats = splats
+          Bounds = bounds
+          VoxelSize = voxelSize }
+
+    let private writeBodyShapeBoxes (writer : BinaryWriter) (bodyBoxes : struct (Vector3 * Vector3) array) =
+        writer.Write bodyBoxes.Length
+        for struct (size, translation) in bodyBoxes do
+            writeVector3 writer size
+            writeVector3 writer translation
+
+    let private readBodyShapeBoxes (reader : BinaryReader) =
+        let count = reader.ReadInt32 ()
+        let bodyShapes = Array.zeroCreate<BodyShape> count
+        for i in 0 .. dec count do
+            let size = readVector3 reader
+            let translation = readVector3 reader
+            bodyShapes[i] <- BoxShape { Size = size; TransformOpt = Some (Affine.makeTranslation translation); PropertiesOpt = None }
+        if count = 0 then EmptyShape
+        else BodyShapes (bodyShapes |> Array.toList)
+
+    let private writeChunkBuild (writer : BinaryWriter) (chunkBuild : VoxelChunkBuild) =
+        match tryGetBodyShapeBoxes chunkBuild.BodyShape with
+        | Some bodyBoxes ->
+            writeVector3i writer chunkBuild.ChunkCoord
+            writeVector3 writer chunkBuild.ChunkCenter
+            writeVector3 writer chunkBuild.ChunkSize
+            writeVoxelModelDescriptor writer chunkBuild.VoxelModelDescriptor
+            writeBodyShapeBoxes writer bodyBoxes
+            match chunkBuild.OcclusionBoundsOpt with
+            | Some bounds ->
+                writer.Write true
+                writeBox3 writer bounds
+            | None -> writer.Write false
+            writeVector3iArray writer chunkBuild.SolidBlockCoords
+            writer.Write chunkBuild.SplatCount
+            writeVector3iArray writer chunkBuild.OpaqueBlockCoords
+            writeBox3Array writer chunkBuild.OpaqueOccluderBoxes
+            writer.Write chunkBuild.OpaqueFaceMask
+            writer.Write chunkBuild.FullOpaqueChunk
+            true
+        | None -> false
+
+    let private readChunkBuild (reader : BinaryReader) =
+        let chunkCoord = readVector3i reader
+        let chunkCenter = readVector3 reader
+        let chunkSize = readVector3 reader
+        let voxelModelDescriptor = readVoxelModelDescriptor reader
+        let bodyShape = readBodyShapeBoxes reader
+        let boxCount =
+            match bodyShape with
+            | BodyShapes bodyShapes -> bodyShapes.Length
+            | EmptyShape -> 0
+            | BoxShape _ -> 1
+            | SphereShape _
+            | CapsuleShape _
+            | BoxRoundedShape _
+            | EdgeShape _
+            | ContourShape _
+            | PointsShape _
+            | GeometryShape _
+            | StaticModelShape _
+            | StaticModelSurfaceShape _
+            | TerrainShape _ -> 0
+        let occlusionBoundsOpt =
+            if reader.ReadBoolean () then Some (readBox3 reader)
+            else None
+        let solidBlockCoords = readVector3iArray reader
+        let splatCount = reader.ReadInt32 ()
+        let opaqueBlockCoords = readVector3iArray reader
+        let opaqueOccluderBoxes = readBox3Array reader
+        let opaqueFaceMask = reader.ReadInt32 ()
+        let fullOpaqueChunk = reader.ReadBoolean ()
+        { ChunkCoord = chunkCoord
+          ChunkCenter = chunkCenter
+          ChunkSize = chunkSize
+          VoxelModelDescriptor = voxelModelDescriptor
+          BodyShape = bodyShape
+          BoxCount = boxCount
+          OcclusionBoundsOpt = occlusionBoundsOpt
+          SolidBlockCoords = solidBlockCoords
+          SplatCount = splatCount
+          OpaqueBlockCoords = opaqueBlockCoords
+          OpaqueOccluderBoxes = opaqueOccluderBoxes
+          OpaqueFaceMask = opaqueFaceMask
+          FullOpaqueChunk = fullOpaqueChunk }
+
+    let private tryLoadChunkBuild (level : VoxelLevel) (chunkCoord : Vector3i) =
+        if canUseChunkBuildCache level then
+            let filePath = chunkBuildCacheFilePath level chunkCoord
+            if File.Exists filePath then
+                try
+                    use stream = File.Open (filePath, FileMode.Open, FileAccess.Read, FileShare.Read)
+                    use reader = new BinaryReader (stream)
+                    let magic = reader.ReadString ()
+                    let version = reader.ReadInt32 ()
+                    let signature = reader.ReadString ()
+                    let cachedChunkCoord = readVector3i reader
+                    if  magic = chunkBuildCacheMagic &&
+                        version = chunkBuildCacheVersion &&
+                        signature = chunkBuildCacheSignature level &&
+                        cachedChunkCoord = chunkCoord then
+                        let hasChunkBuild = reader.ReadBoolean ()
+                        if hasChunkBuild then ValueSome (Some (readChunkBuild reader))
+                        else ValueSome None
+                    else ValueNone
+                with exn ->
+                    Log.warnOnce ("VoxelForge failed to load chunk build cache due to: " + scstring exn)
+                    ValueNone
+            else ValueNone
+        else ValueNone
+
+    let private saveChunkBuild (level : VoxelLevel) (chunkCoord : Vector3i) (chunkBuildOpt : VoxelChunkBuild option) =
+        if canUseChunkBuildCache level then
+            try
+                match chunkBuildOpt with
+                | Some chunkBuild when Option.isNone (tryGetBodyShapeBoxes chunkBuild.BodyShape) -> ()
+                | Some _ | None ->
+                    let filePath = chunkBuildCacheFilePath level chunkCoord
+                    Directory.CreateDirectory (Path.GetDirectoryName filePath) |> ignore<DirectoryInfo>
+                    use stream = File.Open (filePath, FileMode.Create, FileAccess.Write, FileShare.None)
+                    use writer = new BinaryWriter (stream)
+                    writer.Write chunkBuildCacheMagic
+                    writer.Write chunkBuildCacheVersion
+                    writer.Write (chunkBuildCacheSignature level)
+                    writeVector3i writer chunkCoord
+                    match chunkBuildOpt with
+                    | Some chunkBuild ->
+                        writer.Write true
+                        writeChunkBuild writer chunkBuild |> ignore<bool>
+                    | None -> writer.Write false
+            with exn ->
+                Log.warnOnce ("VoxelForge failed to save chunk build cache due to: " + scstring exn)
+
+    let tryBuildChunkWithCellLookupCached useCache (level : VoxelLevel) (tryGetCell : Vector3i -> VoxelCell voption) (chunkCoord : Vector3i) =
+        if useCache then
+            match tryLoadChunkBuild level chunkCoord with
+            | ValueSome chunkBuildOpt -> chunkBuildOpt
+            | ValueNone ->
+                let chunkBuildOpt = tryBuildChunkWithCellLookup level tryGetCell chunkCoord
+                saveChunkBuild level chunkCoord chunkBuildOpt
+                chunkBuildOpt
+        else tryBuildChunkWithCellLookup level tryGetCell chunkCoord
+
+    let tryBuildChunkCached (level : VoxelLevel) (chunkCoord : Vector3i) =
+        let tryGetCell coord = VoxelWorld.tryGetCellValue level coord
+        tryBuildChunkWithCellLookupCached true level tryGetCell chunkCoord
 
     let realizeChunk (level : VoxelLevel) (chunkBuild : VoxelChunkBuild) (world : World) =
         let splatCount = chunkBuild.SplatCount
@@ -472,14 +782,7 @@ module VoxelRuntime =
             | Some voxelModel -> World.destroyUserDefinedVoxelModel voxelModel world
             | None -> ()
 
-    let destroyVoxelModel (voxelChunks : VoxelChunk array) (placeableBlocks : PlaceableBlock array) (levelOpt : VoxelLevel option) (world : World) =
+    let destroyVoxelModel (voxelChunks : VoxelChunk array) (placeableBlocks : PlaceableBlock array) (_levelOpt : VoxelLevel option) (world : World) =
         destroyVoxelChunks voxelChunks world
         for placeableBlock in placeableBlocks do
             World.destroyUserDefinedVoxelModel placeableBlock.PreviewModel world
-        match levelOpt with
-        | Some level ->
-            for z in 0 .. dec level.ChunkCounts.Z do
-                for y in 0 .. dec level.ChunkCounts.Y do
-                    for x in 0 .. dec level.ChunkCounts.X do
-                        World.destroyUserDefinedVoxelModel (Assets.Voxels.MinecraftLevelChunk x y z) world
-        | None -> ()

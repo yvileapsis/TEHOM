@@ -56,6 +56,7 @@ module WorldGenerationLogic =
 
     let private cacheMagic = "VFWG"
     let private cacheVersion = 1
+    let private initialStreamChunkRadius = 8
 
     let private clamp01 value =
         Math.Clamp (value, 0.0f, 1.0f)
@@ -424,52 +425,46 @@ module WorldGenerationLogic =
 
     let prepareWorld (settings : WorldGenSettings) (world : World) =
         let placeableBlocks = VoxelPalettes.createPlaceableBlocks settings.VoxelSize world
-        match tryLoadWorldCache settings placeableBlocks with
-        | Some (struct (level, stats)) ->
-            struct (level, VoxelWorld.allChunkCoords level, stats)
-        | None ->
-            let templates = VoxelPalettes.createBlockTemplates settings.VoxelSize
-            let grass = VoxelPalettes.requireTemplate "Grass" templates
-            let dirt = VoxelPalettes.requireTemplate "Dirt" templates
-            let stone = VoxelPalettes.requireTemplate "Stone" templates
-            let sand = VoxelPalettes.requireTemplate "Sand" templates
-            let log = VoxelPalettes.requireTemplate "Oak Log" templates
-            let leaves = VoxelPalettes.requireTemplate "Leaves" templates
-            let water = VoxelPalettes.requireTemplate "Water" templates
-            let ore = VoxelPalettes.deriveTintedTemplate "Copper Ore" Ore true (color 0.95f 0.56f 0.22f 1.0f) 0.55f stone
-            let lava = VoxelPalettes.deriveTintedTemplate "Lava" Lava false (color 1.0f 0.24f 0.02f 1.0f) 0.86f water
-            let level = VoxelWorld.createEmptyLevel settings placeableBlocks v3Zero (VoxelRuntime.freshRevisionSeed ())
-            let macroCounts = VoxelWorld.macroBlockCounts settings
-            let heightMap = Array2D.zeroCreate<int> macroCounts.X macroCounts.Z
-            for z in 0 .. dec macroCounts.Z do
-                for x in 0 .. dec macroCounts.X do
-                    let height = heightAt settings level macroCounts x z
-                    heightMap[x, z] <- height
-                    for y in 0 .. height do
-                        let worldBlockCoord = VoxelWorld.blockCoordToWorldBlockCoord level (v3i x y z)
-                        let template =
-                            chooseTerrainTemplate
-                                settings
-                                worldBlockCoord.X
-                                worldBlockCoord.Y
-                                worldBlockCoord.Z
-                                y
-                                height
-                                grass
-                                dirt
-                                stone
-                                sand
-                                ore
-                        VoxelWorld.setSourceBlock level (v3i x y z) template
-            addCaves settings level
-            addStillWater settings level heightMap water
-            addStillLava settings level macroCounts lava
-            let treeCount = addTrees settings level heightMap macroCounts log leaves
-            let spawn = pickSpawn settings level heightMap macroCounts
-            let level = VoxelWorld.withSpawnPosition spawn level
-            let stats = countStats level treeCount Ore
-            saveWorldCache settings level stats
-            struct (level, VoxelWorld.allChunkCoords level, stats)
+        let templates = VoxelPalettes.createBlockTemplates settings.VoxelSize
+        let grass = VoxelPalettes.requireTemplate "Grass" templates
+        let dirt = VoxelPalettes.requireTemplate "Dirt" templates
+        let stone = VoxelPalettes.requireTemplate "Stone" templates
+        let sand = VoxelPalettes.requireTemplate "Sand" templates
+        let log = VoxelPalettes.requireTemplate "Oak Log" templates
+        let leaves = VoxelPalettes.requireTemplate "Leaves" templates
+        let water = VoxelPalettes.requireTemplate "Water" templates
+        let ore = VoxelPalettes.deriveTintedTemplate "Copper Ore" Ore true (color 0.95f 0.56f 0.22f 1.0f) 0.55f stone
+        let lava = VoxelPalettes.deriveTintedTemplate "Lava" Lava false (color 1.0f 0.24f 0.02f 1.0f) 0.86f water
+        let generation =
+            { Seed = settings.Seed
+              SeaLevelBlocks = settings.SeaLevelBlocks
+              LavaLevelBlocks = settings.LavaLevelBlocks
+              TerrainScale = settings.TerrainScale
+              MountainStrength = settings.MountainStrength
+              CaveThreshold = settings.CaveThreshold
+              OreRate = settings.OreRate
+              TreeRate = settings.TreeRate
+              Templates =
+                { Grass = grass
+                  Dirt = dirt
+                  Stone = stone
+                  Sand = sand
+                  Log = log
+                  Leaves = leaves
+                  Water = water
+                  Ore = ore
+                  Lava = lava } }
+        let level =
+            VoxelWorld.createEmptyLevel settings placeableBlocks v3Zero (VoxelRuntime.freshRevisionSeed ())
+            |> VoxelWorld.withGeneration generation
+        let spawn = VoxelWorld.pickGeneratedSpawn level
+        let level = VoxelWorld.withSpawnPosition spawn level
+        let stats = countStats level 0 Ore
+        let pendingChunks =
+            match VoxelWorld.tryWorldToChunkCoord level spawn with
+            | Some centerChunkCoord -> VoxelWorld.streamChunkCoords initialStreamChunkRadius level centerChunkCoord
+            | None -> [||]
+        struct (level, pendingChunks, stats)
 
 type WorldGenerationDispatcher () =
     inherit ScreenDispatcher<WorldGenerationModel, WorldGenerationMessage, WorldGenerationCommand> (WorldGenerationModel.initial)
@@ -543,7 +538,7 @@ type WorldGenerationDispatcher () =
                 let chunkBuilds =
                     generation.PendingChunks
                     |> Array.take buildCount
-                    |> Array.Parallel.map (fun chunkCoord -> VoxelRuntime.tryBuildChunk level chunkCoord)
+                    |> Array.Parallel.map (fun chunkCoord -> VoxelRuntime.tryBuildChunkCached level chunkCoord)
                     |> Array.choose id
                 let chunksBuiltNow =
                     chunkBuilds

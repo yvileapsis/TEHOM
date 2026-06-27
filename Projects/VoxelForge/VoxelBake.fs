@@ -201,7 +201,7 @@ module VoxelBake =
             ((single coord.Y + 0.5f) * voxelSize.Y)
             ((single coord.Z + 0.5f) * voxelSize.Z)
 
-    let chunkModelFromCells (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (tryGetCell : Vector3i -> VoxelCell option) (chunkCoord : Vector3i) =
+    let chunkModelFromCells (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (tryGetCell : Vector3i -> VoxelCell voption) (chunkCoord : Vector3i) =
         let chunkSize = v3i (max 1 chunkSize.X) (max 1 chunkSize.Y) (max 1 chunkSize.Z)
         let origin = bounds.Min
         let globalMinCoord = chunkMinCoord chunkSize chunkCoord
@@ -224,14 +224,14 @@ module VoxelBake =
                 for x in globalMinCoord.X .. globalMinCoord.X + chunkSize.X - 1 do
                     let coord = v3i x y z
                     match tryGetCell coord with
-                    | Some cell ->
+                    | ValueSome cell ->
                         occupiedAny <- true
                         let mutable exposed = false
                         let mutable normal = v3Zero
                         for struct (offset, direction) in directions do
                             match tryGetCell (coord + offset) with
-                            | Some _ -> ()
-                            | None ->
+                            | ValueSome _ -> ()
+                            | ValueNone ->
                                 exposed <- true
                                 normal <- normal + direction
                         if exposed then
@@ -240,7 +240,7 @@ module VoxelBake =
                                 { Position = coordCenter origin voxelSize coord
                                   Albedo = cell.Albedo
                                   Normal = normal }
-                    | None -> ()
+                    | ValueNone -> ()
         if occupiedAny then
             let halfVoxelSize = voxelSize * 0.5f
             let struct (center, descriptorBounds) =
@@ -256,9 +256,11 @@ module VoxelBake =
                 else
                     struct (chunkCenter, box3 (chunkWorldSize * -0.5f) chunkWorldSize)
             let splats =
-                splats
-                |> Seq.map (fun splat -> { splat with Position = splat.Position - center })
-                |> Array.ofSeq
+                let splatsArray = Array.zeroCreate splats.Count
+                for i in 0 .. dec splats.Count do
+                    let splat = splats[i]
+                    splatsArray[i] <- { splat with Position = splat.Position - center }
+                splatsArray
             Some
                 struct
                     (center,
@@ -270,8 +272,8 @@ module VoxelBake =
     let chunkModelFromOccupied (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (occupied : Dictionary<Vector3i, Color>) (chunkCoord : Vector3i) =
         let tryGetCell coord =
             match occupied.TryGetValue coord with
-            | (true, albedo) -> Some { Albedo = albedo; Solid = true; Material = Crafted }
-            | (false, _) -> None
+            | (true, albedo) -> ValueSome { Albedo = albedo; Solid = true; Material = Crafted }
+            | (false, _) -> ValueNone
         chunkModelFromCells chunkSize bounds voxelSize tryGetCell chunkCoord
 
     let chunkBodyShapeFromCells (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (tryGetCell : Vector3i -> VoxelCell option) (chunkCoord : Vector3i) =
