@@ -19,6 +19,9 @@ type WorldGenerationModel =
       LevelOpt : VoxelLevel option
       PendingChunks : Vector3i array
       BuiltChunks : VoxelChunk array
+      CompletedChunkBuildCount : int
+      TotalChunkBuildCount : int
+      PrebuildingChunkCache : bool
       StatsOpt : GeneratedWorldStats option
       Progress : single
       Status : string }
@@ -29,6 +32,9 @@ type WorldGenerationModel =
           LevelOpt = None
           PendingChunks = [||]
           BuiltChunks = [||]
+          CompletedChunkBuildCount = 0
+          TotalChunkBuildCount = 0
+          PrebuildingChunkCache = false
           StatsOpt = None
           Progress = 0.0f
           Status = "Waiting" }
@@ -55,7 +61,7 @@ module WorldGenerationExtensions =
 module WorldGenerationLogic =
 
     let private cacheMagic = "VFWG"
-    let private cacheVersion = 1
+    let private cacheVersion = 2
     let private initialStreamChunkRadius = 8
 
     let private clamp01 value =
@@ -423,6 +429,11 @@ module WorldGenerationLogic =
         | Some spawn -> spawn
         | None -> VoxelWorld.blockTopPosition level (v3i centerX settings.SeaLevelBlocks centerZ)
 
+    let initialChunkCoords (level : VoxelLevel) =
+        match VoxelWorld.tryWorldToChunkCoord level level.SpawnPosition with
+        | Some centerChunkCoord -> VoxelWorld.streamChunkCoords initialStreamChunkRadius level centerChunkCoord
+        | None -> [||]
+
     let prepareWorld (settings : WorldGenSettings) (world : World) =
         let placeableBlocks = VoxelPalettes.createPlaceableBlocks settings.VoxelSize world
         let templates = VoxelPalettes.createBlockTemplates settings.VoxelSize
@@ -460,11 +471,20 @@ module WorldGenerationLogic =
         let spawn = VoxelWorld.pickGeneratedSpawn level
         let level = VoxelWorld.withSpawnPosition spawn level
         let stats = countStats level 0 Ore
+        let initialChunks = initialChunkCoords level
+        let prebuildingChunkCache =
+            VoxelRuntime.shouldPrebuildChunkBuildCache level &&
+            not (VoxelRuntime.isChunkBuildCacheComplete level)
         let pendingChunks =
-            match VoxelWorld.tryWorldToChunkCoord level spawn with
-            | Some centerChunkCoord -> VoxelWorld.streamChunkCoords initialStreamChunkRadius level centerChunkCoord
-            | None -> [||]
-        struct (level, pendingChunks, stats)
+            if prebuildingChunkCache then
+                let initialChunkSet = HashSet<Vector3i> (HashIdentity.Structural)
+                for chunkCoord in initialChunks do
+                    initialChunkSet.Add chunkCoord |> ignore<bool>
+                Array.append
+                    initialChunks
+                    (VoxelWorld.allChunkCoords level |> Array.filter (fun chunkCoord -> not (initialChunkSet.Contains chunkCoord)))
+            else initialChunks
+        struct (level, pendingChunks, stats, prebuildingChunkCache)
 
 type WorldGenerationDispatcher () =
     inherit ScreenDispatcher<WorldGenerationModel, WorldGenerationMessage, WorldGenerationCommand> (WorldGenerationModel.initial)
@@ -478,6 +498,9 @@ type WorldGenerationDispatcher () =
             LevelOpt = None
             PendingChunks = [||]
             BuiltChunks = [||]
+            CompletedChunkBuildCount = 0
+            TotalChunkBuildCount = 0
+            PrebuildingChunkCache = false
             StatsOpt = None
             Progress = 0.0f
             Status = "Waiting" }
@@ -488,6 +511,9 @@ type WorldGenerationDispatcher () =
             LevelOpt = None
             PendingChunks = [||]
             BuiltChunks = [||]
+            CompletedChunkBuildCount = 0
+            TotalChunkBuildCount = 0
+            PrebuildingChunkCache = false
             StatsOpt = None
             Progress = 0.0f
             Status = "Waiting" }
@@ -509,16 +535,21 @@ type WorldGenerationDispatcher () =
         match command with
         | PrepareWorld ->
             try
-                let struct (level, pendingChunks, stats) = WorldGenerationLogic.prepareWorld generation.Settings world
+                let struct (level, pendingChunks, stats, prebuildingChunkCache) = WorldGenerationLogic.prepareWorld generation.Settings world
                 screen.SetWorldGeneration
                     { generation with
                         Phase = BuildingChunks
                         LevelOpt = Some level
                         PendingChunks = pendingChunks
                         BuiltChunks = [||]
+                        CompletedChunkBuildCount = 0
+                        TotalChunkBuildCount = pendingChunks.Length
+                        PrebuildingChunkCache = prebuildingChunkCache
                         StatsOpt = Some stats
                         Progress = 0.08f
-                        Status = "Building voxel chunks" }
+                        Status =
+                            if prebuildingChunkCache then "Prebuilding voxel chunk cache"
+                            else "Building voxel chunks" }
                     world
             with exn ->
                 screen.SetWorldGeneration
@@ -527,6 +558,9 @@ type WorldGenerationDispatcher () =
                         LevelOpt = None
                         PendingChunks = [||]
                         BuiltChunks = [||]
+                        CompletedChunkBuildCount = 0
+                        TotalChunkBuildCount = 0
+                        PrebuildingChunkCache = false
                         Progress = 1.0f
                         Status = "World generation failed: " + exn.Message }
                     world
@@ -535,20 +569,35 @@ type WorldGenerationDispatcher () =
             | Some level, Some stats ->
                 let chunksPerUpdate = max 1 generation.Settings.ChunksPerUpdate
                 let buildCount = min chunksPerUpdate generation.PendingChunks.Length
-                let chunkBuilds =
+                let initialChunkSet = HashSet<Vector3i> (HashIdentity.Structural)
+                for chunkCoord in WorldGenerationLogic.initialChunkCoords level do
+                    initialChunkSet.Add chunkCoord |> ignore<bool>
+                let chunkBuildResults =
                     generation.PendingChunks
                     |> Array.take buildCount
-                    |> Array.Parallel.map (fun chunkCoord -> VoxelRuntime.tryBuildChunkCached level chunkCoord)
-                    |> Array.choose id
-                let chunksBuiltNow =
-                    chunkBuilds
-                    |> Array.map (fun chunkBuild -> VoxelRuntime.realizeChunk level chunkBuild world)
-                let builtChunks = Array.append generation.BuiltChunks chunksBuiltNow
+                    |> Array.Parallel.map (fun chunkCoord -> struct (chunkCoord, VoxelRuntime.tryBuildChunkCached level chunkCoord))
+                let chunksBuiltNow = ResizeArray<VoxelChunk> ()
+                let editRevision = VoxelWorld.getEditRevision level
+                for struct (chunkCoord, chunkBuildOpt) in chunkBuildResults do
+                    match chunkBuildOpt with
+                    | Some chunkBuild when initialChunkSet.Contains chunkCoord ->
+                        chunksBuiltNow.Add (VoxelRuntime.realizeChunk level chunkBuild world)
+                    | Some chunkBuild ->
+                        VoxelWorld.updateChunkManifestFromBuild editRevision level chunkBuild
+                    | None ->
+                        VoxelWorld.markChunkManifestEmpty editRevision level chunkCoord
+                if generation.PrebuildingChunkCache then
+                    level.GeneratedBlockTemplateCache.Clear ()
+                let builtChunks = Array.append generation.BuiltChunks (chunksBuiltNow.ToArray ())
                 let pendingChunks = generation.PendingChunks |> Array.skip buildCount
-                let totalChunks = max 1 (builtChunks.Length + pendingChunks.Length)
-                let progress = 0.08f + 0.92f * (single builtChunks.Length / single totalChunks)
+                let completedChunkBuildCount = generation.CompletedChunkBuildCount + buildCount
+                let totalChunkBuildCount = max 1 generation.TotalChunkBuildCount
+                let progress = 0.08f + 0.92f * (single completedChunkBuildCount / single totalChunkBuildCount)
                 if pendingChunks.Length = 0 then
                     let builtChunks = VoxelRuntime.sortVoxelChunks builtChunks
+                    if generation.PrebuildingChunkCache then
+                        VoxelRuntime.markChunkBuildCacheComplete level
+                        level.GeneratedBlockTemplateCache.Clear ()
                     let stats =
                         { stats with
                             ChunkCount = builtChunks.Length
@@ -563,6 +612,9 @@ type WorldGenerationDispatcher () =
                             Phase = Completed
                             PendingChunks = [||]
                             BuiltChunks = builtChunks
+                            CompletedChunkBuildCount = completedChunkBuildCount
+                            TotalChunkBuildCount = generation.TotalChunkBuildCount
+                            PrebuildingChunkCache = false
                             StatsOpt = Some stats
                             Progress = 1.0f
                             Status = "Entering world" }
@@ -573,8 +625,13 @@ type WorldGenerationDispatcher () =
                         { generation with
                             PendingChunks = pendingChunks
                             BuiltChunks = builtChunks
+                            CompletedChunkBuildCount = completedChunkBuildCount
                             Progress = progress
-                            Status = "Building voxel chunks " + scstring builtChunks.Length + " / " + scstring totalChunks }
+                            Status =
+                                if generation.PrebuildingChunkCache then
+                                    "Prebuilding voxel chunk cache " + scstring completedChunkBuildCount + " / " + scstring totalChunkBuildCount
+                                else
+                                    "Building voxel chunks " + scstring completedChunkBuildCount + " / " + scstring totalChunkBuildCount }
                         world
             | None, _ | _, None -> ()
 

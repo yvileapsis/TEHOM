@@ -417,7 +417,10 @@ module PhysicallyBased =
     /// A physically-based voxel model.
     type PhysicallyBasedVoxelModel =
         { VoxelSize : Vector3
-          VoxelGeometry : PhysicallyBasedGeometry }
+          VoxelOrigin : Vector3
+          VoxelGeometry : PhysicallyBasedGeometry
+          PaletteBuffer : uint
+          PaletteTexture : uint }
 
     /// Describes a physically-based shader that's loaded into GPU.
     type PhysicallyBasedShader =
@@ -534,6 +537,7 @@ module PhysicallyBased =
           EyeCenterUniform : int
           ClipPlaneUniform : int
           LightShadowExponentUniform : int
+          PaletteTextureUniform : int
           PhysicallyBasedShader : uint }
 
     /// Describes a light mapping pass of a deferred physically-based shader that's loaded into GPU.
@@ -1973,9 +1977,7 @@ module PhysicallyBased =
     let TerrainBlendsOffset =       (3 (*position*) + 2 (*tex coords*) + 3 (*normal*) + 3 (*tint*)) * sizeof<single>
     let TerrainBlends2Offset =      (3 (*position*) + 2 (*tex coords*) + 3 (*normal*) + 3 (*tint*) + 4 (*blends*)) * sizeof<single>
     let TerrainVertexSize =         (3 (*position*) + 2 (*tex coords*) + 3 (*normal*) + 3 (*tint*) + 4 (*blends*) + 4 (*blends2*)) * sizeof<single>
-    let VoxelAlbedoOffset =         (3 (*position*)) * sizeof<single>
-    let VoxelNormalOffset =         (3 (*position*) + 4 (*albedo*)) * sizeof<single>
-    let VoxelVertexSize =           (3 (*position*) + 4 (*albedo*) + 3 (*normal*)) * sizeof<single>
+    let VoxelVertexSize =           sizeof<uint>
 
     let CreatePhysicallyBasedTerrainVao () =
 
@@ -2048,15 +2050,9 @@ module PhysicallyBased =
         let vao = vao[0]
 
         // per vertex
-        Gl.VertexArrayAttribFormat (vao, 0u, 3, VertexAttribType.Float, false, uint 0)
-        Gl.VertexArrayAttribFormat (vao, 1u, 4, VertexAttribType.Float, false, uint VoxelAlbedoOffset)
-        Gl.VertexArrayAttribFormat (vao, 2u, 3, VertexAttribType.Float, false, uint VoxelNormalOffset)
+        Gl.VertexArrayAttribIFormat (vao, 0u, 1, VertexAttribIType.UnsignedInt, 0u)
         Gl.VertexArrayAttribBinding (vao, 0u, 0u)
-        Gl.VertexArrayAttribBinding (vao, 1u, 0u)
-        Gl.VertexArrayAttribBinding (vao, 2u, 0u)
         Gl.EnableVertexArrayAttrib (vao, 0u)
-        Gl.EnableVertexArrayAttrib (vao, 1u)
-        Gl.EnableVertexArrayAttrib (vao, 2u)
 
         // per instance
         Gl.VertexArrayAttribFormat (vao, 3u, 4, VertexAttribType.Float, false, uint 0)
@@ -2096,6 +2092,23 @@ module PhysicallyBased =
 
         // fin
         vao
+
+    /// Create physically-based voxel instance buffer.
+    let CreatePhysicallyBasedVoxelInstanceBuffer () =
+
+        // create instance buffer
+        let instanceBuffer = Gl.GenBuffer ()
+        Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
+        let instanceData = Array.zeroCreate Constants.Render.InstanceFieldCount
+        m4Identity.ToArray (instanceData, 0)
+        let strideSize = instanceData.Length * sizeof<single>
+        let instanceDataPtr = GCHandle.Alloc (instanceData, GCHandleType.Pinned)
+        try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
+        finally instanceDataPtr.Free ()
+        Hl.Assert ()
+
+        // fin
+        instanceBuffer
 
     /// Create physically-based terrain geometry from a mesh.
     let CreatePhysicallyBasedTerrainGeometry (renderable, primitiveType, vertexData : single Memory, indexData : int Memory, bounds) =
@@ -2168,7 +2181,7 @@ module PhysicallyBased =
         geometry
 
     /// Create physically-based voxel geometry.
-    let CreatePhysicallyBasedVoxelGeometry (renderable, primitiveType, vertexData : single Memory, bounds) =
+    let CreatePhysicallyBasedVoxelGeometry (renderable, primitiveType, vertexData : uint Memory, bounds, voxelOrigin : Vector3, voxelSize : Vector3) =
 
         // make buffers
         let (vertices, vertexBuffer, instanceBuffer) =
@@ -2180,33 +2193,25 @@ module PhysicallyBased =
                 let vertexBuffer = Gl.GenBuffer ()
                 Gl.BindBuffer (BufferTarget.ArrayBuffer, vertexBuffer)
                 use vertexDataHnd = vertexData.Pin () in
-                    let vertexDataNint = vertexDataHnd.Pointer |> NativePtr.ofVoidPtr<single> |> NativePtr.toNativeInt
-                    Gl.BufferData (BufferTarget.ArrayBuffer, uint (vertexData.Length * sizeof<single>), vertexDataNint, BufferUsage.StaticDraw)
-
-                // create instance buffer
-                let instanceBuffer = Gl.GenBuffer ()
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
-                let instanceData = Array.zeroCreate Constants.Render.InstanceFieldCount
-                m4Identity.ToArray (instanceData, 0)
-                let strideSize = instanceData.Length * sizeof<single>
-                let instanceDataPtr = GCHandle.Alloc (instanceData, GCHandleType.Pinned)
-                try Gl.BufferData (BufferTarget.ArrayBuffer, uint strideSize, instanceDataPtr.AddrOfPinnedObject (), BufferUsage.StreamDraw)
-                finally instanceDataPtr.Free ()
-                Hl.Assert ()
+                    let vertexDataNint = vertexDataHnd.Pointer |> NativePtr.ofVoidPtr<uint> |> NativePtr.toNativeInt
+                    Gl.BufferData (BufferTarget.ArrayBuffer, uint (vertexData.Length * sizeof<uint>), vertexDataNint, BufferUsage.StaticDraw)
 
                 // fin
-                ([||], vertexBuffer, instanceBuffer)
+                ([||], vertexBuffer, 0u)
 
             // fake buffers
             else
 
                 // compute vertices
-                let vertices = Array.zeroCreate (vertexData.Length / 10)
+                let vertices = Array.zeroCreate vertexData.Length
                 let vertexData = vertexData.Span
                 for i in 0 .. dec vertices.Length do
-                    let j = i * 10
-                    let vertex = v3 vertexData[j] vertexData[j+1] vertexData[j+2]
-                    vertices[i] <- vertex
+                    let packed = vertexData[i]
+                    vertices[i] <-
+                        v3
+                            (voxelOrigin.X + single (packed &&& 0x3Fu) * voxelSize.X)
+                            (voxelOrigin.Y + single ((packed >>> 6) &&& 0x3Fu) * voxelSize.Y)
+                            (voxelOrigin.Z + single ((packed >>> 12) &&& 0x3Fu) * voxelSize.Z)
 
                 // fin
                 (vertices, 0u, 0u)
@@ -2215,7 +2220,7 @@ module PhysicallyBased =
         let geometry =
             { Bounds = bounds
               PrimitiveType = primitiveType
-              ElementCount = vertexData.Length / 10
+              ElementCount = vertexData.Length
               Vertices = vertices
               Indices = [||]
               TrianglesCached = None
@@ -2225,6 +2230,23 @@ module PhysicallyBased =
 
         // fin
         geometry
+
+    /// Create a physically-based voxel color palette.
+    let CreatePhysicallyBasedVoxelPalette (renderable, paletteData : single Memory) =
+        if renderable then
+            let paletteBuffer = Gl.GenBuffer ()
+            Gl.BindBuffer (BufferTarget.TextureBuffer, paletteBuffer)
+            use paletteDataHnd = paletteData.Pin () in
+                let paletteDataNint = paletteDataHnd.Pointer |> NativePtr.ofVoidPtr<single> |> NativePtr.toNativeInt
+                Gl.BufferData (BufferTarget.TextureBuffer, uint (paletteData.Length * sizeof<single>), paletteDataNint, BufferUsage.StaticDraw)
+            let paletteTexture = Gl.GenTexture ()
+            Gl.BindTexture (TextureTarget.TextureBuffer, paletteTexture)
+            Gl.TexBuffer (TextureTarget.TextureBuffer, SizedInternalFormat.Rgba32f, paletteBuffer)
+            Gl.BindTexture (TextureTarget.TextureBuffer, 0u)
+            Gl.BindBuffer (BufferTarget.TextureBuffer, 0u)
+            Hl.Assert ()
+            struct (paletteBuffer, paletteTexture)
+        else struct (0u, 0u)
 
     /// Create physically-based quad.
     let CreatePhysicallyBasedQuad renderable =
@@ -2589,6 +2611,7 @@ module PhysicallyBased =
         let eyeCenterUniform = Gl.GetUniformLocation (shader, "eyeCenter")
         let clipPlaneUniform = Gl.GetUniformLocation (shader, "clipPlane")
         let lightShadowExponentUniform = Gl.GetUniformLocation (shader, "lightShadowExponent")
+        let paletteTextureUniform = Gl.GetUniformLocation (shader, "paletteTexture")
 
         // make shader record
         { ViewUniform = viewUniform
@@ -2600,6 +2623,7 @@ module PhysicallyBased =
           EyeCenterUniform = eyeCenterUniform
           ClipPlaneUniform = clipPlaneUniform
           LightShadowExponentUniform = lightShadowExponentUniform
+          PaletteTextureUniform = paletteTextureUniform
           PhysicallyBasedShader = shader } : PhysicallyBasedVoxelShader
 
     /// Create a physically-based shader for the light mapping pass of deferred rendering.
@@ -4512,11 +4536,13 @@ module PhysicallyBased =
         Gl.Uniform3 (shader.EyeCenterUniform, eyeCenter.X, eyeCenter.Y, eyeCenter.Z)
         Gl.Uniform4 (shader.ClipPlaneUniform, clipPlane.X, clipPlane.Y, clipPlane.Z, clipPlane.W)
         Gl.Uniform1 (shader.LightShadowExponentUniform, lightShadowExponent)
+        Gl.Uniform1 (shader.PaletteTextureUniform, 0)
         Hl.Assert ()
 
-    let DrawPhysicallyBasedVoxelGeometry
-        (instanceFields : single array,
-        voxelModel : PhysicallyBasedVoxelModel,
+    let DrawPhysicallyBasedVoxelGeometryWithBuffer
+        (instanceFieldsPtr : nativeint,
+         instanceBuffer : uint,
+         voxelModel : PhysicallyBasedVoxelModel,
          vao : uint) =
 
         // skip empty geometry
@@ -4524,22 +4550,32 @@ module PhysicallyBased =
         if geometry.ElementCount > 0 then
 
             // update instance buffer
-            let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
-            try Gl.BindBuffer (BufferTarget.ArrayBuffer, geometry.InstanceBuffer)
-                Gl.BufferSubData (BufferTarget.ArrayBuffer, nativeint 0, uint (Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr.AddrOfPinnedObject ())
-                Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
-                Hl.Assert ()
-            finally instanceFieldsPtr.Free ()
+            Gl.BindBuffer (BufferTarget.ArrayBuffer, instanceBuffer)
+            Gl.BufferSubData (BufferTarget.ArrayBuffer, nativeint 0, uint (Constants.Render.InstanceFieldCount * sizeof<single>), instanceFieldsPtr)
+            Gl.BindBuffer (BufferTarget.ArrayBuffer, 0u)
+            Hl.Assert ()
 
             // setup geometry
             Gl.VertexArrayVertexBuffer (vao, 0u, geometry.VertexBuffer, 0, VoxelVertexSize)
-            Gl.VertexArrayVertexBuffer (vao, 1u, geometry.InstanceBuffer, 0, Constants.Render.InstanceFieldCount * sizeof<single>)
+            Gl.VertexArrayVertexBuffer (vao, 1u, instanceBuffer, 0, Constants.Render.InstanceFieldCount * sizeof<single>)
+            Gl.ActiveTexture TextureUnit.Texture0
+            Gl.BindTexture (TextureTarget.TextureBuffer, voxelModel.PaletteTexture)
             Hl.Assert ()
 
             // draw geometry
             Gl.DrawArrays (geometry.PrimitiveType, 0, geometry.ElementCount)
             Hl.ReportDrawCall 1
             Hl.Assert ()
+
+    let DrawPhysicallyBasedVoxelGeometry
+        (instanceFields : single array,
+         instanceBuffer : uint,
+         voxelModel : PhysicallyBasedVoxelModel,
+         vao : uint) =
+
+        let instanceFieldsPtr = GCHandle.Alloc (instanceFields, GCHandleType.Pinned)
+        try DrawPhysicallyBasedVoxelGeometryWithBuffer (instanceFieldsPtr.AddrOfPinnedObject (), instanceBuffer, voxelModel, vao)
+        finally instanceFieldsPtr.Free ()
 
     let EndPhysicallyBasedVoxel (_ : PhysicallyBasedVoxelShader, _ : uint) =
 
@@ -4549,6 +4585,11 @@ module PhysicallyBased =
 
         // teardown vao
         Gl.BindVertexArray 0u
+        Hl.Assert ()
+
+        // teardown textures
+        Gl.ActiveTexture TextureUnit.Texture0
+        Gl.BindTexture (TextureTarget.TextureBuffer, 0u)
         Hl.Assert ()
 
         // teardown state
@@ -4573,7 +4614,7 @@ module PhysicallyBased =
 
         BeginPhysicallyBasedVoxel
             (view, projection, viewProjection, viewInverse, projectionInverse, viewPort, eyeCenter, clipPlane, lightShadowExponent, shader, vao)
-        DrawPhysicallyBasedVoxelGeometry (instanceFields, voxelModel, vao)
+        DrawPhysicallyBasedVoxelGeometry (instanceFields, voxelModel.VoxelGeometry.InstanceBuffer, voxelModel, vao)
         EndPhysicallyBasedVoxel (shader, vao)
 
     /// Draw the light mapping pass of a deferred physically-based surface.
@@ -5369,6 +5410,8 @@ module PhysicallyBased =
     /// Destroy physically-based voxel model resources.
     let DestroyPhysicallyBasedVoxelModel (model : PhysicallyBasedVoxelModel) =
         DestroyPhysicallyBasedGeometry model.VoxelGeometry
+        Gl.DeleteBuffers [|model.PaletteBuffer|]
+        Gl.DeleteTextures [|model.PaletteTexture|]
 
     /// Memoizes physically-based scene loads.
     type PhysicallyBasedSceneClient () =

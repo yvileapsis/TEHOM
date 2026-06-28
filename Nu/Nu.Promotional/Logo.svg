@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="800" height="800" role="img" aria-labelledby="title desc">
+  <title id="title">Nu logo</title>
+  <desc id="desc">Scalable vector version of the Nu engine promotional logo.</desc>
+  <rect width="800" height="800" fill="#000"/>
+  <defs>
+    <path id="nu-mark-shape" d="
+      M 56 337
+      Q 56 331 61 326
+      L 106 282
+      Q 112 276 121 276
+      L 202 276
+      Q 212 276 212 286
+      L 212 318
+      Q 212 327 221 333
+      L 272 282
+      Q 278 276 287 276
+      L 364 276
+      Q 374 276 374 286
+      L 374 448
+      Q 374 456 382 456
+      L 422 456
+      Q 430 456 430 448
+      L 430 286
+      Q 430 276 440 276
+      L 529 276
+      Q 539 276 539 286
+      L 539 448
+      Q 539 456 547 456
+      L 586 456
+      Q 594 456 594 448
+      L 594 286
+      Q 594 276 604 276
+      L 693 276
+      Q 703 276 703 286
+      L 703 448
+      Q 703 456 711 456
+      L 747 456
+      Q 757 456 757 466
+      L 757 477
+      Q 757 483 752 488
+      L 704 536
+      Q 700 540 693 540
+      L 613 540
+      Q 604 540 603 531
+      L 598 493
+      L 540 536
+      Q 535 540 528 540
+      L 440 540
+      Q 430 540 430 530
+      L 430 493
+      L 378 536
+      Q 373 540 366 540
+      L 278 540
+      Q 268 540 268 530
+      L 268 366
+      Q 268 358 260 358
+      L 220 358
+      Q 212 358 212 366
+      L 212 530
+      Q 212 540 202 540
+      L 110 540
+      Q 100 540 100 530
+      L 100 366
+      Q 100 358 92 358
+      L 57 358
+      Q 47 358 47 348
+      L 47 346
+      Q 47 342 56 337
+      Z"/>
+  </defs>
+  <g id="nu-logo" shape-rendering="geometricPrecision">
+    <use href="#nu-mark-shape" fill="#1f1f1f" transform="translate(16 16)"/>
+    <use href="#nu-mark-shape" fill="#5f5f5f" transform="translate(10 10)"/>
+    <use href="#nu-mark-shape" fill="#9f9f9f" transform="translate(5 5)"/>
+    <use href="#nu-mark-shape" fill="#dfdfdf" stroke="#bfbfbf" stroke-width="7" stroke-linejoin="round"/>
+    <use href="#nu-mark-shape" fill="#fff"/>
+  </g>
+</svg>

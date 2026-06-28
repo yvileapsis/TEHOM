@@ -44,6 +44,50 @@ type VoxelChunk =
       OpaqueFaceMask : int
       FullOpaqueChunk : bool }
 
+type VoxelChunkBuild =
+    { ChunkCoord : Vector3i
+      ChunkCenter : Vector3
+      ChunkSize : Vector3
+      VoxelModelDescriptor : VoxelModelDescriptor
+      BodyShape : BodyShape
+      BoxCount : int
+      OcclusionBoundsOpt : Box3 option
+      SolidBlockCoords : Vector3i array
+      SplatCount : int
+      OpaqueBlockCoords : Vector3i array
+      OpaqueOccluderBoxes : Box3 array
+      OpaqueFaceMask : int
+      FullOpaqueChunk : bool }
+
+[<Struct>]
+type VoxelChunkStatic =
+    { ChunkCoord : Vector3i
+      ChunkCenter : Vector3
+      ChunkSize : Vector3
+      Bounds : Box3
+      HasBuild : bool
+      HasRenderable : bool
+      HasPhysics : bool
+      HasOcclusionBounds : bool
+      OcclusionBounds : Box3
+      SplatCount : int
+      OpaqueOccluderBoxes : Box3 array
+      OpaqueFaceMask : int
+      FullOpaqueChunk : bool
+      EditRevision : int }
+
+type VoxelChunkManifest =
+    { ChunkCounts : Vector3i
+      ChunkStatics : VoxelChunkStatic array
+      DesiredStamps : int array
+      VisibleStamps : int array
+      LoadedStamps : int array
+      EmptyFlags : bool array
+      EditedFlags : bool array
+      mutable DesiredStamp : int
+      mutable VisibleStamp : int
+      mutable LoadedStamp : int }
+
 type VoxelBlockTemplate =
     { Name : string
       Material : VoxelMaterialKind
@@ -100,6 +144,7 @@ type VoxelLevel =
       EditRevision : int ref
       PlaceableBlocks : PlaceableBlock array
       SpawnPosition : Vector3
+      ChunkManifest : VoxelChunkManifest
       NextRevision : int ref }
 
 type WorldGenSettings =
@@ -159,6 +204,194 @@ module WorldGenSettings =
 [<RequireQualifiedAccess>]
 module VoxelWorld =
 
+    let chunkCount (chunkCounts : Vector3i) =
+        max 0 (chunkCounts.X * chunkCounts.Y * chunkCounts.Z)
+
+    let chunkCoordToIndexUnchecked (chunkCounts : Vector3i) (chunkCoord : Vector3i) =
+        chunkCoord.X + chunkCoord.Y * chunkCounts.X + chunkCoord.Z * chunkCounts.X * chunkCounts.Y
+
+    let chunkIndexToCoord (chunkCounts : Vector3i) chunkIndex =
+        let xy = chunkCounts.X * chunkCounts.Y
+        let z = chunkIndex / xy
+        let y = (chunkIndex - z * xy) / chunkCounts.X
+        let x = chunkIndex - z * xy - y * chunkCounts.X
+        v3i x y z
+
+    let tryChunkCoordToIndex (chunkCounts : Vector3i) (chunkCoord : Vector3i) =
+        if  chunkCoord.X >= 0 && chunkCoord.X < chunkCounts.X &&
+            chunkCoord.Y >= 0 && chunkCoord.Y < chunkCounts.Y &&
+            chunkCoord.Z >= 0 && chunkCoord.Z < chunkCounts.Z then
+            ValueSome (chunkCoordToIndexUnchecked chunkCounts chunkCoord)
+        else ValueNone
+
+    let private chunkFullBounds (bounds : Box3) (levelOffset : Vector3) (voxelSize : Vector3) (chunkSizeVoxels : Vector3i) (chunkCoord : Vector3i) =
+        let min =
+            bounds.Min + levelOffset +
+            v3
+                (single (chunkCoord.X * chunkSizeVoxels.X) * voxelSize.X)
+                (single (chunkCoord.Y * chunkSizeVoxels.Y) * voxelSize.Y)
+                (single (chunkCoord.Z * chunkSizeVoxels.Z) * voxelSize.Z)
+        let size =
+            v3
+                (single chunkSizeVoxels.X * voxelSize.X)
+                (single chunkSizeVoxels.Y * voxelSize.Y)
+                (single chunkSizeVoxels.Z * voxelSize.Z)
+        box3 min size
+
+    let createChunkManifest (chunkCounts : Vector3i) (bounds : Box3) (levelOffset : Vector3) (voxelSize : Vector3) (chunkSizeVoxels : Vector3i) =
+        let count = chunkCount chunkCounts
+        let chunkStatics = Array.zeroCreate<VoxelChunkStatic> count
+        let emptyOccluderBoxes = Array.empty<Box3>
+        for z in 0 .. dec chunkCounts.Z do
+            for y in 0 .. dec chunkCounts.Y do
+                for x in 0 .. dec chunkCounts.X do
+                    let chunkCoord = v3i x y z
+                    let chunkIndex = chunkCoordToIndexUnchecked chunkCounts chunkCoord
+                    let bounds = chunkFullBounds bounds levelOffset voxelSize chunkSizeVoxels chunkCoord
+                    chunkStatics[chunkIndex] <-
+                        { ChunkCoord = chunkCoord
+                          ChunkCenter = bounds.Center
+                          ChunkSize = bounds.Size
+                          Bounds = bounds
+                          HasBuild = false
+                          HasRenderable = false
+                          HasPhysics = false
+                          HasOcclusionBounds = false
+                          OcclusionBounds = Unchecked.defaultof<Box3>
+                          SplatCount = 0
+                          OpaqueOccluderBoxes = emptyOccluderBoxes
+                          OpaqueFaceMask = 0
+                          FullOpaqueChunk = false
+                          EditRevision = 0 }
+        { ChunkCounts = chunkCounts
+          ChunkStatics = chunkStatics
+          DesiredStamps = Array.zeroCreate<int> count
+          VisibleStamps = Array.zeroCreate<int> count
+          LoadedStamps = Array.zeroCreate<int> count
+          EmptyFlags = Array.zeroCreate<bool> count
+          EditedFlags = Array.zeroCreate<bool> count
+          DesiredStamp = 0
+          VisibleStamp = 0
+          LoadedStamp = 0 }
+
+    let markChunkManifestDesired (manifest : VoxelChunkManifest) chunkIndex =
+        manifest.DesiredStamps[chunkIndex] <- manifest.DesiredStamp
+
+    let isChunkManifestDesired (manifest : VoxelChunkManifest) chunkIndex =
+        manifest.DesiredStamps[chunkIndex] = manifest.DesiredStamp
+
+    let beginChunkManifestDesiredPass (manifest : VoxelChunkManifest) =
+        manifest.DesiredStamp <- manifest.DesiredStamp + 1
+        if manifest.DesiredStamp = Int32.MaxValue then
+            Array.Clear manifest.DesiredStamps
+            manifest.DesiredStamp <- 1
+        manifest.DesiredStamp
+
+    let markChunkManifestVisible (manifest : VoxelChunkManifest) chunkIndex =
+        manifest.VisibleStamps[chunkIndex] <- manifest.VisibleStamp
+
+    let isChunkManifestVisible (manifest : VoxelChunkManifest) chunkIndex =
+        manifest.VisibleStamps[chunkIndex] = manifest.VisibleStamp
+
+    let beginChunkManifestVisiblePass (manifest : VoxelChunkManifest) =
+        manifest.VisibleStamp <- manifest.VisibleStamp + 1
+        if manifest.VisibleStamp = Int32.MaxValue then
+            Array.Clear manifest.VisibleStamps
+            manifest.VisibleStamp <- 1
+        manifest.VisibleStamp
+
+    let markChunkManifestLoaded (manifest : VoxelChunkManifest) chunkIndex =
+        manifest.LoadedStamps[chunkIndex] <- manifest.LoadedStamp
+
+    let isChunkManifestLoaded (manifest : VoxelChunkManifest) chunkIndex =
+        manifest.LoadedStamps[chunkIndex] = manifest.LoadedStamp
+
+    let beginChunkManifestLoadedPass (manifest : VoxelChunkManifest) =
+        manifest.LoadedStamp <- manifest.LoadedStamp + 1
+        if manifest.LoadedStamp = Int32.MaxValue then
+            Array.Clear manifest.LoadedStamps
+            manifest.LoadedStamp <- 1
+        manifest.LoadedStamp
+
+    let tryGetChunkStatic (level : VoxelLevel) (chunkCoord : Vector3i) =
+        match tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunkCoord with
+        | ValueSome chunkIndex -> ValueSome level.ChunkManifest.ChunkStatics[chunkIndex]
+        | ValueNone -> ValueNone
+
+    let updateChunkManifestFromBuild revision (level : VoxelLevel) (chunkBuild : VoxelChunkBuild) =
+        match tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunkBuild.ChunkCoord with
+        | ValueSome chunkIndex ->
+            let bounds = box3 (chunkBuild.ChunkCenter - chunkBuild.ChunkSize * 0.5f) chunkBuild.ChunkSize
+            let hasOcclusionBounds, occlusionBounds =
+                match chunkBuild.OcclusionBoundsOpt with
+                | Some bounds -> true, bounds
+                | None -> false, Unchecked.defaultof<Box3>
+            level.ChunkManifest.ChunkStatics[chunkIndex] <-
+                { ChunkCoord = chunkBuild.ChunkCoord
+                  ChunkCenter = chunkBuild.ChunkCenter
+                  ChunkSize = chunkBuild.ChunkSize
+                  Bounds = bounds
+                  HasBuild = true
+                  HasRenderable = chunkBuild.SplatCount > 0
+                  HasPhysics = chunkBuild.BoxCount > 0
+                  HasOcclusionBounds = hasOcclusionBounds
+                  OcclusionBounds = occlusionBounds
+                  SplatCount = chunkBuild.SplatCount
+                  OpaqueOccluderBoxes = chunkBuild.OpaqueOccluderBoxes
+                  OpaqueFaceMask = chunkBuild.OpaqueFaceMask
+                  FullOpaqueChunk = chunkBuild.FullOpaqueChunk
+                  EditRevision = revision }
+            level.ChunkManifest.EmptyFlags[chunkIndex] <- false
+            level.ChunkManifest.EditedFlags[chunkIndex] <- false
+        | ValueNone -> ()
+
+    let updateChunkManifestFromChunk revision (level : VoxelLevel) (chunk : VoxelChunk) =
+        match tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunk.ChunkCoord with
+        | ValueSome chunkIndex ->
+            let bounds = box3 (chunk.ChunkCenter - chunk.ChunkSize * 0.5f) chunk.ChunkSize
+            let hasOcclusionBounds, occlusionBounds =
+                match chunk.OcclusionBoundsOpt with
+                | Some bounds -> true, bounds
+                | None -> false, Unchecked.defaultof<Box3>
+            level.ChunkManifest.ChunkStatics[chunkIndex] <-
+                { ChunkCoord = chunk.ChunkCoord
+                  ChunkCenter = chunk.ChunkCenter
+                  ChunkSize = chunk.ChunkSize
+                  Bounds = bounds
+                  HasBuild = true
+                  HasRenderable = chunk.SplatCount > 0 && Option.isSome chunk.VoxelModelOpt
+                  HasPhysics = chunk.BoxCount > 0
+                  HasOcclusionBounds = hasOcclusionBounds
+                  OcclusionBounds = occlusionBounds
+                  SplatCount = chunk.SplatCount
+                  OpaqueOccluderBoxes = chunk.OpaqueOccluderBoxes
+                  OpaqueFaceMask = chunk.OpaqueFaceMask
+                  FullOpaqueChunk = chunk.FullOpaqueChunk
+                  EditRevision = revision }
+            level.ChunkManifest.EmptyFlags[chunkIndex] <- false
+            level.ChunkManifest.EditedFlags[chunkIndex] <- false
+        | ValueNone -> ()
+
+    let markChunkManifestEmpty revision (level : VoxelLevel) (chunkCoord : Vector3i) =
+        match tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunkCoord with
+        | ValueSome chunkIndex ->
+            let current = level.ChunkManifest.ChunkStatics[chunkIndex]
+            level.ChunkManifest.ChunkStatics[chunkIndex] <-
+                { current with
+                    HasBuild = true
+                    HasRenderable = false
+                    HasPhysics = false
+                    HasOcclusionBounds = false
+                    OcclusionBounds = Unchecked.defaultof<Box3>
+                    SplatCount = 0
+                    OpaqueOccluderBoxes = Array.empty
+                    OpaqueFaceMask = 0
+                    FullOpaqueChunk = false
+                    EditRevision = revision }
+            level.ChunkManifest.EmptyFlags[chunkIndex] <- true
+            level.ChunkManifest.EditedFlags[chunkIndex] <- false
+        | ValueNone -> ()
+
     let levelSourceSizeVoxels (settings : WorldGenSettings) =
         v3i
             (settings.ChunkCounts.X * settings.ChunkSizeVoxels.X)
@@ -208,6 +441,8 @@ module VoxelWorld =
                 (single sourceSize.X * settings.VoxelSize.X)
                 (single sourceSize.Y * settings.VoxelSize.Y)
                 (single sourceSize.Z * settings.VoxelSize.Z)
+        let bounds = box3 (worldSize * -0.5f) worldSize
+        let levelOffset = v3 0.0f (worldSize.Y * 0.5f) 0.0f
         { Bounds = box3 (worldSize * -0.5f) worldSize
           VoxelSize = settings.VoxelSize
           WorldSizeBlocks = worldSizeBlocks
@@ -217,7 +452,7 @@ module VoxelWorld =
           ChunkCounts = settings.ChunkCounts
           BlockSideVoxels = settings.BlockSideVoxels
           BlockGridOffsetVoxels = settings.BlockGridOffsetVoxels
-          LevelOffset = v3 0.0f (worldSize.Y * 0.5f) 0.0f
+          LevelOffset = levelOffset
           GenerationOpt = None
           GeneratedBlockTemplateCache = ConcurrentDictionary<Vector3i, VoxelBlockTemplate option> (HashIdentity.Structural)
           SourceVoxels = Dictionary<Vector3i, VoxelCell> (HashIdentity.Structural)
@@ -225,6 +460,7 @@ module VoxelWorld =
           EditRevision = ref 0
           PlaceableBlocks = placeableBlocks
           SpawnPosition = spawnPosition
+          ChunkManifest = createChunkManifest settings.ChunkCounts bounds levelOffset settings.VoxelSize settings.ChunkSizeVoxels
           NextRevision = ref revisionSeed }
 
     let blockCoordToWorldBlockCoord (level : VoxelLevel) (blockCoord : Vector3i) =
@@ -481,17 +717,39 @@ module VoxelWorld =
                 dz <- inc dz
             templateOpt
 
+    let private generatedBlockRemovedByCave (level : VoxelLevel) (generation : VoxelGeneration) (blockCoord : Vector3i) (template : VoxelBlockTemplate) =
+        if template.Solid && template.Material <> Wood && template.Material <> Leaves then
+            let blockCounts = generatedBlockCounts level
+            let sourceCenter = v3 (single blockCounts.X * 0.5f) 0.0f (single blockCounts.Z * 0.5f)
+            let horizontal = v3 (single blockCoord.X) 0.0f (single blockCoord.Z) - sourceCenter
+            let spawnSafe = horizontal.LengthSquared () < 9.0f && blockCoord.Y < generation.SeaLevelBlocks + 4
+            let caveCeiling = generation.SeaLevelBlocks + 8
+            if not spawnSafe && blockCoord.Y < caveCeiling then
+                let worldBlockCoord = blockCoordToWorldBlockCoord level blockCoord
+                let scale = 0.18f
+                let density =
+                    fbm3 (generation.Seed + 131) 4 (single worldBlockCoord.X * scale) (single worldBlockCoord.Y * scale * 1.25f) (single worldBlockCoord.Z * scale) * 0.62f +
+                    ridged3 (generation.Seed + 197) 3 (single worldBlockCoord.X * scale * 1.75f) (single worldBlockCoord.Y * scale) (single worldBlockCoord.Z * scale * 1.75f) * 0.38f
+                let depthGate = clamp01 (single (caveCeiling - blockCoord.Y) / 7.0f)
+                density * depthGate > generation.CaveThreshold
+            else false
+        else false
+
     let private computeGeneratedBlockTemplate (level : VoxelLevel) (generation : VoxelGeneration) (blockCoord : Vector3i) =
         if not (isBlockCoordInBounds level blockCoord) then None
         else
             let height = generatedHeightAt level generation blockCoord.X blockCoord.Z
             let worldBlockCoord = blockCoordToWorldBlockCoord level blockCoord
-            if blockCoord.Y <= height then
-                Some (chooseTerrainTemplate generation worldBlockCoord.X worldBlockCoord.Y worldBlockCoord.Z blockCoord.Y height)
-            elif blockCoord.Y <= generation.SeaLevelBlocks then Some generation.Templates.Water
-            elif blockCoord.Y <= generation.LavaLevelBlocks &&
-                 hash01 (generation.Seed + 211) worldBlockCoord.X worldBlockCoord.Y worldBlockCoord.Z < 0.35f then Some generation.Templates.Lava
-            else tryTreeTemplateAt level generation blockCoord
+            let templateOpt =
+                if blockCoord.Y <= height then
+                    Some (chooseTerrainTemplate generation worldBlockCoord.X worldBlockCoord.Y worldBlockCoord.Z blockCoord.Y height)
+                elif blockCoord.Y <= generation.SeaLevelBlocks then Some generation.Templates.Water
+                elif blockCoord.Y <= generation.LavaLevelBlocks &&
+                     hash01 (generation.Seed + 211) worldBlockCoord.X worldBlockCoord.Y worldBlockCoord.Z < 0.35f then Some generation.Templates.Lava
+                else tryTreeTemplateAt level generation blockCoord
+            match templateOpt with
+            | Some template when generatedBlockRemovedByCave level generation blockCoord template -> None
+            | _ -> templateOpt
 
     let private tryGetGeneratedBlockTemplate (level : VoxelLevel) blockCoord =
         match level.GenerationOpt with
@@ -499,24 +757,22 @@ module VoxelWorld =
             level.GeneratedBlockTemplateCache.GetOrAdd (blockCoord, Func<Vector3i, VoxelBlockTemplate option> (fun coord -> computeGeneratedBlockTemplate level generation coord))
         | None -> None
 
-    let private generatedCellRemovedByCave (level : VoxelLevel) (generation : VoxelGeneration) (coord : Vector3i) (cell : VoxelCell) =
-        if cell.Solid && cell.Material <> Wood && cell.Material <> Leaves then
-            let sourceCenter = v3 (single level.SourceSizeVoxels.X * 0.5f) 0.0f (single level.SourceSizeVoxels.Z * 0.5f)
-            let safeRadius = single (level.BlockSideVoxels * 3)
-            let horizontal = v3 (single coord.X) 0.0f (single coord.Z) - sourceCenter
-            let spawnSafe = horizontal.LengthSquared () < safeRadius * safeRadius && coord.Y < (generation.SeaLevelBlocks + 4) * level.BlockSideVoxels
-            let caveCeiling = (generation.SeaLevelBlocks + 8) * level.BlockSideVoxels
-            if not spawnSafe && coord.Y < caveCeiling then
-                let worldCoord = sourceCoordToWorldVoxelCoord level coord
-                let scale = 0.045f
-                let density =
-                    fbm3 (generation.Seed + 131) 4 (single worldCoord.X * scale) (single worldCoord.Y * scale * 1.35f) (single worldCoord.Z * scale) * 0.62f +
-                    ridged3 (generation.Seed + 197) 3 (single worldCoord.X * scale * 1.75f) (single worldCoord.Y * scale) (single worldCoord.Z * scale * 1.75f) * 0.38f
-                let depthGate =
-                    clamp01 (single (caveCeiling - coord.Y) / single (level.BlockSideVoxels * 7))
-                density * depthGate > generation.CaveThreshold
-            else false
-        else false
+    let tryGetGeneratedBlockTemplateValue (level : VoxelLevel) (blockCoord : Vector3i) =
+        tryGetGeneratedBlockTemplate level blockCoord
+
+    let private generatedCellRemovedByCave (_level : VoxelLevel) (_generation : VoxelGeneration) (_coord : Vector3i) (_cell : VoxelCell) =
+        false
+
+    let tryGetGeneratedCellValueFromTemplateLocal (level : VoxelLevel) (coord : Vector3i) (localCoord : Vector3i) (template : VoxelBlockTemplate) =
+        match level.GenerationOpt with
+        | Some generation ->
+            match template.Cells.TryGetValue localCoord with
+            | (true, cell) when not (generatedCellRemovedByCave level generation coord cell) -> ValueSome cell
+            | (true, _) | (false, _) -> ValueNone
+        | None -> ValueNone
+
+    let tryGetGeneratedCellValueFromTemplate (level : VoxelLevel) (coord : Vector3i) (blockCoord : Vector3i) (template : VoxelBlockTemplate) =
+        tryGetGeneratedCellValueFromTemplateLocal level coord (coord - blockStartCoord level blockCoord) template
 
     let private tryGetGeneratedCellValue (level : VoxelLevel) (coord : Vector3i) =
         match level.GenerationOpt with

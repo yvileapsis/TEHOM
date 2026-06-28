@@ -21,9 +21,9 @@ type PortalPair =
       RecursionLimit : int }
 
 type PortalPlayerTracking =
-    { PreviousSignedDistances : Map<PortalId, single>
-      LastTeleportTime : int64
-      LastExitPortalOpt : PortalId option }
+    { mutable PreviousSignedDistances : Map<PortalId, single>
+      mutable LastTeleportTime : int64
+      mutable LastExitPortalOpt : PortalId option }
 
     static member empty =
         { PreviousSignedDistances = Map.empty

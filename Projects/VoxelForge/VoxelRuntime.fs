@@ -1,7 +1,9 @@
 namespace VoxelForge
 open System
+open System.Collections.Concurrent
 open System.Collections.Generic
 open System.IO
+open System.IO.Compression
 open System.Numerics
 open Prime
 open Nu
@@ -9,20 +11,7 @@ open Nu
 [<RequireQualifiedAccess>]
 module VoxelRuntime =
 
-    type VoxelChunkBuild =
-        { ChunkCoord : Vector3i
-          ChunkCenter : Vector3
-          ChunkSize : Vector3
-          VoxelModelDescriptor : VoxelModelDescriptor
-          BodyShape : BodyShape
-          BoxCount : int
-          OcclusionBoundsOpt : Box3 option
-          SolidBlockCoords : Vector3i array
-          SplatCount : int
-          OpaqueBlockCoords : Vector3i array
-          OpaqueOccluderBoxes : Box3 array
-          OpaqueFaceMask : int
-          FullOpaqueChunk : bool }
+    type VoxelChunkBuild = VoxelForge.VoxelChunkBuild
 
     let freshRevisionSeed () =
         int (Gen.id64 % uint64 (Int32.MaxValue - 1))
@@ -62,6 +51,30 @@ module VoxelRuntime =
 
     let private collisionSolidThreshold = 0.20f
 
+    [<Struct>]
+    type private TemplateSurfaceVoxel =
+        { LocalCoord : Vector3i
+          Cell : VoxelCell }
+
+    [<Struct>]
+    type private TemplateBlockInfo =
+        { SurfaceVoxels : TemplateSurfaceVoxel array
+          HasCollision : bool
+          OpaqueOccluder : bool }
+
+    let private voxelDirections =
+        [|struct (v3iRight, v3Right)
+          struct (v3iLeft, v3Left)
+          struct (v3iUp, v3Up)
+          struct (v3iDown, v3Down)
+          struct (v3iForward, v3Forward)
+          struct (v3iBack, v3Back)|]
+
+    let private templateBlockInfoCache = ConcurrentDictionary<string, TemplateBlockInfo> ()
+
+    let private templateBlockInfoKey (template : VoxelBlockTemplate) =
+        template.Name + "|" + string template.Material + "|" + string template.Solid + "|" + string template.Voxels.Length
+
     let private levelBlockCounts (level : VoxelLevel) =
         let side = max 1 level.BlockSideVoxels
         v3i
@@ -99,6 +112,92 @@ module VoxelRuntime =
         then Some struct (minBlock, maxBlock)
         else None
 
+    let private tryGetCachedGeneratedBlockTemplate (blockTemplateCache : Dictionary<Vector3i, VoxelBlockTemplate option>) (level : VoxelLevel) (blockCoord : Vector3i) =
+        match blockTemplateCache.TryGetValue blockCoord with
+        | (true, templateOpt) -> templateOpt
+        | (false, _) ->
+            let templateOpt = VoxelWorld.tryGetGeneratedBlockTemplateValue level blockCoord
+            blockTemplateCache[blockCoord] <- templateOpt
+            templateOpt
+
+    let private chunkSourceMinCoord (level : VoxelLevel) (chunkCoord : Vector3i) =
+        v3i
+            (chunkCoord.X * level.ChunkSizeVoxels.X)
+            (chunkCoord.Y * level.ChunkSizeVoxels.Y)
+            (chunkCoord.Z * level.ChunkSizeVoxels.Z)
+
+    let private chunkHasRelevantEdits (level : VoxelLevel) (chunkCoord : Vector3i) =
+        if level.Edits.Count = 0 then false
+        else
+            let chunkMin = chunkSourceMinCoord level chunkCoord
+            let chunkMax = chunkMin + level.ChunkSizeVoxels - v3iOne
+            let minCoord =
+                v3i
+                    (max 0 (dec chunkMin.X))
+                    (max 0 (dec chunkMin.Y))
+                    (max 0 (dec chunkMin.Z))
+            let maxCoord =
+                v3i
+                    (min (dec level.SourceSizeVoxels.X) (inc chunkMax.X))
+                    (min (dec level.SourceSizeVoxels.Y) (inc chunkMax.Y))
+                    (min (dec level.SourceSizeVoxels.Z) (inc chunkMax.Z))
+            lock level.Edits (fun () ->
+                let mutable relevant = false
+                for entry in level.Edits do
+                    if not relevant then
+                        let coord = entry.Key
+                        relevant <-
+                            coord.X >= minCoord.X && coord.X <= maxCoord.X &&
+                            coord.Y >= minCoord.Y && coord.Y <= maxCoord.Y &&
+                            coord.Z >= minCoord.Z && coord.Z <= maxCoord.Z
+                relevant)
+
+    let private canUseGeneratedChunkLookup (level : VoxelLevel) (chunkCoord : Vector3i) =
+        Option.isSome level.GenerationOpt && level.SourceVoxels.Count = 0 && not (chunkHasRelevantEdits level chunkCoord)
+
+    let private generatedChunkDefinitelyEmpty (level : VoxelLevel) (chunkCoord : Vector3i) =
+        canUseGeneratedChunkLookup level chunkCoord &&
+        match tryChunkBlockRange level chunkCoord with
+        | Some (struct (minBlock, maxBlock)) ->
+            let blockTemplateCache = Dictionary<Vector3i, VoxelBlockTemplate option> (HashIdentity.Structural)
+            let mutable anyTemplate = false
+            let mutable y = minBlock.Y
+            while not anyTemplate && y <= maxBlock.Y do
+                let mutable z = minBlock.Z
+                while not anyTemplate && z <= maxBlock.Z do
+                    let mutable x = minBlock.X
+                    while not anyTemplate && x <= maxBlock.X do
+                        anyTemplate <- Option.isSome (tryGetCachedGeneratedBlockTemplate blockTemplateCache level (v3i x y z))
+                        x <- inc x
+                    z <- inc z
+                y <- inc y
+            not anyTemplate
+        | None -> true
+
+    let private tryMakeGeneratedChunkCellLookup (level : VoxelLevel) (chunkCoord : Vector3i) =
+        if canUseGeneratedChunkLookup level chunkCoord then
+            let blockTemplateCache = Dictionary<Vector3i, VoxelBlockTemplate option> (HashIdentity.Structural)
+            let mutable lastBlockCoord = v3i Int32.MinValue Int32.MinValue Int32.MinValue
+            let mutable lastBlockStart = v3iZero
+            let mutable lastTemplateOpt : VoxelBlockTemplate option = None
+            Some
+                (fun (coord : Vector3i) ->
+                    if VoxelWorld.isSourceCoordInBounds level coord then
+                        let blockCoord = VoxelWorld.sourceCoordToBlockCoord level coord
+                        let templateOpt =
+                            if blockCoord = lastBlockCoord then lastTemplateOpt
+                            else
+                                let templateOpt = tryGetCachedGeneratedBlockTemplate blockTemplateCache level blockCoord
+                                lastBlockCoord <- blockCoord
+                                lastBlockStart <- VoxelWorld.blockStartCoord level blockCoord
+                                lastTemplateOpt <- templateOpt
+                                templateOpt
+                        match templateOpt with
+                        | Some template -> VoxelWorld.tryGetGeneratedCellValueFromTemplateLocal level coord (coord - lastBlockStart) template
+                        | None -> ValueNone
+                    else ValueNone)
+        else None
+
     let private blockHasCollision (tryGetCell : Vector3i -> VoxelCell voption) (level : VoxelLevel) (blockCoord : Vector3i) =
         let side = max 1 level.BlockSideVoxels
         let solidTarget =
@@ -124,6 +223,100 @@ module VoxelRuntime =
         match cell.Material with
         | Grass | Dirt | Stone | Sand | Wood | Ore | Brick | Crafted -> true
         | Leaves | Glass | Water | Lava -> false
+
+    let private isLocalBlockCoord (side : int) (coord : Vector3i) =
+        coord.X >= 0 && coord.X < side &&
+        coord.Y >= 0 && coord.Y < side &&
+        coord.Z >= 0 && coord.Z < side
+
+    let private blockFaceOpaqueInTemplate (side : int) (template : VoxelBlockTemplate) faceIndex =
+        let isOpaque x y z =
+            match template.Cells.TryGetValue (v3i x y z) with
+            | (true, cell) when isOpaqueCell cell -> true
+            | (true, _) | (false, _) -> false
+        let mutable opaque = true
+        match faceIndex with
+        | 0 ->
+            let mutable y = 0
+            while opaque && y < side do
+                let mutable z = 0
+                while opaque && z < side do
+                    opaque <- isOpaque 0 y z
+                    z <- inc z
+                y <- inc y
+        | 1 ->
+            let mutable y = 0
+            while opaque && y < side do
+                let mutable z = 0
+                while opaque && z < side do
+                    opaque <- isOpaque (dec side) y z
+                    z <- inc z
+                y <- inc y
+        | 2 ->
+            let mutable z = 0
+            while opaque && z < side do
+                let mutable x = 0
+                while opaque && x < side do
+                    opaque <- isOpaque x 0 z
+                    x <- inc x
+                z <- inc z
+        | 3 ->
+            let mutable z = 0
+            while opaque && z < side do
+                let mutable x = 0
+                while opaque && x < side do
+                    opaque <- isOpaque x (dec side) z
+                    x <- inc x
+                z <- inc z
+        | 4 ->
+            let mutable y = 0
+            while opaque && y < side do
+                let mutable x = 0
+                while opaque && x < side do
+                    opaque <- isOpaque x y 0
+                    x <- inc x
+                y <- inc y
+        | 5 ->
+            let mutable y = 0
+            while opaque && y < side do
+                let mutable x = 0
+                while opaque && x < side do
+                    opaque <- isOpaque x y (dec side)
+                    x <- inc x
+                y <- inc y
+        | _ -> opaque <- false
+        opaque
+
+    let private getTemplateBlockInfo (side : int) (template : VoxelBlockTemplate) =
+        let key = templateBlockInfoKey template
+        templateBlockInfoCache.GetOrAdd
+            (key,
+             Func<string, TemplateBlockInfo> (fun _ ->
+                let surfaceVoxels = ResizeArray<TemplateSurfaceVoxel> ()
+                for struct (localCoord, cell) in template.Voxels do
+                    let mutable surface = false
+                    let mutable i = 0
+                    while not surface && i < voxelDirections.Length do
+                        let struct (offset, _) = voxelDirections[i]
+                        let neighbor = localCoord + offset
+                        surface <-
+                            not (isLocalBlockCoord side neighbor) ||
+                            not (template.Cells.ContainsKey neighbor)
+                        i <- inc i
+                    if surface then
+                        surfaceVoxels.Add { LocalCoord = localCoord; Cell = cell }
+                let solidTarget =
+                    max 1 (int (MathF.Ceiling (single (side * side * side) * collisionSolidThreshold)))
+                let opaqueOccluder =
+                    blockFaceOpaqueInTemplate side template 0 &&
+                    blockFaceOpaqueInTemplate side template 1 &&
+                    blockFaceOpaqueInTemplate side template 2 &&
+                    blockFaceOpaqueInTemplate side template 3 &&
+                    blockFaceOpaqueInTemplate side template 4 &&
+                    blockFaceOpaqueInTemplate side template 5
+                { SurfaceVoxels = surfaceVoxels.ToArray ()
+                  HasCollision = template.Solid && template.Voxels.Length >= solidTarget
+                  OpaqueOccluder = opaqueOccluder }))
 
     let private blockFaceOpaque (tryGetCell : Vector3i -> VoxelCell voption) (level : VoxelLevel) (blockCoord : Vector3i) faceIndex =
         let side = max 1 level.BlockSideVoxels
@@ -402,33 +595,355 @@ module VoxelRuntime =
             else struct (EmptyShape, 0, None, [||], [||], [||], 0, false)
         | None -> struct (EmptyShape, 0, None, [||], [||], [||], 0, false)
 
+    let private chunkBodyShapeFromBlockMasks (level : VoxelLevel) (minBlock : Vector3i) (blockCounts : Vector3i) (filled : bool[,,]) (opaque : bool[,,]) (solidBlockCoords : ResizeArray<Vector3i>) (opaqueBlockCoords : ResizeArray<Vector3i>) (renderCenter : Vector3) =
+        if solidBlockCoords.Count > 0 then
+            let visited = Array3D.zeroCreate<bool> blockCounts.X blockCounts.Y blockCounts.Z
+            let canUse x y z = filled[x, y, z] && not visited[x, y, z]
+            let canGrowZ x y z sizeX sizeZ =
+                let z = z + sizeZ
+                let mutable canGrow = z < blockCounts.Z
+                let mutable ix = 0
+                while canGrow && ix < sizeX do
+                    canGrow <- canUse (x + ix) y z
+                    ix <- inc ix
+                canGrow
+            let canGrowY x y z sizeX sizeY sizeZ =
+                let y = y + sizeY
+                let mutable canGrow = y < blockCounts.Y
+                let mutable iz = 0
+                while canGrow && iz < sizeZ do
+                    let mutable ix = 0
+                    while canGrow && ix < sizeX do
+                        canGrow <- canUse (x + ix) y (z + iz)
+                        ix <- inc ix
+                    iz <- inc iz
+                canGrow
+            let blockWorldSize =
+                v3
+                    (single level.BlockSideVoxels * level.VoxelSize.X)
+                    (single level.BlockSideVoxels * level.VoxelSize.Y)
+                    (single level.BlockSideVoxels * level.VoxelSize.Z)
+            let bodyShapes = List<BodyShape> ()
+            let mutable occlusionMin = v3Dup Single.MaxValue
+            let mutable occlusionMax = v3Dup Single.MinValue
+            for y in 0 .. dec blockCounts.Y do
+                for z in 0 .. dec blockCounts.Z do
+                    for x in 0 .. dec blockCounts.X do
+                        if canUse x y z then
+                            let mutable sizeX = 1
+                            while x + sizeX < blockCounts.X && canUse (x + sizeX) y z do
+                                sizeX <- inc sizeX
+                            let mutable sizeZ = 1
+                            while canGrowZ x y z sizeX sizeZ do
+                                sizeZ <- inc sizeZ
+                            let mutable sizeY = 1
+                            while canGrowY x y z sizeX sizeY sizeZ do
+                                sizeY <- inc sizeY
+                            for iy in 0 .. dec sizeY do
+                                for iz in 0 .. dec sizeZ do
+                                    for ix in 0 .. dec sizeX do
+                                        visited[x + ix, y + iy, z + iz] <- true
+                            let blockCoord = minBlock + v3i x y z
+                            let start = VoxelWorld.blockStartCoord level blockCoord
+                            let boxSize =
+                                v3
+                                    (single sizeX * blockWorldSize.X)
+                                    (single sizeY * blockWorldSize.Y)
+                                    (single sizeZ * blockWorldSize.Z)
+                            let boxMin =
+                                level.Bounds.Min +
+                                v3
+                                    (single start.X * level.VoxelSize.X)
+                                    (single start.Y * level.VoxelSize.Y)
+                                    (single start.Z * level.VoxelSize.Z)
+                            let boxCenter = boxMin + boxSize * 0.5f
+                            occlusionMin <- Vector3.Min (occlusionMin, boxMin)
+                            occlusionMax <- Vector3.Max (occlusionMax, boxMin + boxSize)
+                            bodyShapes.Add (BoxShape { Size = boxSize; TransformOpt = Some (Affine.makeTranslation (boxCenter - renderCenter)); PropertiesOpt = None })
+            let occlusionBoundsOpt =
+                if bodyShapes.Count > 0
+                then Some (box3 occlusionMin (occlusionMax - occlusionMin))
+                else None
+            let opaqueOccluderBoxes =
+                if opaqueBlockCoords.Count > 0 then
+                    let visitedOpaque = Array3D.zeroCreate<bool> blockCounts.X blockCounts.Y blockCounts.Z
+                    let canUseOpaque x y z = opaque[x, y, z] && not visitedOpaque[x, y, z]
+                    let canGrowOpaqueZ x y z sizeX sizeZ =
+                        let z = z + sizeZ
+                        let mutable canGrow = z < blockCounts.Z
+                        let mutable ix = 0
+                        while canGrow && ix < sizeX do
+                            canGrow <- canUseOpaque (x + ix) y z
+                            ix <- inc ix
+                        canGrow
+                    let canGrowOpaqueY x y z sizeX sizeY sizeZ =
+                        let y = y + sizeY
+                        let mutable canGrow = y < blockCounts.Y
+                        let mutable iz = 0
+                        while canGrow && iz < sizeZ do
+                            let mutable ix = 0
+                            while canGrow && ix < sizeX do
+                                canGrow <- canUseOpaque (x + ix) y (z + iz)
+                                ix <- inc ix
+                            iz <- inc iz
+                        canGrow
+                    [|for y in 0 .. dec blockCounts.Y do
+                        for z in 0 .. dec blockCounts.Z do
+                            for x in 0 .. dec blockCounts.X do
+                                if canUseOpaque x y z then
+                                    let mutable sizeX = 1
+                                    while x + sizeX < blockCounts.X && canUseOpaque (x + sizeX) y z do
+                                        sizeX <- inc sizeX
+                                    let mutable sizeZ = 1
+                                    while canGrowOpaqueZ x y z sizeX sizeZ do
+                                        sizeZ <- inc sizeZ
+                                    let mutable sizeY = 1
+                                    while canGrowOpaqueY x y z sizeX sizeY sizeZ do
+                                        sizeY <- inc sizeY
+                                    for iy in 0 .. dec sizeY do
+                                        for iz in 0 .. dec sizeZ do
+                                            for ix in 0 .. dec sizeX do
+                                                visitedOpaque[x + ix, y + iy, z + iz] <- true
+                                    let blockCoord = minBlock + v3i x y z
+                                    let start = VoxelWorld.blockStartCoord level blockCoord
+                                    let boxSize =
+                                        v3
+                                            (single sizeX * blockWorldSize.X)
+                                            (single sizeY * blockWorldSize.Y)
+                                            (single sizeZ * blockWorldSize.Z)
+                                    let boxMin =
+                                        level.Bounds.Min + level.LevelOffset +
+                                        v3
+                                            (single start.X * level.VoxelSize.X)
+                                            (single start.Y * level.VoxelSize.Y)
+                                            (single start.Z * level.VoxelSize.Z)
+                                    yield box3 boxMin boxSize|]
+                else [||]
+            let opaqueFaceMask = computeFaceMask opaque blockCounts
+            let fullOpaqueChunk = opaqueBlockCoords.Count = blockCounts.X * blockCounts.Y * blockCounts.Z
+            struct (BodyShapes (bodyShapes |> Seq.toList), bodyShapes.Count, occlusionBoundsOpt, solidBlockCoords.ToArray (), opaqueBlockCoords.ToArray (), opaqueOccluderBoxes, opaqueFaceMask, fullOpaqueChunk)
+        else struct (EmptyShape, 0, None, [||], [||], [||], 0, false)
+
+    let private tryBuildChunkFromBlockLookup (level : VoxelLevel) (chunkCoord : Vector3i) (tryGetBlockTemplate : Vector3i -> VoxelBlockTemplate option) =
+        match tryChunkBlockRange level chunkCoord with
+            | Some (struct (minBlock, maxBlock)) ->
+                let side = max 1 level.BlockSideVoxels
+                let blockCounts = maxBlock - minBlock + v3iOne
+                let filled = Array3D.zeroCreate<bool> blockCounts.X blockCounts.Y blockCounts.Z
+                let opaque = Array3D.zeroCreate<bool> blockCounts.X blockCounts.Y blockCounts.Z
+                let solidBlockCoords = ResizeArray<Vector3i> ()
+                let opaqueBlockCoords = ResizeArray<Vector3i> ()
+                let splats = List<VoxelSplat> ()
+                let mutable occupiedAny = false
+                let origin = level.Bounds.Min
+                for y in 0 .. dec blockCounts.Y do
+                    for z in 0 .. dec blockCounts.Z do
+                        for x in 0 .. dec blockCounts.X do
+                            let blockCoord = minBlock + v3i x y z
+                            match tryGetBlockTemplate blockCoord with
+                            | Some template ->
+                                occupiedAny <- true
+                                let info = getTemplateBlockInfo side template
+                                if info.HasCollision then
+                                    filled[x, y, z] <- true
+                                    solidBlockCoords.Add blockCoord
+                                if info.OpaqueOccluder then
+                                    opaque[x, y, z] <- true
+                                    opaqueBlockCoords.Add blockCoord
+                                let blockStart = VoxelWorld.blockStartCoord level blockCoord
+                                for surfaceVoxel in info.SurfaceVoxels do
+                                    let mutable exposed = false
+                                    let mutable normal = v3Zero
+                                    for struct (offset, direction) in voxelDirections do
+                                        let localNeighbor = surfaceVoxel.LocalCoord + offset
+                                        let neighborOccupied =
+                                            if isLocalBlockCoord side localNeighbor then
+                                                template.Cells.ContainsKey localNeighbor
+                                            else
+                                                let blockOffset =
+                                                    v3i
+                                                        (if localNeighbor.X < 0 then -1 elif localNeighbor.X >= side then 1 else 0)
+                                                        (if localNeighbor.Y < 0 then -1 elif localNeighbor.Y >= side then 1 else 0)
+                                                        (if localNeighbor.Z < 0 then -1 elif localNeighbor.Z >= side then 1 else 0)
+                                                let wrappedLocal =
+                                                    v3i
+                                                        (if localNeighbor.X < 0 then dec side elif localNeighbor.X >= side then 0 else localNeighbor.X)
+                                                        (if localNeighbor.Y < 0 then dec side elif localNeighbor.Y >= side then 0 else localNeighbor.Y)
+                                                        (if localNeighbor.Z < 0 then dec side elif localNeighbor.Z >= side then 0 else localNeighbor.Z)
+                                                match tryGetBlockTemplate (blockCoord + blockOffset) with
+                                                | Some neighborTemplate -> neighborTemplate.Cells.ContainsKey wrappedLocal
+                                                | None -> false
+                                        if not neighborOccupied then
+                                            exposed <- true
+                                            normal <- normal + direction
+                                    if exposed then
+                                        let sourceCoord = blockStart + surfaceVoxel.LocalCoord
+                                        splats.Add
+                                            { Position =
+                                                origin +
+                                                v3
+                                                    ((single sourceCoord.X + 0.5f) * level.VoxelSize.X)
+                                                    ((single sourceCoord.Y + 0.5f) * level.VoxelSize.Y)
+                                                    ((single sourceCoord.Z + 0.5f) * level.VoxelSize.Z)
+                                              Albedo = surfaceVoxel.Cell.Albedo
+                                              Normal = if normal.LengthSquared () > 0.0f then normal.Normalized else v3Up }
+                            | None -> ()
+                if occupiedAny then
+                    let globalMinCoord = chunkSourceMinCoord level chunkCoord
+                    let chunkWorldSize =
+                        v3
+                            (single level.ChunkSizeVoxels.X * level.VoxelSize.X)
+                            (single level.ChunkSizeVoxels.Y * level.VoxelSize.Y)
+                            (single level.ChunkSizeVoxels.Z * level.VoxelSize.Z)
+                    let chunkMin =
+                        origin +
+                        v3
+                            (single globalMinCoord.X * level.VoxelSize.X)
+                            (single globalMinCoord.Y * level.VoxelSize.Y)
+                            (single globalMinCoord.Z * level.VoxelSize.Z)
+                    let chunkCenter = chunkMin + chunkWorldSize * 0.5f
+                    let halfVoxelSize = level.VoxelSize * 0.5f
+                    let struct (renderCenter, descriptorBounds) =
+                        if splats.Count > 0 then
+                            let mutable min = v3Dup Single.MaxValue
+                            let mutable max = v3Dup Single.MinValue
+                            for splat in splats do
+                                min <- Vector3.Min (min, splat.Position - halfVoxelSize)
+                                max <- Vector3.Max (max, splat.Position + halfVoxelSize)
+                            let size = max - min
+                            let center = min + size * 0.5f
+                            struct (center, box3 (min - center) size)
+                        else struct (chunkCenter, box3 (chunkWorldSize * -0.5f) chunkWorldSize)
+                    let splatsArray = Array.zeroCreate<VoxelSplat> splats.Count
+                    for i in 0 .. dec splats.Count do
+                        let splat = splats[i]
+                        splatsArray[i] <- { splat with Position = splat.Position - renderCenter }
+                    let voxelModelDescriptor =
+                        { Splats = splatsArray
+                          Bounds = descriptorBounds
+                          VoxelSize = level.VoxelSize }
+                    let struct (bodyShape, boxCount, occlusionBoundsOpt, solidBlockCoords, opaqueBlockCoords, opaqueOccluderBoxes, opaqueFaceMask, fullOpaqueChunk) =
+                        chunkBodyShapeFromBlockMasks level minBlock blockCounts filled opaque solidBlockCoords opaqueBlockCoords renderCenter
+                    Some
+                        { ChunkCoord = chunkCoord
+                          ChunkCenter = renderCenter + level.LevelOffset
+                          ChunkSize = voxelModelDescriptor.Bounds.Size
+                          VoxelModelDescriptor = voxelModelDescriptor
+                          BodyShape = bodyShape
+                          BoxCount = boxCount
+                          OcclusionBoundsOpt = occlusionBoundsOpt |> Option.map (fun bounds -> box3 (bounds.Min + level.LevelOffset) bounds.Size)
+                          SolidBlockCoords = solidBlockCoords
+                          SplatCount = splatsArray.Length
+                          OpaqueBlockCoords = opaqueBlockCoords
+                          OpaqueOccluderBoxes = opaqueOccluderBoxes
+                          OpaqueFaceMask = opaqueFaceMask
+                          FullOpaqueChunk = fullOpaqueChunk }
+                else None
+            | None -> None
+
+    let private tryBuildGeneratedChunkFromBlocks (level : VoxelLevel) (chunkCoord : Vector3i) =
+        if not (canUseGeneratedChunkLookup level chunkCoord) then None
+        else
+            let blockTemplateCache = Dictionary<Vector3i, VoxelBlockTemplate option> (HashIdentity.Structural)
+            let tryGetBlockTemplate blockCoord = tryGetCachedGeneratedBlockTemplate blockTemplateCache level blockCoord
+            tryBuildChunkFromBlockLookup level chunkCoord tryGetBlockTemplate
+
+    let private tryBuildChunkWithEditSnapshotFromBlocks (level : VoxelLevel) (snapshot : VoxelEditSnapshot) (chunkCoord : Vector3i) =
+        if Option.isNone level.GenerationOpt || level.SourceVoxels.Count <> 0 then ValueNone
+        else
+            let side = max 1 level.BlockSideVoxels
+            let blockTemplateCache = Dictionary<Vector3i, VoxelBlockTemplate option> (HashIdentity.Structural)
+            let editedBlockTemplateCache = Dictionary<Vector3i, VoxelBlockTemplate option> (HashIdentity.Structural)
+            let tryGetEditedBlockTemplate blockCoord =
+                match editedBlockTemplateCache.TryGetValue blockCoord with
+                | (true, templateOpt) -> templateOpt
+                | (false, _) ->
+                    let generatedTemplateOpt = tryGetCachedGeneratedBlockTemplate blockTemplateCache level blockCoord
+                    let templateOpt =
+                        match snapshot.EditsOpt with
+                        | Some edits ->
+                            let blockStart = VoxelWorld.blockStartCoord level blockCoord
+                            let mutable edited = false
+                            let cells =
+                                match generatedTemplateOpt with
+                                | Some template -> Dictionary<Vector3i, VoxelCell> (template.Cells, HashIdentity.Structural)
+                                | None -> Dictionary<Vector3i, VoxelCell> (HashIdentity.Structural)
+                            for entry in edits do
+                                let coord = entry.Key
+                                if  coord.X >= blockStart.X && coord.X < blockStart.X + side &&
+                                    coord.Y >= blockStart.Y && coord.Y < blockStart.Y + side &&
+                                    coord.Z >= blockStart.Z && coord.Z < blockStart.Z + side then
+                                    edited <- true
+                                    let localCoord = coord - blockStart
+                                    match entry.Value with
+                                    | Removed -> cells.Remove localCoord |> ignore<bool>
+                                    | Placed cell -> cells[localCoord] <- cell
+                            if edited then
+                                if cells.Count = 0 then None
+                                else
+                                    let voxels = Array.zeroCreate<struct (Vector3i * VoxelCell)> cells.Count
+                                    let mutable i = 0
+                                    let mutable solid = false
+                                    let mutable material = Crafted
+                                    let mutable first = true
+                                    for entry in cells do
+                                        let cell = entry.Value
+                                        if first then
+                                            material <- cell.Material
+                                            first <- false
+                                        solid <- solid || cell.Solid
+                                        voxels[i] <- struct (entry.Key, cell)
+                                        i <- inc i
+                                    Some
+                                        { Name = "Edited " + string snapshot.Revision + " " + string blockCoord.X + "," + string blockCoord.Y + "," + string blockCoord.Z
+                                          Material = material
+                                          Solid = solid
+                                          Voxels = voxels
+                                          Cells = cells }
+                            else generatedTemplateOpt
+                        | None -> generatedTemplateOpt
+                    editedBlockTemplateCache[blockCoord] <- templateOpt
+                    templateOpt
+            ValueSome (tryBuildChunkFromBlockLookup level chunkCoord tryGetEditedBlockTemplate)
+
     let tryBuildChunkWithCellLookup (level : VoxelLevel) (tryGetCell : Vector3i -> VoxelCell voption) (chunkCoord : Vector3i) =
-        match VoxelBake.chunkModelFromCells level.ChunkSizeVoxels level.Bounds level.VoxelSize tryGetCell chunkCoord with
-        | Some struct (renderCenter, voxelModelDescriptor) ->
-            let struct (bodyShape, boxCount, occlusionBoundsOpt, solidBlockCoords, opaqueBlockCoords, opaqueOccluderBoxes, opaqueFaceMask, fullOpaqueChunk) = chunkBodyShapeFromBlocks tryGetCell level chunkCoord renderCenter
-            let splatCount = voxelModelDescriptor.Splats.Length
-            Some
-                { ChunkCoord = chunkCoord
-                  ChunkCenter = renderCenter + level.LevelOffset
-                  ChunkSize = voxelModelDescriptor.Bounds.Size
-                  VoxelModelDescriptor = voxelModelDescriptor
-                  BodyShape = bodyShape
-                  BoxCount = boxCount
-                  OcclusionBoundsOpt = occlusionBoundsOpt |> Option.map (fun bounds -> box3 (bounds.Min + level.LevelOffset) bounds.Size)
-                  SolidBlockCoords = solidBlockCoords
-                  SplatCount = splatCount
-                  OpaqueBlockCoords = opaqueBlockCoords
-                  OpaqueOccluderBoxes = opaqueOccluderBoxes
-                  OpaqueFaceMask = opaqueFaceMask
-                  FullOpaqueChunk = fullOpaqueChunk }
-        | None -> None
+        if generatedChunkDefinitelyEmpty level chunkCoord then None
+        elif canUseGeneratedChunkLookup level chunkCoord then tryBuildGeneratedChunkFromBlocks level chunkCoord
+        else
+            let tryGetCell =
+                match tryMakeGeneratedChunkCellLookup level chunkCoord with
+                | Some tryGetCell -> tryGetCell
+                | None -> tryGetCell
+            match VoxelBake.chunkModelFromCells level.ChunkSizeVoxels level.Bounds level.VoxelSize tryGetCell chunkCoord with
+            | Some struct (renderCenter, voxelModelDescriptor) ->
+                let struct (bodyShape, boxCount, occlusionBoundsOpt, solidBlockCoords, opaqueBlockCoords, opaqueOccluderBoxes, opaqueFaceMask, fullOpaqueChunk) = chunkBodyShapeFromBlocks tryGetCell level chunkCoord renderCenter
+                let splatCount = voxelModelDescriptor.Splats.Length
+                Some
+                    { ChunkCoord = chunkCoord
+                      ChunkCenter = renderCenter + level.LevelOffset
+                      ChunkSize = voxelModelDescriptor.Bounds.Size
+                      VoxelModelDescriptor = voxelModelDescriptor
+                      BodyShape = bodyShape
+                      BoxCount = boxCount
+                      OcclusionBoundsOpt = occlusionBoundsOpt |> Option.map (fun bounds -> box3 (bounds.Min + level.LevelOffset) bounds.Size)
+                      SolidBlockCoords = solidBlockCoords
+                      SplatCount = splatCount
+                      OpaqueBlockCoords = opaqueBlockCoords
+                      OpaqueOccluderBoxes = opaqueOccluderBoxes
+                      OpaqueFaceMask = opaqueFaceMask
+                      FullOpaqueChunk = fullOpaqueChunk }
+            | None -> None
 
     let tryBuildChunk (level : VoxelLevel) (chunkCoord : Vector3i) =
         let tryGetCell coord = VoxelWorld.tryGetCellValue level coord
         tryBuildChunkWithCellLookup level tryGetCell chunkCoord
 
     let private chunkBuildCacheMagic = "VFCB"
-    let private chunkBuildCacheVersion = 1
+    let private chunkBuildCacheVersion = 6
+    let private chunkBuildCacheMaxBytes = 8L * 1024L * 1024L * 1024L
+    let private chunkBuildCacheTrimEvery = 64
+    let private chunkBuildCacheTrimLock = obj ()
+    let mutable private chunkBuildCacheSaveCount = 0
 
     let private writeVector3i (writer : BinaryWriter) (value : Vector3i) =
         writer.Write value.X
@@ -497,19 +1012,85 @@ module VoxelRuntime =
     let private canUseChunkBuildCache (level : VoxelLevel) =
         Option.isSome level.GenerationOpt
 
-    let private chunkBuildCacheFilePath (level : VoxelLevel) (chunkCoord : Vector3i) =
+    let shouldPrebuildChunkBuildCache (_level : VoxelLevel) =
+        false
+
+    let private chunkBuildCacheDirectoryPath (level : VoxelLevel) =
         let signature = chunkBuildCacheSignature level
         let safeSignature =
             signature.Replace("|", "_").Replace("-", "m").Replace(".", "p").Replace(",", "p")
             |> safePathPart
-        let directoryPath =
-            Path.Combine
-                (Environment.GetFolderPath Environment.SpecialFolder.LocalApplicationData,
-                 "VoxelForge",
-                 "ChunkBuilds",
-                 "v" + string chunkBuildCacheVersion,
-                 safeSignature)
-        Path.Combine (directoryPath, "chunk_" + string chunkCoord.X + "_" + string chunkCoord.Y + "_" + string chunkCoord.Z + ".vfcb")
+        Path.Combine
+            (Environment.GetFolderPath Environment.SpecialFolder.LocalApplicationData,
+             "VoxelForge",
+             "ChunkBuilds",
+             "v" + string chunkBuildCacheVersion,
+             safeSignature)
+
+    let private chunkBuildCacheFilePath (level : VoxelLevel) (chunkCoord : Vector3i) =
+        Path.Combine (chunkBuildCacheDirectoryPath level, "chunk_" + string chunkCoord.X + "_" + string chunkCoord.Y + "_" + string chunkCoord.Z + ".vfcb")
+
+    let private chunkBuildCacheCompleteFilePath (level : VoxelLevel) =
+        Path.Combine (chunkBuildCacheDirectoryPath level, "complete.vfcbc")
+
+    let private trimChunkBuildCache (level : VoxelLevel) =
+        try
+            let directoryPath = chunkBuildCacheDirectoryPath level
+            if Directory.Exists directoryPath then
+                let files =
+                    Directory.GetFiles (directoryPath, "*.vfcb", SearchOption.TopDirectoryOnly)
+                    |> Array.map FileInfo
+                let mutable totalBytes = 0L
+                for file in files do
+                    totalBytes <- totalBytes + file.Length
+                if totalBytes > chunkBuildCacheMaxBytes then
+                    let files = files |> Array.sortBy (fun file -> file.LastAccessTimeUtc.Ticks, file.LastWriteTimeUtc.Ticks)
+                    let mutable i = 0
+                    while totalBytes > chunkBuildCacheMaxBytes && i < files.Length do
+                        let file = files[i]
+                        try
+                            let length = file.Length
+                            file.Delete ()
+                            totalBytes <- totalBytes - length
+                        with _ -> ()
+                        i <- inc i
+        with exn ->
+            Log.warnOnce ("VoxelForge failed to trim chunk build cache due to: " + scstring exn)
+
+    let private noteChunkBuildCacheSave (level : VoxelLevel) =
+        let shouldTrim =
+            lock chunkBuildCacheTrimLock (fun () ->
+                chunkBuildCacheSaveCount <- inc chunkBuildCacheSaveCount
+                chunkBuildCacheSaveCount % chunkBuildCacheTrimEvery = 0)
+        if shouldTrim then trimChunkBuildCache level
+
+    let isChunkBuildCacheComplete (level : VoxelLevel) =
+        if canUseChunkBuildCache level then
+            let filePath = chunkBuildCacheCompleteFilePath level
+            if File.Exists filePath then
+                try
+                    use stream = File.Open (filePath, FileMode.Open, FileAccess.Read, FileShare.Read)
+                    use reader = new BinaryReader (stream)
+                    let magic = reader.ReadString ()
+                    let version = reader.ReadInt32 ()
+                    let signature = reader.ReadString ()
+                    magic = chunkBuildCacheMagic && version = chunkBuildCacheVersion && signature = chunkBuildCacheSignature level
+                with _ -> false
+            else false
+        else false
+
+    let markChunkBuildCacheComplete (level : VoxelLevel) =
+        if canUseChunkBuildCache level then
+            try
+                let filePath = chunkBuildCacheCompleteFilePath level
+                Directory.CreateDirectory (Path.GetDirectoryName filePath) |> ignore<DirectoryInfo>
+                use stream = File.Open (filePath, FileMode.Create, FileAccess.Write, FileShare.None)
+                use writer = new BinaryWriter (stream)
+                writer.Write chunkBuildCacheMagic
+                writer.Write chunkBuildCacheVersion
+                writer.Write (chunkBuildCacheSignature level)
+            with exn ->
+                Log.warnOnce ("VoxelForge failed to mark chunk build cache complete due to: " + scstring exn)
 
     let private tryGetBodyShapeBoxes (bodyShape : BodyShape) =
         let boxes = ResizeArray<struct (Vector3 * Vector3)> ()
@@ -567,25 +1148,77 @@ module VoxelRuntime =
             values[i] <- readBox3 reader
         values
 
+    let private packVoxelSplatPosition (bounds : Box3) (voxelSize : Vector3) (position : Vector3) (paletteIndex : int) =
+        let voxelOrigin = bounds.Min + voxelSize * 0.5f
+        let mutable packingWarning = false
+        let quantize (position : single) (origin : single) (voxelSize : single) =
+            let coord = int (MathF.Round ((position - origin) / voxelSize))
+            let reconstructed = origin + single coord * voxelSize
+            let tolerance = max 0.0001f (MathF.Abs voxelSize * 0.01f)
+            if coord < 0 || coord > 63 || MathF.Abs (reconstructed - position) > tolerance then
+                packingWarning <- true
+                Math.Clamp (coord, 0, 63)
+            else coord
+        let x = quantize position.X voxelOrigin.X voxelSize.X
+        let y = quantize position.Y voxelOrigin.Y voxelSize.Y
+        let z = quantize position.Z voxelOrigin.Z voxelSize.Z
+        let paletteIndex =
+            if paletteIndex > 0x3FFF then
+                packingWarning <- true
+                0x3FFFu
+            else uint paletteIndex
+        struct (uint x ||| (uint y <<< 6) ||| (uint z <<< 12) ||| (paletteIndex <<< 18), packingWarning)
+
+    let private unpackVoxelSplatPosition (bounds : Box3) (voxelSize : Vector3) (packed : uint) =
+        let voxelOrigin = bounds.Min + voxelSize * 0.5f
+        v3
+            (voxelOrigin.X + single (packed &&& 0x3Fu) * voxelSize.X)
+            (voxelOrigin.Y + single ((packed >>> 6) &&& 0x3Fu) * voxelSize.Y)
+            (voxelOrigin.Z + single ((packed >>> 12) &&& 0x3Fu) * voxelSize.Z)
+
     let private writeVoxelModelDescriptor (writer : BinaryWriter) (descriptor : VoxelModelDescriptor) =
         writeBox3 writer descriptor.Bounds
         writeVector3 writer descriptor.VoxelSize
+        let paletteIndices = Dictionary<Color, int> ()
+        let paletteColors = ResizeArray<Color> ()
+        let colorIndices = Array.zeroCreate<int> descriptor.Splats.Length
+        for i in 0 .. dec descriptor.Splats.Length do
+            let color = descriptor.Splats[i].Albedo
+            let mutable colorIndex = 0
+            if not (paletteIndices.TryGetValue (color, &colorIndex)) then
+                colorIndex <- paletteColors.Count
+                paletteIndices[color] <- colorIndex
+                paletteColors.Add color
+            colorIndices[i] <- colorIndex
+        writer.Write paletteColors.Count
+        for color in paletteColors do
+            writeColor writer color
         writer.Write descriptor.Splats.Length
-        for splat in descriptor.Splats do
-            writeVector3 writer splat.Position
-            writeColor writer splat.Albedo
-            writeVector3 writer splat.Normal
+        let mutable packingWarning = false
+        for i in 0 .. dec descriptor.Splats.Length do
+            let splat = descriptor.Splats[i]
+            let struct (packed, splatPackingWarning) = packVoxelSplatPosition descriptor.Bounds descriptor.VoxelSize splat.Position colorIndices[i]
+            writer.Write packed
+            packingWarning <- packingWarning || splatPackingWarning
+        if packingWarning then
+            Log.warnOnce "A voxel chunk build cache entry exceeded the packed 64x64x64 / 16384-color splat format; cached splat keys were clamped."
 
     let private readVoxelModelDescriptor (reader : BinaryReader) =
         let bounds = readBox3 reader
         let voxelSize = readVector3 reader
+        let paletteCount = reader.ReadInt32 ()
+        let palette = Array.zeroCreate<Color> paletteCount
+        for i in 0 .. dec paletteCount do
+            palette[i] <- readColor reader
         let splatCount = reader.ReadInt32 ()
         let splats = Array.zeroCreate<VoxelSplat> splatCount
         for i in 0 .. dec splatCount do
+            let packed = reader.ReadUInt32 ()
+            let colorIndex = int (packed >>> 18)
             splats[i] <-
-                { Position = readVector3 reader
-                  Albedo = readColor reader
-                  Normal = readVector3 reader }
+                { Position = unpackVoxelSplatPosition bounds voxelSize packed
+                  Albedo = if colorIndex < palette.Length then palette[colorIndex] else Color.White
+                  Normal = v3Up }
         { Splats = splats
           Bounds = bounds
           VoxelSize = voxelSize }
@@ -688,8 +1321,15 @@ module VoxelRuntime =
                         signature = chunkBuildCacheSignature level &&
                         cachedChunkCoord = chunkCoord then
                         let hasChunkBuild = reader.ReadBoolean ()
-                        if hasChunkBuild then ValueSome (Some (readChunkBuild reader))
-                        else ValueSome None
+                        let chunkBuildOpt =
+                            if hasChunkBuild then
+                                use compressedStream = new DeflateStream (stream, CompressionMode.Decompress, true)
+                                use payloadReader = new BinaryReader (compressedStream)
+                                Some (readChunkBuild payloadReader)
+                            else None
+                        try File.SetLastAccessTimeUtc (filePath, DateTime.UtcNow)
+                        with _ -> ()
+                        ValueSome chunkBuildOpt
                     else ValueNone
                 with exn ->
                     Log.warnOnce ("VoxelForge failed to load chunk build cache due to: " + scstring exn)
@@ -714,8 +1354,13 @@ module VoxelRuntime =
                     match chunkBuildOpt with
                     | Some chunkBuild ->
                         writer.Write true
-                        writeChunkBuild writer chunkBuild |> ignore<bool>
+                        writer.Flush ()
+                        use compressedStream = new DeflateStream (stream, CompressionLevel.Fastest, true)
+                        use payloadWriter = new BinaryWriter (compressedStream)
+                        writeChunkBuild payloadWriter chunkBuild |> ignore<bool>
+                        payloadWriter.Flush ()
                     | None -> writer.Write false
+                    noteChunkBuildCacheSave level
             with exn ->
                 Log.warnOnce ("VoxelForge failed to save chunk build cache due to: " + scstring exn)
 
@@ -728,6 +1373,14 @@ module VoxelRuntime =
                 saveChunkBuild level chunkCoord chunkBuildOpt
                 chunkBuildOpt
         else tryBuildChunkWithCellLookup level tryGetCell chunkCoord
+
+    let tryBuildChunkWithEditSnapshotCached useCache (level : VoxelLevel) (snapshot : VoxelEditSnapshot) (chunkCoord : Vector3i) =
+        let tryGetCell coord = VoxelWorld.tryGetCellWithEditSnapshotValue snapshot level coord
+        if useCache then tryBuildChunkWithCellLookupCached true level tryGetCell chunkCoord
+        else
+            match tryBuildChunkWithEditSnapshotFromBlocks level snapshot chunkCoord with
+            | ValueSome chunkBuildOpt -> chunkBuildOpt
+            | ValueNone -> tryBuildChunkWithCellLookupCached false level tryGetCell chunkCoord
 
     let tryBuildChunkCached (level : VoxelLevel) (chunkCoord : Vector3i) =
         let tryGetCell coord = VoxelWorld.tryGetCellValue level coord
@@ -742,6 +1395,7 @@ module VoxelRuntime =
                 World.createUserDefinedVoxelModel chunkBuild.VoxelModelDescriptor voxelModel world
                 Some voxelModel
             else None
+        VoxelWorld.updateChunkManifestFromBuild (VoxelWorld.getEditRevision level) level chunkBuild
         { ChunkCoord = chunkBuild.ChunkCoord
           ChunkCenter = chunkBuild.ChunkCenter
           ChunkSize = chunkBuild.ChunkSize
@@ -760,7 +1414,9 @@ module VoxelRuntime =
         match tryBuildChunk level chunkCoord with
         | Some chunkBuild ->
             Some (realizeChunk level chunkBuild world)
-        | None -> None
+        | None ->
+            VoxelWorld.markChunkManifestEmpty (VoxelWorld.getEditRevision level) level chunkCoord
+            None
 
     let rebuildChunks (chunkCoords : Vector3i seq) (level : VoxelLevel) (currentChunks : VoxelChunk array) (world : World) =
         let chunks = Dictionary<Vector3i, VoxelChunk> (HashIdentity.Structural)
@@ -773,7 +1429,9 @@ module VoxelRuntime =
             | (false, _) -> ()
             match tryBuildChunk level chunkCoord with
             | Some chunkBuild -> chunks[chunkCoord] <- realizeChunk level chunkBuild world
-            | None -> chunks.Remove chunkCoord |> ignore<bool>
+            | None ->
+                VoxelWorld.markChunkManifestEmpty (VoxelWorld.getEditRevision level) level chunkCoord
+                chunks.Remove chunkCoord |> ignore<bool>
         struct (sortVoxelChunks chunks.Values, chunksToDestroy.ToArray ())
 
     let destroyVoxelChunks (voxelChunks : VoxelChunk array) (world : World) =

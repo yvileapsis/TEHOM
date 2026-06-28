@@ -73,12 +73,24 @@ type private VoxelModelBatchEntry = Matrix4x4 * bool * Presence * MaterialProper
 [<RequireQualifiedAccess>]
 module private RendererProcessVoxelBatch =
 
+    let private batchPoolLock = obj ()
+    let private batchPool = Queue<ResizeArray<VoxelModelBatchEntry>> ()
+
+    let private allocBatch () =
+        lock batchPoolLock (fun () ->
+            if batchPool.Count > 0 then batchPool.Dequeue ()
+            else ResizeArray<VoxelModelBatchEntry> ())
+
+    let private freeBatch (batch : ResizeArray<VoxelModelBatchEntry>) =
+        batch.Clear ()
+        lock batchPoolLock (fun () -> batchPool.Enqueue batch)
+
     let add (batches : Dictionary<RenderPass, ResizeArray<VoxelModelBatchEntry>>) (modelMatrix : Matrix4x4) castShadow presence (materialProperties : MaterialProperties) (voxelModel : VoxelModel AssetTag) renderPass =
         let mutable batch = Unchecked.defaultof<ResizeArray<VoxelModelBatchEntry>>
         if batches.TryGetValue (renderPass, &batch) then
             batch.Add (modelMatrix, castShadow, presence, materialProperties, voxelModel)
         else
-            let batch = ResizeArray<VoxelModelBatchEntry> ()
+            let batch = allocBatch ()
             batch.Add (modelMatrix, castShadow, presence, materialProperties, voxelModel)
             batches.Add (renderPass, batch)
 
@@ -89,7 +101,13 @@ module private RendererProcessVoxelBatch =
     let flush (batches : Dictionary<RenderPass, ResizeArray<VoxelModelBatchEntry>>) (messages3d : RenderMessage3d List) =
         for batch in batches do
             if batch.Value.Count > 0 then
-                messages3d.Add (RenderVoxelModels { VoxelModels = SList.ofSeq batch.Value; RenderPass = batch.Key })
+                messages3d.Add (RenderVoxelModels { VoxelModels = batch.Value.ToArray (); RenderPass = batch.Key })
+            freeBatch batch.Value
+        batches.Clear ()
+
+    let clear (batches : Dictionary<RenderPass, ResizeArray<VoxelModelBatchEntry>>) =
+        for batch in batches do
+            freeBatch batch.Value
         batches.Clear ()
 
 /// A non-threaded render process.
@@ -211,7 +229,7 @@ type RendererInline () =
 
         member ri.ClearMessages () =
             messages3d.Clear ()
-            voxelModelBatches3d.Clear ()
+            RendererProcessVoxelBatch.clear voxelModelBatches3d
             messages2d.Clear ()
             messagesImGui.Clear ()
 
@@ -288,6 +306,9 @@ type RendererThread () =
     let [<VolatileField>] mutable swapRequestAcknowledged = false
     let [<VolatileField>] mutable renderer3dConfig = Renderer3dConfig.defaultConfig
     let [<VolatileField>] mutable messageBufferIndex = 0
+    let submissionEvent = new AutoResetEvent (false)
+    let swapRequestEvent = new AutoResetEvent (false)
+    let swapAcknowledgedEvent = new AutoResetEvent (false)
     let messageBuffers3d = [|List (); List ()|]
     let voxelModelBatchBuffers3d =
         [|Dictionary<RenderPass, ResizeArray<VoxelModelBatchEntry>> HashIdentity.Structural
@@ -472,54 +493,57 @@ type RendererThread () =
         while not terminated do
 
             // wait until submission is provided
-            while Option.isNone submissionOpt && not terminated do Thread.Yield () |> ignore<bool>
-            let (frustumInterior, frustumExterior, frustumImposter, messages3d, messages2d, messagesImGui, eye3dCenter, eye3dRotation, eye3dFieldOfView, eye2dCenter, eye2dSize, windowSize, geometryViewport, windowViewport, drawData) = Option.get submissionOpt
-            submissionOpt <- None
-
-            // guard against early termination
-            if not terminated then
-
-                // begin frame
-                OpenGL.Hl.BeginFrame (windowSize, windowViewport.Bounds)
-                OpenGL.Hl.Assert ()
-
-                // render 3d
-                renderer3d.Render frustumInterior frustumExterior frustumImposter eye3dCenter eye3dRotation eye3dFieldOfView geometryViewport windowViewport messages3d
-                freeStaticModelMessages messages3d
-                freeStaticModelSurfaceMessages messages3d
-                freeVoxelModelMessages messages3d
-                freeAnimatedModelMessages messages3d
-                renderer3dConfig <- renderer3d.RendererConfig
-                OpenGL.Hl.Assert ()
-
-                // render 2d
-                renderer2d.Render eye2dCenter eye2dSize windowViewport messages2d
-                freeSpriteMessages messages2d
-                OpenGL.Hl.Assert ()
-
-                // render imgui
-                rendererImGui.Render windowViewport drawData messagesImGui
-                OpenGL.Hl.Assert ()
-
-                // end frame
-                OpenGL.Hl.EndFrame ()
-                OpenGL.Hl.Assert ()
+            while Option.isNone submissionOpt && not terminated do submissionEvent.WaitOne () |> ignore<bool>
+            match submissionOpt with
+            | Some (frustumInterior, frustumExterior, frustumImposter, messages3d, messages2d, messagesImGui, eye3dCenter, eye3dRotation, eye3dFieldOfView, eye2dCenter, eye2dSize, windowSize, geometryViewport, windowViewport, drawData) ->
+                submissionOpt <- None
 
                 // guard against early termination
                 if not terminated then
 
-                    // wait until swap is requested
-                    while not swapRequested && not terminated do Thread.Yield () |> ignore<bool>
-                    swapRequested <- false
+                    // begin frame
+                    OpenGL.Hl.BeginFrame (windowSize, windowViewport.Bounds)
+                    OpenGL.Hl.Assert ()
+
+                    // render 3d
+                    renderer3d.Render frustumInterior frustumExterior frustumImposter eye3dCenter eye3dRotation eye3dFieldOfView geometryViewport windowViewport messages3d
+                    freeStaticModelMessages messages3d
+                    freeStaticModelSurfaceMessages messages3d
+                    freeVoxelModelMessages messages3d
+                    freeAnimatedModelMessages messages3d
+                    renderer3dConfig <- renderer3d.RendererConfig
+                    OpenGL.Hl.Assert ()
+
+                    // render 2d
+                    renderer2d.Render eye2dCenter eye2dSize windowViewport messages2d
+                    freeSpriteMessages messages2d
+                    OpenGL.Hl.Assert ()
+
+                    // render imgui
+                    rendererImGui.Render windowViewport drawData messagesImGui
+                    OpenGL.Hl.Assert ()
+
+                    // end frame
+                    OpenGL.Hl.EndFrame ()
+                    OpenGL.Hl.Assert ()
 
                     // guard against early termination
                     if not terminated then
 
-                        // acknowledge swap request
-                        swapRequestAcknowledged <- true
+                        // wait until swap is requested
+                        while not swapRequested && not terminated do swapRequestEvent.WaitOne () |> ignore<bool>
+                        swapRequested <- false
 
-                        // swap
-                        SDL3.SDL_GL_SwapWindow window |> ignore<SDLBool>
+                        // guard against early termination
+                        if not terminated then
+
+                            // acknowledge swap request
+                            swapRequestAcknowledged <- true
+                            swapAcknowledgedEvent.Set () |> ignore<bool>
+
+                            // swap
+                            SDL3.SDL_GL_SwapWindow window |> ignore<SDLBool>
+            | None -> ()
 
         // clean up 3d
         renderer3d.CleanUp ()
@@ -560,13 +584,14 @@ type RendererThread () =
                 let thread = Thread (ThreadStart (fun () ->
                     started <- true
                     while not terminated do
-                        while Option.isNone submissionOpt && not terminated do Thread.Yield () |> ignore<bool>
+                        while Option.isNone submissionOpt && not terminated do submissionEvent.WaitOne () |> ignore<bool>
                         submissionOpt <- None
                         if not terminated then
-                            while not swapRequested && not terminated do ()
+                            while not swapRequested && not terminated do swapRequestEvent.WaitOne () |> ignore<bool>
                             swapRequested <- false
                             if not terminated then
-                                swapRequestAcknowledged <- true))
+                                swapRequestAcknowledged <- true
+                                swapAcknowledgedEvent.Set () |> ignore<bool>))
                 threadOpt <- Some thread
                 thread.Name <- nameof RendererThread
                 thread.IsBackground <- true
@@ -770,7 +795,7 @@ type RendererThread () =
         member rt.ClearMessages () =
             if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
             messageBuffers3d[messageBufferIndex].Clear ()
-            voxelModelBatchBuffers3d[messageBufferIndex].Clear ()
+            RendererProcessVoxelBatch.clear voxelModelBatchBuffers3d[messageBufferIndex]
             messageBuffers2d[messageBufferIndex].Clear ()
             messageBuffersImGui[messageBufferIndex].Clear ()
 
@@ -782,15 +807,17 @@ type RendererThread () =
             let messagesImGui = messageBuffersImGui[messageBufferIndex]
             messageBufferIndex <- if messageBufferIndex = 0 then 1 else 0
             messageBuffers3d[messageBufferIndex].Clear ()
-            voxelModelBatchBuffers3d[messageBufferIndex].Clear ()
+            RendererProcessVoxelBatch.clear voxelModelBatchBuffers3d[messageBufferIndex]
             messageBuffers2d[messageBufferIndex].Clear ()
             messageBuffersImGui[messageBufferIndex].Clear ()
             submissionOpt <- Some (frustumInterior, frustumExterior, frustumImposter, messages3d, messages2d, messagesImGui, eye3dCenter, eye3dRotation, eye3dFieldOfView, eye2dCenter, eye2dSize, eyeMargin, geometryViewport, windowViewport, drawData)
+            submissionEvent.Set () |> ignore<bool>
 
         member rt.RequestSwap () =
             if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
             swapRequested <- true
-            while not swapRequestAcknowledged && not terminated do Thread.Yield () |> ignore<bool>
+            swapRequestEvent.Set () |> ignore<bool>
+            while not swapRequestAcknowledged && not terminated do swapAcknowledgedEvent.WaitOne () |> ignore<bool>
             swapRequestAcknowledged <- false
 
         member rt.Terminate () =
@@ -798,5 +825,8 @@ type RendererThread () =
             let thread = Option.get threadOpt
             if terminated then raise (InvalidOperationException "Redundant Terminate calls.")
             terminated <- true
+            submissionEvent.Set () |> ignore<bool>
+            swapRequestEvent.Set () |> ignore<bool>
+            swapAcknowledgedEvent.Set () |> ignore<bool>
             thread.Join ()
             threadOpt <- None

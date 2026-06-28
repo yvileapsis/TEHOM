@@ -631,7 +631,7 @@ type RenderVoxelModel =
 
 /// Describes how to render multiple voxel models.
 type RenderVoxelModels =
-    { VoxelModels : (Matrix4x4 * bool * Presence * MaterialProperties * VoxelModel AssetTag) SList
+    { VoxelModels : (Matrix4x4 * bool * Presence * MaterialProperties * VoxelModel AssetTag) array
       RenderPass : RenderPass }
 
 /// Describes how to render a portal aperture.
@@ -1336,6 +1336,7 @@ type [<ReferenceEquality>] GlRenderer3d =
           PhysicallyBasedAnimatedVao : uint
           PhysicallyBasedTerrainVao : uint
           PhysicallyBasedVoxelVao : uint
+          PhysicallyBasedVoxelInstanceBuffer : uint
           mutable PhysicallyBasedShaders : OpenGL.PhysicallyBased.PhysicallyBasedShaders
           ShadowMatrices : Matrix4x4 array
           LightShadowIndices : Dictionary<uint64, int>
@@ -1366,8 +1367,11 @@ type [<ReferenceEquality>] GlRenderer3d =
           mutable RendererConfig : Renderer3dConfig
           mutable RendererConfigChanged : bool
           mutable InstanceFields : single array
+          VoxelInstanceFields : single array
+          VoxelInstanceFieldsHandle : GCHandle
+          VoxelInstanceFieldsAddress : nativeint
           mutable UserDefinedStaticModelFields : single array
-          mutable UserDefinedVoxelModelFields : single array
+          mutable UserDefinedVoxelModelFields : uint array
           ForwardSurfacesComparer : IComparer<struct (single * single * Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * OpenGL.PhysicallyBased.PhysicallyBasedSurface * DepthTest * single * int)>
           ForwardSurfacesSortBuffer : struct (single * single * Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * OpenGL.PhysicallyBased.PhysicallyBasedSurface * DepthTest * single * int) List
           RenderPackages : Packages<RenderAsset, AssetClient>
@@ -2111,33 +2115,64 @@ type [<ReferenceEquality>] GlRenderer3d =
 
             // create vertex data
             let splatCount = voxelModelDescriptor.Splats.Length
-            let elementCount = splatCount * 10
+            let elementCount = splatCount
             if renderer.UserDefinedVoxelModelFields.Length < elementCount then
                 renderer.UserDefinedVoxelModelFields <- Array.zeroCreate elementCount
             let vertexData = renderer.UserDefinedVoxelModelFields.AsMemory (0, elementCount)
             let vertexDataSpan = vertexData.Span
+            let voxelOrigin = voxelModelDescriptor.Bounds.Min + voxelModelDescriptor.VoxelSize * 0.5f
+            let mutable packingWarning = false
+            let paletteIndices = Dictionary<Color, uint> ()
+            let paletteColors = ResizeArray<Color> ()
+            let getPaletteIndex (color : Color) =
+                let mutable index = 0u
+                if paletteIndices.TryGetValue (color, &index) then index
+                else
+                    index <- uint paletteColors.Count
+                    paletteIndices[color] <- index
+                    paletteColors.Add color
+                    index
+            let quantizeSplatCoord (position : single) (origin : single) (voxelSize : single) =
+                let coord = int (MathF.Round ((position - origin) / voxelSize))
+                let reconstructed = origin + single coord * voxelSize
+                let tolerance = max 0.0001f (MathF.Abs voxelSize * 0.01f)
+                if coord < 0 || coord > 63 || MathF.Abs (reconstructed - position) > tolerance then
+                    packingWarning <- true
+                    Math.Clamp (coord, 0, 63)
+                else coord
             for i in 0 .. dec splatCount do
                 let splat = voxelModelDescriptor.Splats[i]
-                let normal =
-                    let normal = splat.Normal
-                    if normal.LengthSquared () > 0.0f then Vector3.Normalize normal else v3Up
-                let j = i * 10
-                vertexDataSpan[j] <- splat.Position.X
-                vertexDataSpan[j+1] <- splat.Position.Y
-                vertexDataSpan[j+2] <- splat.Position.Z
-                vertexDataSpan[j+3] <- splat.Albedo.R
-                vertexDataSpan[j+4] <- splat.Albedo.G
-                vertexDataSpan[j+5] <- splat.Albedo.B
-                vertexDataSpan[j+6] <- splat.Albedo.A
-                vertexDataSpan[j+7] <- normal.X
-                vertexDataSpan[j+8] <- normal.Y
-                vertexDataSpan[j+9] <- normal.Z
+                let x = quantizeSplatCoord splat.Position.X voxelOrigin.X voxelModelDescriptor.VoxelSize.X
+                let y = quantizeSplatCoord splat.Position.Y voxelOrigin.Y voxelModelDescriptor.VoxelSize.Y
+                let z = quantizeSplatCoord splat.Position.Z voxelOrigin.Z voxelModelDescriptor.VoxelSize.Z
+                let paletteIndex = getPaletteIndex splat.Albedo
+                let paletteIndex =
+                    if paletteIndex > 0x3FFFu then
+                        packingWarning <- true
+                        0x3FFFu
+                    else paletteIndex
+                vertexDataSpan[i] <- uint x ||| (uint y <<< 6) ||| (uint z <<< 12) ||| (paletteIndex <<< 18)
+            if paletteColors.Count = 0 then paletteColors.Add Color.White
+            if packingWarning then
+                Log.warnOnce ("A user-defined voxel model exceeded the packed 64x64x64 / 16384-color splat format; voxel splats were clamped for '" + scstring assetTag + "'.")
+            let paletteData = Array.zeroCreate<single> (paletteColors.Count * 4)
+            for i in 0 .. dec paletteColors.Count do
+                let color = paletteColors[i]
+                let j = i * 4
+                paletteData[j] <- color.R
+                paletteData[j+1] <- color.G
+                paletteData[j+2] <- color.B
+                paletteData[j+3] <- color.A
 
             // create voxel model
-            let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelGeometry (true, OpenGL.PrimitiveType.Points, vertexData, voxelModelDescriptor.Bounds)
+            let geometry = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelGeometry (true, OpenGL.PrimitiveType.Points, vertexData, voxelModelDescriptor.Bounds, voxelOrigin, voxelModelDescriptor.VoxelSize)
+            let struct (paletteBuffer, paletteTexture) = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelPalette (true, paletteData.AsMemory ())
             let model : OpenGL.PhysicallyBased.PhysicallyBasedVoxelModel =
                 { VoxelSize = voxelModelDescriptor.VoxelSize
-                  VoxelGeometry = geometry }
+                  VoxelOrigin = voxelOrigin
+                  VoxelGeometry = geometry
+                  PaletteBuffer = paletteBuffer
+                  PaletteTexture = paletteTexture }
 
             // assign model as appropriate render package asset
             match renderer.RenderPackages.TryGetValue assetTag.PackageName with
@@ -3789,36 +3824,37 @@ type [<ReferenceEquality>] GlRenderer3d =
          renderer : GlRenderer3d) =
 
         // blit parameters to instance fields
-        model.ToArray (renderer.InstanceFields, 0)
-        renderer.InstanceFields[16] <- voxelModel.VoxelSize.X
-        renderer.InstanceFields[17] <- voxelModel.VoxelSize.Y
-        renderer.InstanceFields[18] <- voxelModel.VoxelSize.Z
-        renderer.InstanceFields[19] <- 0.0f
-        renderer.InstanceFields[20] <- properties.Albedo.R
-        renderer.InstanceFields[21] <- properties.Albedo.G
-        renderer.InstanceFields[22] <- properties.Albedo.B
-        renderer.InstanceFields[23] <- properties.Albedo.A
-        renderer.InstanceFields[24] <- properties.Roughness
-        renderer.InstanceFields[25] <- properties.Metallic
-        renderer.InstanceFields[26] <- properties.AmbientOcclusion
-        renderer.InstanceFields[27] <- properties.Emission
-        renderer.InstanceFields[28] <- properties.Height
-        renderer.InstanceFields[29] <- if properties.IgnoreLightMaps then 1.0f else 0.0f
-        renderer.InstanceFields[30] <- presence.DepthCutoff
-        renderer.InstanceFields[31] <- properties.OpaqueDistance
-        renderer.InstanceFields[32] <- properties.FinenessOffset
-        renderer.InstanceFields[33] <-
+        let instanceFields = renderer.VoxelInstanceFields
+        model.ToArray (instanceFields, 0)
+        instanceFields[16] <- voxelModel.VoxelSize.X
+        instanceFields[17] <- voxelModel.VoxelSize.Y
+        instanceFields[18] <- voxelModel.VoxelSize.Z
+        instanceFields[19] <- voxelModel.VoxelOrigin.X
+        instanceFields[20] <- properties.Albedo.R
+        instanceFields[21] <- properties.Albedo.G
+        instanceFields[22] <- properties.Albedo.B
+        instanceFields[23] <- properties.Albedo.A
+        instanceFields[24] <- properties.Roughness
+        instanceFields[25] <- properties.Metallic
+        instanceFields[26] <- properties.AmbientOcclusion
+        instanceFields[27] <- properties.Emission
+        instanceFields[28] <- properties.Height
+        instanceFields[29] <- if properties.IgnoreLightMaps then 1.0f else 0.0f
+        instanceFields[30] <- presence.DepthCutoff
+        instanceFields[31] <- properties.OpaqueDistance
+        instanceFields[32] <- properties.FinenessOffset
+        instanceFields[33] <-
             match properties.ScatterType with
             | NoScatter -> 0.0f
             | SkinScatter -> 0.1f
             | FoliageScatter -> 0.2f
             | WaxScatter -> 0.3f
-        renderer.InstanceFields[34] <- properties.SpecularScalar
-        renderer.InstanceFields[35] <- properties.RefractiveIndex
-        renderer.InstanceFields[36] <- properties.ClearCoat
-        renderer.InstanceFields[37] <- properties.ClearCoatRoughness
-        renderer.InstanceFields[38] <- 0.0f
-        renderer.InstanceFields[39] <- 0.0f
+        instanceFields[34] <- properties.SpecularScalar
+        instanceFields[35] <- properties.RefractiveIndex
+        instanceFields[36] <- properties.ClearCoat
+        instanceFields[37] <- properties.ClearCoatRoughness
+        instanceFields[38] <- voxelModel.VoxelOrigin.Y
+        instanceFields[39] <- voxelModel.VoxelOrigin.Z
 
     static member private renderPhysicallyBasedVoxels
         (viewArray,
@@ -3836,13 +3872,11 @@ type [<ReferenceEquality>] GlRenderer3d =
          renderer : GlRenderer3d) =
 
         if voxelTasks.Count > 0 then
-            if renderer.InstanceFields.Length < Constants.Render.InstanceFieldCount then
-                renderer.InstanceFields <- Array.zeroCreate Constants.Render.InstanceFieldCount
             OpenGL.PhysicallyBased.BeginPhysicallyBasedVoxel
                 (viewArray, projectionArray, viewProjectionArray, viewInverseArray, projectionInverseArray, viewPort, eyeCenter, clipPlane, lightShadowExponent, shader, vao)
             for struct (model, _, presence, properties, voxelModel) in voxelTasks do
                 GlRenderer3d.blitPhysicallyBasedVoxelFields (&model, presence, &properties, voxelModel, renderer)
-                OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxelGeometry (renderer.InstanceFields, voxelModel, vao)
+                OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxelGeometryWithBuffer (renderer.VoxelInstanceFieldsAddress, renderer.PhysicallyBasedVoxelInstanceBuffer, voxelModel, vao)
             OpenGL.PhysicallyBased.EndPhysicallyBasedVoxel (shader, vao)
 
     static member private renderPhysicallyBasedVoxelShadows
@@ -3861,8 +3895,6 @@ type [<ReferenceEquality>] GlRenderer3d =
          renderer : GlRenderer3d) =
 
         if voxelTasks.Count > 0 then
-            if renderer.InstanceFields.Length < Constants.Render.InstanceFieldCount then
-                renderer.InstanceFields <- Array.zeroCreate Constants.Render.InstanceFieldCount
             let mutable begun = false
             for struct (model, castShadow, presence, properties, voxelModel) in voxelTasks do
                 if castShadow && lightFrustum.Intersects (voxelModel.VoxelGeometry.Bounds.Transform model) then
@@ -3871,7 +3903,7 @@ type [<ReferenceEquality>] GlRenderer3d =
                             (viewArray, projectionArray, viewProjectionArray, viewInverseArray, projectionInverseArray, viewPort, eyeCenter, v4Zero, lightShadowExponent, shader, vao)
                         begun <- true
                     GlRenderer3d.blitPhysicallyBasedVoxelFields (&model, presence, &properties, voxelModel, renderer)
-                    OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxelGeometry (renderer.InstanceFields, voxelModel, vao)
+                    OpenGL.PhysicallyBased.DrawPhysicallyBasedVoxelGeometryWithBuffer (renderer.VoxelInstanceFieldsAddress, renderer.PhysicallyBasedVoxelInstanceBuffer, voxelModel, vao)
             if begun then OpenGL.PhysicallyBased.EndPhysicallyBasedVoxel (shader, vao)
 
     static member private renderShadow
@@ -5461,6 +5493,10 @@ type [<ReferenceEquality>] GlRenderer3d =
         let physicallyBasedVoxelVao = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelVao ()
         OpenGL.Hl.Assert ()
 
+        // create physically-based voxel instance buffer
+        let physicallyBasedVoxelInstanceBuffer = OpenGL.PhysicallyBased.CreatePhysicallyBasedVoxelInstanceBuffer ()
+        OpenGL.Hl.Assert ()
+
         // create physically-based shaders
         let physicallyBasedShaders = OpenGL.PhysicallyBased.CreatePhysicallyBasedShaders (Constants.Render.LightMapsMaxDeferred, Constants.Render.LightsMaxDeferred)
         OpenGL.Hl.Assert ()
@@ -5702,6 +5738,11 @@ type [<ReferenceEquality>] GlRenderer3d =
                             if ssc <> 0 then ssc
                             else -order.CompareTo order2 } // order enabled stable sort
 
+        // create voxel instance upload fields
+        let voxelInstanceFields = Array.zeroCreate<single> Constants.Render.InstanceFieldCount
+        let voxelInstanceFieldsHandle = GCHandle.Alloc (voxelInstanceFields, GCHandleType.Pinned)
+        let voxelInstanceFieldsAddress = voxelInstanceFieldsHandle.AddrOfPinnedObject ()
+
         // make renderer
         let renderer =
             { GeometryViewport = geometryViewport
@@ -5719,6 +5760,7 @@ type [<ReferenceEquality>] GlRenderer3d =
               PhysicallyBasedAnimatedVao = physicallyBasedAnimatedVao
               PhysicallyBasedTerrainVao = physicallyBasedTerrainVao
               PhysicallyBasedVoxelVao = physicallyBasedVoxelVao
+              PhysicallyBasedVoxelInstanceBuffer = physicallyBasedVoxelInstanceBuffer
               PhysicallyBasedShaders = physicallyBasedShaders
               ShadowMatrices = shadowMatrices
               LightShadowIndices = dictPlus HashIdentity.Structural []
@@ -5749,6 +5791,9 @@ type [<ReferenceEquality>] GlRenderer3d =
               RendererConfig = Renderer3dConfig.defaultConfig
               RendererConfigChanged = false
               InstanceFields = Array.zeroCreate<single> (Constants.Render.InstanceFieldCount * Constants.Render.InstanceBatchPrealloc)
+              VoxelInstanceFields = voxelInstanceFields
+              VoxelInstanceFieldsHandle = voxelInstanceFieldsHandle
+              VoxelInstanceFieldsAddress = voxelInstanceFieldsAddress
               UserDefinedStaticModelFields = [||]
               UserDefinedVoxelModelFields = [||]
               ForwardSurfacesComparer = forwardSurfacesComparer
@@ -5795,6 +5840,12 @@ type [<ReferenceEquality>] GlRenderer3d =
             OpenGL.Gl.DeleteVertexArrays [|renderer.PhysicallyBasedTerrainVao|]
             OpenGL.Gl.DeleteVertexArrays [|renderer.PhysicallyBasedVoxelVao|]
             OpenGL.Hl.Assert ()
+
+            OpenGL.Gl.DeleteBuffers [|renderer.PhysicallyBasedVoxelInstanceBuffer|]
+            OpenGL.Hl.Assert ()
+
+            if renderer.VoxelInstanceFieldsHandle.IsAllocated then
+                renderer.VoxelInstanceFieldsHandle.Free ()
 
             OpenGL.PhysicallyBased.DestroyPhysicallyBasedShaders renderer.PhysicallyBasedShaders
             OpenGL.Hl.Assert ()

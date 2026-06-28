@@ -16,7 +16,7 @@ type VoxelAimPick =
       DestroyBlockCoord : Vector3i
       PlaceBlockCoordOpt : Vector3i option }
 
-type Gameplay =
+type [<ReferenceEquality>] Gameplay =
     { GameplayTime : int64
       GameplayState : GameplayState
       VoxelModelReady : bool
@@ -81,6 +81,9 @@ module VoxelChunkVisibility =
     let private depthWidth = 160
     let private depthHeight = 90
     let private depthBias = 0.00075f
+    let private occlusionCoveragePadding = 1
+    let private occlusionCandidateAreaMin = 9
+    let private occluderAreaMin = 6
     let private portalEyeRecursionLimitMax = 8
 
     [<Struct>]
@@ -115,6 +118,28 @@ module VoxelChunkVisibility =
 
     let chunkBounds (voxelChunk : VoxelChunk) =
         box3 (voxelChunk.ChunkCenter - voxelChunk.ChunkSize * 0.5f) voxelChunk.ChunkSize
+
+    let private portalBounds (portal : PortalSurface) =
+        let right = portal.Rotation.Right * portal.HalfExtents.X
+        let up = portal.Rotation.Up * portal.HalfExtents.Y
+        let forward = portal.Rotation.Forward * 0.05f
+        let mutable min = v3Dup Single.PositiveInfinity
+        let mutable max = v3Dup Single.NegativeInfinity
+        let includePoint point =
+            min <- Vector3.Min (min, point)
+            max <- Vector3.Max (max, point)
+        includePoint (portal.Center - right - up - forward)
+        includePoint (portal.Center - right - up + forward)
+        includePoint (portal.Center - right + up - forward)
+        includePoint (portal.Center - right + up + forward)
+        includePoint (portal.Center + right - up - forward)
+        includePoint (portal.Center + right - up + forward)
+        includePoint (portal.Center + right + up - forward)
+        includePoint (portal.Center + right + up + forward)
+        box3 min (max - min)
+
+    let private portalInView (portal : PortalSurface) (world : World) =
+        World.boundsInView3d false Exterior (portalBounds portal) world
 
     let private tryProjectBounds (viewProjection : Matrix4x4) (bounds : Box3) =
         let mutable minX = Single.PositiveInfinity
@@ -161,14 +186,18 @@ module VoxelChunkVisibility =
             else ValueSome { MinX = screenMinX; MaxX = screenMaxX; MinY = screenMinY; MaxY = screenMaxY; NearDepth = nearDepth; FarDepth = farDepth }
 
     let private isCovered (depths : single array) (bounds : ProjectedBounds) =
-        if bounds.Area <= 0 then false
+        if bounds.Area < occlusionCandidateAreaMin then false
         else
+            let minX = max 0 (bounds.MinX - occlusionCoveragePadding)
+            let maxX = min (dec depthWidth) (bounds.MaxX + occlusionCoveragePadding)
+            let minY = max 0 (bounds.MinY - occlusionCoveragePadding)
+            let maxY = min (dec depthHeight) (bounds.MaxY + occlusionCoveragePadding)
             let mutable covered = true
-            let mutable y = bounds.MinY
-            while covered && y <= bounds.MaxY do
+            let mutable y = minY
+            while covered && y <= maxY do
                 let row = y * depthWidth
-                let mutable x = bounds.MinX
-                while covered && x <= bounds.MaxX do
+                let mutable x = minX
+                while covered && x <= maxX do
                     let depth = depths[row + x]
                     covered <- depth < Single.PositiveInfinity && bounds.NearDepth > depth + depthBias
                     x <- inc x
@@ -176,7 +205,7 @@ module VoxelChunkVisibility =
             covered
 
     let private rasterize (depths : single array) (bounds : ProjectedBounds) =
-        if bounds.Area > 0 && not (Single.IsNaN bounds.FarDepth) then
+        if bounds.Area >= occluderAreaMin && not (Single.IsNaN bounds.FarDepth) then
             let mutable y = bounds.MinY
             while y <= bounds.MaxY do
                 let row = y * depthWidth
@@ -203,74 +232,107 @@ module VoxelChunkVisibility =
         processPortal pair.Blue
         processPortal pair.Orange
 
-    let private visibleChunks = HashSet<Vector3i> (HashIdentity.Structural)
     let private candidateChunks = ResizeArray<VoxelChunk> ()
     let private depthBuffer = Array.zeroCreate<single> (depthWidth * depthHeight)
     let private distanceComparer = VoxelChunkDistanceComparer ()
 
+    let private isChunkNearEye (eyeCenter : Vector3) (chunk : VoxelChunk) =
+        let size = chunk.ChunkSize
+        let nearDistanceSquared = size.LengthSquared () * 2.0f
+        Vector3.DistanceSquared (eyeCenter, chunk.ChunkCenter) <= nearDistanceSquared
+
     let private computeVisibleChunksUncached (gameplay : Gameplay) (world : World) =
-        visibleChunks.Clear ()
         candidateChunks.Clear ()
         match gameplay.VoxelLevelOpt with
-        | Some _ ->
+        | Some level ->
+            VoxelWorld.beginChunkManifestVisiblePass level.ChunkManifest |> ignore<int>
+            let markVisible (chunk : VoxelChunk) =
+                match VoxelWorld.tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunk.ChunkCoord with
+                | ValueSome chunkIndex -> VoxelWorld.markChunkManifestVisible level.ChunkManifest chunkIndex
+                | ValueNone -> ()
             for chunk in gameplay.VoxelChunks do
                 if  (Option.isSome chunk.VoxelModelOpt || chunk.OpaqueOccluderBoxes.Length > 0) &&
                     World.boundsInView3d false Exterior (chunkBounds chunk) world then
                     candidateChunks.Add chunk
-            iteratePortalEyePoses gameplay.PortalPair world.Eye3dCenter world.Eye3dRotation (fun eyeCenter eyeRotation ->
-                Array.Fill (depthBuffer, Single.PositiveInfinity)
+            let portalViewsVisible =
+                gameplay.PortalPair.RecursionLimit > 0 &&
+                (portalInView gameplay.PortalPair.Blue world || portalInView gameplay.PortalPair.Orange world)
+            let mutable eyeIndex = 0
+            let processEye eyeCenter eyeRotation =
                 let viewProjection = Viewport.getViewProjection3d eyeCenter eyeRotation world.Eye3dFieldOfView world.WindowViewport
-                distanceComparer.EyeCenter <- eyeCenter
-                candidateChunks.Sort distanceComparer
-                for chunk in candidateChunks do
-                    let renderable = Option.isSome chunk.VoxelModelOpt && chunk.SplatCount > 0
-                    let bounds = chunkBounds chunk
-                    match tryProjectBounds viewProjection bounds with
-                    | ValueSome projectedBounds ->
-                        let occluded = isCovered depthBuffer projectedBounds
-                        if not occluded then
-                            if renderable then visibleChunks.Add chunk.ChunkCoord |> ignore<bool>
-                            for occluderBox in chunk.OpaqueOccluderBoxes do
-                                match tryProjectBounds viewProjection occluderBox with
-                                | ValueSome projectedOccluder -> rasterize depthBuffer projectedOccluder
-                                | ValueNone -> ()
-                    | ValueNone ->
-                        if renderable then visibleChunks.Add chunk.ChunkCoord |> ignore<bool>)
+                if eyeIndex = 0 then
+                    Array.Fill (depthBuffer, Single.PositiveInfinity)
+                    distanceComparer.EyeCenter <- eyeCenter
+                    candidateChunks.Sort distanceComparer
+                    for chunk in candidateChunks do
+                        let renderable = Option.isSome chunk.VoxelModelOpt && chunk.SplatCount > 0
+                        let bounds = chunkBounds chunk
+                        match tryProjectBounds viewProjection bounds with
+                        | ValueSome projectedBounds ->
+                            let occluded = isCovered depthBuffer projectedBounds
+                            if not occluded then
+                                if renderable then markVisible chunk
+                                if chunk.FullOpaqueChunk then rasterize depthBuffer projectedBounds
+                                else
+                                    for occluderBox in chunk.OpaqueOccluderBoxes do
+                                        match tryProjectBounds viewProjection occluderBox with
+                                        | ValueSome projectedOccluder -> rasterize depthBuffer projectedOccluder
+                                        | ValueNone -> ()
+                        | ValueNone ->
+                            if renderable then markVisible chunk
+                else
+                    for chunk in gameplay.VoxelChunks do
+                        if Option.isSome chunk.VoxelModelOpt && chunk.SplatCount > 0 then
+                            match tryProjectBounds viewProjection (chunkBounds chunk) with
+                            | ValueSome _ -> markVisible chunk
+                            | ValueNone ->
+                                if isChunkNearEye eyeCenter chunk then markVisible chunk
+                eyeIndex <- inc eyeIndex
+            if portalViewsVisible then iteratePortalEyePoses gameplay.PortalPair world.Eye3dCenter world.Eye3dRotation processEye
+            else processEye world.Eye3dCenter world.Eye3dRotation
         | None -> ()
-        visibleChunks
 
     let mutable private visibleChunksCacheValid = false
-    let mutable private visibleChunksCacheUpdateTime = 0L
-    let mutable private visibleChunksCacheGameplayTime = 0L
     let mutable private visibleChunksCacheEyeCenter = v3Zero
     let mutable private visibleChunksCacheEyeRotation = quatIdentity
-    let mutable private visibleChunksCacheChunkCount = 0
+    let mutable private visibleChunksCacheEyeFieldOfView = 0.0f
+    let mutable private visibleChunksCacheWindowViewport = Unchecked.defaultof<Viewport>
+    let mutable private visibleChunksCachePortalPair = Unchecked.defaultof<PortalPair>
+    let mutable private visibleChunksCacheChunks = Unchecked.defaultof<VoxelChunk array>
 
     let getVisibleChunks (gameplay : Gameplay) (world : World) =
-        let updateTime = world.UpdateTime
-        let gameplayTime = gameplay.GameplayTime
         let eyeCenter = world.Eye3dCenter
         let eyeRotation = world.Eye3dRotation
-        let chunkCount = gameplay.VoxelChunks.Length
+        let eyeFieldOfView = world.Eye3dFieldOfView
+        let windowViewport = world.WindowViewport
+        let portalPair = gameplay.PortalPair
+        let chunks = gameplay.VoxelChunks
         if  visibleChunksCacheValid &&
-            visibleChunksCacheUpdateTime = updateTime &&
-            visibleChunksCacheGameplayTime = gameplayTime &&
             visibleChunksCacheEyeCenter = eyeCenter &&
             visibleChunksCacheEyeRotation = eyeRotation &&
-            visibleChunksCacheChunkCount = chunkCount then
-            visibleChunks
+            visibleChunksCacheEyeFieldOfView = eyeFieldOfView &&
+            visibleChunksCacheWindowViewport = windowViewport &&
+            visibleChunksCachePortalPair = portalPair &&
+            Object.ReferenceEquals (visibleChunksCacheChunks, chunks) then
+            ()
         else
-            let visibleChunks = computeVisibleChunksUncached gameplay world
+            computeVisibleChunksUncached gameplay world
             visibleChunksCacheValid <- true
-            visibleChunksCacheUpdateTime <- updateTime
-            visibleChunksCacheGameplayTime <- gameplayTime
             visibleChunksCacheEyeCenter <- eyeCenter
             visibleChunksCacheEyeRotation <- eyeRotation
-            visibleChunksCacheChunkCount <- chunkCount
-            visibleChunks
+            visibleChunksCacheEyeFieldOfView <- eyeFieldOfView
+            visibleChunksCacheWindowViewport <- windowViewport
+            visibleChunksCachePortalPair <- portalPair
+            visibleChunksCacheChunks <- chunks
 
     let isChunkVisible (gameplay : Gameplay) chunkCoord (world : World) =
-        (getVisibleChunks gameplay world).Contains chunkCoord
+        getVisibleChunks gameplay world
+        match gameplay.VoxelLevelOpt with
+        | Some level ->
+            match VoxelWorld.tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunkCoord with
+            | ValueSome chunkIndex -> VoxelWorld.isChunkManifestVisible level.ChunkManifest chunkIndex
+            | ValueNone -> false
+        | None -> false
 
 [<AutoOpen>]
 module VoxelChunkFacetExtensions =
@@ -297,17 +359,18 @@ type VoxelChunkFacet () =
     override this.Render (renderPass, entity, world) =
         match entity.GetVoxelModelOpt world with
         | Some voxelModel ->
-            let mutable transform = entity.GetTransform world
-            let castShadow = (World.getRenderer3dConfig world).LightShadowingEnabled && transform.CastShadow
             let visibleByGameplay =
                 if renderPass.IsNormalPass && Simulants.Gameplay.GetExists world then
                     VoxelChunkVisibility.isChunkVisible (Simulants.Gameplay.GetGameplay world) (entity.GetVoxelChunkCoord world) world
                 else true
-            if transform.Visible && visibleByGameplay && (not renderPass.IsShadowPass || castShadow) then
-                let affineMatrix = transform.AffineMatrix
-                let presence = transform.Presence
-                let properties = entity.GetMaterialProperties world
-                World.renderVoxelModelFast (&affineMatrix, castShadow, presence, &properties, voxelModel, renderPass, world)
+            if visibleByGameplay then
+                let mutable transform = entity.GetTransform world
+                let castShadow = (World.getRenderer3dConfig world).LightShadowingEnabled && transform.CastShadow
+                if transform.Visible && (not renderPass.IsShadowPass || castShadow) then
+                    let affineMatrix = transform.AffineMatrix
+                    let presence = transform.Presence
+                    let properties = entity.GetMaterialProperties world
+                    World.renderVoxelModelFast (&affineMatrix, castShadow, presence, &properties, voxelModel, renderPass, world)
         | None -> ()
 
     override this.GetAttributesInferred (entity, world) =
@@ -348,116 +411,112 @@ module GameplayLogic =
     let private streamBuildJobsMax = 96
 
     type private StreamBuildJob =
-        { EditRevision : int
+        { ChunkCoord : Vector3i
+          EditRevision : int
           BuildTask : Task<VoxelRuntime.VoxelChunkBuild option> }
 
-    let private streamBuildJobs = Dictionary<Vector3i, StreamBuildJob> (HashIdentity.Structural)
-    let private streamEmptyChunkCoords = HashSet<Vector3i> (HashIdentity.Structural)
-    let private streamEditedChunkCoords = HashSet<Vector3i> (HashIdentity.Structural)
+    let private streamBuildJobs = Dictionary<int, StreamBuildJob> ()
     let private streamBuildJobsLock = obj ()
-    let private streamCoordsToRemoveBuffer = ResizeArray<Vector3i> ()
-    let private streamCompletedCoordsBuffer = ResizeArray<Vector3i> ()
+    let private streamIndicesToRemoveBuffer = ResizeArray<int> ()
+    let private streamCompletedIndicesBuffer = ResizeArray<int> ()
     let private streamCompletedBuildsBuffer = ResizeArray<VoxelRuntime.VoxelChunkBuild> ()
-    let private streamLoadedChunkCoordsBuffer = HashSet<Vector3i> (HashIdentity.Structural)
     let private streamChunksToKeepBuffer = ResizeArray<VoxelChunk> ()
     let private streamChunksToDestroyBuffer = ResizeArray<VoxelChunk> ()
+    let private desiredStreamChunkIndicesBuffer = ResizeArray<int> ()
 
     let private clearStreamBuildJobs () =
         lock streamBuildJobsLock (fun () ->
-            streamBuildJobs.Clear ()
-            streamEmptyChunkCoords.Clear ()
-            streamEditedChunkCoords.Clear ())
+            streamBuildJobs.Clear ())
 
     let private hasStreamBuildJobs () =
         lock streamBuildJobsLock (fun () -> streamBuildJobs.Count > 0)
 
-    let private markStreamEditedChunks (chunkCoords : Vector3i array) =
+    let private markStreamEditedChunks (level : VoxelLevel) (chunkCoords : Vector3i array) =
         lock streamBuildJobsLock (fun () ->
             for chunkCoord in chunkCoords do
-                streamEmptyChunkCoords.Remove chunkCoord |> ignore<bool>
-                streamEditedChunkCoords.Add chunkCoord |> ignore<bool>)
+                match VoxelWorld.tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunkCoord with
+                | ValueSome chunkIndex ->
+                    level.ChunkManifest.EmptyFlags[chunkIndex] <- false
+                    level.ChunkManifest.EditedFlags[chunkIndex] <- true
+                    streamBuildJobs.Remove chunkIndex |> ignore<bool>
+                | ValueNone -> ())
 
-    let private isStreamEditedChunk (chunkCoord : Vector3i) =
-        lock streamBuildJobsLock (fun () -> streamEditedChunkCoords.Contains chunkCoord)
-
-    let private removeStreamBuildJobsOutside (desiredChunkCoordSet : HashSet<Vector3i>) =
+    let private removeStreamBuildJobsOutside (level : VoxelLevel) =
         lock streamBuildJobsLock (fun () ->
-            let coordsToRemove = streamCoordsToRemoveBuffer
-            coordsToRemove.Clear ()
+            let indicesToRemove = streamIndicesToRemoveBuffer
+            indicesToRemove.Clear ()
             for entry in streamBuildJobs do
-                if not (desiredChunkCoordSet.Contains entry.Key) then
-                    coordsToRemove.Add entry.Key
-            for chunkCoord in coordsToRemove do
-                streamBuildJobs.Remove chunkCoord |> ignore<bool>
-            coordsToRemove.Clear ()
-            for chunkCoord in streamEmptyChunkCoords do
-                if not (desiredChunkCoordSet.Contains chunkCoord) then
-                    coordsToRemove.Add chunkCoord
-            for chunkCoord in coordsToRemove do
-                streamEmptyChunkCoords.Remove chunkCoord |> ignore<bool>
-            coordsToRemove.Clear ())
+                if not (VoxelWorld.isChunkManifestDesired level.ChunkManifest entry.Key) then
+                    indicesToRemove.Add entry.Key
+            for chunkIndex in indicesToRemove do
+                streamBuildJobs.Remove chunkIndex |> ignore<bool>
+            indicesToRemove.Clear ())
 
-    let private tryQueueStreamBuild (level : VoxelLevel) (snapshot : VoxelEditSnapshot) useCache (chunkCoord : Vector3i) =
+    let private tryQueueStreamBuild (level : VoxelLevel) (snapshot : VoxelEditSnapshot) useCache chunkIndex =
         lock streamBuildJobsLock (fun () ->
             if  streamBuildJobs.Count >= streamBuildJobsMax ||
-                streamBuildJobs.ContainsKey chunkCoord ||
-                streamEmptyChunkCoords.Contains chunkCoord then false
+                streamBuildJobs.ContainsKey chunkIndex ||
+                level.ChunkManifest.EmptyFlags[chunkIndex] then false
             else
+                let chunkCoord = level.ChunkManifest.ChunkStatics[chunkIndex].ChunkCoord
                 let buildTask =
                     Task.Run<VoxelRuntime.VoxelChunkBuild option>
                         (Func<VoxelRuntime.VoxelChunkBuild option>
                             (fun () ->
-                                VoxelRuntime.tryBuildChunkWithCellLookupCached
+                                VoxelRuntime.tryBuildChunkWithEditSnapshotCached
                                     useCache
                                     level
-                                    (VoxelWorld.tryGetCellWithEditSnapshotValue snapshot level)
+                                    snapshot
                                     chunkCoord))
-                streamBuildJobs[chunkCoord] <- { EditRevision = snapshot.Revision; BuildTask = buildTask }
+                streamBuildJobs[chunkIndex] <- { ChunkCoord = chunkCoord; EditRevision = snapshot.Revision; BuildTask = buildTask }
                 true)
 
-    let private collectCompletedStreamBuilds (level : VoxelLevel) (desiredChunkCoordSet : HashSet<Vector3i>) (loadedChunkCoords : HashSet<Vector3i>) buildLimit =
+    let private collectCompletedStreamBuilds (level : VoxelLevel) buildLimit =
         let currentEditRevision = VoxelWorld.getEditRevision level
         lock streamBuildJobsLock (fun () ->
-            let completedCoords = streamCompletedCoordsBuffer
+            let completedIndices = streamCompletedIndicesBuffer
             let completedBuilds = streamCompletedBuildsBuffer
-            completedCoords.Clear ()
+            completedIndices.Clear ()
             completedBuilds.Clear ()
             let mutable count = 0
             let limit = max 0 buildLimit
             for entry in streamBuildJobs do
                 if count < limit && entry.Value.BuildTask.IsCompleted then
-                    completedCoords.Add entry.Key
+                    completedIndices.Add entry.Key
                     count <- inc count
-            for chunkCoord in completedCoords do
-                match streamBuildJobs.TryGetValue chunkCoord with
+            for chunkIndex in completedIndices do
+                match streamBuildJobs.TryGetValue chunkIndex with
                 | (true, job) ->
-                    streamBuildJobs.Remove chunkCoord |> ignore<bool>
-                    if  job.EditRevision = currentEditRevision &&
-                        desiredChunkCoordSet.Contains chunkCoord &&
-                        not (loadedChunkCoords.Contains chunkCoord) &&
-                        job.BuildTask.Status = TaskStatus.RanToCompletion then
+                    streamBuildJobs.Remove chunkIndex |> ignore<bool>
+                    if job.EditRevision = currentEditRevision && job.BuildTask.Status = TaskStatus.RanToCompletion then
                         match job.BuildTask.Result with
-                        | Some chunkBuild -> completedBuilds.Add chunkBuild
-                        | None -> streamEmptyChunkCoords.Add chunkCoord |> ignore<bool>
+                        | Some chunkBuild ->
+                            VoxelWorld.updateChunkManifestFromBuild currentEditRevision level chunkBuild
+                            if  VoxelWorld.isChunkManifestDesired level.ChunkManifest chunkIndex &&
+                                not (VoxelWorld.isChunkManifestLoaded level.ChunkManifest chunkIndex) then
+                                completedBuilds.Add chunkBuild
+                        | None ->
+                            VoxelWorld.markChunkManifestEmpty currentEditRevision level job.ChunkCoord
                 | (false, _) -> ()
             let completedBuildsArray = completedBuilds.ToArray ()
-            completedCoords.Clear ()
+            completedIndices.Clear ()
             completedBuilds.Clear ()
             completedBuildsArray)
 
-    let private queueMissingStreamBuilds (level : VoxelLevel) (desiredChunkCoords : Vector3i array) (loadedChunkCoords : HashSet<Vector3i>) buildLimit =
+    let private queueMissingStreamBuilds (level : VoxelLevel) (desiredChunkIndices : int array) buildLimit =
         let mutable queued = 0
         let mutable i = 0
         let mutable snapshotCaptured = false
         let mutable snapshot = Unchecked.defaultof<VoxelEditSnapshot>
-        while queued < buildLimit && i < desiredChunkCoords.Length do
-            let chunkCoord = desiredChunkCoords[i]
-            if not (loadedChunkCoords.Contains chunkCoord) then
+        while queued < buildLimit && i < desiredChunkIndices.Length do
+            let chunkIndex = desiredChunkIndices[i]
+            if  not (VoxelWorld.isChunkManifestLoaded level.ChunkManifest chunkIndex) &&
+                not level.ChunkManifest.EmptyFlags[chunkIndex] then
                 if not snapshotCaptured then
                     snapshot <- VoxelWorld.snapshotEdits level
                     snapshotCaptured <- true
-                let useCache = not (isStreamEditedChunk chunkCoord)
-                if tryQueueStreamBuild level snapshot useCache chunkCoord then
+                let useCache = not level.ChunkManifest.EditedFlags[chunkIndex]
+                if tryQueueStreamBuild level snapshot useCache chunkIndex then
                     queued <- inc queued
             i <- inc i
 
@@ -505,37 +564,66 @@ module GameplayLogic =
         let added = computeOcclusionBlockCoords chunksToAdd
         Set.union (Set.difference current removed) added
 
-    let mutable private desiredStreamChunkCoordsCacheValid = false
-    let mutable private desiredStreamChunkCoordsCacheCenter = v3iZero
-    let mutable private desiredStreamChunkCoordsCacheChunkCounts = v3iZero
-    let mutable private desiredStreamChunkCoordsCache = [||]
-    let private desiredStreamChunkCoordSetCache = HashSet<Vector3i> (HashIdentity.Structural)
+    let mutable private streamChunkOffsetsCacheValid = false
+    let mutable private streamChunkOffsetsCacheChunkCounts = v3iZero
+    let mutable private streamChunkOffsetsCacheRadius = 0
+    let mutable private streamChunkOffsetsCache = [||]
 
-    let private desiredStreamChunkCoordsAndSet (level : VoxelLevel) (center : Vector3i) =
-        if  not desiredStreamChunkCoordsCacheValid ||
-            desiredStreamChunkCoordsCacheCenter <> center ||
-            desiredStreamChunkCoordsCacheChunkCounts <> level.ChunkCounts then
-            let coords = VoxelWorld.streamChunkCoords streamChunkRadius level center
-            desiredStreamChunkCoordSetCache.Clear ()
-            for chunkCoord in coords do
-                desiredStreamChunkCoordSetCache.Add chunkCoord |> ignore<bool>
-            desiredStreamChunkCoordsCacheValid <- true
-            desiredStreamChunkCoordsCacheCenter <- center
-            desiredStreamChunkCoordsCacheChunkCounts <- level.ChunkCounts
-            desiredStreamChunkCoordsCache <- coords
-        struct (desiredStreamChunkCoordsCache, desiredStreamChunkCoordSetCache)
+    let private streamChunkOffsets (level : VoxelLevel) =
+        if  not streamChunkOffsetsCacheValid ||
+            streamChunkOffsetsCacheChunkCounts <> level.ChunkCounts ||
+            streamChunkOffsetsCacheRadius <> streamChunkRadius then
+            streamChunkOffsetsCache <-
+                [|for dz in -streamChunkRadius .. streamChunkRadius do
+                    for dy in -(dec level.ChunkCounts.Y) .. dec level.ChunkCounts.Y do
+                        for dx in -streamChunkRadius .. streamChunkRadius do
+                            v3i dx dy dz|]
+                |> Array.sortBy (fun offset ->
+                    struct (offset.X * offset.X + offset.Z * offset.Z, abs offset.Y, offset.Z, offset.Y, offset.X))
+            streamChunkOffsetsCacheValid <- true
+            streamChunkOffsetsCacheChunkCounts <- level.ChunkCounts
+            streamChunkOffsetsCacheRadius <- streamChunkRadius
+        streamChunkOffsetsCache
 
-    let private desiredStreamChunkCoords (level : VoxelLevel) (center : Vector3i) =
-        let struct (coords, _) = desiredStreamChunkCoordsAndSet level center
-        coords
+    let mutable private desiredStreamChunkIndicesCacheValid = false
+    let mutable private desiredStreamChunkIndicesCacheCenter = v3iZero
+    let mutable private desiredStreamChunkIndicesCacheChunkCounts = v3iZero
+    let mutable private desiredStreamChunkIndicesCacheRadius = 0
+    let mutable private desiredStreamChunkIndicesCacheManifest = Unchecked.defaultof<VoxelChunkManifest>
+    let mutable private desiredStreamChunkIndicesCache = [||]
 
-    let private desiredStreamEmptyChunkCount (desiredChunkCoords : Vector3i array) =
-        lock streamBuildJobsLock (fun () ->
-            let mutable count = 0
-            for chunkCoord in desiredChunkCoords do
-                if streamEmptyChunkCoords.Contains chunkCoord then
-                    count <- inc count
-            count)
+    let private desiredStreamChunkIndices (level : VoxelLevel) (center : Vector3i) =
+        if  not desiredStreamChunkIndicesCacheValid ||
+            desiredStreamChunkIndicesCacheCenter <> center ||
+            desiredStreamChunkIndicesCacheChunkCounts <> level.ChunkCounts ||
+            desiredStreamChunkIndicesCacheRadius <> streamChunkRadius ||
+            not (Object.ReferenceEquals (desiredStreamChunkIndicesCacheManifest, level.ChunkManifest)) then
+            VoxelWorld.beginChunkManifestDesiredPass level.ChunkManifest |> ignore<int>
+            let indices = desiredStreamChunkIndicesBuffer
+            indices.Clear ()
+            let offsets = streamChunkOffsets level
+            for offset in offsets do
+                let chunkCoord = center + offset
+                match VoxelWorld.tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunkCoord with
+                | ValueSome chunkIndex ->
+                    VoxelWorld.markChunkManifestDesired level.ChunkManifest chunkIndex
+                    indices.Add chunkIndex
+                | ValueNone -> ()
+            desiredStreamChunkIndicesCacheValid <- true
+            desiredStreamChunkIndicesCacheCenter <- center
+            desiredStreamChunkIndicesCacheChunkCounts <- level.ChunkCounts
+            desiredStreamChunkIndicesCacheRadius <- streamChunkRadius
+            desiredStreamChunkIndicesCacheManifest <- level.ChunkManifest
+            desiredStreamChunkIndicesCache <- indices.ToArray ()
+            indices.Clear ()
+        desiredStreamChunkIndicesCache
+
+    let private desiredStreamEmptyChunkCount (level : VoxelLevel) (desiredChunkIndices : int array) =
+        let mutable count = 0
+        for chunkIndex in desiredChunkIndices do
+            if level.ChunkManifest.EmptyFlags[chunkIndex] then
+                count <- inc count
+        count
 
     let private getStreamingPosition (gameplay : Gameplay) (world : World) =
         if Simulants.GameplayPlayer.GetExists world then Simulants.GameplayPlayer.GetPosition world
@@ -550,31 +638,36 @@ module GameplayLogic =
             match VoxelWorld.tryWorldToChunkCoord level position with
             | Some centerChunkCoord ->
                 let centerChanged = gameplay.StreamCenterChunkCoordOpt <> Some centerChunkCoord
-                let struct (desiredChunkCoords, desiredChunkCoordSet) = desiredStreamChunkCoordsAndSet level centerChunkCoord
-                let loadedChunkCoords = streamLoadedChunkCoordsBuffer
-                loadedChunkCoords.Clear ()
+                let desiredChunkIndices = desiredStreamChunkIndices level centerChunkCoord
+                VoxelWorld.beginChunkManifestLoadedPass level.ChunkManifest |> ignore<int>
                 for chunk in gameplay.VoxelChunks do
-                    loadedChunkCoords.Add chunk.ChunkCoord |> ignore<bool>
-                removeStreamBuildJobsOutside desiredChunkCoordSet
+                    match VoxelWorld.tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunk.ChunkCoord with
+                    | ValueSome chunkIndex -> VoxelWorld.markChunkManifestLoaded level.ChunkManifest chunkIndex
+                    | ValueNone -> ()
+                removeStreamBuildJobsOutside level
                 let chunksToKeep = streamChunksToKeepBuffer
                 let chunksToDestroy = streamChunksToDestroyBuffer
                 chunksToKeep.Clear ()
                 chunksToDestroy.Clear ()
                 for chunk in gameplay.VoxelChunks do
-                    if desiredChunkCoordSet.Contains chunk.ChunkCoord
-                    then chunksToKeep.Add chunk
-                    else chunksToDestroy.Add chunk
-                let completedBuilds = collectCompletedStreamBuilds level desiredChunkCoordSet loadedChunkCoords buildLimit
+                    match VoxelWorld.tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunk.ChunkCoord with
+                    | ValueSome chunkIndex when VoxelWorld.isChunkManifestDesired level.ChunkManifest chunkIndex ->
+                        chunksToKeep.Add chunk
+                    | ValueSome _
+                    | ValueNone -> chunksToDestroy.Add chunk
+                let completedBuilds = collectCompletedStreamBuilds level buildLimit
                 let chunksToAdd =
                     if completedBuilds.Length > 0 then
                         let chunksToAdd = Array.zeroCreate<VoxelChunk> completedBuilds.Length
                         for i in 0 .. dec completedBuilds.Length do
                             let chunk = VoxelRuntime.realizeChunk level completedBuilds[i] world
                             chunksToAdd[i] <- chunk
-                            loadedChunkCoords.Add chunk.ChunkCoord |> ignore<bool>
+                            match VoxelWorld.tryChunkCoordToIndex level.ChunkManifest.ChunkCounts chunk.ChunkCoord with
+                            | ValueSome chunkIndex -> VoxelWorld.markChunkManifestLoaded level.ChunkManifest chunkIndex
+                            | ValueNone -> ()
                         chunksToAdd
                     else Array.empty
-                queueMissingStreamBuilds level desiredChunkCoords loadedChunkCoords buildLimit
+                queueMissingStreamBuilds level desiredChunkIndices buildLimit
                 let chunksToDestroyArray =
                     if chunksToDestroy.Count > 0 then chunksToDestroy.ToArray ()
                     else Array.empty
@@ -600,7 +693,6 @@ module GameplayLogic =
                                 StreamCenterChunkCoordOpt = Some centerChunkCoord },
                              true)
                     else struct (gameplay, false)
-                loadedChunkCoords.Clear ()
                 chunksToKeep.Clear ()
                 chunksToDestroy.Clear ()
                 result
@@ -610,10 +702,14 @@ module GameplayLogic =
     let streamChunksForCurrentPosition buildLimit (gameplay : Gameplay) (world : World) =
         streamChunksAroundPosition buildLimit (getStreamingPosition gameplay world) gameplay world
 
-    let streamInitialChunksAroundPosition position (gameplay : Gameplay) (world : World) =
+    let streamInitialChunksAroundPosition position (gameplay : Gameplay) (_world : World) =
         clearStreamBuildJobs ()
-        let struct (gameplay, _) = streamChunksAroundPosition streamInitialBuildLimit position gameplay world
-        gameplay
+        match gameplay.VoxelLevelOpt with
+        | Some level ->
+            match VoxelWorld.tryWorldToChunkCoord level position with
+            | Some centerChunkCoord -> { gameplay with StreamCenterChunkCoordOpt = Some centerChunkCoord }
+            | None -> gameplay
+        | None -> gameplay
 
     let streamChunksForCurrentPositionDefault (gameplay : Gameplay) (world : World) =
         let buildLimit =
@@ -630,9 +726,7 @@ module GameplayLogic =
             | Some centerChunkCoord ->
                 if gameplay.StreamCenterChunkCoordOpt <> Some centerChunkCoord then true
                 elif hasStreamBuildJobs () then true
-                else
-                    let desiredChunkCoords = desiredStreamChunkCoords level centerChunkCoord
-                    gameplay.VoxelChunks.Length + desiredStreamEmptyChunkCount desiredChunkCoords < desiredChunkCoords.Length
+                else false
             | None -> false
         | None -> false
 
@@ -670,7 +764,7 @@ module GameplayLogic =
         match gameplay.VoxelLevelOpt with
         | Some level ->
             let chunkCoords = chunkCoords |> Seq.toArray
-            markStreamEditedChunks chunkCoords
+            markStreamEditedChunks level chunkCoords
             let loadedChunkCoords = HashSet<Vector3i> (HashIdentity.Structural)
             for chunk in gameplay.VoxelChunks do
                 loadedChunkCoords.Add chunk.ChunkCoord |> ignore<bool>
@@ -810,7 +904,12 @@ module GameplayLogic =
             destroyVoxelChunks chunksToDestroy world
         | _ -> ()
 
-    let resolvePortalTraversal (gameplay : Gameplay) (screen : Screen) (world : World) =
+    let private copyPortalPlayerTracking (source : PortalPlayerTracking) (target : PortalPlayerTracking) =
+        target.PreviousSignedDistances <- source.PreviousSignedDistances
+        target.LastTeleportTime <- source.LastTeleportTime
+        target.LastExitPortalOpt <- source.LastExitPortalOpt
+
+    let resolvePortalTraversal (gameplay : Gameplay) (_screen : Screen) (world : World) =
         if world.Advancing && Simulants.GameplayPlayer.GetExists world then
             let playerEntity = Simulants.GameplayPlayer
             let player = playerEntity.GetFirstPersonPlayer world
@@ -823,7 +922,7 @@ module GameplayLogic =
                     world.Eye3dCenter
                     world.Eye3dRotation
                     (playerEntity.GetLinearVelocity world)
-            screen.SetGameplay { gameplay with PortalPlayerTracking = result.Tracking } world
+            copyPortalPlayerTracking result.Tracking gameplay.PortalPlayerTracking
             if result.Tracking.LastTeleportTime = world.UpdateTime then
                 let struct (yaw, pitch) = PortalLogic.yawPitchFromRotation result.EyeRotation
                 let player = { player with Yaw = yaw; Pitch = pitch; PreviousMousePositionOpt = None }
@@ -968,6 +1067,7 @@ type GameplayDispatcher () =
                         SelectedBlockPreviewPositionOpt = None }
                     world
             screen.SetGameplay gameplay world
+            Game.SetVoxelForge { Game.GetVoxelForge world with GeneratedWorldPackageOpt = None } world
         | DestroyVoxelModel (voxelChunks, placeableBlocks, levelOpt) ->
             GameplayLogic.destroyVoxelModel voxelChunks placeableBlocks levelOpt world
         | DestroyBlock pick ->

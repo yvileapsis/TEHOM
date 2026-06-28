@@ -5,12 +5,12 @@ uniform mat4 view;
 uniform mat4 projection;
 uniform mat4 viewProjection;
 uniform vec2 viewPort;
+uniform samplerBuffer paletteTexture;
 
-layout(location = 0) in vec3 position;
-layout(location = 1) in vec4 color;
-layout(location = 2) in vec3 normal;
+layout(location = 0) in uint splatKey;
 layout(location = 3) in mat4 model;
 layout(location = 7) in vec4 voxelSize;
+layout(location = 12) in vec4 clearCoatPlus;
 
 flat out vec3 centerOut;
 flat out vec3 axisXOut;
@@ -20,6 +20,12 @@ flat out vec4 colorOut;
 
 void main()
 {
+    uint x = splatKey & 63u;
+    uint y = (splatKey >> 6) & 63u;
+    uint z = (splatKey >> 12) & 63u;
+    uint paletteIndex = splatKey >> 18;
+    vec3 voxelOrigin = vec3(voxelSize.w, clearCoatPlus.z, clearCoatPlus.w);
+    vec3 position = voxelOrigin + vec3(float(x), float(y), float(z)) * voxelSize.xyz;
     vec4 centerWorld = model * vec4(position, 1.0);
     vec3 axisX = model[0].xyz * voxelSize.x * 0.5;
     vec3 axisY = model[1].xyz * voxelSize.y * 0.5;
@@ -33,7 +39,7 @@ void main()
     axisXOut = axisX;
     axisYOut = axisY;
     axisZOut = axisZ;
-    colorOut = color;
+    colorOut = texelFetch(paletteTexture, int(paletteIndex));
 
     gl_PointSize = max(1.0, projection[3][3] == 0.0 ? pointSizePerspective : pointSizeOrthographic);
     gl_Position = viewProjection * centerWorld;
