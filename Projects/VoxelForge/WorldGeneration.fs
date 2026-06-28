@@ -61,7 +61,7 @@ module WorldGenerationExtensions =
 module WorldGenerationLogic =
 
     let private cacheMagic = "VFWG"
-    let private cacheVersion = 2
+    let private cacheVersion = 3
     let private initialStreamChunkRadius = 8
 
     let private clamp01 value =

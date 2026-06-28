@@ -127,7 +127,7 @@ module VoxelRuntime =
             (chunkCoord.Z * level.ChunkSizeVoxels.Z)
 
     let private chunkHasRelevantEdits (level : VoxelLevel) (chunkCoord : Vector3i) =
-        if level.Edits.Count = 0 then false
+        if level.Edits.Count = 0 && level.BlockEdits.Count = 0 then false
         else
             let chunkMin = chunkSourceMinCoord level chunkCoord
             let chunkMax = chunkMin + level.ChunkSizeVoxels - v3iOne
@@ -141,16 +141,28 @@ module VoxelRuntime =
                     (min (dec level.SourceSizeVoxels.X) (inc chunkMax.X))
                     (min (dec level.SourceSizeVoxels.Y) (inc chunkMax.Y))
                     (min (dec level.SourceSizeVoxels.Z) (inc chunkMax.Z))
-            lock level.Edits (fun () ->
-                let mutable relevant = false
-                for entry in level.Edits do
+            let mutable relevant = false
+            let side = max 1 level.BlockSideVoxels
+            lock level.BlockEdits (fun () ->
+                for entry in level.BlockEdits do
                     if not relevant then
-                        let coord = entry.Key
+                        let blockStart = VoxelWorld.blockStartCoord level entry.Key
+                        let blockMax = blockStart + v3i (dec side) (dec side) (dec side)
                         relevant <-
-                            coord.X >= minCoord.X && coord.X <= maxCoord.X &&
-                            coord.Y >= minCoord.Y && coord.Y <= maxCoord.Y &&
-                            coord.Z >= minCoord.Z && coord.Z <= maxCoord.Z
-                relevant)
+                            blockMax.X >= minCoord.X && blockStart.X <= maxCoord.X &&
+                            blockMax.Y >= minCoord.Y && blockStart.Y <= maxCoord.Y &&
+                            blockMax.Z >= minCoord.Z && blockStart.Z <= maxCoord.Z)
+            if relevant then true
+            else
+                lock level.Edits (fun () ->
+                    for entry in level.Edits do
+                        if not relevant then
+                            let coord = entry.Key
+                            relevant <-
+                                coord.X >= minCoord.X && coord.X <= maxCoord.X &&
+                                coord.Y >= minCoord.Y && coord.Y <= maxCoord.Y &&
+                                coord.Z >= minCoord.Z && coord.Z <= maxCoord.Z
+                    relevant)
 
     let private canUseGeneratedChunkLookup (level : VoxelLevel) (chunkCoord : Vector3i) =
         Option.isSome level.GenerationOpt && level.SourceVoxels.Count = 0 && not (chunkHasRelevantEdits level chunkCoord)
@@ -854,54 +866,64 @@ module VoxelRuntime =
             let side = max 1 level.BlockSideVoxels
             let blockTemplateCache = Dictionary<Vector3i, VoxelBlockTemplate option> (HashIdentity.Structural)
             let editedBlockTemplateCache = Dictionary<Vector3i, VoxelBlockTemplate option> (HashIdentity.Structural)
+            let applyCellEdits (blockCoord : Vector3i) (generatedTemplateOpt : VoxelBlockTemplate option) (edits : Dictionary<Vector3i, VoxelEdit>) =
+                let blockStart = VoxelWorld.blockStartCoord level blockCoord
+                let mutable edited = false
+                let cells =
+                    match generatedTemplateOpt with
+                    | Some template -> Dictionary<Vector3i, VoxelCell> (template.Cells, HashIdentity.Structural)
+                    | None -> Dictionary<Vector3i, VoxelCell> (HashIdentity.Structural)
+                for entry in edits do
+                    let coord = entry.Key
+                    if  coord.X >= blockStart.X && coord.X < blockStart.X + side &&
+                        coord.Y >= blockStart.Y && coord.Y < blockStart.Y + side &&
+                        coord.Z >= blockStart.Z && coord.Z < blockStart.Z + side then
+                        edited <- true
+                        let localCoord = coord - blockStart
+                        match entry.Value with
+                        | Removed -> cells.Remove localCoord |> ignore<bool>
+                        | Placed cell -> cells[localCoord] <- cell
+                if edited then
+                    if cells.Count = 0 then None
+                    else
+                        let voxels = Array.zeroCreate<struct (Vector3i * VoxelCell)> cells.Count
+                        let mutable i = 0
+                        let mutable solid = false
+                        let mutable material = Crafted
+                        let mutable first = true
+                        for entry in cells do
+                            let cell = entry.Value
+                            if first then
+                                material <- cell.Material
+                                first <- false
+                            solid <- solid || cell.Solid
+                            voxels[i] <- struct (entry.Key, cell)
+                            i <- inc i
+                        Some
+                            { Name = "Edited " + string snapshot.Revision + " " + string blockCoord.X + "," + string blockCoord.Y + "," + string blockCoord.Z
+                              Material = material
+                              Solid = solid
+                              Voxels = voxels
+                              Cells = cells }
+                else generatedTemplateOpt
             let tryGetEditedBlockTemplate blockCoord =
                 match editedBlockTemplateCache.TryGetValue blockCoord with
                 | (true, templateOpt) -> templateOpt
                 | (false, _) ->
                     let generatedTemplateOpt = tryGetCachedGeneratedBlockTemplate blockTemplateCache level blockCoord
                     let templateOpt =
-                        match snapshot.EditsOpt with
-                        | Some edits ->
-                            let blockStart = VoxelWorld.blockStartCoord level blockCoord
-                            let mutable edited = false
-                            let cells =
-                                match generatedTemplateOpt with
-                                | Some template -> Dictionary<Vector3i, VoxelCell> (template.Cells, HashIdentity.Structural)
-                                | None -> Dictionary<Vector3i, VoxelCell> (HashIdentity.Structural)
-                            for entry in edits do
-                                let coord = entry.Key
-                                if  coord.X >= blockStart.X && coord.X < blockStart.X + side &&
-                                    coord.Y >= blockStart.Y && coord.Y < blockStart.Y + side &&
-                                    coord.Z >= blockStart.Z && coord.Z < blockStart.Z + side then
-                                    edited <- true
-                                    let localCoord = coord - blockStart
-                                    match entry.Value with
-                                    | Removed -> cells.Remove localCoord |> ignore<bool>
-                                    | Placed cell -> cells[localCoord] <- cell
-                            if edited then
-                                if cells.Count = 0 then None
-                                else
-                                    let voxels = Array.zeroCreate<struct (Vector3i * VoxelCell)> cells.Count
-                                    let mutable i = 0
-                                    let mutable solid = false
-                                    let mutable material = Crafted
-                                    let mutable first = true
-                                    for entry in cells do
-                                        let cell = entry.Value
-                                        if first then
-                                            material <- cell.Material
-                                            first <- false
-                                        solid <- solid || cell.Solid
-                                        voxels[i] <- struct (entry.Key, cell)
-                                        i <- inc i
-                                    Some
-                                        { Name = "Edited " + string snapshot.Revision + " " + string blockCoord.X + "," + string blockCoord.Y + "," + string blockCoord.Z
-                                          Material = material
-                                          Solid = solid
-                                          Voxels = voxels
-                                          Cells = cells }
-                            else generatedTemplateOpt
-                        | None -> generatedTemplateOpt
+                        match snapshot.BlockEditsOpt with
+                        | Some blockEdits ->
+                            match blockEdits.TryGetValue blockCoord with
+                            | (true, templateOpt) -> templateOpt
+                            | (false, _) ->
+                                match snapshot.EditsOpt with
+                                | Some edits -> applyCellEdits blockCoord generatedTemplateOpt edits
+                                | None -> generatedTemplateOpt
+                        | None ->
+                            match snapshot.EditsOpt with
+                            | Some edits -> applyCellEdits blockCoord generatedTemplateOpt edits
+                            | None -> generatedTemplateOpt
                     editedBlockTemplateCache[blockCoord] <- templateOpt
                     templateOpt
             ValueSome (tryBuildChunkFromBlockLookup level chunkCoord tryGetEditedBlockTemplate)
@@ -1378,9 +1400,15 @@ module VoxelRuntime =
         let tryGetCell coord = VoxelWorld.tryGetCellWithEditSnapshotValue snapshot level coord
         if useCache then tryBuildChunkWithCellLookupCached true level tryGetCell chunkCoord
         else
-            match tryBuildChunkWithEditSnapshotFromBlocks level snapshot chunkCoord with
-            | ValueSome chunkBuildOpt -> chunkBuildOpt
-            | ValueNone -> tryBuildChunkWithCellLookupCached false level tryGetCell chunkCoord
+            let hasBlockEdits =
+                match snapshot.BlockEditsOpt with
+                | Some blockEdits -> blockEdits.Count > 0
+                | None -> false
+            if hasBlockEdits then tryBuildChunkWithCellLookupCached false level tryGetCell chunkCoord
+            else
+                match tryBuildChunkWithEditSnapshotFromBlocks level snapshot chunkCoord with
+                | ValueSome chunkBuildOpt -> chunkBuildOpt
+                | ValueNone -> tryBuildChunkWithCellLookupCached false level tryGetCell chunkCoord
 
     let tryBuildChunkCached (level : VoxelLevel) (chunkCoord : Vector3i) =
         let tryGetCell coord = VoxelWorld.tryGetCellValue level coord
@@ -1419,20 +1447,46 @@ module VoxelRuntime =
             None
 
     let rebuildChunks (chunkCoords : Vector3i seq) (level : VoxelLevel) (currentChunks : VoxelChunk array) (world : World) =
-        let chunks = Dictionary<Vector3i, VoxelChunk> (HashIdentity.Structural)
-        let chunksToDestroy = ResizeArray<VoxelChunk> ()
-        for chunk in currentChunks do
-            chunks[chunk.ChunkCoord] <- chunk
-        for chunkCoord in chunkCoords do
-            match chunks.TryGetValue chunkCoord with
-            | (true, oldChunk) -> chunksToDestroy.Add oldChunk
-            | (false, _) -> ()
-            match tryBuildChunk level chunkCoord with
-            | Some chunkBuild -> chunks[chunkCoord] <- realizeChunk level chunkBuild world
-            | None ->
-                VoxelWorld.markChunkManifestEmpty (VoxelWorld.getEditRevision level) level chunkCoord
-                chunks.Remove chunkCoord |> ignore<bool>
-        struct (sortVoxelChunks chunks.Values, chunksToDestroy.ToArray ())
+        let targetCoords = chunkCoords |> Seq.toArray
+        if targetCoords.Length = 0 then struct (currentChunks, Array.empty)
+        else
+            let snapshot = VoxelWorld.snapshotEdits level
+            let processedTargets = Array.zeroCreate<bool> targetCoords.Length
+            let chunks = ResizeArray<VoxelChunk> (currentChunks.Length + targetCoords.Length)
+            let chunksToDestroy = ResizeArray<VoxelChunk> (targetCoords.Length)
+            let indexOfTarget coord =
+                let mutable index = -1
+                let mutable i = 0
+                while index < 0 && i < targetCoords.Length do
+                    if targetCoords[i] = coord then index <- i
+                    i <- inc i
+                index
+            let rebuildTarget chunkCoord =
+                match tryBuildChunkWithEditSnapshotCached false level snapshot chunkCoord with
+                | Some chunkBuild -> Some (realizeChunk level chunkBuild world)
+                | None ->
+                    VoxelWorld.markChunkManifestEmpty snapshot.Revision level chunkCoord
+                    None
+            for chunk in currentChunks do
+                let targetIndex = indexOfTarget chunk.ChunkCoord
+                if targetIndex >= 0 then
+                    processedTargets[targetIndex] <- true
+                    chunksToDestroy.Add chunk
+                    match rebuildTarget chunk.ChunkCoord with
+                    | Some rebuiltChunk -> chunks.Add rebuiltChunk
+                    | None -> ()
+                else chunks.Add chunk
+            let mutable appended = false
+            for i in 0 .. dec targetCoords.Length do
+                if not processedTargets[i] then
+                    match rebuildTarget targetCoords[i] with
+                    | Some rebuiltChunk ->
+                        chunks.Add rebuiltChunk
+                        appended <- true
+                    | None -> ()
+            let chunksArray = chunks.ToArray ()
+            let chunksArray = if appended then sortVoxelChunks chunksArray else chunksArray
+            struct (chunksArray, chunksToDestroy.ToArray ())
 
     let destroyVoxelChunks (voxelChunks : VoxelChunk array) (world : World) =
         for chunk in voxelChunks do

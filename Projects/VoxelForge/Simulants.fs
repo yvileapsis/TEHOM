@@ -38,6 +38,7 @@ module Simulants =
     let GameplaySun = GameplayScene / "GeneratedSun"
     let GameplayLightProbe = GameplayScene / "GeneratedLightProbe"
     let VoxelLevelChunk x y z = GameplayScene / ("VoxelLevel" + string x + "_" + string y + "_" + string z)
+    let FarTerrainLod = GameplayScene / "FarTerrainLod"
     let GameplayPlayer = GameplayScene / "GameplayPlayer"
     let GameplayPlayerBody = GameplayPlayer / "Body"
     let AimBlockHighlightFace index = GameplayScene / ("AimBlockHighlightFace" + string index)

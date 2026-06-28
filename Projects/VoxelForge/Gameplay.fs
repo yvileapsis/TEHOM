@@ -67,6 +67,19 @@ type GameplayCommand =
     | StartQuitting
     interface Command
 
+[<NoEquality; NoComparison>]
+type VoxelChunkSyncDelta =
+    { ChunksAdded : VoxelChunk array
+      ChunksUpdated : VoxelChunk array
+      ChunksRemoved : VoxelChunk array
+      VoxelAssetsToDestroy : VoxelChunk array }
+
+    static member val Empty =
+        { ChunksAdded = [||]
+          ChunksUpdated = [||]
+          ChunksRemoved = [||]
+          VoxelAssetsToDestroy = [||] }
+
 [<AutoOpen>]
 module GameplayExtensions =
     type Screen with
@@ -409,6 +422,16 @@ module GameplayLogic =
     let private streamInitialBuildLimit = 96
     let private streamBuildsPerUpdate = 24
     let private streamBuildJobsMax = 96
+    let private farTerrainLodBlockStride = 8
+    let private farTerrainLodVerticalOffset = -0.08f
+
+    type private FarTerrainSurfaceBuilder =
+        { Positions : ResizeArray<Vector3>
+          TexCoordses : ResizeArray<Vector2>
+          Normals : ResizeArray<Vector3>
+          Indices : ResizeArray<int>
+          mutable BoundsMin : Vector3
+          mutable BoundsMax : Vector3 }
 
     type private StreamBuildJob =
         { ChunkCoord : Vector3i
@@ -423,6 +446,274 @@ module GameplayLogic =
     let private streamChunksToKeepBuffer = ResizeArray<VoxelChunk> ()
     let private streamChunksToDestroyBuffer = ResizeArray<VoxelChunk> ()
     let private desiredStreamChunkIndicesBuffer = ResizeArray<int> ()
+
+    let private voxelChunkMaterialProperties =
+        { MaterialProperties.empty with
+            RoughnessOpt = ValueSome 0.92f
+            MetallicOpt = ValueSome 0.0f
+            AmbientOcclusionOpt = ValueSome 1.0f
+            EmissionOpt = ValueSome 0.0f
+            ClearCoatOpt = ValueSome 0.0f
+            ClearCoatRoughnessOpt = ValueSome 1.0f }
+
+    let private makeFarTerrainSurfaceBuilder () =
+        { Positions = ResizeArray<Vector3> ()
+          TexCoordses = ResizeArray<Vector2> ()
+          Normals = ResizeArray<Vector3> ()
+          Indices = ResizeArray<int> ()
+          BoundsMin = v3Dup Single.PositiveInfinity
+          BoundsMax = v3Dup Single.NegativeInfinity }
+
+    let private includeFarTerrainBounds (point : Vector3) (builder : FarTerrainSurfaceBuilder) =
+        builder.BoundsMin <-
+            v3
+                (min builder.BoundsMin.X point.X)
+                (min builder.BoundsMin.Y point.Y)
+                (min builder.BoundsMin.Z point.Z)
+        builder.BoundsMax <-
+            v3
+                (max builder.BoundsMax.X point.X)
+                (max builder.BoundsMax.Y point.Y)
+                (max builder.BoundsMax.Z point.Z)
+
+    let private addFarTerrainQuad (builder : FarTerrainSurfaceBuilder) (p0 : Vector3) (p1 : Vector3) (p2 : Vector3) (p3 : Vector3) =
+        let baseIndex = builder.Positions.Count
+        builder.Positions.Add p0
+        builder.Positions.Add p1
+        builder.Positions.Add p2
+        builder.Positions.Add p3
+        builder.TexCoordses.Add (v2 0.0f 0.0f)
+        builder.TexCoordses.Add (v2 1.0f 0.0f)
+        builder.TexCoordses.Add (v2 1.0f 1.0f)
+        builder.TexCoordses.Add (v2 0.0f 1.0f)
+        for _ in 0 .. 3 do
+            builder.Normals.Add v3Up
+        builder.Indices.Add baseIndex
+        builder.Indices.Add (baseIndex + 1)
+        builder.Indices.Add (baseIndex + 2)
+        builder.Indices.Add baseIndex
+        builder.Indices.Add (baseIndex + 2)
+        builder.Indices.Add (baseIndex + 3)
+        includeFarTerrainBounds p0 builder
+        includeFarTerrainBounds p1 builder
+        includeFarTerrainBounds p2 builder
+        includeFarTerrainBounds p3 builder
+
+    let private averageTemplateAlbedo fallback (template : VoxelBlockTemplate) =
+        if template.Voxels.Length = 0 then fallback
+        else
+            let mutable r = 0.0f
+            let mutable g = 0.0f
+            let mutable b = 0.0f
+            let mutable a = 0.0f
+            for struct (_, cell) in template.Voxels do
+                r <- r + cell.Albedo.R
+                g <- g + cell.Albedo.G
+                b <- b + cell.Albedo.B
+                a <- a + cell.Albedo.A
+            let scalar = 1.0f / single template.Voxels.Length
+            color (r * scalar) (g * scalar) (b * scalar) (a * scalar)
+
+    let private farTerrainMaterialColor (generation : VoxelGeneration) material =
+        match material with
+        | Grass -> averageTemplateAlbedo (color 0.34f 0.58f 0.24f 1.0f) generation.Templates.Grass
+        | Dirt -> averageTemplateAlbedo (color 0.38f 0.26f 0.16f 1.0f) generation.Templates.Dirt
+        | Stone -> averageTemplateAlbedo (color 0.48f 0.48f 0.46f 1.0f) generation.Templates.Stone
+        | Sand -> averageTemplateAlbedo (color 0.72f 0.66f 0.42f 1.0f) generation.Templates.Sand
+        | Wood -> averageTemplateAlbedo (color 0.38f 0.25f 0.13f 1.0f) generation.Templates.Log
+        | Leaves -> averageTemplateAlbedo (color 0.22f 0.43f 0.16f 1.0f) generation.Templates.Leaves
+        | Glass -> color 0.74f 0.9f 1.0f 1.0f
+        | Water -> averageTemplateAlbedo (color 0.12f 0.32f 0.72f 1.0f) generation.Templates.Water
+        | Lava -> averageTemplateAlbedo (color 1.0f 0.24f 0.02f 1.0f) generation.Templates.Lava
+        | Ore -> averageTemplateAlbedo (color 0.72f 0.45f 0.28f 1.0f) generation.Templates.Ore
+        | Brick -> color 0.52f 0.17f 0.12f 1.0f
+        | Crafted -> color 0.58f 0.58f 0.58f 1.0f
+
+    let private farTerrainSurfaceProperties albedo =
+        { OpenGL.PhysicallyBased.PhysicallyBasedMaterialProperties.empty with
+            Albedo = albedo
+            Roughness = 0.96f
+            Metallic = 0.0f
+            AmbientOcclusion = 1.0f
+            Emission = 0.0f
+            Height = 1.0f
+            IgnoreLightMaps = true
+            OpaqueDistance = Constants.Render.OpaqueDistanceDefault
+            FinenessOffset = 0.0f
+            ScatterType = NoScatter
+            SpecularScalar = 0.28f
+            SubsurfaceCutoff = Constants.Render.SubsurfaceCutoffDefault
+            SubsurfaceCutoffMargin = Constants.Render.SubsurfaceCutoffMarginDefault
+            RefractiveIndex = Constants.Render.RefractiveIndexDefault
+            ClearCoat = 0.0f
+            ClearCoatRoughness = 1.0f }
+
+    let private farTerrainDefaultImage name =
+        asset<Image> "Default" name
+
+    let private makeFarTerrainSurfaceDescriptor generation material (builder : FarTerrainSurfaceBuilder) =
+        let bounds = box3 builder.BoundsMin (builder.BoundsMax - builder.BoundsMin)
+        { Positions = builder.Positions.ToArray ()
+          TexCoordses = builder.TexCoordses.ToArray ()
+          Normals = builder.Normals.ToArray ()
+          Indices = builder.Indices.ToArray ()
+          ModelMatrix = Matrix4x4.Identity
+          Bounds = bounds
+          MaterialProperties = farTerrainSurfaceProperties (farTerrainMaterialColor generation material)
+          IgnoreLightMaps = true
+          AlbedoImage = farTerrainDefaultImage "MaterialAlbedo"
+          RoughnessImage = farTerrainDefaultImage "MaterialRoughness"
+          MetallicImage = farTerrainDefaultImage "MaterialMetallic"
+          AmbientOcclusionImage = farTerrainDefaultImage "MaterialAmbientOcclusion"
+          EmissionImage = farTerrainDefaultImage "MaterialEmission"
+          NormalImage = farTerrainDefaultImage "MaterialNormal"
+          HeightImage = farTerrainDefaultImage "MaterialHeight"
+          SubdermalImage = farTerrainDefaultImage "MaterialSubdermal"
+          FinenessImage = farTerrainDefaultImage "MaterialFineness"
+          ScatterImage = farTerrainDefaultImage "MaterialScatter"
+          ClearCoatImage = farTerrainDefaultImage "MaterialClearCoat"
+          ClearCoatRoughnessImage = farTerrainDefaultImage "MaterialClearCoatRoughness"
+          ClearCoatNormalImage = farTerrainDefaultImage "MaterialClearCoatNormal"
+          TwoSided = true
+          Clipped = false }
+
+    let private tryBuildFarTerrainLod (level : VoxelLevel) =
+        match level.GenerationOpt with
+        | Some generation ->
+            let macroCounts = VoxelWorld.generatedBlockCounts level
+            if macroCounts.X <= 0 || macroCounts.Z <= 0 then None
+            else
+                let side = max 1 level.BlockSideVoxels
+                let stride = min farTerrainLodBlockStride (max 1 (min macroCounts.X macroCounts.Z))
+                let surfaceBuilders = Dictionary<VoxelMaterialKind, FarTerrainSurfaceBuilder> ()
+                let getBuilder material =
+                    let mutable builder = Unchecked.defaultof<FarTerrainSurfaceBuilder>
+                    if surfaceBuilders.TryGetValue (material, &builder) then builder
+                    else
+                        builder <- makeFarTerrainSurfaceBuilder ()
+                        surfaceBuilders.Add (material, builder)
+                        builder
+                let blockEdgeX x =
+                    level.Bounds.Min.X + level.LevelOffset.X + single (level.BlockGridOffsetVoxels.X + x * side) * level.VoxelSize.X
+                let blockEdgeZ z =
+                    level.Bounds.Min.Z + level.LevelOffset.Z + single (level.BlockGridOffsetVoxels.Z + z * side) * level.VoxelSize.Z
+                let blockTopY y =
+                    level.Bounds.Min.Y + level.LevelOffset.Y + single (level.BlockGridOffsetVoxels.Y + (inc y) * side) * level.VoxelSize.Y + farTerrainLodVerticalOffset
+                let heightAt x z =
+                    VoxelWorld.generatedHeightAt
+                        level
+                        generation
+                        (Math.Clamp (x, 0, dec macroCounts.X))
+                        (Math.Clamp (z, 0, dec macroCounts.Z))
+                let surfaceMaterialForHeight height =
+                    if height <= generation.SeaLevelBlocks + 1 then Sand else Grass
+                for z in 0 .. stride .. dec macroCounts.Z do
+                    let z1 = min macroCounts.Z (z + stride)
+                    for x in 0 .. stride .. dec macroCounts.X do
+                        let x1 = min macroCounts.X (x + stride)
+                        if x1 > x && z1 > z then
+                            let height00 = heightAt x z
+                            let height10 = heightAt x1 z
+                            let height11 = heightAt x1 z1
+                            let height01 = heightAt x z1
+                            let centerHeight = heightAt ((x + x1) / 2) ((z + z1) / 2)
+                            let x0f = blockEdgeX x
+                            let x1f = blockEdgeX x1
+                            let z0f = blockEdgeZ z
+                            let z1f = blockEdgeZ z1
+                            let p0 = v3 x0f (blockTopY height00) z0f
+                            let p1 = v3 x1f (blockTopY height10) z0f
+                            let p2 = v3 x1f (blockTopY height11) z1f
+                            let p3 = v3 x0f (blockTopY height01) z1f
+                            addFarTerrainQuad (getBuilder (surfaceMaterialForHeight centerHeight)) p0 p1 p2 p3
+                            if centerHeight < generation.SeaLevelBlocks then
+                                let waterY = blockTopY generation.SeaLevelBlocks + 0.02f
+                                addFarTerrainQuad
+                                    (getBuilder Water)
+                                    (v3 x0f waterY z0f)
+                                    (v3 x1f waterY z0f)
+                                    (v3 x1f waterY z1f)
+                                    (v3 x0f waterY z1f)
+                let surfaceDescriptors =
+                    [|for entry in surfaceBuilders do
+                        if entry.Value.Positions.Count > 0 then
+                            makeFarTerrainSurfaceDescriptor generation entry.Key entry.Value|]
+                if surfaceDescriptors.Length = 0 then None
+                else
+                    let mutable boundsMin = v3Dup Single.PositiveInfinity
+                    let mutable boundsMax = v3Dup Single.NegativeInfinity
+                    for descriptor in surfaceDescriptors do
+                        boundsMin <-
+                            v3
+                                (min boundsMin.X descriptor.Bounds.Min.X)
+                                (min boundsMin.Y descriptor.Bounds.Min.Y)
+                                (min boundsMin.Z descriptor.Bounds.Min.Z)
+                        boundsMax <-
+                            v3
+                                (max boundsMax.X descriptor.Bounds.Max.X)
+                                (max boundsMax.Y descriptor.Bounds.Max.Y)
+                                (max boundsMax.Z descriptor.Bounds.Max.Z)
+                    let bounds = box3 boundsMin (boundsMax - boundsMin)
+                    Some struct (surfaceDescriptors, bounds)
+        | None -> None
+
+    let destroyFarTerrainLod (world : World) =
+        World.destroyUserDefinedStaticModel Assets.Voxels.FarTerrainLod world
+
+    let createFarTerrainLod (level : VoxelLevel) (world : World) =
+        destroyFarTerrainLod world
+        match tryBuildFarTerrainLod level with
+        | Some (struct (surfaceDescriptors, bounds)) ->
+            World.createUserDefinedStaticModel surfaceDescriptors bounds Assets.Voxels.FarTerrainLod world
+            let tileCount = surfaceDescriptors |> Array.sumBy (fun descriptor -> descriptor.Indices.Length / 6)
+            Log.info ("VoxelForge created far terrain LOD with " + scstring tileCount + " coarse tiles across " + scstring surfaceDescriptors.Length + " surfaces.")
+        | None -> ()
+
+    let voxelChunkEntity (voxelChunk : VoxelChunk) =
+        Simulants.VoxelLevelChunk voxelChunk.ChunkCoord.X voxelChunk.ChunkCoord.Y voxelChunk.ChunkCoord.Z
+
+    let setVoxelChunkEntityProperties (voxelChunk : VoxelChunk) (entity : Entity) (world : World) =
+        entity.SetPosition voxelChunk.ChunkCenter world
+        entity.SetSize voxelChunk.ChunkSize world
+        entity.SetVoxelChunkCoord voxelChunk.ChunkCoord world
+        entity.SetVoxelModelOpt voxelChunk.VoxelModelOpt world
+        entity.SetVisible (Option.isSome voxelChunk.VoxelModelOpt) world
+        entity.SetPresence Exterior world
+        entity.SetAlwaysRender false world
+        entity.SetCastShadow false world
+        entity.SetBodyEnabled true world
+        entity.SetBodyType Static world
+        entity.SetBodyShape voxelChunk.BodyShape world
+        entity.SetCollisionCategories "10" world
+        entity.SetStatic true world
+        entity.SetMaterialProperties voxelChunkMaterialProperties world
+
+    let createOrUpdateVoxelChunkEntity (voxelChunk : VoxelChunk) (world : World) =
+        let entity = voxelChunkEntity voxelChunk
+        if Simulants.GameplayScene.GetExists world then
+            if not (entity.GetExists world) || entity.GetDestroying world then
+                World.createEntity<VoxelChunkDispatcher> (Some Address.parent) DefaultOverlay (Some entity.Surnames) entity.Group world |> ignore<Entity>
+                entity.SetProtection ManualProtection world
+                entity.SetPersistent false world
+            setVoxelChunkEntityProperties voxelChunk entity world
+
+    let removeVoxelChunkEntity (voxelChunk : VoxelChunk) (world : World) =
+        let entity = voxelChunkEntity voxelChunk
+        if entity.GetExists world then
+            entity.SetVoxelModelOpt None world
+            entity.SetVisible false world
+            entity.SetBodyEnabled false world
+            World.destroyEntity entity world
+
+    let applyVoxelChunkSyncDelta (delta : VoxelChunkSyncDelta) (world : World) =
+        for chunk in delta.ChunksRemoved do
+            removeVoxelChunkEntity chunk world
+        for chunk in delta.ChunksAdded do
+            createOrUpdateVoxelChunkEntity chunk world
+        for chunk in delta.ChunksUpdated do
+            createOrUpdateVoxelChunkEntity chunk world
+        if delta.VoxelAssetsToDestroy.Length > 0 then
+            VoxelRuntime.destroyVoxelChunks delta.VoxelAssetsToDestroy world
 
     let private clearStreamBuildJobs () =
         lock streamBuildJobsLock (fun () ->
@@ -539,11 +830,9 @@ module GameplayLogic =
             else gameplay
         | Some _ | None -> gameplay
 
-    let updateSelectedBlockPreviewPosition (gameplay : Gameplay) (world : World) =
+    let private selectedBlockPreviewPosition (world : World) =
         let rotation = world.Eye3dRotation
-        { gameplay with
-            SelectedBlockPreviewPositionOpt =
-                Some (world.Eye3dCenter + rotation.Forward * 1.25f + rotation.Right * 0.55f + rotation.Down * 0.35f) }
+        world.Eye3dCenter + rotation.Forward * 1.25f + rotation.Right * 0.55f + rotation.Down * 0.35f
 
     let tryGetSelectedBlock (gameplay : Gameplay) =
         match gameplay.VoxelLevelOpt with
@@ -671,8 +960,6 @@ module GameplayLogic =
                 let chunksToDestroyArray =
                     if chunksToDestroy.Count > 0 then chunksToDestroy.ToArray ()
                     else Array.empty
-                if chunksToDestroyArray.Length > 0 then
-                    VoxelRuntime.destroyVoxelChunks chunksToDestroyArray world
                 let chunksChanged = chunksToDestroyArray.Length > 0 || chunksToAdd.Length > 0
                 let voxelChunks =
                     if chunksChanged then
@@ -681,6 +968,13 @@ module GameplayLogic =
                         Array.Copy (chunksToAdd, 0, voxelChunks, chunksToKeep.Count, chunksToAdd.Length)
                         VoxelRuntime.sortVoxelChunks voxelChunks
                     else gameplay.VoxelChunks
+                let syncDelta =
+                    if chunksChanged then
+                        { VoxelChunkSyncDelta.Empty with
+                            ChunksAdded = chunksToAdd
+                            ChunksRemoved = chunksToDestroyArray
+                            VoxelAssetsToDestroy = chunksToDestroyArray }
+                    else VoxelChunkSyncDelta.Empty
                 let result =
                     if chunksChanged || centerChanged then
                         struct
@@ -691,13 +985,14 @@ module GameplayLogic =
                                         replaceOcclusionBlockCoords gameplay.OcclusionBlockCoords chunksToDestroyArray chunksToAdd
                                     else gameplay.OcclusionBlockCoords
                                 StreamCenterChunkCoordOpt = Some centerChunkCoord },
+                             syncDelta,
                              true)
-                    else struct (gameplay, false)
+                    else struct (gameplay, VoxelChunkSyncDelta.Empty, false)
                 chunksToKeep.Clear ()
                 chunksToDestroy.Clear ()
                 result
-            | None -> struct (gameplay, false)
-        | None -> struct (gameplay, false)
+            | None -> struct (gameplay, VoxelChunkSyncDelta.Empty, false)
+        | None -> struct (gameplay, VoxelChunkSyncDelta.Empty, false)
 
     let streamChunksForCurrentPosition buildLimit (gameplay : Gameplay) (world : World) =
         streamChunksAroundPosition buildLimit (getStreamingPosition gameplay world) gameplay world
@@ -765,20 +1060,36 @@ module GameplayLogic =
         | Some level ->
             let chunkCoords = chunkCoords |> Seq.toArray
             markStreamEditedChunks level chunkCoords
-            let loadedChunkCoords = HashSet<Vector3i> (HashIdentity.Structural)
-            for chunk in gameplay.VoxelChunks do
-                loadedChunkCoords.Add chunk.ChunkCoord |> ignore<bool>
+            let loadedChunkCoordExists chunkCoord =
+                let mutable exists = false
+                let mutable i = 0
+                while not exists && i < gameplay.VoxelChunks.Length do
+                    exists <- gameplay.VoxelChunks[i].ChunkCoord = chunkCoord
+                    i <- inc i
+                exists
             let chunkCoords =
                 chunkCoords
-                |> Array.filter (fun chunkCoord -> loadedChunkCoords.Contains chunkCoord)
-            let chunkCoordSet = Set.ofArray chunkCoords
-            let struct (voxelChunks, chunksToDestroy) = VoxelRuntime.rebuildChunks chunkCoords level gameplay.VoxelChunks world
-            let chunksToAdd =
-                voxelChunks
-                |> Array.filter (fun (chunk : VoxelChunk) -> Set.contains chunk.ChunkCoord chunkCoordSet)
-            let occlusionBlockCoords = replaceOcclusionBlockCoords gameplay.OcclusionBlockCoords chunksToDestroy chunksToAdd
-            struct ({ gameplay with VoxelChunks = voxelChunks; OcclusionBlockCoords = occlusionBlockCoords }, chunksToDestroy)
-        | None -> struct (gameplay, [||])
+                |> Array.filter loadedChunkCoordExists
+            if chunkCoords.Length = 0 then struct (gameplay, VoxelChunkSyncDelta.Empty)
+            else
+                let isTargetChunk chunkCoord =
+                    let mutable found = false
+                    let mutable i = 0
+                    while not found && i < chunkCoords.Length do
+                        found <- chunkCoords[i] = chunkCoord
+                        i <- inc i
+                    found
+                let struct (voxelChunks, chunksToDestroy) = VoxelRuntime.rebuildChunks chunkCoords level gameplay.VoxelChunks world
+                let chunksToAdd =
+                    voxelChunks
+                    |> Array.filter (fun (chunk : VoxelChunk) -> isTargetChunk chunk.ChunkCoord)
+                let occlusionBlockCoords = replaceOcclusionBlockCoords gameplay.OcclusionBlockCoords chunksToDestroy chunksToAdd
+                let syncDelta =
+                    { VoxelChunkSyncDelta.Empty with
+                        ChunksUpdated = chunksToAdd
+                        VoxelAssetsToDestroy = chunksToDestroy }
+                struct ({ gameplay with VoxelChunks = voxelChunks; OcclusionBlockCoords = occlusionBlockCoords }, syncDelta)
+        | None -> struct (gameplay, VoxelChunkSyncDelta.Empty)
 
     let private tryNearestPhysicsHit (origin : Vector3) (direction : Vector3) remainingDistance (world : World) =
         let ray = ray3 origin (direction * remainingDistance)
@@ -849,6 +1160,45 @@ module GameplayLogic =
                 | None -> None)
         | None -> None
 
+    let private updateSelectedBlockPreview (gameplay : Gameplay) (world : World) =
+        let preview = Simulants.SelectedBlockPreview
+        if preview.GetExists world then
+            match tryGetSelectedBlock gameplay with
+            | Some placeableBlock ->
+                preview.SetPosition (selectedBlockPreviewPosition world) world
+                preview.SetVoxelModel placeableBlock.PreviewModel world
+                preview.SetVisible true world
+            | None ->
+                preview.SetVisible false world
+
+    let private updateAimBlockHighlight (gameplay : Gameplay) (pickOpt : VoxelAimPick option) (world : World) =
+        match gameplay.VoxelLevelOpt, pickOpt with
+        | Some level, Some pick when VoxelWorld.blockContainsCell level pick.DestroyBlockCoord ->
+            let bounds = VoxelWorld.blockBounds level pick.DestroyBlockCoord
+            let light = Simulants.AimBlockHighlightLight
+            if light.GetExists world then
+                light.SetPosition bounds.Center world
+                light.SetVisible true world
+            for i in 0 .. dec 6 do
+                let face = Simulants.AimBlockHighlightFace i
+                if face.GetExists world then
+                    let struct (position, rotation, scale) = getAimBlockHighlightFace bounds i
+                    face.SetPosition position world
+                    face.SetRotation rotation world
+                    face.SetSize scale world
+                    face.SetScale scale world
+                    face.SetVisible true world
+        | Some _, Some _ | Some _, None | None, _ ->
+            let light = Simulants.AimBlockHighlightLight
+            if light.GetExists world then light.SetVisible false world
+            for i in 0 .. dec 6 do
+                let face = Simulants.AimBlockHighlightFace i
+                if face.GetExists world then face.SetVisible false world
+
+    let updateAimVisuals (gameplay : Gameplay) (world : World) =
+        updateSelectedBlockPreview gameplay world
+        updateAimBlockHighlight gameplay (tryPickForward gameplay world) world
+
     let createVoxelLevel (world : World) =
         match VoxelBake.tryBakeSliceAtlasVolume Assets.Voxels.Minecraft sourceVoxelSize with
         | Some minecraftLevel ->
@@ -869,23 +1219,26 @@ module GameplayLogic =
             Log.warnOnce "VoxelForge could not bake the minecraft voxel slice atlas."
             None
 
-    let private destroyVoxelChunks (voxelChunks : VoxelChunk array) (world : World) =
-        VoxelRuntime.destroyVoxelChunks voxelChunks world
-
     let destroyVoxelModel (voxelChunks : VoxelChunk array) (placeableBlocks : PlaceableBlock array) (levelOpt : VoxelLevel option) (world : World) =
         clearStreamBuildJobs ()
+        applyVoxelChunkSyncDelta
+            { VoxelChunkSyncDelta.Empty with
+                ChunksRemoved = voxelChunks }
+            world
         VoxelRuntime.destroyVoxelModel voxelChunks placeableBlocks levelOpt world
+        destroyFarTerrainLod world
 
     let tryDestroyBlock (pick : VoxelAimPick) (gameplay : Gameplay) (screen : Screen) (world : World) =
         match gameplay.VoxelLevelOpt with
         | Some level when world.Advancing && VoxelWorld.blockContainsSolidCell level pick.DestroyBlockCoord ->
             VoxelWorld.removeBlock level pick.DestroyBlockCoord
-            let struct (rebuilt, chunksToDestroy) = rebuildChunks (VoxelWorld.affectedChunksForBlock level pick.DestroyBlockCoord) { gameplay with AimPickOpt = None } world
+            let struct (rebuilt, syncDelta) = rebuildChunks (VoxelWorld.affectedChunksForBlock level pick.DestroyBlockCoord) { gameplay with AimPickOpt = None } world
             screen.SetGameplay
                 { rebuilt with
                     AimPickOpt = None }
                 world
-            destroyVoxelChunks chunksToDestroy world
+            applyVoxelChunkSyncDelta syncDelta world
+            updateAimVisuals rebuilt world
         | Some _ | None -> ()
 
     let tryPlaceBlock (pick : VoxelAimPick) (gameplay : Gameplay) (screen : Screen) (world : World) =
@@ -896,12 +1249,13 @@ module GameplayLogic =
                  VoxelWorld.blockIsEmpty level placeBlockCoord &&
                  not (blockIntersectsPlayer level placeBlockCoord world) ->
             VoxelWorld.placeBlock level placeableBlock placeBlockCoord
-            let struct (rebuilt, chunksToDestroy) = rebuildChunks (VoxelWorld.affectedChunksForBlock level placeBlockCoord) { gameplay with AimPickOpt = None } world
+            let struct (rebuilt, syncDelta) = rebuildChunks (VoxelWorld.affectedChunksForBlock level placeBlockCoord) { gameplay with AimPickOpt = None } world
             screen.SetGameplay
                 { rebuilt with
                     AimPickOpt = None }
                 world
-            destroyVoxelChunks chunksToDestroy world
+            applyVoxelChunkSyncDelta syncDelta world
+            updateAimVisuals rebuilt world
         | _ -> ()
 
     let private copyPortalPlayerTracking (source : PortalPlayerTracking) (target : PortalPlayerTracking) =
@@ -939,6 +1293,23 @@ module GameplayLogic =
         World.setEye3dCenter eyeCenter world
         World.setEye3dRotation eyeRotation world
         World.setEye3dFieldOfView 0.75f world
+
+    let tryWriteProfileReadyMarker mode (world : World) =
+        let filePath = Environment.GetEnvironmentVariable "VOXELFORGE_PROFILE_READY_FILE"
+        if not (String.IsNullOrWhiteSpace filePath) then
+            try
+                let directoryPath = System.IO.Path.GetDirectoryName filePath
+                if not (String.IsNullOrWhiteSpace directoryPath) then
+                    System.IO.Directory.CreateDirectory directoryPath |> ignore<System.IO.DirectoryInfo>
+                let payload =
+                    "{\n" +
+                    "  \"mode\": \"" + mode + "\",\n" +
+                    "  \"updateTime\": " + scstring world.UpdateTime + ",\n" +
+                    "  \"writtenUtc\": \"" + DateTime.UtcNow.ToString "o" + "\"\n" +
+                    "}\n"
+                System.IO.File.WriteAllText (filePath, payload)
+            with exn ->
+                Log.warnOnce ("VoxelForge failed to write profile ready marker due to: " + scstring exn)
 
 type GameplayDispatcher () =
     inherit ScreenDispatcher<Gameplay, GameplayMessage, GameplayCommand> (Gameplay.empty)
@@ -985,12 +1356,9 @@ type GameplayDispatcher () =
             withSignal (signal (DestroyVoxelModel (gameplay.VoxelChunks, placeableBlocks, gameplay.VoxelLevelOpt))) Gameplay.empty
 
         | TimeUpdate ->
-            let gameplay =
-                { gameplay with
-                    GameplayTime = gameplay.GameplayTime + world.GameDelta.Updates
-                    AimPickOpt = GameplayLogic.tryPickForward gameplay world }
-                |> fun gameplay -> GameplayLogic.updateSelectedBlockFromInput gameplay world
-                |> fun gameplay -> GameplayLogic.updateSelectedBlockPreviewPosition gameplay world
+            let gameplay = GameplayLogic.updateSelectedBlockFromInput gameplay world
+            if gameplay.GameplayState = Playing then
+                GameplayLogic.updateAimVisuals gameplay world
             if gameplay.GameplayState = Playing && not gameplay.VoxelModelReady then
                 withSignal (signal EnsureVoxelModel) { gameplay with VoxelModelReady = true }
             elif gameplay.GameplayState = Playing && GameplayLogic.shouldStreamVoxelChunks gameplay world then
@@ -998,12 +1366,12 @@ type GameplayDispatcher () =
             else just gameplay
 
         | TryDestroyBlock ->
-            match gameplay.AimPickOpt with
+            match GameplayLogic.tryPickForward gameplay world with
             | Some pick when world.Advancing -> withSignal (signal (DestroyBlock pick)) gameplay
             | Some _ | None -> just gameplay
 
         | TryPlaceBlock ->
-            match gameplay.AimPickOpt with
+            match GameplayLogic.tryPickForward gameplay world with
             | Some pick when world.Advancing -> withSignal (signal (PlaceBlock pick)) gameplay
             | Some _ | None -> just gameplay
 
@@ -1014,7 +1382,7 @@ type GameplayDispatcher () =
             | Some (voxelLevel, voxelChunks) ->
                 if world.Unaccompanied then GameplayLogic.setInitialCamera voxelLevel.SpawnPosition world
                 let portalPair = PortalLogic.pairAtGround voxelLevel.SpawnPosition
-                screen.SetGameplay
+                let gameplay =
                     { gameplay with
                         GameplayState = Playing
                         VoxelModelReady = true
@@ -1026,7 +1394,14 @@ type GameplayDispatcher () =
                         AimPickOpt = None
                         SelectedBlockIndex = 0
                         SelectedBlockPreviewPositionOpt = None }
+                screen.SetGameplay gameplay world
+                GameplayLogic.applyVoxelChunkSyncDelta
+                    { VoxelChunkSyncDelta.Empty with
+                        ChunksAdded = voxelChunks }
                     world
+                GameplayLogic.destroyFarTerrainLod world
+                GameplayLogic.updateAimVisuals gameplay world
+                GameplayLogic.tryWriteProfileReadyMarker "fallback" world
             | None ->
                 let fallbackSpawn = v3 0.0f 18.0f 0.0f
                 if world.Unaccompanied then GameplayLogic.setInitialCamera fallbackSpawn world
@@ -1043,6 +1418,7 @@ type GameplayDispatcher () =
                         SelectedBlockIndex = 0
                         SelectedBlockPreviewPositionOpt = None }
                     world
+                GameplayLogic.destroyFarTerrainLod world
         | UseGeneratedWorld package ->
             Log.infoOnce
                 ("VoxelForge entering generated world with " +
@@ -1067,6 +1443,13 @@ type GameplayDispatcher () =
                         SelectedBlockPreviewPositionOpt = None }
                     world
             screen.SetGameplay gameplay world
+            GameplayLogic.applyVoxelChunkSyncDelta
+                { VoxelChunkSyncDelta.Empty with
+                    ChunksAdded = gameplay.VoxelChunks }
+                world
+            GameplayLogic.createFarTerrainLod package.Level world
+            GameplayLogic.updateAimVisuals gameplay world
+            GameplayLogic.tryWriteProfileReadyMarker "generated-world" world
             Game.SetVoxelForge { Game.GetVoxelForge world with GeneratedWorldPackageOpt = None } world
         | DestroyVoxelModel (voxelChunks, placeableBlocks, levelOpt) ->
             GameplayLogic.destroyVoxelModel voxelChunks placeableBlocks levelOpt world
@@ -1075,8 +1458,11 @@ type GameplayDispatcher () =
         | PlaceBlock pick ->
             GameplayLogic.tryPlaceBlock pick gameplay screen world
         | StreamVoxelChunks ->
-            let struct (gameplay, changed) = GameplayLogic.streamChunksForCurrentPositionDefault gameplay world
-            if changed then screen.SetGameplay gameplay world
+            let struct (gameplay, syncDelta, changed) = GameplayLogic.streamChunksForCurrentPositionDefault gameplay world
+            if changed then
+                screen.SetGameplay gameplay world
+                GameplayLogic.applyVoxelChunkSyncDelta syncDelta world
+                GameplayLogic.updateAimVisuals gameplay world
         | ResolvePortalTraversal ->
             GameplayLogic.resolvePortalTraversal gameplay screen world
         | StartQuitting ->
@@ -1155,28 +1541,22 @@ type GameplayDispatcher () =
                             RoughnessOpt = ValueSome 0.45f
                             MetallicOpt = ValueSome 0.0f }]
 
-                 for voxelChunk in gameplay.VoxelChunks do
-                    Content.entity<VoxelChunkDispatcher> (Simulants.VoxelLevelChunk voxelChunk.ChunkCoord.X voxelChunk.ChunkCoord.Y voxelChunk.ChunkCoord.Z).Name
-                        [Entity.Position := voxelChunk.ChunkCenter
-                         Entity.Size := voxelChunk.ChunkSize
-                         Entity.VoxelChunkCoord := voxelChunk.ChunkCoord
-                         Entity.VoxelModelOpt := voxelChunk.VoxelModelOpt
-                         Entity.Visible == Option.isSome voxelChunk.VoxelModelOpt
-                         Entity.Presence == Exterior
-                         Entity.AlwaysRender == false
-                         Entity.CastShadow == false
-                         Entity.BodyType == Static
-                         Entity.BodyShape := voxelChunk.BodyShape
-                         Entity.CollisionCategories == "10"
-                         Entity.Static == true
-                         Entity.MaterialProperties ==
-                            { MaterialProperties.empty with
-                                RoughnessOpt = ValueSome 0.92f
-                                MetallicOpt = ValueSome 0.0f
-                                AmbientOcclusionOpt = ValueSome 1.0f
-                                EmissionOpt = ValueSome 0.0f
-                                ClearCoatOpt = ValueSome 0.0f
-                                ClearCoatRoughnessOpt = ValueSome 1.0f }]
+                 let farTerrainLodVisible =
+                    match gameplay.VoxelLevelOpt with
+                    | Some level -> Option.isSome level.GenerationOpt
+                    | None -> false
+                 Content.staticModel Simulants.FarTerrainLod.Name
+                    [Entity.Visible := farTerrainLodVisible
+                     Entity.Position == v3Zero
+                     Entity.Size == v3One
+                     Entity.Scale == v3One
+                     Entity.Presence == Omnipresent
+                     Entity.AlwaysRender == true
+                     Entity.Static == true
+                     Entity.Pickable == false
+                     Entity.CastShadow == false
+                     Entity.StaticModel == Assets.Voxels.FarTerrainLod
+                     Entity.MaterialProperties == MaterialProperties.empty]
 
                  Content.composite<FirstPersonPlayerDispatcher> Simulants.GameplayPlayer.Name
                     [Entity.Position == playerSpawnPosition]
@@ -1223,63 +1603,61 @@ type GameplayDispatcher () =
                          Entity.PortalOneSided := true
                          Entity.PortalTint := PortalLogic.portalTint portal.Id]
 
-                 match gameplay.SelectedBlockPreviewPositionOpt, GameplayLogic.tryGetSelectedBlock gameplay with
-                 | Some position, Some placeableBlock ->
-                    Content.voxel Simulants.SelectedBlockPreview.Name
-                        [Entity.Position := position
-                         Entity.Size := v3One
-                         Entity.Scale := v3Dup 0.35f
-                         Entity.VoxelModel := placeableBlock.PreviewModel
-                         Entity.Static == true
-                         Entity.MaterialProperties ==
-                            { MaterialProperties.empty with
-                                RoughnessOpt = ValueSome 0.88f
-                                MetallicOpt = ValueSome 0.0f
-                                AmbientOcclusionOpt = ValueSome 1.0f
-                                EmissionOpt = ValueSome 0.0f
-                                ClearCoatOpt = ValueSome 0.0f
-                                ClearCoatRoughnessOpt = ValueSome 1.0f }]
-                 | _, _ -> ()
+                 let selectedBlockOpt = GameplayLogic.tryGetSelectedBlock gameplay
+                 let selectedBlockPreviewModel =
+                    match selectedBlockOpt with
+                    | Some placeableBlock -> placeableBlock.PreviewModel
+                    | None -> Assets.Default.VoxelModel
 
-                 match GameplayLogic.tryGetAimBlockBounds gameplay with
-                 | Some bounds ->
-                    Content.light3d Simulants.AimBlockHighlightLight.Name
-                        [Entity.Position := bounds.Center
+                 Content.voxel Simulants.SelectedBlockPreview.Name
+                    [Entity.Size == v3One
+                     Entity.Scale == v3Dup 0.35f
+                     Entity.VoxelModel := selectedBlockPreviewModel
+                     Entity.Visible == Option.isSome selectedBlockOpt
+                     Entity.Static == true
+                     Entity.MaterialProperties ==
+                        { MaterialProperties.empty with
+                            RoughnessOpt = ValueSome 0.88f
+                            MetallicOpt = ValueSome 0.0f
+                            AmbientOcclusionOpt = ValueSome 1.0f
+                            EmissionOpt = ValueSome 0.0f
+                            ClearCoatOpt = ValueSome 0.0f
+                            ClearCoatRoughnessOpt = ValueSome 1.0f }]
+
+                 Content.light3d Simulants.AimBlockHighlightLight.Name
+                    [Entity.Visible == false
+                     Entity.Presence == Omnipresent
+                     Entity.AlwaysRender == true
+                     Entity.Static == true
+                     Entity.LightType == PointLight
+                     Entity.Color == color 0.18f 0.95f 1.0f 1.0f
+                     Entity.Brightness == 1.25f
+                     Entity.LightCutoff == 2.5f
+                     Entity.AutoAttenuate == true
+                     Entity.DesireShadows == false
+                     Entity.DesireFog == false]
+                 for i in 0 .. dec 6 do
+                    Content.staticModel (Simulants.AimBlockHighlightFace i).Name
+                        [Entity.Visible == false
+                         Entity.Size == v3One
+                         Entity.Scale == v3One
                          Entity.Presence == Omnipresent
                          Entity.AlwaysRender == true
                          Entity.Static == true
-                         Entity.LightType == PointLight
-                         Entity.Color == color 0.18f 0.95f 1.0f 1.0f
-                         Entity.Brightness == 1.25f
-                         Entity.LightCutoff == 2.5f
-                         Entity.AutoAttenuate == true
-                         Entity.DesireShadows == false
-                         Entity.DesireFog == false]
-                    for i in 0 .. dec 6 do
-                        let struct (position, rotation, scale) = GameplayLogic.getAimBlockHighlightFace bounds i
-                        Content.staticModel (Simulants.AimBlockHighlightFace i).Name
-                            [Entity.Position := position
-                             Entity.Rotation := rotation
-                             Entity.Size := scale
-                             Entity.Scale := scale
-                             Entity.Presence == Omnipresent
-                             Entity.AlwaysRender == true
-                             Entity.Static == true
-                             Entity.Pickable == false
-                             Entity.CastShadow == false
-                             Entity.Clipped == true
-                             Entity.DepthTest == LessThanOrEqualTest
-                             Entity.RenderStyle == Deferred
-                             Entity.StaticModel == Assets.Default.HighlightModel
-                             Entity.MaterialProperties ==
-                                { MaterialProperties.defaultProperties with
-                                    AlbedoOpt = ValueSome (color 0.18f 0.95f 1.0f 1.0f)
-                                    RoughnessOpt = ValueSome 0.25f
-                                    MetallicOpt = ValueSome 0.0f
-                                    AmbientOcclusionOpt = ValueSome 1.0f
-                                    EmissionOpt = ValueSome 1.65f
-                                    SpecularScalarOpt = ValueSome 0.0f }]
-                 | None -> ()
+                         Entity.Pickable == false
+                         Entity.CastShadow == false
+                         Entity.Clipped == true
+                         Entity.DepthTest == LessThanOrEqualTest
+                         Entity.RenderStyle == Deferred
+                         Entity.StaticModel == Assets.Default.HighlightModel
+                         Entity.MaterialProperties ==
+                            { MaterialProperties.defaultProperties with
+                                AlbedoOpt = ValueSome (color 0.18f 0.95f 1.0f 1.0f)
+                                RoughnessOpt = ValueSome 0.25f
+                                MetallicOpt = ValueSome 0.0f
+                                AmbientOcclusionOpt = ValueSome 1.0f
+                                EmissionOpt = ValueSome 1.65f
+                                SpecularScalarOpt = ValueSome 0.0f }]
 
                  Content.button Simulants.GameplayQuit.Name
                     [Entity.Position == v3 232.0f -144.0f 0.0f

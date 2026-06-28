@@ -119,11 +119,13 @@ type VoxelGeneration =
 
 type VoxelEditSnapshot =
     { Revision : int
+      BlockEditsOpt : Dictionary<Vector3i, VoxelBlockTemplate option> option
       EditsOpt : Dictionary<Vector3i, VoxelEdit> option }
 
 type PlaceableBlock =
     { Name : string
       Voxels : struct (Vector3i * VoxelCell) array
+      Template : VoxelBlockTemplate
       PreviewModel : VoxelModel AssetTag }
 
 type VoxelLevel =
@@ -140,6 +142,7 @@ type VoxelLevel =
       GenerationOpt : VoxelGeneration option
       GeneratedBlockTemplateCache : ConcurrentDictionary<Vector3i, VoxelBlockTemplate option>
       SourceVoxels : Dictionary<Vector3i, VoxelCell>
+      BlockEdits : Dictionary<Vector3i, VoxelBlockTemplate option>
       Edits : Dictionary<Vector3i, VoxelEdit>
       EditRevision : int ref
       PlaceableBlocks : PlaceableBlock array
@@ -198,7 +201,7 @@ module WorldGenSettings =
           MountainStrength = 0.85f
           CaveThreshold = 0.70f
           OreRate = 0.035f
-          TreeRate = 0.10f
+          TreeRate = 0.025f
           ChunksPerUpdate = 32 }
 
 [<RequireQualifiedAccess>]
@@ -456,6 +459,7 @@ module VoxelWorld =
           GenerationOpt = None
           GeneratedBlockTemplateCache = ConcurrentDictionary<Vector3i, VoxelBlockTemplate option> (HashIdentity.Structural)
           SourceVoxels = Dictionary<Vector3i, VoxelCell> (HashIdentity.Structural)
+          BlockEdits = Dictionary<Vector3i, VoxelBlockTemplate option> (HashIdentity.Structural)
           Edits = Dictionary<Vector3i, VoxelEdit> (HashIdentity.Structural)
           EditRevision = ref 0
           PlaceableBlocks = placeableBlocks
@@ -792,59 +796,180 @@ module VoxelWorld =
         | ValueSome cell -> Some cell
         | ValueNone -> None
 
+    let private spawnSearchRadiusMax = 192
+    let private spawnLakeSearchRadius = 20
+    let private spawnCandidatesMax = 256
+
     let pickGeneratedSpawn (level : VoxelLevel) =
         match level.GenerationOpt with
         | Some generation ->
             let macroCounts = generatedBlockCounts level
             let centerX = macroCounts.X / 2
             let centerZ = macroCounts.Z / 2
+            let heightCache = Dictionary<int, int> ()
+            let getHeight x z =
+                let key = z * macroCounts.X + x
+                let mutable height = 0
+                if heightCache.TryGetValue (key, &height) then height
+                else
+                    height <- generatedHeightAt level generation x z
+                    heightCache[key] <- height
+                    height
+            let tryNearestWaterDistance x z =
+                let mutable found = false
+                let mutable foundDistance = 0
+                let mutable radius = 1
+                let tryWater wx wz =
+                    wx >= 0 && wx < macroCounts.X &&
+                    wz >= 0 && wz < macroCounts.Z &&
+                    getHeight wx wz < generation.SeaLevelBlocks
+                while not found && radius <= spawnLakeSearchRadius do
+                    let zMin = z - radius
+                    let zMax = z + radius
+                    let xMin = x - radius
+                    let xMax = x + radius
+                    let mutable dx = -radius
+                    while not found && dx <= radius do
+                        if tryWater (x + dx) zMin || tryWater (x + dx) zMax then
+                            found <- true
+                            foundDistance <- radius
+                        dx <- inc dx
+                    let mutable dz = -radius + 1
+                    while not found && dz <= radius - 1 do
+                        if tryWater xMin (z + dz) || tryWater xMax (z + dz) then
+                            found <- true
+                            foundDistance <- radius
+                        dz <- inc dz
+                    radius <- inc radius
+                if found then ValueSome foundDistance else ValueNone
+            let isSpawnSafe x z height =
+                let feet = v3i x (height + 1) z
+                let head = v3i x (height + 2) z
+                let terrainBlock = v3i x height z
+                height >= generation.SeaLevelBlocks &&
+                isBlockCoordInBounds level feet &&
+                isBlockCoordInBounds level head &&
+                (match tryGetGeneratedBlockTemplate level terrainBlock with Some template -> template.Solid | None -> false) &&
+                Option.isNone (tryGetGeneratedBlockTemplate level feet) &&
+                Option.isNone (tryGetGeneratedBlockTemplate level head)
+            let searchRadius = min spawnSearchRadiusMax (max macroCounts.X macroCounts.Z / 2)
+            let candidates = ResizeArray<struct (single * int * int * int)> ()
+            for z in max 0 (centerZ - searchRadius) .. min (dec macroCounts.Z) (centerZ + searchRadius) do
+                for x in max 0 (centerX - searchRadius) .. min (dec macroCounts.X) (centerX + searchRadius) do
+                    let height = getHeight x z
+                    if height >= generation.SeaLevelBlocks then
+                        let heightAboveSea = height - generation.SeaLevelBlocks
+                        let waterScore =
+                            match tryNearestWaterDistance x z with
+                            | ValueSome distance -> 90.0f + single (spawnLakeSearchRadius - distance) * 3.0f
+                            | ValueNone -> 0.0f
+                        let mountainScore =
+                            single heightAboveSea * 14.0f +
+                            if heightAboveSea >= 4 then 36.0f else 0.0f
+                        let dx = x - centerX
+                        let dz = z - centerZ
+                        let centerPenalty = single (dx * dx + dz * dz) * 0.00025f
+                        let score = mountainScore + waterScore - centerPenalty
+                        candidates.Add (struct (score, x, z, height))
+            let candidates = candidates.ToArray ()
+            Array.sortInPlaceWith
+                (fun (struct (leftScore, leftX, leftZ, _)) (struct (rightScore, rightX, rightZ, _)) ->
+                    let scoreCompare = compare rightScore leftScore
+                    if scoreCompare <> 0 then scoreCompare
+                    else
+                        let leftDistance = (leftX - centerX) * (leftX - centerX) + (leftZ - centerZ) * (leftZ - centerZ)
+                        let rightDistance = (rightX - centerX) * (rightX - centerX) + (rightZ - centerZ) * (rightZ - centerZ)
+                        compare leftDistance rightDistance)
+                candidates
             let mutable spawnOpt = None
-            let mutable radius = 0
-            while spawnOpt.IsNone && radius < max macroCounts.X macroCounts.Z do
-                for z in max 0 (centerZ - radius) .. min (dec macroCounts.Z) (centerZ + radius) do
-                    for x in max 0 (centerX - radius) .. min (dec macroCounts.X) (centerX + radius) do
-                        if spawnOpt.IsNone then
-                            let height = generatedHeightAt level generation x z
-                            let feet = v3i x (height + 1) z
-                            let head = v3i x (height + 2) z
-                            let terrainBlock = v3i x height z
-                            if height >= generation.SeaLevelBlocks &&
-                               isBlockCoordInBounds level feet &&
-                               isBlockCoordInBounds level head &&
-                               (match tryGetGeneratedBlockTemplate level terrainBlock with Some template -> template.Solid | None -> false) &&
-                               Option.isNone (tryGetGeneratedBlockTemplate level feet) &&
-                               Option.isNone (tryGetGeneratedBlockTemplate level head) then
-                                spawnOpt <- Some (blockTopPosition level (v3i x height z))
-                radius <- inc radius
+            let mutable i = 0
+            while spawnOpt.IsNone && i < min spawnCandidatesMax candidates.Length do
+                let struct (_, x, z, height) = candidates[i]
+                if isSpawnSafe x z height then
+                    spawnOpt <- Some (blockTopPosition level (v3i x height z))
+                i <- inc i
             match spawnOpt with
             | Some spawn -> spawn
-            | None -> blockTopPosition level (v3i centerX generation.SeaLevelBlocks centerZ)
+            | None ->
+                let mutable fallbackOpt = None
+                let mutable radius = 0
+                while fallbackOpt.IsNone && radius < max macroCounts.X macroCounts.Z do
+                    for z in max 0 (centerZ - radius) .. min (dec macroCounts.Z) (centerZ + radius) do
+                        for x in max 0 (centerX - radius) .. min (dec macroCounts.X) (centerX + radius) do
+                            if fallbackOpt.IsNone then
+                                let height = getHeight x z
+                                if isSpawnSafe x z height then
+                                    fallbackOpt <- Some (blockTopPosition level (v3i x height z))
+                    radius <- inc radius
+                match fallbackOpt with
+                | Some spawn -> spawn
+                | None -> blockTopPosition level (v3i centerX generation.SeaLevelBlocks centerZ)
         | None -> level.SpawnPosition
 
     let getEditRevision (level : VoxelLevel) =
         level.EditRevision.Value
 
+    let private tryGetBlockEditValue (blockEdits : Dictionary<Vector3i, VoxelBlockTemplate option>) (blockCoord : Vector3i) =
+        match blockEdits.TryGetValue blockCoord with
+        | (true, templateOpt) -> ValueSome templateOpt
+        | (false, _) -> ValueNone
+
+    let private tryGetCellFromBlockTemplateValue (level : VoxelLevel) (coord : Vector3i) (blockCoord : Vector3i) (template : VoxelBlockTemplate) =
+        let localCoord = coord - blockStartCoord level blockCoord
+        match template.Cells.TryGetValue localCoord with
+        | (true, cell) -> ValueSome cell
+        | (false, _) -> ValueNone
+
+    let private tryGetCellFromBlockEditValue (level : VoxelLevel) (coord : Vector3i) (blockCoord : Vector3i) (templateOpt : VoxelBlockTemplate option) =
+        match templateOpt with
+        | Some template -> tryGetCellFromBlockTemplateValue level coord blockCoord template
+        | None -> ValueNone
+
     let snapshotEdits (level : VoxelLevel) =
-        lock level.Edits (fun () ->
-            { Revision = level.EditRevision.Value
-              EditsOpt =
-                if level.Edits.Count = 0 then None
-                else Some (Dictionary<Vector3i, VoxelEdit> (level.Edits, HashIdentity.Structural)) })
+        lock level.BlockEdits (fun () ->
+            lock level.Edits (fun () ->
+                { Revision = level.EditRevision.Value
+                  BlockEditsOpt =
+                    if level.BlockEdits.Count = 0 then None
+                    else Some (Dictionary<Vector3i, VoxelBlockTemplate option> (level.BlockEdits, HashIdentity.Structural))
+                  EditsOpt =
+                    if level.Edits.Count = 0 then None
+                    else Some (Dictionary<Vector3i, VoxelEdit> (level.Edits, HashIdentity.Structural)) }))
 
     let tryGetCellWithEditSnapshotValue (snapshot : VoxelEditSnapshot) (level : VoxelLevel) (coord : Vector3i) =
-        match snapshot.EditsOpt with
-        | Some edits ->
-            match edits.TryGetValue coord with
-            | (true, Removed) -> ValueNone
-            | (true, Placed cell) -> ValueSome cell
-            | (false, _) ->
+        let blockCoord = sourceCoordToBlockCoord level coord
+        match snapshot.BlockEditsOpt with
+        | Some blockEdits ->
+            match tryGetBlockEditValue blockEdits blockCoord with
+            | ValueSome templateOpt -> tryGetCellFromBlockEditValue level coord blockCoord templateOpt
+            | ValueNone ->
+                match snapshot.EditsOpt with
+                | Some edits ->
+                    match edits.TryGetValue coord with
+                    | (true, Removed) -> ValueNone
+                    | (true, Placed cell) -> ValueSome cell
+                    | (false, _) ->
+                        match level.SourceVoxels.TryGetValue coord with
+                        | (true, cell) -> ValueSome cell
+                        | (false, _) -> tryGetGeneratedCellValue level coord
+                | None ->
+                    match level.SourceVoxels.TryGetValue coord with
+                    | (true, cell) -> ValueSome cell
+                    | (false, _) -> tryGetGeneratedCellValue level coord
+        | None ->
+            match snapshot.EditsOpt with
+            | Some edits ->
+                match edits.TryGetValue coord with
+                | (true, Removed) -> ValueNone
+                | (true, Placed cell) -> ValueSome cell
+                | (false, _) ->
+                    match level.SourceVoxels.TryGetValue coord with
+                    | (true, cell) -> ValueSome cell
+                    | (false, _) -> tryGetGeneratedCellValue level coord
+            | None ->
                 match level.SourceVoxels.TryGetValue coord with
                 | (true, cell) -> ValueSome cell
                 | (false, _) -> tryGetGeneratedCellValue level coord
-        | None ->
-            match level.SourceVoxels.TryGetValue coord with
-            | (true, cell) -> ValueSome cell
-            | (false, _) -> tryGetGeneratedCellValue level coord
 
     let tryGetCellWithEditSnapshot (snapshot : VoxelEditSnapshot) (level : VoxelLevel) (coord : Vector3i) =
         match tryGetCellWithEditSnapshotValue snapshot level coord with
@@ -852,13 +977,17 @@ module VoxelWorld =
         | ValueNone -> None
 
     let tryGetCellValue (level : VoxelLevel) (coord : Vector3i) =
-        match level.Edits.TryGetValue coord with
-        | (true, Removed) -> ValueNone
-        | (true, Placed cell) -> ValueSome cell
-        | (false, _) ->
-            match level.SourceVoxels.TryGetValue coord with
-            | (true, cell) -> ValueSome cell
-            | (false, _) -> tryGetGeneratedCellValue level coord
+        let blockCoord = sourceCoordToBlockCoord level coord
+        match tryGetBlockEditValue level.BlockEdits blockCoord with
+        | ValueSome templateOpt -> tryGetCellFromBlockEditValue level coord blockCoord templateOpt
+        | ValueNone ->
+            match level.Edits.TryGetValue coord with
+            | (true, Removed) -> ValueNone
+            | (true, Placed cell) -> ValueSome cell
+            | (false, _) ->
+                match level.SourceVoxels.TryGetValue coord with
+                | (true, cell) -> ValueSome cell
+                | (false, _) -> tryGetGeneratedCellValue level coord
 
     let tryGetCell (level : VoxelLevel) (coord : Vector3i) =
         match tryGetCellValue level coord with
@@ -889,61 +1018,67 @@ module VoxelWorld =
             setSourceCell level coord cell
 
     let blockContainsCell (level : VoxelLevel) (blockCoord : Vector3i) =
-        let start = blockStartCoord level blockCoord
-        let mutable contains = false
-        let mutable y = 0
-        while not contains && y < level.BlockSideVoxels do
-            let mutable z = 0
-            while not contains && z < level.BlockSideVoxels do
-                let mutable x = 0
-                while not contains && x < level.BlockSideVoxels do
-                    contains <- containsCell level (v3i (start.X + x) (start.Y + y) (start.Z + z))
-                    x <- inc x
-                z <- inc z
-            y <- inc y
-        contains
+        match tryGetBlockEditValue level.BlockEdits blockCoord with
+        | ValueSome (Some template) -> template.Voxels.Length > 0
+        | ValueSome None -> false
+        | ValueNone when level.SourceVoxels.Count = 0 && level.Edits.Count = 0 && Option.isSome level.GenerationOpt ->
+            match tryGetGeneratedBlockTemplate level blockCoord with
+            | Some template -> template.Voxels.Length > 0
+            | None -> false
+        | ValueNone ->
+            let start = blockStartCoord level blockCoord
+            let mutable contains = false
+            let mutable y = 0
+            while not contains && y < level.BlockSideVoxels do
+                let mutable z = 0
+                while not contains && z < level.BlockSideVoxels do
+                    let mutable x = 0
+                    while not contains && x < level.BlockSideVoxels do
+                        contains <- containsCell level (v3i (start.X + x) (start.Y + y) (start.Z + z))
+                        x <- inc x
+                    z <- inc z
+                y <- inc y
+            contains
 
     let blockContainsSolidCell (level : VoxelLevel) (blockCoord : Vector3i) =
-        let start = blockStartCoord level blockCoord
-        let mutable contains = false
-        let mutable y = 0
-        while not contains && y < level.BlockSideVoxels do
-            let mutable z = 0
-            while not contains && z < level.BlockSideVoxels do
-                let mutable x = 0
-                while not contains && x < level.BlockSideVoxels do
-                    contains <- containsSolidCell level (v3i (start.X + x) (start.Y + y) (start.Z + z))
-                    x <- inc x
-                z <- inc z
-            y <- inc y
-        contains
+        match tryGetBlockEditValue level.BlockEdits blockCoord with
+        | ValueSome (Some template) -> template.Solid && template.Voxels.Length > 0
+        | ValueSome None -> false
+        | ValueNone when level.SourceVoxels.Count = 0 && level.Edits.Count = 0 && Option.isSome level.GenerationOpt ->
+            match tryGetGeneratedBlockTemplate level blockCoord with
+            | Some template -> template.Solid && template.Voxels.Length > 0
+            | None -> false
+        | ValueNone ->
+            let start = blockStartCoord level blockCoord
+            let mutable contains = false
+            let mutable y = 0
+            while not contains && y < level.BlockSideVoxels do
+                let mutable z = 0
+                while not contains && z < level.BlockSideVoxels do
+                    let mutable x = 0
+                    while not contains && x < level.BlockSideVoxels do
+                        contains <- containsSolidCell level (v3i (start.X + x) (start.Y + y) (start.Z + z))
+                        x <- inc x
+                    z <- inc z
+                y <- inc y
+            contains
 
     let blockIsEmpty level blockCoord =
         not (blockContainsCell level blockCoord)
 
     let removeBlock (level : VoxelLevel) (blockCoord : Vector3i) =
-        let start = blockStartCoord level blockCoord
-        lock level.Edits (fun () ->
-            for y in 0 .. dec level.BlockSideVoxels do
-                for z in 0 .. dec level.BlockSideVoxels do
-                    for x in 0 .. dec level.BlockSideVoxels do
-                        let coord = v3i (start.X + x) (start.Y + y) (start.Z + z)
-                        if isSourceCoordInBounds level coord then
-                            level.Edits[coord] <- Removed
-            level.EditRevision.Value <- inc level.EditRevision.Value)
+        if isBlockCoordInBounds level blockCoord then
+            lock level.BlockEdits (fun () ->
+                level.BlockEdits[blockCoord] <- None
+                level.EditRevision.Value <- inc level.EditRevision.Value)
 
     let placeBlock (level : VoxelLevel) (placeableBlock : PlaceableBlock) (blockCoord : Vector3i) =
-        removeBlock level blockCoord
-        let start = blockStartCoord level blockCoord
-        lock level.Edits (fun () ->
-            for struct (localCoord, cell) in placeableBlock.Voxels do
-                let coord = v3i (start.X + localCoord.X) (start.Y + localCoord.Y) (start.Z + localCoord.Z)
-                if isSourceCoordInBounds level coord then
-                    level.Edits[coord] <- Placed cell
-            level.EditRevision.Value <- inc level.EditRevision.Value)
+        if isBlockCoordInBounds level blockCoord then
+            lock level.BlockEdits (fun () ->
+                level.BlockEdits[blockCoord] <- Some placeableBlock.Template
+                level.EditRevision.Value <- inc level.EditRevision.Value)
 
     let affectedChunksForBlock (level : VoxelLevel) (blockCoord : Vector3i) =
-        let affected = HashSet<Vector3i> (HashIdentity.Structural)
         let start = blockStartCoord level blockCoord
         let finish =
             start +
@@ -963,9 +1098,8 @@ module VoxelWorld =
                 (min (level.SourceSizeVoxels.Z - 1) (finish.Z + 1))
         let minChunkCoord = sourceCoordToChunkCoord level minCoord
         let maxChunkCoord = sourceCoordToChunkCoord level maxCoord
-        for z in minChunkCoord.Z .. maxChunkCoord.Z do
+        [|for z in minChunkCoord.Z .. maxChunkCoord.Z do
             for y in minChunkCoord.Y .. maxChunkCoord.Y do
                 for x in minChunkCoord.X .. maxChunkCoord.X do
                     let coord = v3i x y z
-                    if isChunkCoordInBounds level coord then affected.Add coord |> ignore<bool>
-        affected |> Seq.toArray
+                    if isChunkCoordInBounds level coord then yield coord|]

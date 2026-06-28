@@ -160,6 +160,28 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
                 Log.warnOnce "Invalid utilization of BodyShape.PropertiesOpt in JoltPhysicsEngine. Only BodyShapeProperties.BodyShapeIndex can be utilized in the context of Jolt physics."
         | None -> ()
 
+    static member private getBodyShapeTransform (transformOpt : Affine option) =
+        match transformOpt with
+        | Some transform -> struct (transform.Translation, transform.Rotation)
+        | None -> struct (v3Zero, quatIdentity)
+
+    static member private computeShapeScale (bodyProperties : BodyProperties) (transformOpt : Affine option) =
+        let scale =
+            match transformOpt with
+            | Some transform -> bodyProperties.Scale * transform.Scale
+            | None -> bodyProperties.Scale
+        JoltPhysicsEngine.sanitizeScale scale
+
+    static member private addSubShapeSettings (scShapeSettings : StaticCompoundShapeSettings) (center : Vector3) (rotation : Quaternion) (shapeScale : Vector3) (shapeSettings : ShapeSettings) (bodyShapeId : int) =
+        let mutable center = center
+        let mutable rotation = rotation
+        if shapeScale <> v3One then
+            let mutable shapeScale = shapeScale
+            use scaledShapeSettings = new ScaledShapeSettings (shapeSettings, &shapeScale)
+            scShapeSettings.AddShape (&center, &rotation, scaledShapeSettings, uint bodyShapeId)
+        else
+            scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+
     static member private handleBodyPenetration (bodyId : BodyId) (body2Id : BodyId) (contactNormal : Vector3) physicsEngine =
 
         // construct body penetration message
@@ -227,19 +249,19 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
         | BoxShape boxShape ->
             let extent = boxShape.Size |> JoltPhysicsEngine.sanitizeExtent
             let halfExtent = extent * 0.5f
-            let shapeSettings = new BoxShapeSettings (&halfExtent)
+            use shapeSettings = new BoxShapeSettings (&halfExtent)
             let shape = new BoxShape (shapeSettings)
             Some (shape :> ConvexShape, boxShape.TransformOpt)
         | SphereShape sphereShape ->
             let radius = sphereShape.Radius |> JoltPhysicsEngine.sanitizeRadius
-            let shapeSettings = new SphereShapeSettings (radius)
+            use shapeSettings = new SphereShapeSettings (radius)
             let shape = new SphereShape (shapeSettings)
             Some (shape :> ConvexShape, sphereShape.TransformOpt)
         | CapsuleShape capsuleShape ->
             let height = capsuleShape.Height |> JoltPhysicsEngine.sanitizeHeight
             let halfHeight = height * 0.5f
             let radius = capsuleShape.Radius |> JoltPhysicsEngine.sanitizeRadius
-            let shapeSettings = new CapsuleShapeSettings (halfHeight, radius)
+            use shapeSettings = new CapsuleShapeSettings (halfHeight, radius)
             let shape = new CapsuleShape (shapeSettings)
             Some (shape :> ConvexShape, capsuleShape.TransformOpt)
         | BoxRoundedShape boxRoundedShape ->
@@ -266,22 +288,11 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
     static member private attachBoxShape (bodyProperties : BodyProperties) (boxShape : Nu.BoxShape) (scShapeSettings : StaticCompoundShapeSettings) masses =
         let extent = boxShape.Size |> JoltPhysicsEngine.sanitizeExtent
         let halfExtent = extent * 0.5f
-        let shapeSettings = new BoxShapeSettings (&halfExtent)
-        let struct (center, rotation) =
-            match boxShape.TransformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let shapeSettings =
-            match boxShape.TransformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale)
-            | None -> shapeSettings
+        use shapeSettings = new BoxShapeSettings (&halfExtent)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform boxShape.TransformOpt
+        let shapeScale = JoltPhysicsEngine.computeShapeScale bodyProperties boxShape.TransformOpt
         let bodyShapeId = match boxShape.PropertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings center rotation shapeScale shapeSettings bodyShapeId
         let mass =
             match bodyProperties.Substance with
             | Density density ->
@@ -292,22 +303,11 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
 
     static member private attachSphereShape (bodyProperties : BodyProperties) (sphereShape : Nu.SphereShape) (scShapeSettings : StaticCompoundShapeSettings) masses =
         let radius = sphereShape.Radius |> JoltPhysicsEngine.sanitizeRadius
-        let shapeSettings = new SphereShapeSettings (radius)
-        let struct (center, rotation) =
-            match sphereShape.TransformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let shapeSettings =
-            match sphereShape.TransformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale)
-            | None -> shapeSettings
+        use shapeSettings = new SphereShapeSettings (radius)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform sphereShape.TransformOpt
+        let shapeScale = JoltPhysicsEngine.computeShapeScale bodyProperties sphereShape.TransformOpt
         let bodyShapeId = match sphereShape.PropertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings center rotation shapeScale shapeSettings bodyShapeId
         let mass =
             match bodyProperties.Substance with
             | Density density ->
@@ -320,22 +320,11 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
         let height = capsuleShape.Height |> JoltPhysicsEngine.sanitizeHeight
         let halfHeight = height * 0.5f
         let radius = capsuleShape.Radius |> JoltPhysicsEngine.sanitizeRadius
-        let shapeSettings = new CapsuleShapeSettings (halfHeight, radius)
-        let struct (center, rotation) =
-            match capsuleShape.TransformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let shapeSettings =
-            match capsuleShape.TransformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale)
-            | None -> shapeSettings
+        use shapeSettings = new CapsuleShapeSettings (halfHeight, radius)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform capsuleShape.TransformOpt
+        let shapeScale = JoltPhysicsEngine.computeShapeScale bodyProperties capsuleShape.TransformOpt
         let bodyShapeId = match capsuleShape.PropertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings center rotation shapeScale shapeSettings bodyShapeId
         let mass =
             match bodyProperties.Substance with
             | Density density ->
@@ -367,7 +356,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             | (false, _) -> (false, points)
         let unscaledPoints =
             if not optimized then
-                let hull = new BulletSharp.ConvexHullShape (unscaledPoints) // TODO: P1: attempt to find a way to remove dependency on Bullet here.
+                use hull = new BulletSharp.ConvexHullShape (unscaledPoints) // TODO: P1: attempt to find a way to remove dependency on Bullet here.
                 hull.OptimizeConvexHull ()
                 let unscaledPoints =
                     match hull.UnscaledPoints with
@@ -376,22 +365,11 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
                 physicsEngine.UnscaledPointsCache.Add (unscaledPointsKey, unscaledPoints)
                 unscaledPoints
             else unscaledPoints
-        let shapeSettings = new ConvexHullShapeSettings (unscaledPoints)
-        let struct (center, rotation) =
-            match transformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let (scale, shapeSettings) =
-            match transformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, (new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings))
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, new ScaledShapeSettings (shapeSettings, &shapeScale))
-            | None -> (v3One, shapeSettings)
+        use shapeSettings = new ConvexHullShapeSettings (unscaledPoints)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform transformOpt
+        let scale = JoltPhysicsEngine.computeShapeScale bodyProperties transformOpt
         let bodyShapeId = match propertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings center rotation scale shapeSettings bodyShapeId
         // NOTE: we approximate volume with the volume of a bounding box.
         // TODO: use a more accurate volume calculation.
         let box = box3 v3Zero ((Box3.Enclose points).Size * scale)
@@ -409,23 +387,12 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             |> Seq.chunkBySize 3
             |> Seq.map (fun t -> Triangle (&t[0], &t[1], &t[2]))
             |> Array.ofSeq
-        let shapeSettings = new MeshShapeSettings (triangles)
+        use shapeSettings = new MeshShapeSettings (triangles)
         shapeSettings.Sanitize ()
-        let struct (center, rotation) =
-            match transformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let (scale, shapeSettings) =
-            match transformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, (new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings))
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, new ScaledShapeSettings (shapeSettings, &shapeScale))
-            | None -> (v3One, shapeSettings)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform transformOpt
+        let scale = JoltPhysicsEngine.computeShapeScale bodyProperties transformOpt
         let bodyShapeId = match propertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings center rotation scale shapeSettings bodyShapeId
         // NOTE: we approximate volume with the volume of a bounding box.
         // TODO: use a more accurate volume calculation.
         let box = box3 v3Zero ((Box3.Enclose vertices).Size * scale)
@@ -439,22 +406,11 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
 
     static member private attachBodyBoundsShape (bodyProperties : BodyProperties) (points : Vector3 array) (transformOpt : Affine option) (propertiesOpt : BodyShapeProperties option) (scShapeSettings : StaticCompoundShapeSettings) masses =
         let bounds = Box3.Enclose points
-        let shapeSettings = new ConvexHullShapeSettings (bounds.Corners)
-        let struct (center, rotation) =
-            match transformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let (scale, shapeSettings) =
-            match transformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, (new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings))
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, new ScaledShapeSettings (shapeSettings, &shapeScale))
-            | None -> (v3One, shapeSettings)
+        use shapeSettings = new ConvexHullShapeSettings (bounds.Corners)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform transformOpt
+        let scale = JoltPhysicsEngine.computeShapeScale bodyProperties transformOpt
         let bodyShapeId = match propertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings center rotation scale shapeSettings bodyShapeId
         // NOTE: we approximate volume with the volume of a bounding box.
         // TODO: use a more accurate volume calculation.
         let box = box3 v3Zero ((Box3.Enclose points).Size * scale)
@@ -543,7 +499,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
                     let size = match terrainShape.TransformOpt with Some transform -> transform.Scale * size | None -> size
                     let offset = size * -0.5f
                     let tileSize = v3 (size.X / single (dec terrainShape.Resolution.X)) (size.Y / terrainShape.Bounds.Height) (size.Z / single (dec terrainShape.Resolution.Y))
-                    let shapeSettings = new HeightFieldShapeSettings (heights.AsSpan (), &offset, &tileSize, uint terrainShape.Resolution.X)
+                    use shapeSettings = new HeightFieldShapeSettings (heights.AsSpan (), &offset, &tileSize, uint terrainShape.Resolution.X)
                     let bodyShapeId = match terrainShape.PropertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
                     scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
                     0.0f :: masses // infinite mass
@@ -579,7 +535,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
         | BodyShapes bodyShapes -> JoltPhysicsEngine.attachBodyShapes bodyProperties bodyShapes scShapeSettings masses physicsEngine
 
     static member private createBodyNonCharacter mass layer motionType (shapeSettings : ShapeSettings) (bodyId : BodyId) (bodyProperties : BodyProperties) (physicsEngine : JoltPhysicsEngine) =
-        let mutable bodyCreationSettings = new BodyCreationSettings (shapeSettings, &bodyProperties.Center, &bodyProperties.Rotation, motionType, layer)
+        use bodyCreationSettings = new BodyCreationSettings (shapeSettings, &bodyProperties.Center, &bodyProperties.Rotation, motionType, layer)
         bodyCreationSettings.AllowSleeping <- bodyProperties.SleepingAllowed
         bodyCreationSettings.Friction <- bodyProperties.Friction
         bodyCreationSettings.Restitution <- bodyProperties.Restitution
@@ -677,7 +633,8 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             let position = v3Zero
             let rotation = quatIdentity
             let centerOfMass = v3Zero
-            scShapeSettings.AddShape (&position, &rotation, new EmptyShapeSettings (&centerOfMass))
+            use emptyShapeSettings = new EmptyShapeSettings (&centerOfMass)
+            scShapeSettings.AddShape (&position, &rotation, emptyShapeSettings)
         let objectLayer = JoltPhysicsEngine.computeObjectLayer bodyProperties.Enabled bodyProperties.BodyType
         let motionType = JoltPhysicsEngine.computeMotionType bodyProperties.Enabled bodyProperties.BodyType
         let characterProperties =
@@ -789,7 +746,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
 
             // create vehicle offset COM shape
             let offset = v3Down * 1.25f // TODO: P1: expose this as parameter.
-            let offsetComShapeSettings = new OffsetCenterOfMassShapeSettings (&offset, scShapeSettings)
+            use offsetComShapeSettings = new OffsetCenterOfMassShapeSettings (&offset, scShapeSettings)
 
             // create vehicle body
             let (bodyId, body) = JoltPhysicsEngine.createBodyNonCharacter mass objectLayer motionType offsetComShapeSettings bodyId bodyProperties physicsEngine
@@ -922,6 +879,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             physicsEngine.BodyConstraints.Remove bodyJointId |> ignore
             physicsEngine.BodyConstraintBreakingPoints.Remove bodyJointId |> ignore
             physicsEngine.PhysicsContext.RemoveConstraint joint
+            joint.Dispose ()
         | (false, _) -> ()
 
     static member private destroyBodyJoint (destroyBodyJointMessage : DestroyBodyJointMessage) physicsEngine =
@@ -1486,6 +1444,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
         member physicsEngine.ShapeCast (shape, transformOpt, ray, collisionCategory, collisionMask, closestOnly) =
             match JoltPhysicsEngine.tryCreateShape shape with
             | Some (shape, shapeTransformOpt) ->
+                use shape = shape
                 let transformMatrix =
                     Option.map2 Affine.combineAsMatrix shapeTransformOpt transformOpt
                     |> Option.defaultValue m4Identity
@@ -1666,6 +1625,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             // destroy constraints
             for constrain in physicsEngine.BodyConstraints.Values do
                 physicsEngine.PhysicsContext.RemoveConstraint constrain
+                constrain.Dispose ()
             physicsEngine.BodyConstraints.Clear ()
 
             // destroy bodies
@@ -1684,12 +1644,14 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             for vehicleConstraint in physicsEngine.VehicleConstraints.Values do
                 physicsEngine.PhysicsContext.RemoveStepListener vehicleConstraint
                 physicsEngine.PhysicsContext.RemoveConstraint vehicleConstraint
+                vehicleConstraint.Dispose ()
             physicsEngine.VehicleConstraints.Clear ()
 
             // clear integration messages
             physicsEngine.IntegrationMessages.Clear ()
 
         member physicsEngine.CleanUp () =
+            physicsEngine.CharacterVsCharacterCollision.Dispose ()
             physicsEngine.JobSystem.Dispose ()
             physicsEngine.PhysicsContext.Dispose ()
             Foundation.Shutdown ()

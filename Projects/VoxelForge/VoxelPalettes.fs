@@ -60,10 +60,17 @@ module VoxelPalettes =
             match VoxelBake.tryBakeSliceAtlasVolume image voxelSize with
             | Some volume ->
                 let previewModel = Assets.Voxels.PlaceableBlockPreview i
+                let voxels = cellsFromVolume material solid volume
                 World.createUserDefinedVoxelModel volume.VoxelModel previewModel world
                 yield
                     { Name = name
-                      Voxels = cellsFromVolume material solid volume
+                      Voxels = voxels
+                      Template =
+                        { Name = name
+                          Material = material
+                          Solid = solid
+                          Voxels = voxels
+                          Cells = cellMap voxels }
                       PreviewModel = previewModel }
             | None ->
                 Log.warnOnce ("VoxelForge could not bake placeable block '" + name + "'.")|]

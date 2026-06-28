@@ -39,3 +39,4 @@ module Assets =
         let PlaceableBlockPreview index = asset<VoxelModel> PackageName ("PlaceableBlockPreview" + string index)
         let MinecraftLevelChunk x y z = asset<VoxelModel> PackageName ("MinecraftLevel" + string x + "_" + string y + "_" + string z)
         let MinecraftLevelChunkRevision x y z revision = asset<VoxelModel> PackageName ("MinecraftLevel" + string x + "_" + string y + "_" + string z + "_" + string revision)
+        let FarTerrainLod = asset<StaticModel> PackageName "FarTerrainLod"
