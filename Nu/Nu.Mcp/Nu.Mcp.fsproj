@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <WarnOn>FS1182</WarnOn>
+    <NoWarn>FS0009;FS0052;FS1178;FS3391;FS3536;FS3560</NoWarn>
+    <Tailcalls>False</Tailcalls>
+    <WarningLevel>5</WarningLevel>
+    <WarningsAsErrors>FS0026;FS0049;FS3239;$(WarningsAsErrors)</WarningsAsErrors>
+    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Nu/Nu.fsproj" />
+    <PackageReference Include="FSharp.Core" Version="10.1.204" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([System.OperatingSystem]::IsMacOS())">
+    <None Include="../Nu.Dependencies/AssimpNet/iOS/assimp.xcframework/macos-arm64/assimp.framework/**/*">
+      <TargetPath>Frameworks/assimp.framework/%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>False</Visible>
+    </None>
+    <None Include="../Nu.Dependencies/BulletSharpPInvoke/iOS/bulletc.xcframework/macos-arm64/bulletc.framework/**/*">
+      <TargetPath>Frameworks/bulletc.framework/%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>False</Visible>
+    </None>
+  </ItemGroup>
+
+</Project>
