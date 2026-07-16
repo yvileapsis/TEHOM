@@ -133,7 +133,7 @@ type RenderAsset =
     | TextureAsset of Texture : Texture
     | FontAsset of FontSizeDefault : single * Font : TTF_Font nativeptr
     | MsdfFontAsset of Font : MsdfFontAssetData * AtlasTextures : Texture array
-    | SlugFontAsset of Font : SlugFontAssetData * CurveTexture : Texture * BandTexture : Texture
+    | SlugFontAsset of Font : SlugFontAssetData * ShaperOpt : SlugFontRuntime.SlugFontShaper option * CurveTexture : Texture * BandTexture : Texture
     | CubeMapAsset of FilePaths : CubeMapKey * CubeMap : Texture * IrradianceAndEnvironmentMapOptRef : (Texture * Texture) option ref
     | StaticModelAsset of UserDefined : bool * StaticModel : PhysicallyBasedModel
     | AnimatedModelAsset of AnimatedModel : PhysicallyBasedModel

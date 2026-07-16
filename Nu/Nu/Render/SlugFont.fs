@@ -100,7 +100,7 @@ module SlugFontRuntime =
           Bounds : SlugGlyphBounds
           Contours : Curve array array }
 
-    type private ShapedGlyph =
+    type internal ShapedGlyph =
         { Index : uint32
           XAdvance : single
           YAdvance : single
@@ -111,9 +111,73 @@ module SlugFontRuntime =
         { Glyphs : ShapedGlyph array
           Width : single }
 
+    /// Owns one reusable HarfBuzz Blob -> Face -> Font chain for a loaded Slug render asset.
+    /// ShapeRun is serialized because HarfBuzz font scale is mutable; this keeps complex-script
+    /// shaping identical while avoiding native font reconstruction for every directional run.
+    [<Sealed>]
+    type SlugFontShaper internal (blob : Blob, face : Face, font : HarfBuzzSharp.Font) =
+
+        let syncRoot = obj ()
+        let mutable disposed = false
+
+        member internal _.ShapeRun fontSize (direction : Direction) (languageOpt : string option) (runText : string) =
+            lock syncRoot (fun () ->
+                if disposed then raise (ObjectDisposedException "SlugFontShaper")
+                if String.IsNullOrEmpty runText then [||]
+                else
+                    let scale = max 1 (int (fontSize * 64.0f))
+                    font.SetScale (scale, scale)
+                    use buffer = new HarfBuzzSharp.Buffer ()
+                    buffer.AddUtf16 runText
+                    buffer.Direction <- direction
+                    match languageOpt with Some language when not (String.IsNullOrWhiteSpace language) -> buffer.Language <- new Language (language) | _ -> ()
+                    buffer.GuessSegmentProperties ()
+                    font.Shape (buffer, [||])
+                    let glyphInfos = buffer.GlyphInfos
+                    let glyphPositions = buffer.GlyphPositions
+                    [|for i in 0 .. dec glyphInfos.Length do
+                          let info = glyphInfos[i]
+                          let position = glyphPositions[i]
+                          yield { Index = info.Codepoint; XAdvance = single position.XAdvance / 64.0f; YAdvance = single position.YAdvance / 64.0f; XOffset = single position.XOffset / 64.0f; YOffset = single position.YOffset / 64.0f }|])
+
+        interface IDisposable with
+            member _.Dispose () =
+                lock syncRoot (fun () ->
+                    if not disposed then
+                        disposed <- true
+                        font.Dispose ()
+                        face.Dispose ()
+                        blob.Dispose ())
+
+    /// Try to create an asset-owned HarfBuzz context for repeated Slug layout.
+    let tryCreateShaper fontFilePath =
+        let mutable blobOpt : Blob option = None
+        let mutable faceOpt : Face option = None
+        let mutable fontOpt : HarfBuzzSharp.Font option = None
+        try
+            let fontFilePath = Path.GetFullPath fontFilePath
+            let blob = Blob.FromFile fontFilePath
+            blobOpt <- Some blob
+            let face = new Face (blob, 0u)
+            faceOpt <- Some face
+            let font = new HarfBuzzSharp.Font (face)
+            fontOpt <- Some font
+            font.SetFunctionsOpenType ()
+            Some (new SlugFontShaper (blob, face, font))
+        with exn ->
+            match fontOpt with Some font -> font.Dispose () | None -> ()
+            match faceOpt with Some face -> face.Dispose () | None -> ()
+            match blobOpt with Some blob -> blob.Dispose () | None -> ()
+            Log.info ("Could not create retained Slug font shaper for '" + fontFilePath + "' due to: " + scstring exn)
+            None
+
+
     let private textureWidth = 4096
     let private maxBandCount = 16
-    let private bandEpsilon = 1.0f / 1024.0f
+    // This epsilon expands adjacent bands so boundary samples cannot miss a curve. It must never
+    // be used to classify a curve as axis-aligned: even a one-font-unit slope can affect winding
+    // when Slug text is magnified.
+    let private bandOverlapEpsilon = 1.0f / 1024.0f
     let private maxCompositeDepth = 32
 
     let private readUInt16 (bytes : byte array) offset =
@@ -361,9 +425,20 @@ module SlugFontRuntime =
         else max 1 (min maxBandCount (int (sqrt (single curveCount))))
 
     let private makeBandData (glyphs : RawGlyph array) (curveLocations : Dictionary<uint32, Vector2i array>) =
-        let bandRows = max 1 glyphs.Length
-        let bandTexels = Array.zeroCreate<SlugBandTexel> (bandRows * textureWidth)
+        // Slug addresses every glyph from one texture origin, so glyphs can share rows. Keep the
+        // header block and each individual curve-index list inside one row: the fragment shader
+        // wraps a list's relative start offset, but deliberately increments its X coordinate
+        // directly inside the loop. This dense layout avoids reserving a mostly-empty 4096-texel
+        // row for every glyph without adding any shader work.
+        let bandTexels = ResizeArray<SlugBandTexel> ()
         let glyphMetadata = Dictionary<uint32, SlugFontGlyph> ()
+        let mutable cursor = 0
+        let alignCursorForSpan span =
+            if span > textureWidth then failwith "Slug band span exceeds the band texture row width."
+            let x = cursor % textureWidth
+            if x + span > textureWidth then cursor <- cursor + textureWidth - x
+        let ensureTexel index =
+            while bandTexels.Count <= index do bandTexels.Add Unchecked.defaultof<SlugBandTexel>
         for glyphIndex in 0 .. dec glyphs.Length do
             let glyph = glyphs[glyphIndex]
             let bounds = glyph.Bounds
@@ -380,36 +455,46 @@ module SlugFontRuntime =
                           let curve = curveList[curveIndex]
                           let minimum = if horizontal then min curve.P1.Y (min curve.P2.Y curve.P3.Y) else min curve.P1.X (min curve.P2.X curve.P3.X)
                           let maximum = if horizontal then max curve.P1.Y (max curve.P2.Y curve.P3.Y) else max curve.P1.X (max curve.P2.X curve.P3.X)
-                          let isAxisAligned = abs (maximum - minimum) <= bandEpsilon
-                          if not isAxisAligned && maximum >= lower - bandEpsilon && minimum <= upper + bandEpsilon then yield curveIndex|]
+                          // Only an exactly axis-parallel curve is irrelevant to a parallel ray.
+                          // The overlap epsilon below serves a different purpose and using it here
+                          // would drop genuine tiny slopes from complex or highly magnified text.
+                          let isAxisAligned = maximum = minimum
+                          if not isAxisAligned && maximum >= lower - bandOverlapEpsilon && minimum <= upper + bandOverlapEpsilon then yield curveIndex|]
                     |> Array.sortByDescending (fun curveIndex -> if horizontal then max curveList[curveIndex].P1.X (max curveList[curveIndex].P2.X curveList[curveIndex].P3.X) else max curveList[curveIndex].P1.Y (max curveList[curveIndex].P2.Y curveList[curveIndex].P3.Y)))
             let mutable bandCount = chooseBandCount curveList.Length (max xSpan ySpan)
             let mutable horizontalLists = makeLists true bandCount
             let mutable verticalLists = makeLists false bandCount
             let mutable headerCount = horizontalLists.Length + verticalLists.Length
             let mutable totalListCount = (Array.sumBy Array.length horizontalLists) + (Array.sumBy Array.length verticalLists)
+            // Keep each glyph's useful payload below one row as before. Dense placement can add at
+            // most one alignment gap, so every 16-bit relative list offset remains comfortably valid.
             while totalListCount > textureWidth - (2 * bandCount) && bandCount > 1 do
                 bandCount <- dec bandCount
                 horizontalLists <- makeLists true bandCount
                 verticalLists <- makeLists false bandCount
                 headerCount <- horizontalLists.Length + verticalLists.Length
                 totalListCount <- (Array.sumBy Array.length horizontalLists) + (Array.sumBy Array.length verticalLists)
-            let row = glyphIndex
-            let glyphLocation = Vector2i (0, row)
-            let mutable cursor = headerCount
+            alignCursorForSpan headerCount
+            let glyphStart = cursor
+            let glyphLocation = Vector2i (glyphStart % textureWidth, glyphStart / textureWidth)
+            if headerCount > 0 then ensureTexel (glyphStart + dec headerCount)
+            cursor <- cursor + headerCount
             let writeList (list : int array) : int * int =
-                let offset = cursor
+                alignCursorForSpan list.Length
+                let offset = cursor - glyphStart
+                if offset > int UInt16.MaxValue then failwith "Slug band list offset exceeds the 16-bit texture format."
                 for curveIndex in list do
                     let location = locationList[curveIndex]
-                    bandTexels[row * textureWidth + cursor] <- makeBandTexel location.X location.Y
+                    ensureTexel cursor
+                    bandTexels[cursor] <- makeBandTexel location.X location.Y
                     cursor <- inc cursor
                 list.Length, offset
             for bandIndex in 0 .. dec bandCount do
                 let count, offset = writeList horizontalLists[bandIndex]
-                bandTexels[row * textureWidth + bandIndex] <- makeBandTexel count offset
+                bandTexels[glyphStart + bandIndex] <- makeBandTexel count offset
             for bandIndex in 0 .. dec bandCount do
                 let count, offset = writeList verticalLists[bandIndex]
-                bandTexels[row * textureWidth + bandCount + bandIndex] <- makeBandTexel count offset
+                bandTexels[glyphStart + bandCount + bandIndex] <- makeBandTexel count offset
             let bandTransform =
                 Vector4
                     (single bandCount / xSpan,
@@ -423,7 +508,10 @@ module SlugFontRuntime =
                   BandLocation = glyphLocation
                   BandMax = Vector2i (dec bandCount, dec bandCount)
                   BandTransform = bandTransform }
-        glyphMetadata, bandTexels, bandRows
+        let bandRows = max 1 ((cursor + dec textureWidth) / textureWidth)
+        let result = Array.zeroCreate<SlugBandTexel> (bandRows * textureWidth)
+        for i in 0 .. dec bandTexels.Count do result[i] <- bandTexels[i]
+        glyphMetadata, result, bandRows
 
     let private tryReadFont fontFilePath =
         let fontFilePath = Path.GetFullPath fontFilePath
@@ -485,7 +573,6 @@ module SlugFontRuntime =
             Log.info ("Could not load Slug font '" + fontFilePath + "' due to: " + scstring exn)
             None
 
-    let private clampSingle minimum maximum value = max minimum (min maximum value)
 
     let private isRtlChar (ch : char) =
         let code = int ch
@@ -513,6 +600,9 @@ module SlugFontRuntime =
                 i <- inc i
             result
 
+    // TextDirectionAuto provides first-strong paragraph direction plus strong-direction runs, not
+    // the full UAX #9 bidi algorithm. Neutral characters and numerals inherit the current run.
+    // Keep that established behavior explicit while retained and stateless shaping stay identical.
     let private segmentRuns (paragraph : string) direction =
         if String.IsNullOrEmpty paragraph then [||]
         else
@@ -539,7 +629,7 @@ module SlugFontRuntime =
         | TextDirectionRightToLeft -> Direction.RightToLeft
         | TextDirectionAuto | TextDirectionLeftToRight -> Direction.LeftToRight
 
-    let private shapeRun fontFilePath fontSize direction languageOpt (runText : string) =
+    let private shapeRunFresh fontFilePath fontSize direction languageOpt (runText : string) =
         if String.IsNullOrEmpty runText then [||]
         else
             use blob = Blob.FromFile fontFilePath
@@ -561,23 +651,23 @@ module SlugFontRuntime =
                   let position = glyphPositions[i]
                   yield { Index = info.Codepoint; XAdvance = single position.XAdvance / 64.0f; YAdvance = single position.YAdvance / 64.0f; XOffset = single position.XOffset / 64.0f; YOffset = single position.YOffset / 64.0f }|]
 
-    let private shapeLine fontData fontSize direction languageOpt text =
+    let private shapeLine shapeRun fontSize direction languageOpt text =
         let glyphs = ResizeArray<ShapedGlyph> ()
         let mutable width = 0.0f
         for runText, runDirection in segmentRuns text direction do
-            for glyph in shapeRun fontData.FontFilePath fontSize runDirection languageOpt runText do
+            for glyph in shapeRun fontSize runDirection languageOpt runText do
                 glyphs.Add glyph
                 width <- width + glyph.XAdvance
         { Glyphs = glyphs.ToArray (); Width = width }
 
-    let private wrapParagraph fontData fontSize maxWidth direction languageOpt (paragraph : string) =
+    let private wrapParagraph shapeRun fontSize maxWidth direction languageOpt (paragraph : string) =
         if maxWidth <= 0.0f || String.IsNullOrEmpty paragraph then [|paragraph|]
         else
             let lines = ResizeArray<string> ()
             let mutable current = ""
             for word in paragraph.Split [|' '|] do
                 let candidate = if String.IsNullOrEmpty current then word else current + " " + word
-                if (shapeLine fontData fontSize direction languageOpt candidate).Width > maxWidth && not (String.IsNullOrEmpty current) then
+                if (shapeLine shapeRun fontSize direction languageOpt candidate).Width > maxWidth && not (String.IsNullOrEmpty current) then
                     lines.Add current
                     current <- word
                 else current <- candidate
@@ -595,15 +685,14 @@ module SlugFontRuntime =
     /// Try to load a Slug font from a TTF-compatible file.
     let tryLoad fontFilePath = tryReadFont fontFilePath
 
-    /// Lay out shaped Slug text using the prepared contour data.
-    let layout (text : string) (fontData : SlugFontAssetData) fontSizing color fillRule caretOpt justification direction languageOpt (perimeterSize : Vector2) displayScalar =
+    let private layoutInternal shapeRun (text : string) (fontData : SlugFontAssetData) fontSizing color fillRule caretOpt justification direction languageOpt (perimeterSize : Vector2) displayScalar =
         let text = applyCaret caretOpt text
         if String.IsNullOrEmpty text then { Glyphs = [||]; Size = v2Zero }
         else
             let fontSize = defaultArg fontSizing Constants.Render.FontSizeDefault * displayScalar
             let paragraphs = text.Replace("\r\n", "\n").Replace('\r', '\n').Split([|'\n'|])
-            let wrapped = [|for paragraph in paragraphs do match justification with MsdfTextUnjustified true -> yield! wrapParagraph fontData fontSize perimeterSize.X direction languageOpt paragraph | MsdfTextUnjustified false | MsdfTextJustified _ -> yield paragraph|]
-            let shapedLines = [|for paragraph in wrapped do yield shapeLine fontData fontSize (inferParagraphDirection paragraph direction) languageOpt paragraph|]
+            let wrapped = [|for paragraph in paragraphs do match justification with MsdfTextUnjustified true -> yield! wrapParagraph shapeRun fontSize perimeterSize.X direction languageOpt paragraph | MsdfTextUnjustified false | MsdfTextJustified _ -> yield paragraph|]
+            let shapedLines = [|for paragraph in wrapped do yield shapeLine shapeRun fontSize (inferParagraphDirection paragraph direction) languageOpt paragraph|]
             let lineCount = max 1 shapedLines.Length
             let lineHeight = abs fontData.Metrics.LineHeight * fontSize
             let ascender = fontData.Metrics.Ascender * fontSize
@@ -646,3 +735,13 @@ module SlugFontRuntime =
                                   FillRule = fillRule }
                     pen <- pen + v2 shapedGlyph.XAdvance shapedGlyph.YAdvance
             { Glyphs = glyphs.ToArray (); Size = v2 layoutWidth naturalHeight }
+
+    /// Lay out shaped Slug text with a stateless HarfBuzz context.
+    let layout (text : string) (fontData : SlugFontAssetData) fontSizing color fillRule caretOpt justification direction languageOpt (perimeterSize : Vector2) displayScalar =
+        layoutInternal (shapeRunFresh fontData.FontFilePath) text fontData fontSizing color fillRule caretOpt justification direction languageOpt perimeterSize displayScalar
+
+    /// Lay out Slug text with the reusable HarfBuzz context owned by a render asset.
+    let layoutWithShaper (shaper : SlugFontShaper) (text : string) (fontData : SlugFontAssetData) fontSizing color fillRule caretOpt justification direction languageOpt (perimeterSize : Vector2) displayScalar =
+        let shapeRun fontSize direction languageOpt runText =
+            shaper.ShapeRun fontSize (toHarfBuzzDirection direction) languageOpt runText
+        layoutInternal shapeRun text fontData fontSizing color fillRule caretOpt justification direction languageOpt perimeterSize displayScalar

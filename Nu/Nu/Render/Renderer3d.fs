@@ -1454,9 +1454,10 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         | FontAsset (_, font) -> SDL3_ttf.TTF_CloseFont font
         | MsdfFontAsset (_, textures) ->
             for texture in textures do Texture.destroy texture renderer.VulkanContext
-        | SlugFontAsset (_, curveTexture, bandTexture) ->
+        | SlugFontAsset (_, shaperOpt, curveTexture, bandTexture) ->
             Texture.destroy curveTexture renderer.VulkanContext
             Texture.destroy bandTexture renderer.VulkanContext
+            shaperOpt |> Option.iter (fun shaper -> (shaper :> IDisposable).Dispose ())
         | CubeMapAsset (_, cubeMap, irradianceAndEnvironmentMapOptRef) ->
             Texture.destroy cubeMap renderer.VulkanContext
             match irradianceAndEnvironmentMapOptRef.Value with
@@ -3842,6 +3843,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         let renderPasses = renderer.RenderPasses
         renderer.RenderPasses <- renderer.RenderPasses2
         renderer.RenderPasses2 <- renderPasses
+
 
 
 

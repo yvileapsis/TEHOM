@@ -239,6 +239,13 @@ type VulkanBuffer =
         use arrayPin = new ArrayPin<_> (array)
         VulkanBuffer.uploadData sizeof<'a> array.Length arrayPin.NativeInt buffer context
 
+    /// Upload only the populated prefix of an array to Buffer.
+    static member uploadArrayCount count (array : 'a array) buffer context =
+        if count < 0 || count > array.Length then invalidArg (nameof count) "Upload count must be within the source array."
+        elif count > 0 then
+            use arrayPin = new ArrayPin<_> (array)
+            VulkanBuffer.uploadData sizeof<'a> count arrayPin.NativeInt buffer context
+
     /// Create a staging buffer and stage the data.
     static member stageData size data context =
         let buffer = VulkanBuffer.create Staging size context

@@ -280,7 +280,8 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         | FontAsset (_, font) -> SDL3_ttf.TTF_CloseFont font
         | MsdfFontAsset (_, textures) ->
             for texture in textures do texture.Destroy renderer.VulkanContext
-        | SlugFontAsset (_, curveTexture, bandTexture) ->
+        | SlugFontAsset (_, shaperOpt, curveTexture, bandTexture) ->
+            shaperOpt |> Option.iter (fun shaper -> (shaper :> IDisposable).Dispose ())
             curveTexture.Destroy renderer.VulkanContext
             bandTexture.Destroy renderer.VulkanContext
         | CubeMapAsset _ -> ()
@@ -361,7 +362,12 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                             fontData.BandTexels
                             Texture.RenderThread
                             renderer.VulkanContext)
-                Some (SlugFontAsset (fontData, curveTexture, bandTexture))
+                // Retain one serialized HarfBuzz context with the GPU asset when possible. This
+                // removes native Blob / Face / Font reconstruction from every text run while
+                // coupling its lifetime to texture reload and unload. Shaper creation is only an
+                // optimization: stateless shaping remains available if native retention fails.
+                let shaperOpt = SlugFontRuntime.tryCreateShaper fontData.FontFilePath
+                Some (SlugFontAsset (fontData, shaperOpt, curveTexture, bandTexture))
             | None -> None
         | _ -> None
 
@@ -1124,8 +1130,13 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                             | JustifyBottom -> MsdfTextJustifyBottom
                         MsdfTextJustified (horizontal, vertical)
                 match VulkanRenderer2d.tryGetRenderAsset slugFont renderer with
-                | ValueSome (SlugFontAsset (fontData, curveTexture, bandTexture)) ->
-                    let layout = SlugFontRuntime.layout text fontData fontSizing color shader.FillRule caretOpt slugJustification textDirection languageOpt size displayScalar
+                | ValueSome (SlugFontAsset (fontData, shaperOpt, curveTexture, bandTexture)) ->
+                    let layout =
+                        match shaperOpt with
+                        | Some shaper ->
+                            SlugFontRuntime.layoutWithShaper shaper text fontData fontSizing color shader.FillRule caretOpt slugJustification textDirection languageOpt size displayScalar
+                        | None ->
+                            SlugFontRuntime.layout text fontData fontSizing color shader.FillRule caretOpt slugJustification textDirection languageOpt size displayScalar
                     if layout.Glyphs.Length = 0 then
                         Log.infoOnce
                             ("Slug text produced no drawable glyphs for '" + text + "' with font '" + scstring slugFont +

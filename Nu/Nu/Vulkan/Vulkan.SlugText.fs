@@ -101,8 +101,9 @@ module SlugText =
         | ValueSome (curveTexture, bandTexture) when env.GlyphIndex > 0 ->
             if env.DrawIndex < env.Pipeline.BulkDrawLimit then
                 let vkc = env.VulkanContext
-                for i in 0 .. dec env.GlyphIndex do
-                    Buffer.Buffer.uploadValue env.DrawIndex (i * sizeof<Glyph>) 0 env.Glyphs.[i] env.GlyphUniform vkc
+                // Preserve the existing Slug batch and ordering boundaries, but copy and flush its
+                // populated CPU prefix once instead of issuing one mapped-memory flush per glyph.
+                Buffer.Buffer.uploadArrayCount env.DrawIndex 0 0 env.GlyphIndex env.Glyphs env.GlyphUniform vkc
                 Pipeline.Pipeline.writeDescriptorStorageBuffer 0 0 env.DrawIndex 0 env.GlyphUniform.[env.DrawIndex] env.Pipeline vkc
                 let mutable viewProjection = ViewProjection ()
                 viewProjection.viewProjection <- if env.State.Absolute then env.ViewProjection2dAbsolute else env.ViewProjection2dRelative

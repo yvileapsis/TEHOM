@@ -724,7 +724,7 @@ type [<CustomEquality; NoComparison>] Texture =
                 context
         use texelsPin = new ArrayPin<_> (texels)
         TextureInternal.upload metadata 0 0 texelsPin.NativeInt thread textureInternal context
-        EagerTexture textureInternal
+        textureInternal
 
     /// Asynchronously transition the layout of the current texture.
     static member recordTransitionLayout srcLayout dstLayout (texture : Texture) commandBuffer =

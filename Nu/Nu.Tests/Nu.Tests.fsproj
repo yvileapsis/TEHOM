@@ -11,6 +11,7 @@
         <None Include="Assets\*\*" />
 		<Compile Include="NUnit.fs" />
 		<Compile Include="TestPlugin.fs" />
+		<Compile Include="SlugFontTests.fs" />
 		<Compile Include="AddressTests.fs" />
 		<Compile Include="CoroutineTests.fs" />
 		<Compile Include="QuadtreeTests.fs" />
