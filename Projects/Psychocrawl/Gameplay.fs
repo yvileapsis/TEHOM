@@ -2285,3 +2285,311 @@ type GameplayDispatcher () =
         [Content.group Simulants.GameplayScene.Name []
             [DreamView.grid projectionMode gameplay.CurrentProjectionId gameplay.UnfoldedInstances gameplay.UnfoldedVisibleCells gameplay.UnfoldedRememberedCells run
              yield! DreamView.hud projectionMode run]]
+
+type FontBenchmarkRenderer =
+    | BenchmarkText
+    | BenchmarkMsdf
+    | BenchmarkSlug
+    | BenchmarkBoth
+    | BenchmarkAll
+
+    member this.Name =
+        match this with
+        | BenchmarkText -> "TEXT"
+        | BenchmarkMsdf -> "MSDF"
+        | BenchmarkSlug -> "SLUG"
+        | BenchmarkBoth -> "BOTH"
+        | BenchmarkAll -> "ALL"
+
+    member this.PassCount =
+        match this with
+        | BenchmarkText
+        | BenchmarkMsdf
+        | BenchmarkSlug -> 1
+        | BenchmarkBoth -> 2
+        | BenchmarkAll -> 3
+
+type FontBenchmarkSize =
+    | BenchmarkSmall
+    | BenchmarkLarge
+
+    member this.Name =
+        match this with
+        | BenchmarkSmall -> "VERY SMALL (5 px)"
+        | BenchmarkLarge -> "VERY LARGE (144 px)"
+
+type FontBenchmark =
+    { Renderer : FontBenchmarkRenderer
+      FontSize : FontBenchmarkSize
+      TextRevision : int64
+      AverageFrameMilliseconds : double
+      FrameSampleCount : int }
+
+type FontBenchmarkMessage =
+    | StartFontBenchmark
+    | UpdateFontBenchmark
+    | FontBenchmarkKeyPressed of KeyboardKeyData
+    interface Message
+
+type FontBenchmarkCommand =
+    | FontBenchmarkNoop
+    interface Command
+
+[<RequireQualifiedAccess>]
+module FontBenchmark =
+
+    let initial =
+        { Renderer = BenchmarkAll
+          FontSize = BenchmarkSmall
+          TextRevision = 0L
+          AverageFrameMilliseconds = 0.0
+          FrameSampleCount = 0 }
+
+    let private resetSamples benchmark =
+        { benchmark with
+            AverageFrameMilliseconds = 0.0
+            FrameSampleCount = 0 }
+
+    let applyKeyPress (data : KeyboardKeyData) benchmark =
+        match data.KeyboardKey with
+        | KeyboardKey.Num0 -> resetSamples { benchmark with Renderer = BenchmarkText }
+        | KeyboardKey.Num1 -> resetSamples { benchmark with Renderer = BenchmarkMsdf }
+        | KeyboardKey.Num2 -> resetSamples { benchmark with Renderer = BenchmarkSlug }
+        | KeyboardKey.Num3 -> resetSamples { benchmark with Renderer = BenchmarkBoth }
+        | KeyboardKey.Num4 -> resetSamples { benchmark with Renderer = BenchmarkAll }
+        | KeyboardKey.S -> resetSamples { benchmark with FontSize = BenchmarkSmall }
+        | KeyboardKey.L -> resetSamples { benchmark with FontSize = BenchmarkLarge }
+        | _ -> benchmark
+
+    let update (world : World) benchmark =
+        let benchmark = { benchmark with TextRevision = benchmark.TextRevision + 1L }
+        let frameMilliseconds = world.DateDelta.TotalMilliseconds
+        if frameMilliseconds <= 0.0 || not (Double.IsFinite frameMilliseconds) then benchmark
+        else
+            let frameSampleCount = min 120 (inc benchmark.FrameSampleCount)
+            let blend =
+                if benchmark.FrameSampleCount < 120
+                then 1.0 / double frameSampleCount
+                else 1.0 / 120.0
+            let averageFrameMilliseconds =
+                if benchmark.FrameSampleCount = 0 then frameMilliseconds
+                else benchmark.AverageFrameMilliseconds + (frameMilliseconds - benchmark.AverageFrameMilliseconds) * blend
+            { benchmark with
+                AverageFrameMilliseconds = averageFrameMilliseconds
+                FrameSampleCount = frameSampleCount }
+
+[<RequireQualifiedAccess>]
+module FontBenchmarkView =
+
+    let private smallFontSize = 5.0f
+    let private largeFontSize = 144.0f
+    let private smallRowCount = 48
+    let private smallRowHeight = 6.25f
+    let private smallValueLength = 70
+    let private workloadMultiplier = 10
+    let private workloadAlphabet =
+        "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!?@#%&"
+    let private largePositions =
+        [|v3 -240.0f 52.0f 0.0f
+          v3 -80.0f 52.0f 0.0f
+          v3 80.0f 52.0f 0.0f
+          v3 240.0f 52.0f 0.0f
+          v3 -240.0f -108.0f 0.0f
+          v3 -80.0f -108.0f 0.0f
+          v3 80.0f -108.0f 0.0f
+          v3 240.0f -108.0f 0.0f|]
+    let private textColor = Color (255uy, 208uy, 64uy, 255uy)
+    let private msdfColor = Color (64uy, 224uy, 255uy, 255uy)
+    let private slugColor = Color (255uy, 96uy, 220uy, 255uy)
+    let private msdfBothColor = Color (64uy, 224uy, 255uy, 176uy)
+    let private slugBothColor = Color (255uy, 96uy, 220uy, 176uy)
+    let private textAllColor = Color (255uy, 208uy, 64uy, 144uy)
+    let private msdfAllColor = Color (64uy, 224uy, 255uy, 144uy)
+    let private slugAllColor = Color (255uy, 96uy, 220uy, 144uy)
+
+    let private makeSmallValue revision sampleIndex =
+        let alphabetLength = int64 workloadAlphabet.Length
+        let chars = Array.zeroCreate<char> smallValueLength
+        let row = sampleIndex % smallRowCount
+        let bank = sampleIndex / smallRowCount
+        chars[0] <- workloadAlphabet[row]
+        chars[1] <- workloadAlphabet[bank]
+        let mutable revisionValue = revision
+        for index in 2 .. 12 do
+            chars[index] <- workloadAlphabet[int (revisionValue % alphabetLength)]
+            revisionValue <- revisionValue / alphabetLength
+        let modulus = 2147483647L
+        let mutable state =
+            ((revision % (modulus - 1L)) * 97L + int64 sampleIndex * 7919L + 1L) % modulus
+        for index in 13 .. smallValueLength - 1 do
+            state <- state * 48271L % modulus
+            chars[index] <- workloadAlphabet[int (state % alphabetLength)]
+        String chars
+
+    let private makeLargeValue revision sampleIndex =
+        let alphabetLength = int64 workloadAlphabet.Length
+        let valueCount = alphabetLength * alphabetLength
+        let sampleCount = int64 (largePositions.Length * workloadMultiplier)
+        let token = (revision * sampleCount + int64 sampleIndex) % valueCount
+        let first = workloadAlphabet[int (token / alphabetLength)]
+        let second = workloadAlphabet[int (token % alphabetLength)]
+        String [|first; second|]
+
+    let private makeSamples (revision : int64) (fontSize : FontBenchmarkSize) bank =
+        match fontSize with
+        | BenchmarkSmall ->
+            Array.init smallRowCount (fun row ->
+                let sampleIndex = bank * smallRowCount + row
+                let name = bank.ToString "D2" + "-" + row.ToString "D2"
+                let value = makeSmallValue revision sampleIndex
+                let y = 137.0f - (single row + 0.5f) * smallRowHeight
+                (name,
+                 value,
+                 v3 0.0f y 0.0f,
+                 v3 620.0f smallRowHeight 0.0f,
+                 Justified (JustifyLeft, JustifyMiddle)))
+        | BenchmarkLarge ->
+            Array.mapi (fun index position ->
+                let sampleIndex = bank * largePositions.Length + index
+                (bank.ToString "D2" + "-" + string index,
+                 makeLargeValue revision sampleIndex,
+                 position,
+                 v3 156.0f 150.0f 0.0f,
+                 Justified (JustifyCenter, JustifyMiddle)))
+                largePositions
+
+    let private text renderer name position size elevation fontSize color justification value =
+        let definitions =
+            [Entity.Position := position
+             Entity.Size := size
+             Entity.Elevation == elevation
+             Entity.Text := value
+             Entity.Justification == justification
+             Entity.FontSizing := Some fontSize
+             Entity.TextColor := color]
+        match renderer with
+        | BenchmarkText ->
+            Content.text ("Text+" + name)
+                [Entity.Font := Assets.Default.Font
+                 yield! definitions]
+        | BenchmarkMsdf ->
+            Content.msdfText ("Msdf+" + name)
+                [Entity.MsdfFont := Assets.Default.FontMtsdf
+                 yield! definitions]
+        | BenchmarkSlug ->
+            Content.slugText ("Slug+" + name)
+                [Entity.SlugFont := Assets.Default.FontSlug
+                 Entity.SlugFillRule := SlugFillNonzero
+                 yield! definitions]
+        | BenchmarkBoth
+        | BenchmarkAll ->
+            failwithumf ()
+
+    let private workload renderer fontSize elevation color samples =
+        [for name, value, position, size, justification in samples do
+             text
+                renderer
+                name
+                position
+                size
+                elevation
+                fontSize
+                color
+                justification
+                value]
+
+    let private rendererWorkload renderer fontSize color visibleSamples stressSamples =
+        workload renderer fontSize -1.0f Color.Black stressSamples @
+        workload renderer fontSize 0.0f color visibleSamples
+
+    let private interfaceText renderer name y value =
+        text
+            renderer
+            name
+            (v3 0.0f y 0.0f)
+            (v3 620.0f 22.0f 0.0f)
+            100.0f
+            10.0f
+            Color.White
+            (Justified (JustifyCenter, JustifyMiddle))
+            value
+
+    let content benchmark =
+        let fontSize =
+            match benchmark.FontSize with
+            | BenchmarkSmall -> smallFontSize
+            | BenchmarkLarge -> largeFontSize
+        let visibleSamples = makeSamples benchmark.TextRevision benchmark.FontSize 0
+        let stressSamples =
+            [|for bank in 1 .. workloadMultiplier - 1 do
+                  yield! makeSamples benchmark.TextRevision benchmark.FontSize bank|]
+        let workloadContent =
+            match benchmark.Renderer with
+            | BenchmarkText ->
+                rendererWorkload BenchmarkText fontSize textColor visibleSamples stressSamples
+            | BenchmarkMsdf ->
+                rendererWorkload BenchmarkMsdf fontSize msdfColor visibleSamples stressSamples
+            | BenchmarkSlug ->
+                rendererWorkload BenchmarkSlug fontSize slugColor visibleSamples stressSamples
+            | BenchmarkBoth ->
+                rendererWorkload BenchmarkMsdf fontSize msdfBothColor visibleSamples stressSamples @
+                rendererWorkload BenchmarkSlug fontSize slugBothColor visibleSamples stressSamples
+            | BenchmarkAll ->
+                rendererWorkload BenchmarkText fontSize textAllColor visibleSamples stressSamples @
+                rendererWorkload BenchmarkMsdf fontSize msdfAllColor visibleSamples stressSamples @
+                rendererWorkload BenchmarkSlug fontSize slugAllColor visibleSamples stressSamples
+        let interfaceRenderer =
+            match benchmark.Renderer with
+            | BenchmarkText -> BenchmarkText
+            | BenchmarkSlug -> BenchmarkSlug
+            | BenchmarkMsdf
+            | BenchmarkBoth
+            | BenchmarkAll -> BenchmarkMsdf
+        let glyphsPerRenderer =
+            Array.sumBy (fun (_, value : string, _, _, _) -> value.Length) visibleSamples +
+            Array.sumBy (fun (_, value : string, _, _, _) -> value.Length) stressSamples
+        let totalWorkloadGlyphs = glyphsPerRenderer * benchmark.Renderer.PassCount
+        let framesPerSecond =
+            if benchmark.AverageFrameMilliseconds > 0.0
+            then 1000.0 / benchmark.AverageFrameMilliseconds
+            else 0.0
+        let controls =
+            "FONT BENCH | [0] TEXT [1] MSDF [2] SLUG [3] BOTH [4] ALL | [S] 5 px [L] 144 px | [F10/ESC] GAME"
+        let metrics =
+            String.Format
+                ("{0} / {1} | {2} glyphs (10x; black stress) | {3:F2} ms | {4:F1} FPS | 120f wall",
+                 benchmark.Renderer.Name,
+                 benchmark.FontSize.Name,
+                 totalWorkloadGlyphs,
+                 benchmark.AverageFrameMilliseconds,
+                 framesPerSecond)
+        workloadContent @
+        [interfaceText interfaceRenderer "Controls" 166.0f controls
+         interfaceText interfaceRenderer "Metrics" 142.0f metrics]
+
+type FontBenchmarkDispatcher () =
+    inherit ScreenDispatcher<FontBenchmark, FontBenchmarkMessage, FontBenchmarkCommand> (FontBenchmark.initial)
+
+    override this.GetFallbackModel (_, _, _) =
+        FontBenchmark.initial
+
+    override this.Definitions (_, _) =
+        [Screen.SelectEvent => StartFontBenchmark
+         Screen.UpdateEvent => UpdateFontBenchmark
+         Game.KeyboardKeyDownEvent =|> fun evt -> FontBenchmarkKeyPressed evt.Data]
+
+    override this.Message (benchmark, message, _, world) =
+        match message with
+        | StartFontBenchmark ->
+            just FontBenchmark.initial
+        | FontBenchmarkKeyPressed data ->
+            just (FontBenchmark.applyKeyPress data benchmark)
+        | UpdateFontBenchmark ->
+            just (FontBenchmark.update world benchmark)
+
+    override this.Command (_, command, _, _) =
+        match command with
+        | FontBenchmarkNoop -> ()
+
+    override this.Content (benchmark, _) =
+        [Content.group Simulants.FontBenchmarkScene.Name [] (FontBenchmarkView.content benchmark)]
