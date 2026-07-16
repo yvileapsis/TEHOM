@@ -1445,6 +1445,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
               Constants.Paths.SpriteShaderFilePath
               Constants.Paths.SpriteBatchShaderFilePath
               Constants.Paths.MsdfTextShaderFilePath
+              Constants.Paths.SlugTextShaderFilePath
               Constants.Paths.ContourShaderFilePath
               Constants.Paths.SkyBoxShaderFilePath
               Constants.Paths.IrradianceShaderFilePath
