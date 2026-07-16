@@ -21,6 +21,8 @@ type Font = private { __ : unit }
 
 /// A phantom type to denote the type of an asset as a multi-channel signed distance field font.
 type MsdfFont = private { __ : unit }
+/// A phantom type to denote an outline-based Slug font.
+type SlugFont = private { __ : unit }
 
 /// A phantom type to denote the type of an asset as a tile map.
 type TileMap = private { __ : unit }

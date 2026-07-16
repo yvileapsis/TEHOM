@@ -562,6 +562,56 @@ type MsdfTextFacet () =
         AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
 
 [<AutoOpen>]
+module SlugTextFacetExtensions =
+    type Entity with
+        member this.GetSlugFont world : SlugFont AssetTag = this.Get (nameof this.SlugFont) world
+        member this.SetSlugFont (value : SlugFont AssetTag) world = this.Set (nameof this.SlugFont) value world
+        member this.SlugFont = lens (nameof this.SlugFont) this this.GetSlugFont this.SetSlugFont
+        member this.GetSlugFillRule world : SlugFillRule = this.Get (nameof this.SlugFillRule) world
+        member this.SetSlugFillRule (value : SlugFillRule) world = this.Set (nameof this.SlugFillRule) value world
+        member this.SlugFillRule = lens (nameof this.SlugFillRule) this this.GetSlugFillRule this.SetSlugFillRule
+
+/// Augments an entity with Slug contour text.
+type SlugTextFacet () =
+    inherit Facet (false, false, false)
+
+    static member Properties =
+        [define Entity.Text ""
+         define Entity.SlugFont Assets.Default.FontSlug
+         define Entity.FontSizing None
+         define Entity.Justification (Justified (JustifyCenter, JustifyMiddle))
+         define Entity.TextMargin v2Zero
+         define Entity.TextColor Color.White
+         define Entity.TextColorDisabled Constants.Gui.ColorDisabledDefault
+         define Entity.TextOffset v2Zero
+         define Entity.TextShift Constants.Gui.TextShiftDefault
+         define Entity.TextDirection TextDirectionAuto
+         define Entity.LanguageOpt None
+         define Entity.SlugFillRule SlugFillNonzero]
+
+    override this.Render (_, entity, world) =
+        let mutable transform = entity.GetTransform world
+        let absolute = transform.Absolute
+        let perimeter = transform.Perimeter
+        let offset = (entity.GetTextOffset world).V3
+        let elevation = transform.Elevation
+        let shift = entity.GetTextShift world
+        let clipOpt = ValueSome transform.Bounds2d.Box2
+        let justification = entity.GetJustification world
+        let margin = (entity.GetTextMargin world).V3
+        let color = if transform.Enabled then entity.GetTextColor world else entity.GetTextColorDisabled world
+        let slugFont = entity.GetSlugFont world
+        let fontSizing = entity.GetFontSizing world
+        let textDirection = entity.GetTextDirection world
+        let languageOpt = entity.GetLanguageOpt world
+        let shader = { FillRule = entity.GetSlugFillRule world }
+        let text = entity.GetText world
+        World.renderGuiSlugText absolute perimeter offset elevation shift clipOpt justification None margin color shader slugFont fontSizing textDirection languageOpt text world
+
+    override this.GetAttributesInferred (_, _) =
+        AttributesInferred.important Constants.Engine.EntityGuiSizeDefault v3Zero
+
+[<AutoOpen>]
 module BackdroppableFacetExtensions =
     type Entity with
         member this.GetColorDisabled world : Color = this.Get (nameof this.ColorDisabled) world

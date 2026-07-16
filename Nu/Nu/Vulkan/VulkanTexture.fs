@@ -42,7 +42,7 @@ type Sampler =
         let mutable info = VkSamplerCreateInfo ()
         info.magFilter <- magFilter
         info.minFilter <- minFilter
-        info.mipmapMode <- VkSamplerMipmapMode.Linear
+        info.mipmapMode <- if minFilter = VkFilter.Nearest then VkSamplerMipmapMode.Nearest else VkSamplerMipmapMode.Linear
         info.addressModeU <- addressMode
         info.addressModeV <- addressMode
         info.addressModeW <- addressMode
@@ -708,6 +708,23 @@ type [<CustomEquality; NoComparison>] Texture =
         | EmptyTexture -> ()
         | EagerTexture texture -> TextureInternal.updateSize metadata texture context
         | LazyTexture lazyTexture -> TextureInternal.updateSize metadata lazyTexture.TextureInternal context
+
+    /// Create an uncompressed texture directly from a managed texel array.
+    static member createFromArray width height (internalFormat : ImageFormat) pixelFormat (texels : 'a array) thread context =
+        let metadata = TextureMetadata.make width height
+        let textureInternal =
+            TextureInternal.create
+                MipmapNone
+                AttachmentNone
+                Texture2d
+                VkImageUsageFlags.None
+                internalFormat
+                pixelFormat
+                metadata
+                context
+        use texelsPin = new ArrayPin<_> (texels)
+        TextureInternal.upload metadata 0 0 texelsPin.NativeInt thread textureInternal context
+        EagerTexture textureInternal
 
     /// Asynchronously transition the layout of the current texture.
     static member recordTransitionLayout srcLayout dstLayout (texture : Texture) commandBuffer =

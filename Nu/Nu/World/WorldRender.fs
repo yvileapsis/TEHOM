@@ -176,6 +176,28 @@ module WorldRender =
                 let operation = { Elevation = textTransform.Elevation; Horizon = perimeter.Center.Y; AssetTag = msdfFont; RenderOperation2d = RenderMsdfText descriptor }
                 World.enqueueLayeredOperation2d operation world
 
+        static member renderGuiSlugText absolute (perimeter : Box3) offset elevation shift clipOpt justification caretOpt textMargin color shader slugFont fontSizing textDirection languageOpt text world =
+            if not (String.IsNullOrWhiteSpace text) || Option.isSome caretOpt then
+                let mutable textTransform = Transform.makeDefault ()
+                textTransform.Position <- perimeter.Center + textMargin + offset
+                textTransform.Size <- perimeter.Size - textMargin * 2.0f
+                textTransform.Elevation <- elevation + shift
+                textTransform.Absolute <- absolute
+                let descriptor =
+                    { Transform = textTransform
+                      ClipOpt = clipOpt
+                      Text = text
+                      SlugFont = slugFont
+                      FontSizing = fontSizing
+                      Color = color
+                      Shader = shader
+                      Justification = justification
+                      CaretOpt = caretOpt
+                      TextDirection = textDirection
+                      LanguageOpt = languageOpt }
+                let operation = { Elevation = textTransform.Elevation; Horizon = perimeter.Center.Y; AssetTag = slugFont; RenderOperation2d = RenderSlugText descriptor }
+                World.enqueueLayeredOperation2d operation world
+
         /// Render a vector graphics contour.
         static member renderContour (descriptor : ContourDescriptor) world =
             World.enqueueLayeredOperation2d

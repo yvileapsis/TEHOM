@@ -26,6 +26,7 @@ open Nu
 type ImageFormat =
     | Rgba8
     | Rgba16f
+    | Rgba16ui
     | Rgba32f
     | Rgb16f
     | Rgb32f
@@ -47,6 +48,7 @@ type ImageFormat =
         match this with
         | Rgba8 -> VkFormat.R8G8B8A8Unorm
         | Rgba16f -> VkFormat.R16G16B16A16Sfloat
+        | Rgba16ui -> VkFormat.R16G16B16A16Uint
         | Rgba32f -> VkFormat.R32G32B32A32Sfloat
         | Rgb16f -> VkFormat.R16G16B16Sfloat
         | Rgb32f -> VkFormat.R32G32B32Sfloat
@@ -68,6 +70,7 @@ type ImageFormat =
         match this with
         | Rgba8
         | Rgba16f
+        | Rgba16ui
         | Rgba32f
         | Rgb16f
         | Rgb32f
@@ -89,6 +92,7 @@ type ImageFormat =
         match imageFormat with
         | Rgba8 -> width * height * 4
         | Rgba16f -> width * height * 8
+        | Rgba16ui -> width * height * 8
         | Rgba32f -> width * height * 16
         | Rgb16f -> width * height * 6
         | Rgb32f -> width * height * 12
@@ -410,6 +414,7 @@ module Hl =
             match format with
             | Rgba8
             | Rgba16f
+            | Rgba16ui
             | Rgba32f
             | Rgb16f
             | Rgb32f
@@ -445,7 +450,7 @@ module Hl =
                     checkAttachmentFormat vkPhysicalDevice Rgba32f
                 | Rgba32f ->
                     checkAttachmentFormat vkPhysicalDevice Rgba16f
-                | Rgba8 | Rgba16f | Rg32f | R16f | R32f ->
+                | Rgba8 | Rgba16f | Rgba16ui | Rg32f | R16f | R32f ->
                     Log.fail ("Vulkan attachment image format '" + scstring format.VkFormat + "' support is absent but required. Further, it's a requirement in the Vulkan specification!")
                 | D32f ->
                     checkAttachmentFormat vkPhysicalDevice D32fs8ui

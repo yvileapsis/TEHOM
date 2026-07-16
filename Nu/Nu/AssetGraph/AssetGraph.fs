@@ -24,6 +24,7 @@ type Refinement =
     | PsdToPng
     | BlockCompress
     | MtsdfAtlas
+    | Slug
 
     /// Convert a string to a refinement value.
     static member ofString str =
@@ -31,6 +32,7 @@ type Refinement =
         | nameof PsdToPng -> PsdToPng
         | nameof BlockCompress -> BlockCompress
         | nameof MtsdfAtlas -> MtsdfAtlas
+        | nameof Slug -> Slug
         | _ -> failwith ("Invalid refinement '" + str + "'.")
 
 /// Describes a game asset, such as an image, sound, or model in detail.
@@ -110,6 +112,7 @@ module AssetGraph =
 [[Default
  [[Assets Assets/Default [bmp png psd ttf skel json] [PsdToPng] [Render2d]]
   [Asset FontMtsdf "Assets/Default/Font.ttf" [MtsdfAtlas] [Render2d]]
+  [Asset FontSlug "Assets/Default/Font.ttf" [Slug] [Render2d]]
   [Assets Assets/Default [jpg jpeg tga tif tiff dds ktx] [BlockCompress] [Render3d]]
   [Assets Assets/Default [cbm fbx gltf glb dae obj mtl raw] [] [Render3d]]
   [Assets Assets/Default [wav ogg mp3] [] [Audio]]
@@ -125,6 +128,7 @@ module AssetGraph =
             | BcCompression -> ".dds"
             | AstcCompression -> ".ktx"
         | MtsdfAtlas -> if rawAssetExtension = ".ttf" || rawAssetExtension = ".otf" then ".mtsdffont" else rawAssetExtension
+        | Slug -> if rawAssetExtension = ".ttf" || rawAssetExtension = ".otf" then ".slugfont" else rawAssetExtension
 
     let private getAssetExtension usingRawAssets blockCompression rawAssetExtension refinements =
         if usingRawAssets
@@ -523,6 +527,12 @@ module AssetGraph =
                 if File.Exists refinementFilePath then copyFileReplacing intermediateFilePath fontFilePath
             else
                 Log.error ("MtsdfAtlas refinement requires a .ttf or .otf asset, not '" + intermediateFilePath + "'.")
+
+        | Slug ->
+            if intermediateFileExtension = ".ttf" || intermediateFileExtension = ".otf" then
+                copyFileReplacing intermediateFilePath refinementFilePath
+            else
+                Log.error ("Slug refinement requires a .ttf or .otf asset, not '" + intermediateFilePath + "'.")
 
         // return the latest refinement localities
         (refinementFileSubpath, refinementDirectory)

@@ -411,6 +411,18 @@ module Content =
     let msdfLabel entityName definitions = entity<MsdfLabelDispatcher> entityName definitions
 
     /// <summary>
+    /// Describe a Slug contour text entity with the given definitions.
+    /// See <see cref="SlugTextDispatcher"/>.
+    /// </summary>
+    let slugText entityName definitions = entity<SlugTextDispatcher> entityName definitions
+
+    /// <summary>
+    /// Describe a Slug contour label with the given definitions.
+    /// See <see cref="SlugLabelDispatcher"/>.
+    /// </summary>
+    let slugLabel entityName definitions = entity<SlugLabelDispatcher> entityName definitions
+
+    /// <summary>
     /// Describe a button with the given definitions.
     /// See <see cref="ButtonDispatcher"/>.
     /// </summary>

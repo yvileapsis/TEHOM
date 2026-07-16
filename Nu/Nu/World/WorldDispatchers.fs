@@ -145,6 +145,25 @@ type MsdfLabelDispatcher () =
     static member Properties =
         [define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))]
 
+/// Gives an entity the base behavior of a GUI Slug contour text control.
+type SlugTextDispatcher () =
+    inherit GuiDispatcher ()
+
+    static member Facets =
+        [typeof<BackdroppableFacet>
+         typeof<SlugTextFacet>]
+
+/// Gives an entity the base behavior of a GUI Slug contour label.
+type SlugLabelDispatcher () =
+    inherit GuiDispatcher ()
+
+    static member Facets =
+        [typeof<BackdroppableFacet>
+         typeof<SlugTextFacet>]
+
+    static member Properties =
+        [define Entity.Justification (Justified (JustifyLeft, JustifyMiddle))]
+
 /// Gives an entity the base behavior of a gui button.
 type ButtonDispatcher () =
     inherit GuiDispatcher ()

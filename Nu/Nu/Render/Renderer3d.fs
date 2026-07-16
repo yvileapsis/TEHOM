@@ -1454,6 +1454,9 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         | FontAsset (_, font) -> SDL3_ttf.TTF_CloseFont font
         | MsdfFontAsset (_, textures) ->
             for texture in textures do Texture.destroy texture renderer.VulkanContext
+        | SlugFontAsset (_, curveTexture, bandTexture) ->
+            Texture.destroy curveTexture renderer.VulkanContext
+            Texture.destroy bandTexture renderer.VulkanContext
         | CubeMapAsset (_, cubeMap, irradianceAndEnvironmentMapOptRef) ->
             Texture.destroy cubeMap renderer.VulkanContext
             match irradianceAndEnvironmentMapOptRef.Value with
@@ -1520,6 +1523,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 | FontAsset _ -> ()
                 | MsdfFontAsset (fontData, _) ->
                     for atlas in fontData.Atlases do renderPackage.PackageState.TextureClient.Textures.Remove atlas.FilePath |> ignore<bool>
+                | SlugFontAsset _ -> ()
                 | CubeMapAsset (cubeMapKey, _, _) -> renderPackage.PackageState.CubeMapClient.CubeMaps.Remove cubeMapKey |> ignore<bool>
                 | StaticModelAsset _ | AnimatedModelAsset _ -> ()
                 VulkanRenderer3d.freeRenderAsset renderAsset renderer
@@ -1552,7 +1556,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                     let dirPath = PathF.GetDirectoryName asset.FilePath
                     let renderAsset =
                         match renderAsset with
-                        | RawAsset | TextureAsset _ | FontAsset _ | MsdfFontAsset _ | CubeMapAsset _ ->
+                        | RawAsset | TextureAsset _ | FontAsset _ | MsdfFontAsset _ | SlugFontAsset _ | CubeMapAsset _ ->
                             renderAsset
                         | StaticModelAsset (userDefined, staticModel) ->
                             match staticModel.SceneOpt with
@@ -3838,6 +3842,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         let renderPasses = renderer.RenderPasses
         renderer.RenderPasses <- renderer.RenderPasses2
         renderer.RenderPasses2 <- renderPasses
+
 
 
 

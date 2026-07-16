@@ -229,6 +229,7 @@ module MsdfFontRuntime =
           Size = defaultArg (tryGetSingle "size" atlasElement) Constants.Render.FontSizeDefault }
 
     let tryLoad metadataFilePath =
+        let metadataFilePath = Path.GetFullPath metadataFilePath
         try
             use document = JsonDocument.Parse (File.ReadAllText metadataFilePath)
             let root = document.RootElement

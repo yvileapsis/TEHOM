@@ -117,6 +117,20 @@ type MsdfTextDescriptor =
       TextDirection : TextDirection
       LanguageOpt : string option }
 
+/// Describes how to render Slug contour text to a rendering subsystem.
+type SlugTextDescriptor =
+    { mutable Transform : Transform
+      ClipOpt : Box2 voption
+      Text : string
+      SlugFont : SlugFont AssetTag
+      FontSizing : single option
+      Color : Color
+      Shader : SlugTextShader
+      Justification : Justification
+      CaretOpt : int option
+      TextDirection : TextDirection
+      LanguageOpt : string option }
+
 /// A fixed-position MTSDF glyph in a glyph grid.
 type [<Struct>] MsdfGlyphValue =
     { Text : string
@@ -154,6 +168,7 @@ type RenderOperation2d =
     | RenderCachedSprite of CachedSpriteDescriptor
     | RenderText of TextDescriptor
     | RenderMsdfText of MsdfTextDescriptor
+    | RenderSlugText of SlugTextDescriptor
     | RenderMsdfGlyphGrid of MsdfGlyphGridDescriptor
     | RenderTiles of TilesDescriptor
     | RenderSpineSkeleton of SpineSkeletonDescriptor
@@ -236,6 +251,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
           TextTextures : Dictionary<obj, bool ref * (int * int * Matrix4x4 * Texture)>
           SpriteBatchEnv : SpriteBatchEnv
           MsdfTextBatchEnv : MsdfText.MsdfTextBatchEnv
+          SlugTextBatchEnv : SlugText.SlugTextBatchEnv
           SpritePipeline : VulkanBuffer * VulkanBuffer * Pipeline
           ContourPipeline : VulkanBuffer * VulkanBuffer * VulkanBuffer * VulkanBuffer * VulkanBuffer * Pipeline
           RenderPackages : Packages<RenderAsset, AssetClient>
@@ -264,6 +280,9 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         | FontAsset (_, font) -> SDL3_ttf.TTF_CloseFont font
         | MsdfFontAsset (_, textures) ->
             for texture in textures do texture.Destroy renderer.VulkanContext
+        | SlugFontAsset (_, curveTexture, bandTexture) ->
+            curveTexture.Destroy renderer.VulkanContext
+            bandTexture.Destroy renderer.VulkanContext
         | CubeMapAsset _ -> ()
         | StaticModelAsset _ -> ()
         | AnimatedModelAsset _ -> ()
@@ -319,6 +338,31 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                     Log.infoOnce ("Could not load MTSDF font '" + asset.FilePath + "' because one or more sidecars are missing.")
                     None
             | None -> None
+        | SlugFontExtension _ ->
+            match SlugFontRuntime.tryLoad asset.FilePath with
+            | Some fontData ->
+                let curveTexture =
+                    Texture.EagerTexture
+                        (Texture.Texture.createFromArray
+                            fontData.CurveTextureWidth
+                            fontData.CurveTextureHeight
+                            Hl.Rgba32f
+                            Hl.Rgba
+                            fontData.CurveTexels
+                            Texture.RenderThread
+                            renderer.VulkanContext)
+                let bandTexture =
+                    Texture.EagerTexture
+                        (Texture.Texture.createFromArray
+                            fontData.BandTextureWidth
+                            fontData.BandTextureHeight
+                            Hl.Rgba16ui
+                            Hl.Rgba
+                            fontData.BandTexels
+                            Texture.RenderThread
+                            renderer.VulkanContext)
+                Some (SlugFontAsset (fontData, curveTexture, bandTexture))
+            | None -> None
         | _ -> None
 
     static member private tryLoadRenderPackage packageName renderer =
@@ -366,6 +410,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                 | FontAsset _ -> ()
                 | MsdfFontAsset (fontData, _) ->
                     for atlas in fontData.Atlases do renderPackage.PackageState.TextureClient.Textures.Remove atlas.FilePath |> ignore<bool>
+                | SlugFontAsset _ -> ()
                 | CubeMapAsset (cubeMapKey, _, _) -> renderPackage.PackageState.CubeMapClient.CubeMaps.Remove cubeMapKey |> ignore<bool>
                 | StaticModelAsset _ | AnimatedModelAsset _ -> ()
                 VulkanRenderer2d.freeRenderAsset renderAsset renderer
@@ -458,6 +503,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         Pipeline.reloadShaders spritePipeline renderer.VulkanContext
         SpriteBatch.reloadShaders renderer.SpriteBatchEnv renderer.VulkanContext
         MsdfText.ReloadShaders renderer.MsdfTextBatchEnv renderer.VulkanContext
+        SlugText.ReloadShaders renderer.SlugTextBatchEnv renderer.VulkanContext
         Pipeline.reloadShaders contourPipeline renderer.VulkanContext
 
     static member private handleReloadRenderAssets renderer =
@@ -1032,6 +1078,69 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                     | _ -> Log.infoOnce ("Cannot render MTSDF text with a non-MTSDF font asset for '" + scstring msdfFont + "'.")
                 | ValueNone -> Log.infoOnce ("MsdfTextDescriptor failed due to unloadable asset for '" + scstring msdfFont + "'.")
 
+    /// Render Slug contour text.
+    static member renderSlugText
+        (transform : Transform byref,
+         clipOpt : Box2 voption inref,
+         text : string,
+         slugFont : SlugFont AssetTag,
+         fontSizing : single option,
+         color : Color inref,
+         shader : SlugTextShader,
+         justification : Justification,
+         caretOpt : int option,
+         textDirection : TextDirection,
+         languageOpt : string option,
+         renderer : VulkanRenderer2d) =
+        if (not (String.IsNullOrWhiteSpace text) || Option.isSome caretOpt) && color.A8 <> 0uy then
+            let fontSizing =
+                match fontSizing with
+                | Some fontSize when fontSize > 0.0f && Single.IsFinite fontSize -> fontSizing
+                | Some _ | None -> None
+            let color = color
+            let transform = transform
+            let clipOpt = clipOpt
+            flip3 SpriteBatch.InterruptSpriteBatchFrame renderer.Viewport renderer.SpriteBatchEnv $ fun () ->
+                let absolute = transform.Absolute
+                let perimeter = transform.Perimeter
+                let displayScalar = single renderer.Viewport.DisplayScalar
+                let virtualScalar = v2Dup displayScalar
+                let position = perimeter.Min.V2 * virtualScalar
+                let size = perimeter.Size.V2 * virtualScalar
+                let fontSize = defaultArg fontSizing Constants.Render.FontSizeDefault * displayScalar
+                let slugJustification =
+                    match justification with
+                    | Unjustified wrapped -> MsdfTextUnjustified wrapped
+                    | Justified (horizontal, vertical) ->
+                        let horizontal =
+                            match horizontal with
+                            | JustifyLeft -> MsdfTextJustifyLeft
+                            | JustifyCenter -> MsdfTextJustifyCenter
+                            | JustifyRight -> MsdfTextJustifyRight
+                        let vertical =
+                            match vertical with
+                            | JustifyTop -> MsdfTextJustifyTop
+                            | JustifyMiddle -> MsdfTextJustifyMiddle
+                            | JustifyBottom -> MsdfTextJustifyBottom
+                        MsdfTextJustified (horizontal, vertical)
+                match VulkanRenderer2d.tryGetRenderAsset slugFont renderer with
+                | ValueSome (SlugFontAsset (fontData, curveTexture, bandTexture)) ->
+                    let layout = SlugFontRuntime.layout text fontData fontSizing color shader.FillRule caretOpt slugJustification textDirection languageOpt size displayScalar
+                    if layout.Glyphs.Length = 0 then
+                        Log.infoOnce
+                            ("Slug text produced no drawable glyphs for '" + text + "' with font '" + scstring slugFont +
+                             "', font size " + scstring fontSize + ", display scalar " + scstring displayScalar +
+                             ", perimeter size " + scstring size + ", layout size " + scstring layout.Size +
+                             ", font path '" + fontData.FontFilePath + "', and " + string fontData.Glyphs.Count + " loaded glyphs.")
+                    else
+                        for glyph in layout.Glyphs do
+                            let mutable glyph = { glyph with Position = position + glyph.Position }
+                            SlugText.SubmitSlugTextBatchGlyph
+                                (absolute, glyph, fontSize, &clipOpt, Pipeline.Transparent, curveTexture, bandTexture, renderer.Viewport, renderer.SlugTextBatchEnv)
+                        SlugText.EndSlugTextBatchFrame renderer.Viewport renderer.SlugTextBatchEnv
+                | ValueSome _ -> Log.infoOnce ("Cannot render Slug text with a non-Slug font asset for '" + scstring slugFont + "'.")
+                | ValueNone -> Log.infoOnce ("SlugTextDescriptor failed due to unloadable asset for '" + scstring slugFont + "'.")
+
     /// Render a fixed-cell MTSDF glyph grid.
     static member renderMsdfGlyphGrid
         (transform : Transform byref,
@@ -1161,6 +1270,8 @@ type [<ReferenceEquality>] VulkanRenderer2d =
             VulkanRenderer2d.renderText (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Text, descriptor.Font, descriptor.FontSizing, descriptor.FontStyling, &descriptor.Color, descriptor.Justification, descriptor.CaretOpt, eyeCenter, eyeSize, renderer)
         | RenderMsdfText descriptor ->
             VulkanRenderer2d.renderMsdfText (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Text, descriptor.MsdfFont, descriptor.FontSizing, &descriptor.Color, descriptor.Shader, descriptor.Justification, descriptor.CaretOpt, descriptor.TextDirection, descriptor.LanguageOpt, renderer)
+        | RenderSlugText descriptor ->
+            VulkanRenderer2d.renderSlugText (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Text, descriptor.SlugFont, descriptor.FontSizing, &descriptor.Color, descriptor.Shader, descriptor.Justification, descriptor.CaretOpt, descriptor.TextDirection, descriptor.LanguageOpt, renderer)
         | RenderMsdfGlyphGrid descriptor ->
             VulkanRenderer2d.renderMsdfGlyphGrid (&descriptor.Transform, &descriptor.ClipOpt, descriptor.Glyphs, descriptor.Columns, descriptor.Rows, descriptor.CellSize, descriptor.GlyphScale, descriptor.GlyphCutTop, descriptor.GlyphCutBottom, descriptor.MsdfFont, descriptor.FontSizing, descriptor.Shader, descriptor.TextDirection, descriptor.LanguageOpt, renderer)
         | RenderTiles descriptor ->
@@ -1189,6 +1300,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         let viewProjectionClipRelative = Viewport.getViewProjectionClip false eyeCenter eyeSize viewport
         SpriteBatch.beginSpriteBatchFrame (&viewProjectionAbsolute, &viewProjectionRelative, &viewProjectionClipAbsolute, &viewProjectionClipRelative, renderer.SpriteBatchEnv)
         MsdfText.BeginMsdfTextBatchFrame (&viewProjectionAbsolute, &viewProjectionRelative, &viewProjectionClipAbsolute, &viewProjectionClipRelative, renderer.MsdfTextBatchEnv)
+        SlugText.BeginSlugTextBatchFrame (&viewProjectionAbsolute, &viewProjectionRelative, &viewProjectionClipAbsolute, &viewProjectionClipRelative, renderer.SlugTextBatchEnv)
 
         // begin single sprite frame
         match renderer.SpritePipeline with (_, _, pipeline) -> Pipeline.beginFrame pipeline
@@ -1236,6 +1348,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         // end sprite batch frame
         SpriteBatch.endSpriteBatchFrame renderer.Viewport renderer.SpriteBatchEnv
         MsdfText.EndMsdfTextBatchFrame renderer.Viewport renderer.MsdfTextBatchEnv
+        SlugText.EndSlugTextBatchFrame renderer.Viewport renderer.SlugTextBatchEnv
 
         // sweep up any text textures that went unused this frame and mark remaining text textures as unused for next
         // frame
@@ -1275,6 +1388,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         let textureDumpster = TextureDumpster.create ()
 
         // create sprite batch env
+        let slugTextBatchEnv = SlugText.CreateSlugTextBatchEnv unfilteredSampler context
         let spriteBatchEnv = SpriteBatch.createSpriteBatchEnv unfilteredSampler filteredSampler context
         let msdfTextBatchEnv = MsdfText.CreateMsdfTextBatchEnv filteredSampler context
 
@@ -1292,6 +1406,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
               TextTextures = dictPlus HashIdentity.Structural []
               SpriteBatchEnv = spriteBatchEnv
               MsdfTextBatchEnv = msdfTextBatchEnv
+              SlugTextBatchEnv = slugTextBatchEnv
               SpritePipeline = spriteSingletonPipeline
               ContourPipeline = contourPipeline
               RenderPackages = dictPlus StringComparer.Ordinal []
@@ -1331,6 +1446,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
             // destroy sprite batch environment
             SpriteBatch.destroySpriteBatchEnv renderer.SpriteBatchEnv
             MsdfText.DestroyMsdfTextBatchEnv renderer.MsdfTextBatchEnv
+            SlugText.DestroySlugTextBatchEnv renderer.SlugTextBatchEnv
 
             (* TODO: DJL: free spine skeleton resources.
             // free sprite skeleton renderers
