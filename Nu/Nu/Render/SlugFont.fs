@@ -15,10 +15,6 @@ open System.Runtime.InteropServices
 open HarfBuzzSharp
 open Prime
 
-/// The fill rule used by Slug contour evaluation.
-type [<Struct>] SlugFillRule =
-    | SlugFillNonzero
-    | SlugFillEvenOdd
 
 /// Per-glyph controls for Slug text.
 type [<Struct>] SlugTextShader =
@@ -288,32 +284,41 @@ module SlugFontRuntime =
                     value
             y <- y + dy
             points[i] <- { points[i] with Position = v2 points[i].Position.X (single y / unitsPerEm) }
-        let contours = ResizeArray<Curve array> ()
+        let contours = ResizeArray<Point array> ()
         let mutable first = 0
         for contourIndex in 0 .. dec numberOfContours do
             let last = endPoints[contourIndex]
-            if last >= first then contours.Add (makeContour points[first .. last])
+            if last >= first then contours.Add (points[first .. last])
             first <- last + 1
         contours.ToArray ()
 
-    let private transformCurve (matrix : Matrix3x2) (offset : Vector2) (curve : Curve) =
-        let transform (point : Vector2) =
+    let private transformPoint (matrix : Matrix3x2) (offset : Vector2) (point : Point) =
+        let position =
             v2
-                (point.X * matrix.M11 + point.Y * matrix.M21 + matrix.M31 + offset.X)
-                (point.X * matrix.M12 + point.Y * matrix.M22 + matrix.M32 + offset.Y)
-        { P1 = transform curve.P1
-          P2 = transform curve.P2
-          P3 = transform curve.P3 }
+                (point.Position.X * matrix.M11 + point.Position.Y * matrix.M21 + matrix.M31 + offset.X)
+                (point.Position.X * matrix.M12 + point.Position.Y * matrix.M22 + matrix.M32 + offset.Y)
+        { point with Position = position }
+
+    let private transformVector (matrix : Matrix3x2) (vector : Vector2) =
+        v2
+            (vector.X * matrix.M11 + vector.Y * matrix.M21)
+            (vector.X * matrix.M12 + vector.Y * matrix.M22)
+
+    let private roundOffset (offset : Vector2) =
+        v2 (single (Math.Round (float offset.X))) (single (Math.Round (float offset.Y)))
+
+    let private makeCurves (contours : Point array array) =
+        contours |> Array.map makeContour
 
     let private makeGlyphParser (glyf : byte array) (loca : uint32 array) unitsPerEm =
-        let cache = Dictionary<uint32, Curve array array> ()
+        let cache = Dictionary<uint32, Point array array> ()
         let rec parseGlyph depth glyphIndex =
             if depth > maxCompositeDepth || glyphIndex >= uint32 loca.Length - 1u then [||]
             elif cache.ContainsKey glyphIndex then cache[glyphIndex]
             else
                 let start = int loca[int glyphIndex]
                 let finish = int loca[int glyphIndex + 1]
-                let curves =
+                let points =
                     if start >= finish || start + 10 > glyf.Length then [||]
                     else
                         let contourCount = int (readInt16 glyf start)
@@ -321,7 +326,8 @@ module SlugFontRuntime =
                             readSimpleGlyph glyf start contourCount unitsPerEm
                         else
                             let mutable cursor = start + 10
-                            let transformed = ResizeArray<Curve array> ()
+                            let transformed = ResizeArray<Point array> ()
+                            let accumulatedPoints = ResizeArray<Point> ()
                             let mutable moreComponents = true
                             while moreComponents && cursor + 4 <= finish do
                                 let flags = readUInt16 glyf cursor
@@ -331,16 +337,26 @@ module SlugFontRuntime =
                                 let argsAreXY = flags &&& 2us <> 0us
                                 let arg1, arg2 =
                                     if argWords then
-                                        let a = readInt16 glyf cursor
-                                        let b = readInt16 glyf (cursor + 2)
-                                        cursor <- cursor + 4
-                                        int a, int b
-                                    else
+                                        if argsAreXY then
+                                            let a = int (readInt16 glyf cursor)
+                                            let b = int (readInt16 glyf (cursor + 2))
+                                            cursor <- cursor + 4
+                                            a, b
+                                        else
+                                            let a = int (readUInt16 glyf cursor)
+                                            let b = int (readUInt16 glyf (cursor + 2))
+                                            cursor <- cursor + 4
+                                            a, b
+                                    elif argsAreXY then
                                         let a = int (sbyte glyf[cursor])
                                         let b = int (sbyte glyf[cursor + 1])
                                         cursor <- cursor + 2
                                         a, b
-                                let dx, dy = if argsAreXY then single arg1 / unitsPerEm, single arg2 / unitsPerEm else 0.0f, 0.0f
+                                    else
+                                        let a = int glyf[cursor]
+                                        let b = int glyf[cursor + 1]
+                                        cursor <- cursor + 2
+                                        a, b
                                 let mutable a = 1.0f
                                 let mutable b = 0.0f
                                 let mutable c = 0.0f
@@ -360,17 +376,37 @@ module SlugFontRuntime =
                                     d <- single (readInt16 glyf (cursor + 6)) / 16384.0f
                                     cursor <- cursor + 8
                                 let matrix = Matrix3x2 (a, b, c, d, 0.0f, 0.0f)
-                                for contour in parseGlyph (inc depth) componentIndex do
-                                    transformed.Add [|for curve in contour do yield transformCurve matrix (v2 dx dy) curve|]
+                                let componentContours = parseGlyph (inc depth) componentIndex
+                                let childPoints =
+                                    componentContours
+                                    |> Array.collect id
+                                let offset =
+                                    if argsAreXY then
+                                        let rawOffset = v2 (single (int arg1)) (single (int arg2))
+                                        let offsetDesign =
+                                            if flags &&& 0x0800us <> 0us then transformVector matrix rawOffset
+                                            else rawOffset
+                                        let offsetDesign = if flags &&& 4us <> 0us then roundOffset offsetDesign else offsetDesign
+                                        v2 (offsetDesign.X / unitsPerEm) (offsetDesign.Y / unitsPerEm)
+                                    elif int arg1 < accumulatedPoints.Count && int arg2 < childPoints.Length then
+                                        accumulatedPoints[int arg1].Position - transformVector matrix childPoints[int arg2].Position
+                                    else
+                                        Vector2.Zero
+                                for contour in componentContours do
+                                    let transformedContour = [|for point in contour do yield transformPoint matrix offset point|]
+                                    transformed.Add transformedContour
+                                    for point in transformedContour do accumulatedPoints.Add point
                                 moreComponents <- flags &&& 32us <> 0us
                             if moreComponents then
                                 if cursor + 2 <= finish then
                                     let instructionLength = int (readUInt16 glyf cursor)
                                     cursor <- cursor + 2 + instructionLength
                             transformed.ToArray ()
-                cache[glyphIndex] <- curves
-                curves
-        parseGlyph
+                cache[glyphIndex] <- points
+                points
+        fun depth glyphIndex -> parseGlyph depth glyphIndex |> makeCurves
+
+
 
     let private makeRawGlyph (glyphIndex : uint32) (advances : single array) curves =
         { Index = glyphIndex
@@ -518,57 +554,63 @@ module SlugFontRuntime =
         try
             use blob = Blob.FromFile fontFilePath
             use face = new Face (blob, 0u)
-            let head = readTable face 'h' 'e' 'a' 'd'
-            let maxp = readTable face 'm' 'a' 'x' 'p'
-            let hhea = readTable face 'h' 'h' 'e' 'a'
-            let hmtx = readTable face 'h' 'm' 't' 'x'
-            let loca = readTable face 'l' 'o' 'c' 'a'
-            let glyf = readTable face 'g' 'l' 'y' 'f'
-            if head.Length < 54 || maxp.Length < 6 || hhea.Length < 36 || hmtx.Length < 4 || loca.Length = 0 || glyf.Length = 0 then
+            let cff = readTable face 'C' 'F' 'F' ' '
+            let cff2 = readTable face 'C' 'F' 'F' '2'
+            if cff.Length > 0 || cff2.Length > 0 then
+                Log.info ("Could not load Slug font '" + fontFilePath + "' because CFF/CFF2 outlines are unsupported.")
                 None
             else
-                let unitsPerEm = max 1.0f (single (readUInt16 head 18))
-                let glyphCount = int (readUInt16 maxp 4)
-                let numberOfHMetrics = min glyphCount (int (readUInt16 hhea 34))
-                let advances = Array.zeroCreate<single> glyphCount
-                let mutable lastAdvance = 0.0f
-                for glyphIndex in 0 .. dec glyphCount do
-                    let metricIndex = min glyphIndex (dec numberOfHMetrics)
-                    let offset = metricIndex * 4
-                    if offset + 2 <= hmtx.Length then lastAdvance <- single (readUInt16 hmtx offset) / unitsPerEm
-                    advances[glyphIndex] <- lastAdvance
-                let locaFormat = int (readInt16 head 50)
-                let locaOffsets = Array.zeroCreate<uint32> (glyphCount + 1)
-                for glyphIndex in 0 .. glyphCount do
-                    locaOffsets[glyphIndex] <-
-                        if locaFormat = 0 then uint32 (readUInt16 loca (glyphIndex * 2)) * 2u
-                        else readUInt32 loca (glyphIndex * 4)
-                let parser = makeGlyphParser glyf locaOffsets unitsPerEm
-                let rawGlyphs =
-                    [|for glyphIndex in 0 .. dec glyphCount do
-                          let contours = parser 0 (uint32 glyphIndex)
-                          yield makeRawGlyph (uint32 glyphIndex) advances contours
-                          |]
-                let curveTexels, curveHeight, curveLocations = packCurveData rawGlyphs
-                let glyphMetadata, bandTexels, bandHeight = makeBandData rawGlyphs curveLocations
-                let ascender = single (readInt16 hhea 4) / unitsPerEm
-                let descender = single (readInt16 hhea 6) / unitsPerEm
-                let lineGap = single (readInt16 hhea 8) / unitsPerEm
-                let metrics =
-                    { LineHeight = ascender - descender + lineGap
-                      Ascender = ascender
-                      Descender = descender }
-                Some
-                    { FontFilePath = fontFilePath
-                      UnitsPerEm = unitsPerEm
-                      Metrics = metrics
-                      Glyphs = glyphMetadata
-                      CurveTextureWidth = textureWidth
-                      CurveTextureHeight = curveHeight
-                      CurveTexels = curveTexels
-                      BandTextureWidth = textureWidth
-                      BandTextureHeight = bandHeight
-                      BandTexels = bandTexels }
+                let head = readTable face 'h' 'e' 'a' 'd'
+                let maxp = readTable face 'm' 'a' 'x' 'p'
+                let hhea = readTable face 'h' 'h' 'e' 'a'
+                let hmtx = readTable face 'h' 'm' 't' 'x'
+                let loca = readTable face 'l' 'o' 'c' 'a'
+                let glyf = readTable face 'g' 'l' 'y' 'f'
+                if head.Length < 54 || maxp.Length < 6 || hhea.Length < 36 || hmtx.Length < 4 || loca.Length = 0 || glyf.Length = 0 then
+                    None
+                else
+                    let unitsPerEm = max 1.0f (single (readUInt16 head 18))
+                    let glyphCount = int (readUInt16 maxp 4)
+                    let numberOfHMetrics = min glyphCount (int (readUInt16 hhea 34))
+                    let advances = Array.zeroCreate<single> glyphCount
+                    let mutable lastAdvance = 0.0f
+                    for glyphIndex in 0 .. dec glyphCount do
+                        let metricIndex = min glyphIndex (dec numberOfHMetrics)
+                        let offset = metricIndex * 4
+                        if offset + 2 <= hmtx.Length then lastAdvance <- single (readUInt16 hmtx offset) / unitsPerEm
+                        advances[glyphIndex] <- lastAdvance
+                    let locaFormat = int (readInt16 head 50)
+                    let locaOffsets = Array.zeroCreate<uint32> (glyphCount + 1)
+                    for glyphIndex in 0 .. glyphCount do
+                        locaOffsets[glyphIndex] <-
+                            if locaFormat = 0 then uint32 (readUInt16 loca (glyphIndex * 2)) * 2u
+                            else readUInt32 loca (glyphIndex * 4)
+                    let parser = makeGlyphParser glyf locaOffsets unitsPerEm
+                    let rawGlyphs =
+                        [|for glyphIndex in 0 .. dec glyphCount do
+                              let contours = parser 0 (uint32 glyphIndex)
+                              yield makeRawGlyph (uint32 glyphIndex) advances contours
+                              |]
+                    let curveTexels, curveHeight, curveLocations = packCurveData rawGlyphs
+                    let glyphMetadata, bandTexels, bandHeight = makeBandData rawGlyphs curveLocations
+                    let ascender = single (readInt16 hhea 4) / unitsPerEm
+                    let descender = single (readInt16 hhea 6) / unitsPerEm
+                    let lineGap = single (readInt16 hhea 8) / unitsPerEm
+                    let metrics =
+                        { LineHeight = ascender - descender + lineGap
+                          Ascender = ascender
+                          Descender = descender }
+                    Some
+                        { FontFilePath = fontFilePath
+                          UnitsPerEm = unitsPerEm
+                          Metrics = metrics
+                          Glyphs = glyphMetadata
+                          CurveTextureWidth = textureWidth
+                          CurveTextureHeight = curveHeight
+                          CurveTexels = curveTexels
+                          BandTextureWidth = textureWidth
+                          BandTextureHeight = bandHeight
+                          BandTexels = bandTexels }
         with exn ->
             Log.info ("Could not load Slug font '" + fontFilePath + "' due to: " + scstring exn)
             None

@@ -44,27 +44,31 @@ uint CalcRootCode(float y1, float y2, float y3)
 
 vec2 SolveHorizPoly(vec4 p12, vec2 p3)
 {
-    vec2 a = p12.xy - p12.zw * 2.0 + p3;
     vec2 b = p12.xy - p12.zw;
+    vec2 c = p3 - p12.zw;
+    vec2 a = b + c;
     float ra = 1.0 / a.y;
     float rb = 0.5 / b.y;
     float d = sqrt(max(b.y * b.y - a.y * p12.y, 0.0));
     float t1 = (b.y - d) * ra;
     float t2 = (b.y + d) * ra;
-    if (abs(a.y) < 1.0 / 65536.0) t1 = t2 = p12.y * rb;
+    float linearScale = max(max(abs(b.y), abs(c.y)), 1.0);
+    if (abs(a.y) < linearScale / 65536.0) t1 = t2 = p12.y * rb;
     return vec2((a.x * t1 - b.x * 2.0) * t1 + p12.x, (a.x * t2 - b.x * 2.0) * t2 + p12.x);
 }
 
 vec2 SolveVertPoly(vec4 p12, vec2 p3)
 {
-    vec2 a = p12.xy - p12.zw * 2.0 + p3;
     vec2 b = p12.xy - p12.zw;
+    vec2 c = p3 - p12.zw;
+    vec2 a = b + c;
     float ra = 1.0 / a.x;
     float rb = 0.5 / b.x;
     float d = sqrt(max(b.x * b.x - a.x * p12.x, 0.0));
     float t1 = (b.x - d) * ra;
     float t2 = (b.x + d) * ra;
-    if (abs(a.x) < 1.0 / 65536.0) t1 = t2 = p12.x * rb;
+    float linearScale = max(max(abs(b.x), abs(c.x)), 1.0);
+    if (abs(a.x) < linearScale / 65536.0) t1 = t2 = p12.x * rb;
     return vec2((a.y * t1 - b.y * 2.0) * t1 + p12.y, (a.y * t2 - b.y * 2.0) * t2 + p12.y);
 }
 

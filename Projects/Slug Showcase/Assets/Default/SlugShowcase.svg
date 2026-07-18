@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 180">
+  <defs>
+    <linearGradient id="heartGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff3f81"/>
+      <stop offset="0.5" stop-color="#c457ff"/>
+      <stop offset="1" stop-color="#ffbc55"/>
+    </linearGradient>
+    <radialGradient id="cloudGradient" cx="0.42" cy="0.7" r="0.72">
+      <stop offset="0" stop-color="#d9fbff"/>
+      <stop offset="0.45" stop-color="#54dfff"/>
+      <stop offset="1" stop-color="#477fff"/>
+    </radialGradient>
+  </defs>
+  <path id="heart" fill="url(#heartGradient)" d="M100 145 C30 100 28 30 78 28 C91 28 100 38 110 52 C120 38 129 28 142 28 C192 30 190 100 120 145 C113 150 107 150 100 145 Z"/>
+  <path id="cloud" fill="url(#cloudGradient)" d="M245 130 C218 130 209 96 230 82 C238 76 247 74 258 77 C268 46 305 36 331 54 C343 62 351 75 353 90 C379 85 395 102 392 121 C390 136 378 145 361 145 L245 145 C230 145 218 138 218 128 Z"/>
+  <path id="pin" fill="#ffc84f" fill-rule="evenodd" d="M500 154 C486 133 454 99 454 65 C454 34 474 16 500 16 C526 16 546 34 546 65 C546 99 514 133 500 154 Z M500 44 C487 44 478 53 478 66 C478 79 487 88 500 88 C513 88 522 79 522 66 C522 53 513 44 500 44 Z"/>
+</svg>

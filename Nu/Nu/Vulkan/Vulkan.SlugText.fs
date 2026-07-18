@@ -21,6 +21,7 @@ module SlugText =
         [<FieldOffset(72)>] val mutable bandMaxX : uint32
         [<FieldOffset(76)>] val mutable bandMaxYAndFlags : uint32
         [<FieldOffset(80)>] val mutable color : Vector4
+        [<FieldOffset(96)>] val mutable transform : Matrix4x4
 
     [<Struct; StructLayout(LayoutKind.Explicit)>]
     type ViewProjection =
@@ -172,7 +173,7 @@ module SlugText =
         fn ()
         BeginSlugTextBatch state env
 
-    let private PopulateSlugTextBatchGlyph (glyph : SlugTextGlyph) fontSize env =
+    let private PopulateSlugTextBatchGlyph (glyph : SlugTextGlyph) fontSize (transform : Matrix4x4 inref) env =
         let i = env.GlyphIndex
         let mutable gpuGlyph = Glyph ()
         gpuGlyph.perimeter <- v4 glyph.Position.X glyph.Position.Y glyph.Size.X glyph.Size.Y
@@ -184,12 +185,13 @@ module SlugText =
         gpuGlyph.bandMaxX <- uint32 glyph.BandMax.X
         gpuGlyph.bandMaxYAndFlags <- uint32 glyph.BandMax.Y ||| (match glyph.FillRule with SlugFillNonzero -> 0u | SlugFillEvenOdd -> 0x1000u)
         gpuGlyph.color <- glyph.Color.V4
+        gpuGlyph.transform <- transform
         env.Glyphs.[i] <- gpuGlyph
 
-    let SubmitSlugTextBatchGlyph (absolute, glyph : SlugTextGlyph, fontSize, clipOpt : Box2 voption inref, blend, curveTexture, bandTexture, viewport, env) =
+    let SubmitSlugTextBatchGlyph (absolute, glyph : SlugTextGlyph, fontSize, transform : Matrix4x4 inref, clipOpt : Box2 voption inref, blend, curveTexture, bandTexture, viewport, env) =
         let state = SlugTextBatchState.make absolute clipOpt blend curveTexture bandTexture
         if SlugTextBatchState.changed state env.State || env.GlyphIndex = Constants.Render.SpriteBatchSize then RestartSlugTextBatch state viewport env
-        PopulateSlugTextBatchGlyph glyph fontSize env
+        PopulateSlugTextBatchGlyph glyph fontSize &transform env
         env.GlyphIndex <- inc env.GlyphIndex
 
     let CreateSlugTextBatchEnv unfilteredSampler vkc =

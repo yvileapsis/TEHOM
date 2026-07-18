@@ -198,6 +198,14 @@ module WorldRender =
                 let operation = { Elevation = textTransform.Elevation; Horizon = perimeter.Center.Y; AssetTag = slugFont; RenderOperation2d = RenderSlugText descriptor }
                 World.enqueueLayeredOperation2d operation world
 
+        /// Render an arbitrary analytic Slug composite shape.
+        static member renderSlugShape (descriptor : SlugShapeDescriptor) world =
+            World.enqueueLayeredOperation2d
+                { Elevation = descriptor.Transform.Elevation
+                  Horizon = descriptor.Transform.Horizon
+                  AssetTag = AssetTag.makeEmpty ()
+                  RenderOperation2d = RenderSlugShape descriptor } world
+
         /// Render a vector graphics contour.
         static member renderContour (descriptor : ContourDescriptor) world =
             World.enqueueLayeredOperation2d

@@ -224,6 +224,7 @@ type ShaderStage =
     | VertexStage
     | FragmentStage
     | VertexFragmentStage
+    | ComputeStage
 
     /// The VkShaderStageFlags.
     member this.VkShaderStageFlags =
@@ -231,6 +232,7 @@ type ShaderStage =
         | VertexStage -> VkShaderStageFlags.Vertex
         | FragmentStage -> VkShaderStageFlags.Fragment
         | VertexFragmentStage -> VkShaderStageFlags.Vertex ||| VkShaderStageFlags.Fragment
+        | ComputeStage -> VkShaderStageFlags.Compute
     
 /// The type of a resource descriptor.
 type DescriptorType =
@@ -760,6 +762,65 @@ module Hl =
              VkDependencyFlags.None,
              0u, nullPtr, 0u, nullPtr,
              1u, &&barrier)
+
+    /// Record a buffer memory barrier for an explicit byte range.
+    let recordBufferMemoryBarrierRange
+        commandBuffer
+        srcStage
+        srcAccess
+        dstStage
+        dstAccess
+        vkBuffer
+        (offset : uint64)
+        (size : uint64) =
+        let mutable barrier = VkBufferMemoryBarrier ()
+        barrier.srcAccessMask <- srcAccess
+        barrier.dstAccessMask <- dstAccess
+        barrier.srcQueueFamilyIndex <- Vulkan.VK_QUEUE_FAMILY_IGNORED
+        barrier.dstQueueFamilyIndex <- Vulkan.VK_QUEUE_FAMILY_IGNORED
+        barrier.buffer <- vkBuffer
+        barrier.offset <- offset
+        barrier.size <- size
+        DeviceApi.vkCmdPipelineBarrier
+            (commandBuffer,
+             srcStage,
+             dstStage,
+             VkDependencyFlags.None,
+             0u, nullPtr,
+             1u, &&barrier,
+             0u, nullPtr)
+
+    /// Record a buffer memory barrier covering the whole buffer.
+    let recordBufferMemoryBarrier commandBuffer srcStage srcAccess dstStage dstAccess vkBuffer =
+        recordBufferMemoryBarrierRange
+            commandBuffer
+            srcStage
+            srcAccess
+            dstStage
+            dstAccess
+            vkBuffer
+            0UL
+            Vulkan.VK_WHOLE_SIZE
+
+    /// Make host writes visible to a compute shader on the supplied command buffer.
+    let recordHostWritesToCompute commandBuffer vkBuffer =
+        recordBufferMemoryBarrier
+            commandBuffer
+            VkPipelineStageFlags.Host
+            VkAccessFlags.HostWrite
+            VkPipelineStageFlags.ComputeShader
+            (VkAccessFlags.ShaderRead ||| VkAccessFlags.ShaderWrite)
+            vkBuffer
+
+    /// Make compute shader writes visible to vertex and fragment shaders on the supplied command buffer.
+    let recordComputeWritesToGraphics commandBuffer vkBuffer =
+        recordBufferMemoryBarrier
+            commandBuffer
+            VkPipelineStageFlags.ComputeShader
+            VkAccessFlags.ShaderWrite
+            (VkPipelineStageFlags.VertexShader ||| VkPipelineStageFlags.FragmentShader)
+            VkAccessFlags.ShaderRead
+            vkBuffer
 
     /// Try get surface capabilities.
     let tryGetSurfaceCapabilities vkPhysicalDevice =

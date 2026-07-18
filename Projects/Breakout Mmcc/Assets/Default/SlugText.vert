@@ -40,6 +40,7 @@ struct Glyph
     vec4 banding;
     uvec4 glyph;
     vec4 color;
+    mat4 transform;
 };
 
 struct ViewProjection
@@ -93,8 +94,9 @@ void main()
     vec4 pos = vec4(position, corner * 2.0 - 1.0);
     vec4 tex4 = vec4(tex, 0.0, 0.0);
     vec2 dilatedPosition;
-    renderCoord = SlugDilate(pos, tex4, glyph.jacobian, viewProjection.viewProjection, viewProjection.viewport.xy, dilatedPosition);
-    gl_Position = viewProjection.viewProjection * vec4(dilatedPosition, 0.0, 1.0);
+    mat4 modelViewProjection = viewProjection.viewProjection * glyph.transform;
+    renderCoord = SlugDilate(pos, tex4, glyph.jacobian, modelViewProjection, viewProjection.viewport.xy, dilatedPosition);
+    gl_Position = modelViewProjection * vec4(dilatedPosition, 0.0, 1.0);
     banding = glyph.banding;
     glyphData = glyph.glyph;
     color = glyph.color;

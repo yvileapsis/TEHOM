@@ -221,7 +221,7 @@ type Pipeline =
         pipeline.DescriptorSets_[set]
 
     /// Create the descriptor set layout.
-    static member private createDescriptorSetLayout (resourceBindings : VkDescriptorSetLayoutBinding array) =
+    static member internal createDescriptorSetLayout (resourceBindings : VkDescriptorSetLayoutBinding array) =
         use resourceBindingsPin = new ArrayPin<_> (resourceBindings)
         let mutable info = VkDescriptorSetLayoutCreateInfo ()
         info.bindingCount <- uint resourceBindings.Length
@@ -231,7 +231,7 @@ type Pipeline =
         descriptorSetLayout
 
     /// Create the pipeline layout.
-    static member private createVkPipelineLayout (descriptorSetLayouts : VkDescriptorSetLayout array) (pushConstantRanges : VkPushConstantRange array) =
+    static member internal createVkPipelineLayout (descriptorSetLayouts : VkDescriptorSetLayout array) (pushConstantRanges : VkPushConstantRange array) =
         use descriptorSetLayoutsPin = new ArrayPin<_> (descriptorSetLayouts)
         use pushConstantRangesPin = new ArrayPin<_> (pushConstantRanges)
         let mutable info = VkPipelineLayoutCreateInfo ()
@@ -664,3 +664,126 @@ type Pipeline =
         for vkLayout in pipeline.VkDescriptorSetLayouts_ do DeviceApi.vkDestroyDescriptorSetLayout (vkLayout, nullPtr)
         for buffer in pipeline.Buffers_ do VulkanBuffer.destroy buffer context
         for set in pipeline.DescriptorSets_ do set.Destroy ()
+
+/// A Vulkan compute pipeline.
+type ComputePipeline =
+    private
+        { mutable VkPipeline_ : VkPipeline
+          DescriptorSets_ : DescriptorSet array
+          mutable VkPipelineLayout_ : VkPipelineLayout
+          mutable VkDescriptorSetLayouts_ : VkDescriptorSetLayout array
+          ShaderPath_ : string }
+
+    /// The compute pipeline layout.
+    member this.PipelineLayout = this.VkPipelineLayout_
+
+    /// Try to create a compute pipeline from shaderPath + ".comp".
+    static member private tryCreateVkPipeline shaderPath pipelineLayout =
+        match Hl.tryCreateShaderModuleFromGlsl (shaderPath + ".comp") ShaderKind.ComputeShader with
+        | Right computeModule ->
+            use entryPoint = new StringWrap ("main")
+            let mutable stage = VkPipelineShaderStageCreateInfo ()
+            stage.stage <- VkShaderStageFlags.Compute
+            stage.``module`` <- computeModule
+            stage.pName <- entryPoint.Pointer
+            let mutable info = VkComputePipelineCreateInfo ()
+            info.stage <- stage
+            info.layout <- pipelineLayout
+            let mutable vkPipeline = Unchecked.defaultof<VkPipeline>
+            let result =
+                DeviceApi.vkCreateComputePipelines
+                    (VkPipelineCache.Null, 1u, &&info, nullPtr, &&vkPipeline)
+            DeviceApi.vkDestroyShaderModule (computeModule, nullPtr)
+            result |> Hl.check
+            vkPipeline
+        | Left message ->
+            Log.warn message
+            VkPipeline.Null
+
+    /// Begin use of the compute pipeline this frame.
+    static member beginFrame pipeline =
+        for descriptorSet in pipeline.DescriptorSets_ do descriptorSet.BeginFrame ()
+
+    /// Specify a descriptor set.
+    static member specifyDescriptorSet<'k when 'k : equality> set (key : 'k) pipeline specify =
+        pipeline.DescriptorSets_[set].Specify key specify
+
+    /// Bind this compute pipeline to the supplied command buffer.
+    static member bind commandBuffer pipeline =
+        DeviceApi.vkCmdBindPipeline (commandBuffer, VkPipelineBindPoint.Compute, pipeline.VkPipeline_)
+
+    /// Bind a descriptor set to the supplied command buffer.
+    static member bindDescriptorSet commandBuffer setNumber descriptorSet pipeline =
+        let mutable descriptorSet = descriptorSet
+        DeviceApi.vkCmdBindDescriptorSets
+            (commandBuffer,
+             VkPipelineBindPoint.Compute,
+             pipeline.VkPipelineLayout_,
+             uint setNumber,
+             1u,
+             &&descriptorSet,
+             0u,
+             nullPtr)
+
+    /// Dispatch compute work on the supplied command buffer.
+    static member dispatch commandBuffer groupCountX groupCountY groupCountZ pipeline =
+        ignore pipeline
+        DeviceApi.vkCmdDispatch (commandBuffer, uint groupCountX, uint groupCountY, uint groupCountZ)
+
+    /// Recreate the compute VkPipeline with the updated shader.
+    static member reload pipeline (context : VulkanContext) =
+        ConcurrentCommandQueue.waitIdle context.RenderQueue
+        if pipeline.VkPipeline_ <> VkPipeline.Null then
+            DeviceApi.vkDestroyPipeline (pipeline.VkPipeline_, nullPtr)
+            pipeline.VkPipeline_ <- VkPipeline.Null
+        pipeline.VkPipeline_ <- ComputePipeline.tryCreateVkPipeline pipeline.ShaderPath_ pipeline.VkPipelineLayout_
+
+    /// Create a compute pipeline.
+    static member create
+        shaderPath
+        (descriptorSetDefinitions : DescriptorSetDefinition array)
+        (pushConstants : PushConstant array) =
+
+        // create descriptor set layouts
+        let descriptorSetLayouts = Array.zeroCreate descriptorSetDefinitions.Length
+        for i in 0 .. dec descriptorSetDefinitions.Length do
+            let descriptorBindings =
+                descriptorSetDefinitions[i].DescriptorBindings
+                |> Array.map (fun binding -> Hl.makeDescriptorBinding binding.Binding binding.DescriptorType binding.DescriptorCount binding.ShaderStage)
+            descriptorSetLayouts[i] <- Pipeline.createDescriptorSetLayout descriptorBindings
+
+        // create descriptor sets
+        let descriptorSets = Array.zeroCreate descriptorSetDefinitions.Length
+        for i in 0 .. dec descriptorSetDefinitions.Length do
+            descriptorSets[i] <- descriptorSetDefinitions[i].CreateDescriptorSet descriptorSetLayouts[i]
+
+        // create pipeline layout and compute pipeline
+        let pushConstantRanges =
+            Array.map
+                (fun pushConstant ->
+                    Hl.makePushConstantRange
+                        pushConstant.Offset
+                        pushConstant.Size
+                        pushConstant.ShaderStage)
+                pushConstants
+        let pipelineLayout = Pipeline.createVkPipelineLayout descriptorSetLayouts pushConstantRanges
+        let vkPipeline = ComputePipeline.tryCreateVkPipeline shaderPath pipelineLayout
+        { VkPipeline_ = vkPipeline
+          DescriptorSets_ = descriptorSets
+          VkPipelineLayout_ = pipelineLayout
+          VkDescriptorSetLayouts_ = descriptorSetLayouts
+          ShaderPath_ = shaderPath }
+
+    /// Destroy a compute pipeline and all resources it owns.
+    static member destroy pipeline =
+        if pipeline.VkPipeline_ <> VkPipeline.Null then
+            DeviceApi.vkDestroyPipeline (pipeline.VkPipeline_, nullPtr)
+            pipeline.VkPipeline_ <- VkPipeline.Null
+        for descriptorSet in pipeline.DescriptorSets_ do descriptorSet.Destroy ()
+        if pipeline.VkPipelineLayout_ <> VkPipelineLayout.Null then
+            DeviceApi.vkDestroyPipelineLayout (pipeline.VkPipelineLayout_, nullPtr)
+            pipeline.VkPipelineLayout_ <- VkPipelineLayout.Null
+        for i in 0 .. dec pipeline.VkDescriptorSetLayouts_.Length do
+            if pipeline.VkDescriptorSetLayouts_[i] <> VkDescriptorSetLayout.Null then
+                DeviceApi.vkDestroyDescriptorSetLayout (pipeline.VkDescriptorSetLayouts_[i], nullPtr)
+                pipeline.VkDescriptorSetLayouts_[i] <- VkDescriptorSetLayout.Null

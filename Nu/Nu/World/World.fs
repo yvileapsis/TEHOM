@@ -50,6 +50,8 @@ module NativeLibraryLoading =
                         if String.Equals (libraryName, candidateName, StringComparison.Ordinal) then
                             if frameworkName = "__Internal" then
                                 tryLoadNativeLibraryByNameOpt frameworkName
+                            elif frameworkName.Contains '/' then
+                                tryLoadNativeLibraryOpt (Path.Combine (AppContext.BaseDirectory, frameworkName))
                             else tryLoadNativeLibraryOpt (frameworkPath frameworkName)
                         else None)
                     |> Option.defaultValue 0n)
@@ -103,7 +105,8 @@ module NativeLibraryLoading =
 
         let configureFrameworkNativeLibraries () =
             trySetDllImportResolver typeof<World>.Assembly
-                ["cimgui", "cimgui"]
+                ["cimgui", "cimgui"
+                 "libHarfBuzzSharp", "runtimes/osx/native/libHarfBuzzSharp.dylib"]
             trySetDllImportResolver typeof<ImGuiNET.ImGui>.Assembly
                 ["cimgui", "cimgui"]
             trySetDllImportResolver typeof<BulletSharp.BulletObject>.Assembly

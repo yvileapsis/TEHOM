@@ -530,6 +530,18 @@ module WorldImSim =
         static member doText name args world = World.doEntity<TextDispatcher> name args world
 
         /// <summary>
+        /// ImSim declare MTSDF text with the given arguments.
+        /// See <see cref="MsdfTextDispatcher" />.
+        /// </summary>
+        static member doMsdfText name args world = World.doEntity<MsdfTextDispatcher> name args world
+
+        /// <summary>
+        /// ImSim declare Slug contour text with the given arguments.
+        /// See <see cref="SlugTextDispatcher" />.
+        /// </summary>
+        static member doSlugText name args world = World.doEntity<SlugTextDispatcher> name args world
+
+        /// <summary>
         /// ImSim declare a label with the given arguments.
         /// See <see cref="LabelDispatcher" />.
         /// </summary>

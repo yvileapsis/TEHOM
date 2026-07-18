@@ -84,10 +84,14 @@
         <Compile Include="Physics\Box2dNetPhysicsEngine.fs" />
         <Compile Include="Physics\JoltPhysicsEngine.fs" />
         <Compile Include="Render\MsdfFont.fs" />
+        <Compile Include="Render\SlugShape.fs" />
+        <Compile Include="Render\SlugColorFont.fs" />
+        <Compile Include="Render\SlugSvg.fs" />
         <Compile Include="Render\SlugFont.fs" />
         <Compile Include="Render\RendererPrelude.fs" />
         <Compile Include="Vulkan\Vulkan.MsdfText.fs" />
         <Compile Include="Vulkan\Vulkan.SlugText.fs" />
+        <Compile Include="Vulkan\Vulkan.SlugShape.fs" />
         <Compile Include="Render\Renderer2d.fs" />
         <Compile Include="Render\Renderer3d.fs" />
         <Compile Include="Render\RendererImGui.fs" />
@@ -163,6 +167,7 @@
         <PackageReference Include="Pfim" Version="0.11.4" />
         <PackageReference Include="Prime" Version="11.5.1" />
         <PackageReference Include="System.Configuration.ConfigurationManager" Version="10.0.1" />
+        <PackageReference Include="Svg" Version="3.4.7" />
         <PackageReference Include="System.Drawing.Common" Version="10.0.1" />
         <PackageReference Include="System.Formats.Nrbf" Version="10.0.1" /> <!-- we need this to AOT System.Drawing.Common for macOS/mobile when building in Release -->
         <PackageReference Include="Twizzle.ImGui-Bundle.NET" Version="1.91.5.2" />
