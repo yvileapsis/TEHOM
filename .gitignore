@@ -31,7 +31,9 @@ bin/
 obj/
 refinement/
 piped/
+refinement-out/
 .vs/
+.idea/
 
 #########
 # Nuget #
