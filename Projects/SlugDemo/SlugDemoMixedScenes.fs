@@ -327,8 +327,6 @@ module SlugDemoMixedScenes =
 
 
     let draw (world : World) =
-        // Navigation is supplied by SlugDemoView; this scene is the canonical
-        // content only, rather than another explanatory ribbon or telemetry card.
         let cardPosition = v3 0.0f -12.0f 0.0f
         let cardSize = v3 180.0f (180.0f * 516.0f / 356.0f) 0.0f
         placeComposite

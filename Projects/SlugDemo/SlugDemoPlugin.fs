@@ -14,4 +14,4 @@ type SlugDemoPlugin () =
     override this.EditModes =
         Map.ofList
             [for scene in SlugDemoScene.all do
-                (SlugDemoScene.label scene, fun world -> Game.SetSlugDemoScene scene world)]
+                (SlugDemoScene.label scene, fun world -> Game.SetGameState scene world)]

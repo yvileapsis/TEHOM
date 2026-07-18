@@ -3,113 +3,163 @@ open System
 open System.Numerics
 open Prime
 open Nu
-open SlugDemoTextSupport
 
 [<RequireQualifiedAccess>]
 module SlugDemoTextEffects =
 
-    let private configureGlyph (composite : SlugCompositeShape) fillSource effectId parameters parameters2 color =
-        let state = composite.Layers.Item 0
-        composite.SetLayerState
-            (0,
-             { state with
-                 Color = color
-                 FillSource = fillSource
-                 EffectId = effectId
-                 EffectParameters = parameters
-                 EffectParameters2 = parameters2 })
-
-    let draw (world : World) =
-        let cards =
-            [| (-150.0f, 45.0f)
-               (150.0f, 45.0f)
-               (-150.0f, -55.0f)
-               (150.0f, -55.0f) |]
-        let sourceCenterX = (textEffectXs.[0] + textEffectXs.[textEffectXs.Length - 1]) * 0.5f
-        let glyphOffsets = textEffectXs |> Array.map (fun sourceX -> sourceX - sourceCenterX)
-        let glyphs = textEffectComposites.Value
-
-        // Keep the preview honest about what this renderer provides: Slug's analytic
-        // coverage stays the source of every glyph, while the procedural fills and
-        // layer effects supply the halo, outline, and cut-away treatments.
-        for column in 0 .. textEffectCharacters.Length - 1 do
-            configureGlyph glyphs.[0].[column] SlugFillSource.Solid 0 (v4 0.0f 0.0f 0.0f 0.0f) (v4 0.0f 0.0f 0.0f 0.0f) SlugDemo.white
-            configureGlyph glyphs.[1].[column] (SlugFillSource.Procedural 4) 0 (v4 8.0f 0.0f 0.0f 0.0f) (v4 0.0f 0.0f 0.0f 0.0f) SlugDemo.amber
-            configureGlyph glyphs.[2].[column] (SlugFillSource.Procedural 5) 0 (v4 8.0f 0.0f 0.0f 0.0f) (v4 0.0f 0.0f 0.0f 0.0f) SlugDemo.coral
-            configureGlyph glyphs.[4].[column] SlugFillSource.Solid 0 (v4 0.0f 0.0f 0.0f 0.0f) (v4 0.0f 0.0f 0.0f 0.0f) SlugDemo.white
-            let cutProgress = [| 0.12f; 0.18f; 0.24f; 0.30f |].[column]
-            configureGlyph
-                glyphs.[3].[column]
-                SlugFillSource.Solid
-                4
-                (v4 cutProgress 0.0f 0.0f 0.0f)
-                (v4 0.0f 0.0f 0.0f 0.0f)
-                SlugDemo.cyan
+    let private panelColor = Color (9uy, 8uy, 40uy, 255uy)
+    let private warm = Color (244uy, 151uy, 24uy, 255uy)
+    let private ink = Color (5uy, 4uy, 12uy, 255uy)
+    let private paper = Color (250uy, 249uy, 246uy, 255uy)
+    let private pigment = Color (63uy, 55uy, 157uy, 255uy)
+    let private stroke = Color (242uy, 91uy, 42uy, 255uy)
+    let private stoneImage = asset<Image> Assets.Default.PackageName "CobblestoneFloor"
 
 
-        for cardIndex in 0 .. cards.Length - 1 do
-            let centerX, centerY = cards.[cardIndex]
-            SlugDemo.panel
-                ("TextEffectsPanel" + string cardIndex)
-                (v3 centerX centerY 0.0f)
-                (v3 282.0f 84.0f 0.0f)
-                (if cardIndex % 2 = 0 then SlugDemo.panelColor else SlugDemo.panelColorLight)
-                0.0f
+    let private makeEffectComposite fileName text fillSource effectId color =
+        let composite = SlugDemoTextSupport.makeTextComposite fileName text
+        for layerIndex in 0 .. composite.LayerCount - 1 do
+            let state = composite.Layers.Item layerIndex
+            composite.SetLayerState
+                (layerIndex,
+                 { state with
+                     Color = color
+                     FillSource = fillSource
+                     EffectId = effectId
+                     EffectParameters =
+                         if effectId = 10
+                         then v4 0.0f 0.0f (single layerIndex * 1.37f) 0.0f
+                         else Vector4.Zero
+                     EffectParameters2 = Vector4.Zero })
+        composite
+
+    let private warmWord =
+        lazy (makeEffectComposite "Lobster-Regular.ttf" "SLUG" SlugFillSource.Solid 9 warm)
+
+    let private scriptShadow =
+        lazy (makeEffectComposite "Allura-Regular.ttf" "slughorn" SlugFillSource.Solid 0 ink)
+
+    let private scriptFill =
+        lazy (makeEffectComposite "Allura-Regular.ttf" "slughorn" SlugFillSource.Solid 0 paper)
+
+    let private chippedWord =
+        lazy (makeEffectComposite "Anton-Regular.ttf" "SLUGHORN" SlugFillSource.Solid 10 pigment)
+
+    let private filledA =
+        lazy (makeEffectComposite "LibreBaskerville.ttf" "A" SlugFillSource.Solid 0 paper)
+
+    let private outlineA =
+        lazy (makeEffectComposite "LibreBaskerville.ttf" "A" SlugFillSource.Solid 0 stroke)
+
+    let private outlineCutoutA =
+        lazy (makeEffectComposite "LibreBaskerville.ttf" "A" SlugFillSource.Solid 0 panelColor)
+
+    let private ringOffsets (radius : single) : Vector2 array =
+        Array.init 16 (fun index ->
+            let angle = single index * MathF.PI * 2.0f / 16.0f
+            v2 (MathF.Cos angle * radius) (MathF.Sin angle * radius))
+
+    let private scriptOutlineOffsets = ringOffsets 2.0f
+    let private glyphOutlineOffsets = ringOffsets 1.0f
+
+    let private placeTextComposite (name : string) (composite : SlugCompositeShape) (position : Vector3) (size : Vector3) (rotation : Quaternion) (elevation : single) computeConfigOpt (world : World) =
+        let bounds = SlugDemoContours.getCompositeLayerBounds composite
+        SlugDemoContours.placeCompositeInBounds
+            name composite bounds position size rotation elevation computeConfigOpt world
+
+    let private placeOutline (name : string) (composite : SlugCompositeShape) (position : Vector3) (size : Vector3) (offsets : Vector2 array) (elevation : single) (world : World) =
+        for index in 0 .. offsets.Length - 1 do
+            let offset = offsets.[index]
+            placeTextComposite
+                (name + string index)
+                composite
+                (position + v3 offset.X offset.Y 0.0f)
+                size
+                Quaternion.Identity
+                elevation
+                None
                 world
 
-            for column in 0 .. textEffectCharacters.Length - 1 do
-                let x = centerX + glyphOffsets.[column]
-                let y = centerY - 15.0f
-                match cardIndex with
-                | 0 ->
-                    SlugDemoContours.placeComposite
-                        ("TextEffectsInside" + string column)
-                        glyphs.[0].[column]
-                        (v3 x y 0.0f)
-                        (v3 28.0f 29.0f 0.0f)
-                        Quaternion.Identity
-                        2.0f
-                        None
-                        world
-                | 1 ->
-                    // The enlarged analytic halo sits behind the normal glyph, so its
-                    // procedural edge is visible on the outside rather than as a label.
-                    SlugDemoContours.placeComposite
-                        ("TextEffectsHalo" + string column)
-                        glyphs.[1].[column]
-                        (v3 x y 0.0f)
-                        (v3 37.0f 35.0f 0.0f)
-                        Quaternion.Identity
-                        2.0f
-                        None
-                        world
-                    SlugDemoContours.placeComposite
-                        ("TextEffectsHaloFill" + string column)
-                        glyphs.[4].[column]
-                        (v3 x y 0.0f)
-                        (v3 28.0f 29.0f 0.0f)
-                        Quaternion.Identity
-                        3.0f
-                        None
-                        world
-                | 2 ->
-                    SlugDemoContours.placeComposite
-                        ("TextEffectsOutline" + string column)
-                        glyphs.[2].[column]
-                        (v3 x y 0.0f)
-                        (v3 37.0f 35.0f 0.0f)
-                        Quaternion.Identity
-                        2.0f
-                        None
-                        world
-                | _ ->
-                    SlugDemoContours.placeComposite
-                        ("TextEffectsCutAway" + string column)
-                        glyphs.[3].[column]
-                        (v3 x y 0.0f)
-                        (v3 31.0f 31.0f 0.0f)
-                        Quaternion.Identity
-                        2.0f
-                        None
-                        world
+    let draw (world : World) =
+        let topLeft = v3 -150.0f 55.0f 0.0f
+        let topRight = v3 150.0f 55.0f 0.0f
+        let bottomLeft = v3 -150.0f -75.0f 0.0f
+        let bottomRight = v3 150.0f -75.0f 0.0f
+        let panelSize = v3 292.0f 126.0f 0.0f
 
+        SlugDemo.panel "TextEffectsWarmPanel" topLeft panelSize panelColor 0.0f world
+        SlugDemo.panel "TextEffectsScriptPanel" topRight panelSize panelColor 0.0f world
+        SlugDemo.panel "TextEffectsStrokePanel" bottomRight panelSize panelColor 0.0f world
+        World.doStaticSprite
+            "TextEffectsStone"
+            [Entity.Position .= bottomLeft
+             Entity.Size .= panelSize
+             Entity.Elevation .= 0.0f
+             Entity.StaticImage .= stoneImage
+             Entity.Color .= Color (110uy, 110uy, 110uy, 255uy)]
+            world
+
+        placeTextComposite
+            "TextEffectsWarm"
+            warmWord.Value
+            (topLeft + v3 0.0f -3.0f 0.0f)
+            (v3 180.0f 60.0f 0.0f)
+            Quaternion.Identity
+            2.0f
+            None
+            world
+
+        placeOutline
+            "TextEffectsScriptOutline"
+            scriptShadow.Value
+            (topRight + v3 0.0f -2.0f 0.0f)
+            (v3 235.0f 54.0f 0.0f)
+            scriptOutlineOffsets
+            1.0f
+            world
+        placeTextComposite
+            "TextEffectsScript"
+            scriptFill.Value
+            (topRight + v3 0.0f -2.0f 0.0f)
+            (v3 235.0f 54.0f 0.0f)
+            Quaternion.Identity
+            2.0f
+            None
+            world
+
+        placeTextComposite
+            "TextEffectsChipped"
+            chippedWord.Value
+            bottomLeft
+            (v3 235.0f 32.0f 0.0f)
+            (Quaternion.CreateFromAxisAngle (Vector3.UnitZ, -0.16f))
+            2.0f
+            None
+            world
+
+        placeTextComposite
+            "TextEffectsFilledA"
+            filledA.Value
+            (bottomRight + v3 -55.0f -2.0f 0.0f)
+            (v3 36.0f 50.0f 0.0f)
+            Quaternion.Identity
+            2.0f
+            None
+            world
+        placeOutline
+            "TextEffectsOutlineA"
+            outlineA.Value
+            (bottomRight + v3 55.0f -2.0f 0.0f)
+            (v3 36.0f 50.0f 0.0f)
+            glyphOutlineOffsets
+            1.0f
+            world
+        placeTextComposite
+            "TextEffectsOutlineCutoutA"
+            outlineCutoutA.Value
+            (bottomRight + v3 55.0f -2.0f 0.0f)
+            (v3 36.0f 50.0f 0.0f)
+            Quaternion.Identity
+            2.0f
+            None
+            world

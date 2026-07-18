@@ -262,6 +262,20 @@ module SlugDemoContours =
         placeCompositeWithinBounds
             name composite bounds position size rotation elevation computeConfigOpt Matrix4x4.Identity [||] world
 
+    let placeCompositeInBoundsWithTextures
+        name
+        composite
+        bounds
+        position
+        size
+        rotation
+        elevation
+        computeConfigOpt
+        textureSlots
+        world =
+        placeCompositeWithinBounds
+            name composite bounds position size rotation elevation computeConfigOpt Matrix4x4.Identity textureSlots world
+
     let placeCompositeWithTextures name composite position size rotation elevation computeConfigOpt textureSlots world =
         placeCompositeWithProjectiveAndTextures
             name composite position size rotation elevation computeConfigOpt Matrix4x4.Identity textureSlots world

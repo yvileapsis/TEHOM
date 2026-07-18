@@ -517,6 +517,22 @@ type SlugPath (startPoint : Vector2, sourceSegments : SlugPathSegment array, ?cl
         let mutable current = startPoint
         let mutable fallbackTangent = Vector2.UnitX
 
+        let firstTangent =
+            if segments.Length = 0 then Vector2.UnitX
+            else
+                match segments[0] with
+                | SlugPathSegment.Line point ->
+                    point - startPoint
+                | SlugPathSegment.Quadratic (control, point) ->
+                    let tangent = control - startPoint
+                    if tangent.LengthSquared () > 1.0e-12f then tangent else point - startPoint
+                | SlugPathSegment.Cubic (control1, control2, point) ->
+                    let tangent1 = control1 - startPoint
+                    if tangent1.LengthSquared () > 1.0e-12f then tangent1
+                    else
+                        let tangent2 = control2 - startPoint
+                        if tangent2.LengthSquared () > 1.0e-12f then tangent2 else point - startPoint
+
         let addSample point tangent =
             let tangent = normalizeOrFallback tangent fallbackTangent
             if table.Count = 0 then
@@ -562,7 +578,7 @@ type SlugPath (startPoint : Vector2, sourceSegments : SlugPathSegment array, ?cl
         let appendCubic (p0 : Vector2) (p1 : Vector2) (p2 : Vector2) (p3 : Vector2) =
             appendCurve (evaluateCubic p0 p1 p2 p3) (derivativeCubic p0 p1 p2 p3) p0 p3
 
-        addSample startPoint Vector2.UnitX
+        addSample startPoint firstTangent
         for segment in segments do
             match segment with
             | SlugPathSegment.Line point ->

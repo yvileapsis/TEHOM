@@ -685,7 +685,7 @@ vec3 SlugRaymarchCircle(vec2 uv, float seconds)
     return clamp(vec3(0.10, 0.28, 0.58) * (0.22 + diffuse * 0.78) + vec3(0.20, 0.42, 0.95) * specular + vec3(0.06, 0.18, 0.35) * rim, vec3(0.0), vec3(1.0));
 }
 
-vec4 SlugFill(vec2 coord, vec2 uv, vec2 gradient, vec4 base, uvec4 ids, uvec4 resources, vec4 params, vec4 params2, vec4 material)
+vec4 SlugFill(vec2 coord, vec2 composite, vec2 uv, vec2 gradient, vec4 base, uvec4 ids, uvec4 resources, vec4 params, vec4 params2, vec4 material)
 {
     uint fillId = ids.y;
     vec4 result = base;
@@ -834,7 +834,8 @@ vec4 SlugFill(vec2 coord, vec2 uv, vec2 gradient, vec4 base, uvec4 ids, uvec4 re
             color += diffuseRadiance * baseColor * diffuseWeight;
         }
 
-        vec3 position = vec3(coord, 0.0);
+        vec2 normalizedPosition = (composite - params2.xy) * params2.z;
+        vec3 position = vec3(normalizedPosition, 0.0);
         float seconds = view.time.x;
 
         // Match the source example's animated warm, cool, and magenta point
@@ -930,6 +931,23 @@ vec4 SlugEffectFill(vec4 fill, vec2 coord, vec2 uv, uvec4 ids, vec4 params, vec4
         float radial = sin(length(coord) * max(abs(params.x), 1.0) - view.time.x * params.y);
         fill.rgb *= 0.8 + 0.2 * radial;
     }
+    else if (effectId == 9u) // warm vertical treatment used by the text-effects demo
+    {
+        float vertical = clamp(uv.y, 0.0, 1.0);
+        fill.rgb = mix(vec3(1.00, 0.76, 0.08), vec3(0.84, 0.24, 0.01), vertical);
+    }
+    else if (effectId == 10u) // chipped pigment used by the text-effects demo
+    {
+        float seed = params.z;
+        float grain =
+            sin(uv.x * 13.0 + sin(uv.y * 7.0 + seed) * 2.2) *
+            cos(uv.y * 11.0 + sin(uv.x * 5.0 - seed) * 2.0);
+        float fracture = sin((uv.x + uv.y) * 29.0 + seed * 1.7) * 0.24;
+        float pigment = smoothstep(-0.55, -0.08, grain + fracture);
+        float colorNoise = 0.5 + 0.5 * sin(uv.x * 11.0 - uv.y * 9.0 + seed);
+        fill.rgb = mix(vec3(0.12, 0.15, 0.48), vec3(0.30, 0.23, 0.64), colorNoise);
+        fill.a *= pigment;
+    }
     return fill;
 }
 
@@ -942,7 +960,7 @@ void main()
     if (maskCoverage <= 0.0) discard;
 
     uvec4 fillIds = uvec4(layerResourceIds.x, layerState.y, layerResourceIds.z, layerResourceIds.w);
-    vec4 fill = SlugFill(emCoord, shapeUv, gradientCoord, layerColor, fillIds, layerResourceIds, layerEffectParams, layerEffectParams2, layerMaskMaterial);
+    vec4 fill = SlugFill(emCoord, compositeCoord, shapeUv, gradientCoord, layerColor, fillIds, layerResourceIds, layerEffectParams, layerEffectParams2, layerMaskMaterial);
     fill = SlugEffectFill(fill, emCoord, shapeUv, layerState, layerEffectParams, layerEffectParams2);
 
     // The only shape boundary is the analytic curve/band evaluator. The quad is

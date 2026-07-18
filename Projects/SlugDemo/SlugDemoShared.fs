@@ -91,22 +91,6 @@ module SlugDemoScene =
         | TextAlongPath -> "Text Along Path"
         | ComputeShaders -> "Compute Shaders"
 
-    let shortLabel scene =
-        match scene with
-        | AnimatedGlyphs -> "Glyph Anim"
-        | LayerEffects -> "Layers"
-        | Projection2d -> "2D"
-        | Projection3d -> "3D"
-        | AnimatedHud -> "Anim HUD"
-        | ShapesCompositeShapes -> "Shapes"
-        | MixedScenes -> "Mixed"
-        | AnimatedScenes -> "Anim Scene"
-        | Objects3d -> "3D Objects"
-        | MixedText -> "Mixed Text"
-        | TextEffects -> "Effects"
-        | TextAlongPath -> "Text Path"
-        | ComputeShaders -> "Compute"
-        | scene -> label scene
 
     let index scene = Array.findIndex ((=) scene) all
 
@@ -122,8 +106,7 @@ module SlugDemoScene =
         all
         |> Array.tryFind (fun scene ->
             String.Equals (normalize (name scene), normalized, StringComparison.OrdinalIgnoreCase) ||
-            String.Equals (normalize (label scene), normalized, StringComparison.OrdinalIgnoreCase) ||
-            String.Equals (normalize (shortLabel scene), normalized, StringComparison.OrdinalIgnoreCase))
+            String.Equals (normalize (label scene), normalized, StringComparison.OrdinalIgnoreCase))
 
 [<RequireQualifiedAccess>]
 module SlugDemo =
@@ -215,9 +198,3 @@ module SlugDemo =
              Entity.Scale @= scale
              Entity.Justification .= Justified (JustifyCenter, JustifyMiddle)] world
 
-    let title name titleText subtitle world =
-        slug (name + "Title") font titleText (v3 0.0f 116.0f 0.0f) (v3 600.0f 38.0f 0.0f) 23.0f white 20.0f world
-        slugLeft (name + "Subtitle") font subtitle (v3 -300.0f 91.0f 0.0f) (v3 600.0f 18.0f 0.0f) 8.5f muted 20.0f TextDirectionLeftToRight None world
-
-    let footer name text world =
-        slugLeft (name + "Footer") font text (v3 -300.0f -161.0f 0.0f) (v3 600.0f 18.0f 0.0f) 7.5f dim 20.0f TextDirectionLeftToRight None world

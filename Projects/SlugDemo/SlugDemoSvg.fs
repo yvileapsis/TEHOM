@@ -3,17 +3,14 @@ open System
 open System.IO
 open System.Numerics
 open Nu
-open SlugDemoVectorSupport
 
 [<RequireQualifiedAccess>]
 module SlugDemoSvg =
 
-    // The original osgSlug NanoSVG example accepts arbitrary real-world SVG
-    // files. The showcase keeps that same loader path while embedding a small
-    // authored SlugHorn-style logo and tiger illustration when no upstream
-    // fixture is shipped with the repository.
+    // osgSlug's NanoSVG demo loads arbitrary external SVG files.  Keep the small
+    // SlugHorn-style logo here and load NanoSVG's detailed tiger fixture below.
     let private authoredSvg =
-        """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 300">
+        """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 230">
   <defs>
     <linearGradient id="arcGradient" gradientUnits="userSpaceOnUse" x1="15" y1="120" x2="285" y2="100" gradientTransform="rotate(-4 150 110)">
       <stop offset="0" stop-color="#26b890"/>
@@ -34,20 +31,6 @@ module SlugDemoSvg =
       <stop offset="0" stop-color="#e8751c"/>
       <stop offset="0.55" stop-color="#f69d26"/>
       <stop offset="1" stop-color="#f3c143"/>
-    </linearGradient>
-    <linearGradient id="tigerFur" gradientUnits="userSpaceOnUse" x1="330" y1="55" x2="550" y2="266" gradientTransform="rotate(-7 440 160)">
-      <stop offset="0" stop-color="#f7ad35"/>
-      <stop offset="0.48" stop-color="#d96b17"/>
-      <stop offset="1" stop-color="#a94013"/>
-    </linearGradient>
-    <linearGradient id="tigerWhite" gradientUnits="userSpaceOnUse" x1="365" y1="122" x2="505" y2="260">
-      <stop offset="0" stop-color="#fffdf4"/>
-      <stop offset="0.58" stop-color="#f5f5ee"/>
-      <stop offset="1" stop-color="#cfd4db"/>
-    </linearGradient>
-    <linearGradient id="tigerMouth" gradientUnits="userSpaceOnUse" x1="418" y1="207" x2="454" y2="247">
-      <stop offset="0" stop-color="#ff8596"/>
-      <stop offset="1" stop-color="#d82f57"/>
     </linearGradient>
   </defs>
 
@@ -79,58 +62,11 @@ module SlugDemoSvg =
     <path id="wordN" fill="#26313a" d="M310 157 H321 V161 C325 158 329 157 334 157 C343 157 347 163 347 172 V198 H335 V174 C335 169 333 167 329 167 C325 167 322 169 322 174 V198 H310 Z"/>
   </g>
 
-  <g id="tigerArtwork" transform="translate(7 -3) rotate(-2 445 158)">
-    <path id="tigerSilhouette" fill="url(#tigerFur)" d="M321 122 C315 99 318 67 337 40 L371 61 C392 49 416 44 443 48 C469 44 495 50 516 63 L551 40 C567 65 569 97 562 121 C575 150 574 188 557 216 C542 242 516 260 486 273 C467 281 450 278 437 268 C422 280 401 282 382 274 C350 262 328 243 315 216 C302 188 306 149 321 122 Z"/>
-    <path id="leftEar" fill="#17161a" d="M327 73 L337 31 L369 57 L359 88 Z"/>
-    <path id="leftEarColor" fill="#f2a436" d="M337 51 L340 42 L357 59 L350 67 Z"/>
-    <path id="rightEar" fill="#17161a" d="M511 59 L548 32 L560 78 L542 91 Z"/>
-    <path id="rightEarColor" fill="#f2a436" d="M530 58 L547 45 L551 66 L541 72 Z"/>
-
-    <path id="foreheadStripe1" fill="#16171b" d="M378 58 C390 49 406 45 418 44 L425 52 C410 57 399 65 390 77 Z"/>
-    <path id="foreheadStripe2" fill="#16171b" d="M432 47 C450 45 466 49 477 54 L472 65 C458 59 446 58 436 60 Z"/>
-    <path id="foreheadStripe3" fill="#16171b" d="M490 60 C501 65 510 72 519 84 L509 92 C501 81 494 75 484 71 Z"/>
-    <path id="leftFaceStripe1" fill="#17171b" d="M335 101 C349 92 365 86 378 88 L373 102 C360 102 350 108 341 117 Z"/>
-    <path id="leftFaceStripe2" fill="#17171b" d="M324 125 C343 119 357 120 370 128 L364 140 C350 134 338 136 327 143 Z"/>
-    <path id="leftFaceStripe3" fill="#17171b" d="M319 156 C337 151 353 155 363 165 L355 177 C345 168 335 166 320 171 Z"/>
-    <path id="rightFaceStripe1" fill="#17171b" d="M535 101 C521 93 506 88 493 90 L498 104 C511 103 521 109 530 117 Z"/>
-    <path id="rightFaceStripe2" fill="#17171b" d="M548 126 C531 119 515 121 502 129 L508 141 C522 135 534 137 545 145 Z"/>
-    <path id="rightFaceStripe3" fill="#17171b" d="M554 158 C536 151 520 155 509 165 L517 178 C529 169 539 167 554 173 Z"/>
-
-    <path id="leftCheek" fill="url(#tigerWhite)" d="M331 128 C346 116 370 116 391 131 C400 144 400 171 389 193 C379 211 363 220 347 208 C333 196 325 171 331 128 Z"/>
-    <path id="rightCheek" fill="url(#tigerWhite)" d="M549 128 C534 116 510 116 489 131 C480 144 480 171 491 193 C501 211 517 220 533 208 C547 196 555 171 549 128 Z"/>
-    <path id="leftCheekStripe" fill="#17171b" d="M347 142 C360 137 375 140 384 150 L377 160 C367 153 357 152 347 157 Z"/>
-    <path id="rightCheekStripe" fill="#17171b" d="M533 142 C520 137 505 140 496 150 L503 160 C513 153 523 152 533 157 Z"/>
-    <path id="leftJawStripe" fill="#17171b" d="M347 193 C359 199 372 198 383 190 L388 203 C375 216 359 217 347 210 Z"/>
-    <path id="rightJawStripe" fill="#17171b" d="M533 193 C521 199 508 198 497 190 L492 203 C505 216 521 217 533 210 Z"/>
-
-    <path id="muzzle" fill="url(#tigerWhite)" d="M386 177 C396 158 416 151 437 160 C458 151 478 158 488 177 C495 193 490 216 474 229 C461 241 450 247 437 248 C424 247 413 241 400 229 C384 216 379 193 386 177 Z"/>
-    <ellipse id="nose" fill="#17171b" cx="437" cy="184" rx="16" ry="11"/>
-    <path id="noseHighlight" fill="#4f4b4b" d="M427 180 C432 175 439 174 445 178 C441 184 434 186 427 180 Z"/>
-    <path id="mouthLeft" fill="#17171b" d="M437 193 C428 201 418 202 408 198 C416 210 427 212 437 203 Z"/>
-    <path id="mouthRight" fill="#17171b" d="M437 193 C446 201 456 202 466 198 C458 210 447 212 437 203 Z"/>
-    <path id="openMouth" fill="#17171b" fill-rule="evenodd" d="M406 204 C418 214 429 217 437 216 C445 217 456 214 468 204 C468 227 456 242 437 247 C418 242 406 227 406 204 Z M416 216 C423 223 430 226 437 226 C444 226 451 223 458 216 C454 233 447 238 437 239 C427 238 420 233 416 216 Z"/>
-    <path id="tongue" fill="url(#tigerMouth)" d="M422 223 C429 227 445 227 452 223 C450 239 445 244 437 245 C429 244 424 239 422 223 Z"/>
-
-    <ellipse id="leftEyeWhite" fill="#f9f9f1" cx="389" cy="125" rx="23" ry="16"/>
-    <ellipse id="rightEyeWhite" fill="#f9f9f1" cx="485" cy="125" rx="23" ry="16"/>
-    <ellipse id="leftEye" fill="#8bd53d" cx="393" cy="126" rx="12" ry="10"/>
-    <ellipse id="rightEye" fill="#8bd53d" cx="481" cy="126" rx="12" ry="10"/>
-    <ellipse id="leftPupil" fill="#101b16" cx="394" cy="126" rx="4" ry="9"/>
-    <ellipse id="rightPupil" fill="#101b16" cx="480" cy="126" rx="4" ry="9"/>
-    <circle id="leftEyeGlint" fill="#ffffff" cx="397" cy="122" r="2.5"/>
-    <circle id="rightEyeGlint" fill="#ffffff" cx="483" cy="122" r="2.5"/>
-
-    <path id="leftWhiskerTop" fill="#ffffff" d="M387 188 C365 178 342 176 321 180 L321 184 C344 183 366 187 388 194 Z"/>
-    <path id="leftWhiskerBottom" fill="#ffffff" d="M388 199 C364 199 341 204 323 213 L325 217 C344 209 366 205 390 205 Z"/>
-    <path id="rightWhiskerTop" fill="#ffffff" d="M487 188 C509 178 532 176 553 180 L553 184 C530 183 508 187 486 194 Z"/>
-    <path id="rightWhiskerBottom" fill="#ffffff" d="M486 199 C510 199 533 204 551 213 L549 217 C530 209 508 205 484 205 Z"/>
-    <path id="chinFur" fill="url(#tigerWhite)" d="M393 235 C406 251 421 263 437 266 C453 263 468 251 481 235 C477 260 463 273 437 278 C411 273 397 260 393 235 Z"/>
-  </g>
 </svg>"""
 
     let private authoredSvgPath =
         lazy
-            let path = Path.Combine (Path.GetTempPath (), "nu-slug-showcase-slughorn-tiger.svg")
+            let path = Path.Combine (Path.GetTempPath (), "nu-slugdemo-slughorn-logo.svg")
             File.WriteAllText (path, authoredSvg)
             path
 
@@ -142,56 +78,27 @@ module SlugDemoSvg =
             Matrix4x4.CreateScale (1.0f, -1.0f, 1.0f) *
             Matrix4x4.CreateTranslation (0.0f, centerY, 0.0f)
         let layers = document.Layers
-        let originalSources = document.Sources
-        let isWordmarkSource = Array.zeroCreate originalSources.Length
-        let mutable wordmarkMinX = Single.PositiveInfinity
-        let mutable wordmarkMaxX = Single.NegativeInfinity
-        for layer in layers do
-            match layer.ElementId with
-            | Some id when id.StartsWith ("word", StringComparison.Ordinal) ->
-                isWordmarkSource[layer.SourceIndex] <- true
-                let sourceBounds = originalSources[layer.SourceIndex].Bounds
-                wordmarkMinX <- min wordmarkMinX sourceBounds.Min.X
-                wordmarkMaxX <- max wordmarkMaxX sourceBounds.Max.X
-            | _ -> ()
-        if not (Single.IsFinite wordmarkMinX && Single.IsFinite wordmarkMaxX) then
-            invalidOp "Authored SVG wordmark sources were not found."
-        let reflectPoint reflectX (point : Vector2) =
-            let point =
-                if reflectX then v2 (wordmarkMinX + wordmarkMaxX - point.X) point.Y
-                else point
-            Vector2.Transform (point, reflection)
+        let reflectPoint (point : Vector2) = Vector2.Transform (point, reflection)
         let sources =
-            originalSources
-            |> Array.mapi (fun sourceIndex source ->
-                let reflectX = isWordmarkSource[sourceIndex]
+            document.Sources
+            |> Array.map (fun source ->
                 let contours =
                     source.Contours
-                    |> Array.map (fun contour ->
-                        if reflectX then
-                            // The second reflection restores the wordmark's authored handedness;
-                            // retaining contour order preserves its original winding.
-                            contour
-                            |> Array.map (fun curve ->
-                                { P1 = reflectPoint true curve.P1
-                                  P2 = reflectPoint true curve.P2
-                                  P3 = reflectPoint true curve.P3 })
-                        else
-                            contour
-                            |> Array.rev
-                            |> Array.map (fun curve ->
-                                { P1 = reflectPoint false curve.P3
-                                  P2 = reflectPoint false curve.P2
-                                  P3 = reflectPoint false curve.P1 }))
-                let reflectedMin =
-                    reflectPoint reflectX
-                        (v2 (if reflectX then source.Bounds.Max.X else source.Bounds.Min.X) source.Bounds.Max.Y)
-                let reflectedMax =
-                    reflectPoint reflectX
-                        (v2 (if reflectX then source.Bounds.Min.X else source.Bounds.Max.X) source.Bounds.Min.Y)
+                    |> Array.map (Array.map (fun curve ->
+                        { P1 = reflectPoint curve.P1
+                          P2 = reflectPoint curve.P2
+                          P3 = reflectPoint curve.P3 }))
+                let corners =
+                    [| v2 source.Bounds.Min.X source.Bounds.Min.Y
+                       v2 source.Bounds.Max.X source.Bounds.Min.Y
+                       v2 source.Bounds.Max.X source.Bounds.Max.Y
+                       v2 source.Bounds.Min.X source.Bounds.Max.Y |]
+                    |> Array.map reflectPoint
+                let minPoint = corners |> Array.reduce (fun a b -> Vector2.Min (a, b))
+                let maxPoint = corners |> Array.reduce (fun a b -> Vector2.Max (a, b))
                 { source with
                     Contours = contours
-                    Bounds = { Min = reflectedMin; Max = reflectedMax } })
+                    Bounds = { Min = minPoint; Max = maxPoint } })
         let gradients = document.Gradients
         let data =
             SlugShapeRuntime.packWithResources
@@ -224,24 +131,48 @@ module SlugDemoSvg =
         SlugShapeRuntime.createComposite data layerStates
 
 
-    let private authoredSvgShape =
+    let private logoComposite =
         lazy
-            let path = authoredSvgPath.Value
-            try
-                let document = SlugSvg.load path 1.0e-3f
-                AnalyticSlug (createUprightComposite document, None)
-            finally
-                try File.Delete path with _ -> ()
+            (let path = authoredSvgPath.Value
+             try
+                 SlugSvg.load path 1.0e-3f
+                 |> createUprightComposite
+             finally
+                 try File.Delete path with _ -> ())
+
+    let private tigerComposite =
+        lazy
+            (Path.Combine (AppContext.BaseDirectory, "Assets", "Default", "Tiger.svg")
+             |> fun path -> SlugSvg.load path 1.0e-3f
+             |> createUprightComposite)
+
+    let private placeSvg name composite position size elevation world =
+        let bounds = SlugDemoContours.getCompositeLayerBounds composite
+        SlugDemoContours.placeCompositeInBounds
+            name
+            composite
+            bounds
+            position
+            size
+            Quaternion.Identity
+            elevation
+            None
+            world
 
     let draw (world : World) =
-        // SlugSvg preserves SVG's y-down coordinates. The scene bakes osgSlug's
-        // scale (1, -1, 1) into the analytic sources above, keeping the culled
-        // Slug layer quads front-facing and the full composition centered.
-        SlugDemoContours.placeContour
-            "SvgRealWorldComposition"
-            authoredSvgShape.Value
-            (v3 0.0f -14.0f 0.0f)
-            (v3 290.0f 145.0f 0.0f)
-            Quaternion.Identity
+        // NanoSVG keeps y-down source geometry and osgSlug applies one outer
+        // scale (1, -1, 1).  createUprightComposite bakes that same transform.
+        placeSvg
+            "SvgSlugHornLogo"
+            logoComposite.Value
+            (v3 -155.0f 8.0f 0.0f)
+            (v3 280.0f 150.0f 0.0f)
+            2.0f
+            world
+        placeSvg
+            "SvgTiger"
+            tigerComposite.Value
+            (v3 160.0f -18.0f 0.0f)
+            (v3 230.0f 230.0f 0.0f)
             2.0f
             world

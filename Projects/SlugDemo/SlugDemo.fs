@@ -21,54 +21,52 @@ type SlugButtonDispatcher () =
 [<AutoOpen>]
 module SlugDemoExtensions =
     type Game with
-        member this.GetSlugDemoScene world : SlugDemoScene = this.Get (nameof Game.SlugDemoScene) world
-        member this.SetSlugDemoScene (value : SlugDemoScene) world = this.Set (nameof Game.SlugDemoScene) value world
-        member this.SlugDemoScene = lens (nameof Game.SlugDemoScene) this this.GetSlugDemoScene this.SetSlugDemoScene
+        member this.GetGameState world : SlugDemoScene = this.Get (nameof Game.GameState) world
+        member this.SetGameState (value : SlugDemoScene) world = this.Set (nameof Game.GameState) value world
+        member this.GameState = lens (nameof Game.GameState) this this.GetGameState this.SetGameState
+
+    type Screen with
+        member this.GetSlugDemoScene world : SlugDemoScene = this.Get (nameof Screen.SlugDemoScene) world
+        member this.SetSlugDemoScene (value : SlugDemoScene) world = this.Set (nameof Screen.SlugDemoScene) value world
+        member this.SlugDemoScene = lens (nameof Screen.SlugDemoScene) this this.GetSlugDemoScene this.SetSlugDemoScene
 
 [<RequireQualifiedAccess>]
-module SlugDemoView =
-
-    let private pageSize = 5
+module SlugDemoSceneView =
 
     let private doSlugButton name args world =
         let init updateResult (entity : Entity) world =
             World.monitor (fun _ world -> updateResult tautology world; Cascade) entity.ClickEvent entity world
         World.doEntityPlus<SlugButtonDispatcher, _> false init name args world
 
-    let private button name label position size fontSize active world =
-        let args =
+    let private arrowButton name label position world =
+        doSlugButton
+            name
             [Entity.Position .= position
-             Entity.Size .= size
+             Entity.Size .= v3 28.0f 22.0f 0.0f
              Entity.Elevation .= 50.0f
              Entity.SlugFont .= SlugDemo.font
-             Entity.FontSizing .= Some fontSize
+             Entity.FontSizing .= Some 11.0f
              Entity.Text .= label
-             Entity.TextColor @= if active then SlugDemo.cyan else SlugDemo.muted
+             Entity.TextColor .= SlugDemo.white
              Entity.Justification .= Justified (JustifyCenter, JustifyMiddle)]
-        doSlugButton name args world
+            world
+        |> ignore
 
-    let private drawNavigation scene (setScene : SlugDemoScene -> unit) world =
-        let sceneIndex = SlugDemoScene.index scene
-        let page = sceneIndex / pageSize
-        let pageCount = (SlugDemoScene.all.Length + pageSize - 1) / pageSize
-        let pageStart = page * pageSize
-        let previousPage = (page + pageCount - 1) % pageCount
-        let nextPage = (page + 1) % pageCount
-        if button "NavPreviousPage" "<" (v3 -302.0f 164.0f 0.0f) (v3 28.0f 22.0f 0.0f) 11.0f false world then
-            setScene SlugDemoScene.all[previousPage * pageSize]
-        for slot in 0 .. pageSize - 1 do
-            let index = pageStart + slot
-            if index < SlugDemoScene.all.Length then
-                let destination = SlugDemoScene.all[index]
-                let x = -240.0f + single slot * 120.0f
-                if button ("NavScene" + string slot) (SlugDemoScene.shortLabel destination) (v3 x 164.0f 0.0f) (v3 110.0f 22.0f 0.0f) 7.5f (destination = scene) world then
-                    setScene destination
-        if button "NavNextPage" ">" (v3 302.0f 164.0f 0.0f) (v3 28.0f 22.0f 0.0f) 11.0f false world then
-            setScene SlugDemoScene.all[nextPage * pageSize]
-        let hint = sprintf "LEFT / RIGHT demos   |   page %d / %d   |   buttons select" (page + 1) pageCount
-        SlugDemo.slugLeft "NavigationHint" SlugDemo.font hint (v3 -300.0f 144.0f 0.0f) (v3 600.0f 16.0f 0.0f) 7.5f SlugDemo.dim 50.0f TextDirectionLeftToRight None world
+    let drawNavigation scene world =
+        arrowButton (Simulants.previousButton scene).Name "<" (v3 -302.0f 164.0f 0.0f) world
+        SlugDemo.slug
+            (Simulants.currentDemo scene).Name
+            SlugDemo.font
+            (SlugDemoScene.label scene)
+            (v3 0.0f 164.0f 0.0f)
+            (v3 520.0f 22.0f 0.0f)
+            11.0f
+            SlugDemo.white
+            50.0f
+            world
+        arrowButton (Simulants.nextButton scene).Name ">" (v3 302.0f 164.0f 0.0f) world
 
-    let private drawScene scene world =
+    let drawScene scene world =
         match scene with
         | Emoji -> SlugDemoEmoji.draw world
         | PbrIbl -> SlugDemoPbrIbl.draw world
@@ -92,21 +90,21 @@ module SlugDemoView =
         | TextAlongPath -> SlugDemoTextAlongPath.draw world
         | ComputeShaders -> SlugDemoComputeShaders.draw world
 
-    let declare (game : Game) (world : World) =
-        let mutable scene = game.GetSlugDemoScene world
-        if World.isKeyboardKeyPressed KeyboardKey.Left world then scene <- SlugDemoScene.previous scene
-        elif World.isKeyboardKeyPressed KeyboardKey.Right world then scene <- SlugDemoScene.next scene
-        let setScene destination = scene <- destination
-        World.beginScreen "Showcase" true Vanilla [] world |> ignore
-        World.beginGroup "Gallery" [] world
-        SlugDemo.backgroundEntity world
-        drawNavigation scene setScene world
-        drawScene scene world
-        World.endGroup world
-        World.endScreen world
-        game.SetSlugDemoScene scene world
+type SlugDemoSceneDispatcher () =
+    inherit ScreenDispatcherImSim ()
 
-/// The top-level ImSim dispatcher for the showcase.
+    static member Properties =
+        [define Screen.SlugDemoScene Emoji]
+
+    override this.Process (_, screen, world) =
+        if screen.GetSelected world then
+            let scene = screen.GetSlugDemoScene world
+            World.beginGroup (Simulants.sceneGroup scene).Name [] world
+            SlugDemo.backgroundEntity world
+            SlugDemoSceneView.drawNavigation scene world
+            SlugDemoSceneView.drawScene scene world
+            World.endGroup world
+
 type SlugDemoDispatcher () =
     inherit GameDispatcherImSim ()
 
@@ -115,7 +113,31 @@ type SlugDemoDispatcher () =
             Environment.GetEnvironmentVariable "SLUG_DEMO_SCENE"
             |> SlugDemoScene.tryFind
             |> Option.defaultValue Emoji
-        [define Game.SlugDemoScene initialScene]
+        [define Game.GameState initialScene]
 
     override this.Process (game, world) =
-        SlugDemoView.declare game world
+        let mutable scene = game.GetGameState world
+        let previousClicked =
+            World.doSubscriptionAny
+                "PreviousScene"
+                (Simulants.previousButton scene).ClickEvent
+                world
+        let nextClicked =
+            World.doSubscriptionAny
+                "NextScene"
+                (Simulants.nextButton scene).ClickEvent
+                world
+        if World.isKeyboardKeyPressed KeyboardKey.Left world || previousClicked then
+            scene <- SlugDemoScene.previous scene
+        elif World.isKeyboardKeyPressed KeyboardKey.Right world || nextClicked then
+            scene <- SlugDemoScene.next scene
+        for declaredScene in SlugDemoScene.all do
+            let screen = Simulants.screen declaredScene
+            World.doScreen<SlugDemoSceneDispatcher>
+                screen.Name
+                (scene = declaredScene)
+                Vanilla
+                [Screen.SlugDemoScene .= declaredScene]
+                world
+            |> ignore
+        game.SetGameState scene world

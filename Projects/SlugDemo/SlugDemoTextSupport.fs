@@ -3,6 +3,7 @@ open System
 open System.Numerics
 open Prime
 open Nu
+open HarfBuzzSharp
 
 module SlugDemoTextSupport =
 
@@ -22,7 +23,6 @@ module SlugDemoTextSupport =
            (150.0f, -51.0f, "TextMixedPanel") |]
     let mixedLetterXs = [| -108.0f; -36.0f; 108.0f |]
     let mixedLetters = [| "S"; "L"; "G" |]
-    let effectRows = [| 58.0f; 28.0f; -2.0f; -32.0f; -62.0f |]
 
     let private triangleCommands =
         [| MoveTo (v2 0.0f 0.46f)
@@ -97,45 +97,51 @@ module SlugDemoTextSupport =
              Entity.Justification .= Justified (JustifyCenter, JustifyMiddle)]
             world
 
-    let textEffectCharacters = [| 'S'; 'L'; 'U'; 'G' |]
-    let textEffectXs = [| 67.0f; 113.0f; 159.0f; 205.0f |]
+    // Shape the complete run before splitting it into independently transformable layers.
+    let makeTextComposite (fileName : string) (text : string) =
+        let path = IO.Path.Combine (AppContext.BaseDirectory, "Assets", "Default", fileName)
+        use loader = new SlugColorFontLoader (path)
+        use blob = Blob.FromFile path
+        use face = new Face (blob, 0u)
+        use font = new HarfBuzzSharp.Font (face)
+        font.SetFunctionsOpenType ()
+        font.SetScale (loader.UnitsPerEm, loader.UnitsPerEm)
+        use buffer = new HarfBuzzSharp.Buffer ()
+        buffer.AddUtf16 text
+        buffer.Direction <- Direction.LeftToRight
+        buffer.GuessSegmentProperties ()
+        font.Shape (buffer, [||])
+        let infos = buffer.GlyphInfos
+        let positions = buffer.GlyphPositions
+        if infos.Length <> positions.Length then
+            invalidOp "HarfBuzz returned mismatched Slug glyph data."
+        let sources = ResizeArray<SlugShapeSource> ()
+        let layers = ResizeArray<SlugLayerState> ()
+        let mutable pen = Vector2.Zero
+        for index in 0 .. infos.Length - 1 do
+            let source =
+                match loader.LoadGlyph (infos.[index].Codepoint, foreground = Color.White) with
+                | SlugColorGlyph.Outline source -> source
+                | SlugColorGlyph.ColrV0 _
+                | SlugColorGlyph.ColrV1 _ ->
+                    invalidOp "This Slug text treatment requires an outline font."
+            let position = positions.[index]
+            let sourceIndex = sources.Count
+            let mutable transform = Matrix4x4.Identity
+            transform.Translation <-
+                v3
+                    (pen.X + single position.XOffset)
+                    (pen.Y + single position.YOffset)
+                    0.0f
+            sources.Add source
+            layers.Add
+                { SlugLayerState.defaultState sourceIndex with
+                    Transform = transform }
+            pen <-
+                pen +
+                v2
+                    (single position.XAdvance)
+                    (single position.YAdvance)
+        let data = SlugShapeRuntime.pack (sources.ToArray ())
+        SlugShapeRuntime.createComposite data (layers.ToArray ())
 
-    let textEffectComposites =
-        lazy
-            use loader = new SlugColorFontLoader (SlugDemo.fontFilePath)
-            Array.init effectRows.Length (fun row ->
-                Array.init textEffectCharacters.Length (fun column ->
-                    let glyphId = loader.GetGlyphId (uint32 textEffectCharacters.[column])
-                    let composite = loader.LoadComposite (glyphId, foreground = Color.White)
-                    let state = composite.Layers.Item 0
-                    let bounds = composite.Data.Metadata.[state.ShapeIndex].Bounds
-                    let origin = (bounds.Min + bounds.Max) * 0.5f
-                    let state =
-                        match row with
-                        | 1 ->
-                            { state with
-                                Origin = origin
-                                Color = SlugDemo.amber
-                                FillSource = SlugFillSource.Procedural 0
-                                EffectParameters = v4 10.0f 8.0f 0.0f 0.0f }
-                        | 2 ->
-                            { state with
-                                Origin = origin
-                                Color = SlugDemo.magenta
-                                EffectId = 2
-                                EffectParameters = v4 0.15f 2.2f 0.0f 0.0f }
-                        | 3 ->
-                            { state with
-                                Origin = origin
-                                Color = SlugDemo.green
-                                EffectId = 4 }
-                        | 4 ->
-                            { state with
-                                Origin = origin
-                                Color = SlugDemo.cyan
-                                FillSource = SlugFillSource.Procedural 8
-                                EffectParameters = v4 1.2f 0.018f (single column * 0.8f) 0.0f
-                                EffectParameters2 = v4 0.013f 1.0f 0.0f 0.0f }
-                        | _ -> { state with Origin = origin; Color = SlugDemo.white }
-                    composite.SetLayerState (0, state)
-                    composite))

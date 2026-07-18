@@ -11,8 +11,14 @@
         <None Include="Assets\*\*" />
         <None Update="Assets\Default\SlugDemo.svg" CopyToOutputDirectory="PreserveNewest" />
         <None Update="Assets\Default\Noto-COLRv1.ttf" CopyToOutputDirectory="PreserveNewest" />
+        <None Update="Assets\Default\Tiger.svg" CopyToOutputDirectory="PreserveNewest" />
+        <None Update="Assets\Default\Lobster-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
+        <None Update="Assets\Default\Allura-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
+        <None Update="Assets\Default\Anton-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
+        <None Update="Assets\Default\LibreBaskerville.ttf" CopyToOutputDirectory="PreserveNewest" />
         <Compile Include="SlugDemoContours.fs" />
         <Compile Include="SlugDemoShared.fs" />
+        <Compile Include="Simulants.fs" />
         <Compile Include="SlugDemoProjectionSupport.fs" />
         <Compile Include="SlugDemoVectorSupport.fs" />
         <Compile Include="SlugDemoTextSupport.fs" />

@@ -104,21 +104,3 @@ module SlugDemoProjectionSupport =
            asset<Image> Assets.Default.PackageName "SlugPbrBack"
            asset<Image> Assets.Default.PackageName "SlugPbrFront" |]
 
-    let pbrSlugMaterials =
-        lazy
-            use loader = new SlugColorFontLoader (SlugDemo.fontFilePath)
-            let glyphId = loader.GetGlyphId (uint32 'S')
-            [| 0.08f; 0.36f; 0.78f |]
-            |> Array.mapi (fun index roughness ->
-                let composite = loader.LoadComposite (glyphId, foreground = Color.White)
-                let state = composite.Layers.Item 0
-                let bounds = composite.Data.Metadata.[state.ShapeIndex].Bounds
-                let origin = (bounds.Min + bounds.Max) * 0.5f
-                composite.SetLayerState (
-                    0,
-                    { state with
-                        Origin = origin
-                        Color = if index = 0 then SlugDemo.cyan elif index = 1 then SlugDemo.magenta else SlugDemo.amber
-                        FillSource = SlugFillSource.PbrMaterial 0
-                        MaterialValues = v4 0.92f roughness 0.0f 0.0f })
-                composite)
