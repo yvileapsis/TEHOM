@@ -1,16 +1,19 @@
 ﻿// Nu Game Engine.
 // Copyright (C) Bryan Edds.
 
-namespace Vortice.Vulkan
+namespace Nu.Vulkan
+open System
 open System.Numerics
 open System.Runtime.InteropServices
+open FSharp.NativeInterop
+open Vortice.Vulkan
 open Prime
 open Nu
 
 [<RequireQualifiedAccess>]
 module SlugText =
 
-    [<Struct; StructLayout(LayoutKind.Explicit)>]
+    [<Struct; StructLayout (LayoutKind.Explicit)>]
     type Glyph =
         [<FieldOffset(0)>] val mutable perimeter : Vector4
         [<FieldOffset(16)>] val mutable texCoords : Vector4
@@ -23,7 +26,7 @@ module SlugText =
         [<FieldOffset(80)>] val mutable color : Vector4
         [<FieldOffset(96)>] val mutable transform : Matrix4x4
 
-    [<Struct; StructLayout(LayoutKind.Explicit)>]
+    [<Struct; StructLayout (LayoutKind.Explicit)>]
     type ViewProjection =
         [<FieldOffset(0)>] val mutable viewProjection : Matrix4x4
         [<FieldOffset(64)>] val mutable viewport : Vector4
@@ -31,8 +34,8 @@ module SlugText =
     type [<Struct>] private SlugTextBatchState =
         { Absolute : bool
           ClipOpt : Box2 voption
-          Blend : Pipeline.Blend
-          TextureOpt : (Texture.Texture * Texture.Texture) voption }
+          Blend : VulkanBlend
+          TextureOpt : (Texture * Texture) voption }
 
         static member inline changed state state2 =
             state.Absolute <> state2.Absolute ||
@@ -57,98 +60,112 @@ module SlugText =
         static member defaultState =
             { Absolute = false
               ClipOpt = ValueNone
-              Blend = Pipeline.Transparent
+              Blend = VulkanTransparent
               TextureOpt = ValueNone }
 
     type [<ReferenceEquality>] SlugTextBatchEnv =
         private
-            { mutable DrawIndex : int
-              mutable GlyphIndex : int
+            { mutable GlyphIndex : int
               mutable ViewProjection2dAbsolute : Matrix4x4
               mutable ViewProjection2dRelative : Matrix4x4
               mutable ViewProjectionClipAbsolute : Matrix4x4
               mutable ViewProjectionClipRelative : Matrix4x4
-              VulkanContext : Hl.VulkanContext
-              Pipeline : Pipeline.Pipeline
-              UnfilteredSampler : Texture.Sampler
-              GlyphUniform : Buffer.Buffer
-              ViewProjectionUniform : Buffer.Buffer
+              VulkanContext : VulkanContext
+              Pipeline : Pipeline
+              UnfilteredSampler : Sampler
+              GlyphUniform : VulkanBuffer
+              ViewProjectionUniform : VulkanBuffer
               Glyphs : Glyph array
               mutable State : SlugTextBatchState }
 
-    let private CreateSlugTextBatchPipeline (vkc : Hl.VulkanContext) =
+    let private CreateSlugTextBatchPipeline (context : VulkanContext) =
+        let glyphUniform = VulkanBuffer.create Storage (Constants.Render.SpriteBatchSize * sizeof<Glyph>) context
+        let viewProjectionUniform = VulkanBuffer.create Storage sizeof<ViewProjection> context
         let pipeline =
-            Pipeline.Pipeline.create
+            Pipeline.create
                 Constants.Paths.SlugTextShaderFilePath
-                Constants.Render.SpriteBatchesMax
-                [|Pipeline.Transparent; Pipeline.Additive; Pipeline.Overwrite|] [|true|] [||]
-                [|Pipeline.descriptorSet Hl.BulkSetIndexed 1
-                    [|Pipeline.descriptor 0 Hl.StorageBuffer Hl.VertexStage 1
-                      Pipeline.descriptor 1 Hl.StorageBuffer Hl.VertexStage 1
-                      Pipeline.descriptor 2 Hl.CombinedImageSampler Hl.FragmentStage 1
-                      Pipeline.descriptor 3 Hl.CombinedImageSampler Hl.FragmentStage 1|]|]
-                [||] [|vkc.SwapFormat|] None vkc
-        let glyphUniform = Buffer.Buffer.create (Constants.Render.SpriteBatchSize * sizeof<Glyph>) Buffer.Storage vkc
-        let viewProjectionUniform = Buffer.Buffer.create sizeof<ViewProjection> Buffer.Storage vkc
+                [|VulkanTransparent; VulkanAdditive; VulkanOverwrite|]
+                [|true|]
+                [||]
+                [|Pipeline.descriptorSet<int>
+                    [|Pipeline.descriptor 0 StorageBuffer VertexStage 1
+                      Pipeline.descriptor 1 StorageBuffer VertexStage 1
+                      Pipeline.descriptor 2 CombinedImageSampler FragmentStage 1
+                      Pipeline.descriptor 3 CombinedImageSampler FragmentStage 1|]|]
+                [||]
+                [|context.SwapFormat|]
+                None
+                [|glyphUniform; viewProjectionUniform|]
         glyphUniform, viewProjectionUniform, pipeline
 
-    let ReloadShaders env vkc =
-        Pipeline.Pipeline.reloadShaders env.Pipeline vkc
+    let ReloadShaders env context =
+        Pipeline.reloadShaders env.Pipeline context
 
-    let private BeginSlugTextBatch state env = env.State <- state
+    let private BeginSlugTextBatch state env =
+        env.State <- state
 
     let private EndSlugTextBatch (viewport : Viewport) env =
         match env.State.TextureOpt with
         | ValueSome (curveTexture, bandTexture) when env.GlyphIndex > 0 ->
-            if env.DrawIndex < env.Pipeline.BulkDrawLimit then
-                let vkc = env.VulkanContext
-                // Preserve the existing Slug batch and ordering boundaries, but copy and flush its
-                // populated CPU prefix once instead of issuing one mapped-memory flush per glyph.
-                Buffer.Buffer.uploadArrayCount env.DrawIndex 0 0 env.GlyphIndex env.Glyphs env.GlyphUniform vkc
-                Pipeline.Pipeline.writeDescriptorStorageBuffer 0 0 env.DrawIndex 0 env.GlyphUniform.[env.DrawIndex] env.Pipeline vkc
-                let mutable viewProjection = ViewProjection ()
-                viewProjection.viewProjection <- if env.State.Absolute then env.ViewProjection2dAbsolute else env.ViewProjection2dRelative
-                let pixelDensity = Hl.getWindowPixelDensity vkc.Window
-                let renderAreaLogical = VkRect2D (viewport.Inner.Min.X, viewport.Outer.Max.Y - viewport.Inner.Max.Y, uint viewport.Inner.Size.X, uint viewport.Inner.Size.Y)
-                let renderArea = Hl.scaleRectForPixelDensity pixelDensity renderAreaLogical
-                viewProjection.viewport <- Vector4 (single renderArea.extent.width, single renderArea.extent.height, 0.0f, 0.0f)
-                Buffer.Buffer.uploadValue env.DrawIndex 0 0 viewProjection env.ViewProjectionUniform vkc
-                Pipeline.Pipeline.writeDescriptorStorageBuffer 0 1 env.DrawIndex 0 env.ViewProjectionUniform.[env.DrawIndex] env.Pipeline vkc
-                Pipeline.Pipeline.writeDescriptorCombinedImageSampler 0 2 env.DrawIndex 0 curveTexture env.UnfilteredSampler env.Pipeline vkc
-                Pipeline.Pipeline.writeDescriptorCombinedImageSampler 0 3 env.DrawIndex 0 bandTexture env.UnfilteredSampler env.Pipeline vkc
-                let mutable vkViewport = Hl.makeViewport true renderArea
-                let mutable scissor = renderArea
-                match env.State.ClipOpt with
-                | ValueSome clip ->
-                    let viewProjection = if env.State.Absolute then env.ViewProjectionClipAbsolute else env.ViewProjectionClipRelative
-                    let minClip = Vector4.Transform(Vector4 (clip.Min.X, clip.Max.Y, 0.0f, 1.0f), viewProjection).V2
-                    let minNdc = minClip * single viewport.DisplayScalar
-                    let minScissor = (minNdc + v2One) * 0.5f * viewport.Inner.Size.V2
-                    let sizeClip = Vector4.Transform(Vector4 (clip.Size, 0.0f, 1.0f), viewProjection).V2
-                    let sizeNdc = sizeClip * single viewport.DisplayScalar
-                    let sizeScissor = sizeNdc * 0.5f * viewport.Inner.Size.V2
-                    let offset = v2i viewport.Inner.Min.X (viewport.Outer.Max.Y - viewport.Inner.Max.Y)
-                    let scissorLogical = VkRect2D ((minScissor.X |> round |> int) + offset.X, (single renderAreaLogical.extent.height - minScissor.Y |> round |> int) + offset.Y, uint sizeScissor.X, uint sizeScissor.Y)
-                    scissor <- Hl.scaleRectForPixelDensity pixelDensity scissorLogical
-                    scissor <- Hl.clipRect renderArea scissor
-                | ValueNone -> ()
-                if Hl.validateRect scissor then
-                    match Pipeline.Pipeline.tryGetVkPipeline env.State.Blend true env.Pipeline with
-                    | Some vkPipeline ->
-                        let cb = vkc.RenderCommandBuffer
-                        let mutable rendering = Hl.makeRenderingInfo [|vkc.SwapchainImageView|] None renderArea None
-                        Vulkan.vkCmdBeginRendering (cb, asPointer &rendering)
-                        Vulkan.vkCmdBindPipeline (cb, VkPipelineBindPoint.Graphics, vkPipeline)
-                        Vulkan.vkCmdSetViewport (cb, 0u, 1u, asPointer &vkViewport)
-                        Vulkan.vkCmdSetScissor (cb, 0u, 1u, asPointer &scissor)
-                        let mutable mainDescriptorSet = env.Pipeline.VkDescriptorSet 0 env.DrawIndex
-                        Vulkan.vkCmdBindDescriptorSets (cb, VkPipelineBindPoint.Graphics, env.Pipeline.PipelineLayout, 0u, 1u, asPointer &mainDescriptorSet, 0u, nullPtr)
-                        Vulkan.vkCmdDraw (cb, uint (6 * env.GlyphIndex), 1u, 0u, 0u)
-                        Hl.reportDrawCall env.GlyphIndex
-                        Vulkan.vkCmdEndRendering cb
-                    | None -> Log.warnOnce "Cannot draw Slug text because VkPipeline does not exist."
-            else Log.warnOnce "Slug text draw operations aborted because the bulk draw limit has been reached."
-            env.DrawIndex <- inc env.DrawIndex
+            let context = env.VulkanContext
+            let pixelDensity = Hl.getWindowPixelDensity context.Window
+            let renderAreaLogical =
+                VkRect2D
+                    (viewport.Inner.Min.X,
+                     viewport.Outer.Max.Y - viewport.Inner.Max.Y,
+                     uint viewport.Inner.Size.X,
+                     uint viewport.Inner.Size.Y)
+            let renderArea = Hl.scaleRectForPixelDensity pixelDensity renderAreaLogical
+            let mutable vkViewport = Hl.makeViewport true renderArea
+            let mutable scissor = renderArea
+            match env.State.ClipOpt with
+            | ValueSome clip ->
+                let viewProjection = if env.State.Absolute then env.ViewProjectionClipAbsolute else env.ViewProjectionClipRelative
+                let minClip4 = System.Numerics.Vector4.Transform (System.Numerics.Vector4 (clip.Min.X, clip.Max.Y, 0.0f, 1.0f), viewProjection)
+                let minClip = System.Numerics.Vector2 (minClip4.X, minClip4.Y)
+                let minNdc = minClip * single viewport.DisplayScalar
+                let viewportSize = System.Numerics.Vector2 (single viewport.Inner.Size.X, single viewport.Inner.Size.Y)
+                let minScissor = (minNdc + v2One) * 0.5f * viewportSize
+                let sizeClip4 = System.Numerics.Vector4.Transform (System.Numerics.Vector4 (clip.Size, 0.0f, 1.0f), viewProjection)
+                let sizeClip = System.Numerics.Vector2 (sizeClip4.X, sizeClip4.Y)
+                let sizeNdc = sizeClip * single viewport.DisplayScalar
+                let sizeScissor = sizeNdc * 0.5f * viewportSize
+                let offset = v2i viewport.Inner.Min.X (viewport.Outer.Max.Y - viewport.Inner.Max.Y)
+                let scissorLogical =
+                    VkRect2D
+                        ((minScissor.X |> round |> int) + offset.X,
+                         (single renderAreaLogical.extent.height - minScissor.Y |> round |> int) + offset.Y,
+                         uint sizeScissor.X,
+                         uint sizeScissor.Y)
+                scissor <- Hl.scaleRectForPixelDensity pixelDensity scissorLogical
+                scissor <- Hl.clipRect renderArea scissor
+            | ValueNone -> ()
+            if Hl.validateRect scissor then
+                match Pipeline.tryGetVkPipeline env.State.Blend true env.Pipeline with
+                | Some vkPipeline ->
+                    let mutable descriptorSet =
+                        Pipeline.specifyDescriptorSet 0 env.Pipeline.DrawIndex env.Pipeline $ fun vkSet ->
+                            VulkanBuffer.uploadArrayCount env.GlyphIndex env.Glyphs env.GlyphUniform context
+                            Pipeline.writeDescriptorStorageBuffer 0 0 env.GlyphUniform vkSet
+                            let mutable viewProjection = ViewProjection ()
+                            viewProjection.viewProjection <- if env.State.Absolute then env.ViewProjection2dAbsolute else env.ViewProjection2dRelative
+                            viewProjection.viewport <- Vector4 (single renderArea.extent.width, single renderArea.extent.height, 0.0f, 0.0f)
+                            VulkanBuffer.uploadValue viewProjection env.ViewProjectionUniform context
+                            Pipeline.writeDescriptorStorageBuffer 1 0 env.ViewProjectionUniform vkSet
+                            Pipeline.writeDescriptorCombinedTextureSampler 2 0 curveTexture env.UnfilteredSampler vkSet
+                            Pipeline.writeDescriptorCombinedTextureSampler 3 0 bandTexture env.UnfilteredSampler vkSet
+                    let mutable renderingInfo = Hl.makeRenderingInfo [|context.SwapchainImageView|] None renderArea None
+                    DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+                    DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
+                    DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&scissor)
+                    DeviceApi.vkCmdBindPipeline (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)
+                    DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, env.Pipeline.PipelineLayout, 0u, 1u, &&descriptorSet, 0u, nullPtr)
+                    DeviceApi.vkCmdDraw (context.RenderCommandBuffer, uint (6 * env.GlyphIndex), 1u, 0u, 0u)
+                    DeviceApi.vkCmdEndRendering context.RenderCommandBuffer
+                    Hl.reportDrawCall env.GlyphIndex true
+                    Pipeline.advance env.Pipeline
+                    VulkanContext.advanceRenderCommandBuffer context
+                | None -> Log.warnOnce "Cannot draw Slug text because VkPipeline does not exist."
             env.GlyphIndex <- 0
         | ValueSome _ | ValueNone -> ()
 
@@ -156,8 +173,13 @@ module SlugText =
         EndSlugTextBatch viewport env
         BeginSlugTextBatch state env
 
-    let BeginSlugTextBatchFrame (viewProjection2dAbsolute : Matrix4x4 inref, viewProjection2dRelative : Matrix4x4 inref, viewProjectionClipAbsolute : Matrix4x4 inref, viewProjectionClipRelative : Matrix4x4 inref, env) =
-        env.DrawIndex <- 0
+    let BeginSlugTextBatchFrame
+        (viewProjection2dAbsolute : Matrix4x4 inref,
+         viewProjection2dRelative : Matrix4x4 inref,
+         viewProjectionClipAbsolute : Matrix4x4 inref,
+         viewProjectionClipRelative : Matrix4x4 inref,
+         env) =
+        Pipeline.beginFrame env.Pipeline
         env.GlyphIndex <- 0
         env.ViewProjection2dAbsolute <- viewProjection2dAbsolute
         env.ViewProjection2dRelative <- viewProjection2dRelative
@@ -165,7 +187,8 @@ module SlugText =
         env.ViewProjectionClipRelative <- viewProjectionClipRelative
         BeginSlugTextBatch SlugTextBatchState.defaultState env
 
-    let EndSlugTextBatchFrame viewport env = EndSlugTextBatch viewport env
+    let EndSlugTextBatchFrame viewport env =
+        EndSlugTextBatch viewport env
 
     let InterruptSlugTextBatchFrame fn viewport env =
         let state = env.State
@@ -174,7 +197,6 @@ module SlugText =
         BeginSlugTextBatch state env
 
     let private PopulateSlugTextBatchGlyph (glyph : SlugTextGlyph) fontSize (transform : Matrix4x4 inref) env =
-        let i = env.GlyphIndex
         let mutable gpuGlyph = Glyph ()
         gpuGlyph.perimeter <- v4 glyph.Position.X glyph.Position.Y glyph.Size.X glyph.Size.Y
         gpuGlyph.texCoords <- glyph.TexCoords
@@ -186,23 +208,23 @@ module SlugText =
         gpuGlyph.bandMaxYAndFlags <- uint32 glyph.BandMax.Y ||| (match glyph.FillRule with SlugFillNonzero -> 0u | SlugFillEvenOdd -> 0x1000u)
         gpuGlyph.color <- glyph.Color.V4
         gpuGlyph.transform <- transform
-        env.Glyphs.[i] <- gpuGlyph
+        env.Glyphs[env.GlyphIndex] <- gpuGlyph
 
     let SubmitSlugTextBatchGlyph (absolute, glyph : SlugTextGlyph, fontSize, transform : Matrix4x4 inref, clipOpt : Box2 voption inref, blend, curveTexture, bandTexture, viewport, env) =
         let state = SlugTextBatchState.make absolute clipOpt blend curveTexture bandTexture
-        if SlugTextBatchState.changed state env.State || env.GlyphIndex = Constants.Render.SpriteBatchSize then RestartSlugTextBatch state viewport env
+        if SlugTextBatchState.changed state env.State || env.GlyphIndex = Constants.Render.SpriteBatchSize then
+            RestartSlugTextBatch state viewport env
         PopulateSlugTextBatchGlyph glyph fontSize &transform env
         env.GlyphIndex <- inc env.GlyphIndex
 
-    let CreateSlugTextBatchEnv unfilteredSampler vkc =
-        let glyphUniform, viewProjectionUniform, pipeline = CreateSlugTextBatchPipeline vkc
-        { DrawIndex = 0
-          GlyphIndex = 0
+    let CreateSlugTextBatchEnv unfilteredSampler context =
+        let glyphUniform, viewProjectionUniform, pipeline = CreateSlugTextBatchPipeline context
+        { GlyphIndex = 0
           ViewProjection2dAbsolute = m4Identity
           ViewProjection2dRelative = m4Identity
           ViewProjectionClipAbsolute = m4Identity
           ViewProjectionClipRelative = m4Identity
-          VulkanContext = vkc
+          VulkanContext = context
           Pipeline = pipeline
           UnfilteredSampler = unfilteredSampler
           GlyphUniform = glyphUniform
@@ -211,7 +233,4 @@ module SlugText =
           State = SlugTextBatchState.defaultState }
 
     let DestroySlugTextBatchEnv env =
-        let vkc = env.VulkanContext
-        Pipeline.Pipeline.destroy env.Pipeline vkc
-        Buffer.Buffer.destroy env.GlyphUniform vkc
-        Buffer.Buffer.destroy env.ViewProjectionUniform vkc
+        Pipeline.destroy env.Pipeline env.VulkanContext

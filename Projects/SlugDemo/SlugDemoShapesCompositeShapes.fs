@@ -104,7 +104,7 @@ module SlugDemoShapesCompositeShapes =
             |> Array.mapi (fun index (_, layerColor) ->
                 { SlugLayerState.defaultState index with
                     Color = layerColor })
-        AnalyticSlug (SlugShapeRuntime.createComposite data states, None)
+        SlugShapeRuntime.createComposite data states
 
     let private analyticComposite layers =
         analyticCompositeWithScale 1.0f layers
@@ -376,38 +376,42 @@ module SlugDemoShapesCompositeShapes =
         SlugDemo.panel "ShapesCompositeBottomLeft" (v3 leftX bottomY 0.0f) (v3 panelWidth panelHeight 0.0f) canonicalNavy -10.0f world
         SlugDemo.panel "ShapesCompositeBottomRight" (v3 rightX bottomY 0.0f) (v3 panelWidth panelHeight 0.0f) canonicalNavy -10.0f world
 
-        SlugDemoContours.placeContour
+        SlugDemoContours.placeComposite
             "ShapesCreature"
             creature
             (v3 -144.0f topY 0.0f)
             (v3 158.0f 124.0f 0.0f)
             Quaternion.Identity
             0.0f
+            None
             world
 
-        SlugDemoContours.placeContour
+        SlugDemoContours.placeComposite
             "ShapesFace"
             face
             (v3 147.0f 54.0f 0.0f)
             (v3 168.0f 84.0f 0.0f)
             Quaternion.Identity
             0.0f
+            None
             world
 
-        SlugDemoContours.placeContour
+        SlugDemoContours.placeComposite
             "ShapesPuzzle"
             puzzle
             (v3 -150.0f -92.0f 0.0f)
             (v3 140.0f 108.0f 0.0f)
             Quaternion.Identity
             0.0f
+            None
             world
 
-        SlugDemoContours.placeContour
+        SlugDemoContours.placeComposite
             "ShapesGreenRing"
             ring
             (v3 143.0f bottomY 0.0f)
             (v3 136.0f 112.0f 0.0f)
             (Quaternion.CreateFromAxisAngle (Vector3.UnitZ, -0.08f))
             0.0f
+            None
             world

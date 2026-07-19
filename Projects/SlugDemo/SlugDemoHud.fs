@@ -59,7 +59,7 @@ module SlugDemoHud =
         Array.append (scaledCircle outer) (scaledCircle inner)
 
     let private solid commands fillColor winding =
-        SlugDemoContours.makeFilled commands fillColor winding Color.Zero 0.0f (v2 1.0f 1.0f)
+        SlugDemoContours.makeFilled commands fillColor winding Color.Zero 0.0f
 
     let private clockFace =
         SlugDemoContours.makeFilled
@@ -68,7 +68,6 @@ module SlugDemoHud =
             NonZero
             (color 0.12f 0.12f 0.18f 1.0f)
             1.0f
-            (v2 124.0f 124.0f)
 
     let private clockTick =
         solid
@@ -154,7 +153,7 @@ module SlugDemoHud =
             { SlugLayerState.defaultState 0 with
                 Color = Color.One
                 FillSource = SlugFillSource.Gradient 0 }
-        AnalyticSlug (SlugShapeRuntime.createComposite data [| state |], None)
+        SlugShapeRuntime.createComposite data [| state |]
 
     let private radarCrosshair =
         solid
@@ -245,7 +244,7 @@ module SlugDemoHud =
         let secondAngle = seconds % 60.0f / 60.0f * MathF.PI * 2.0f
         let minuteAngle = seconds % 3600.0f / 3600.0f * MathF.PI * 2.0f
         let hourAngle = seconds % 43200.0f / 43200.0f * MathF.PI * 2.0f
-        placeContour "HudClockFace" clockFace clockCenter (v3 108.0f 108.0f 0.0f) Quaternion.Identity 0.0f world
+        placeContour clockFace clockCenter (v3 108.0f 108.0f 0.0f) Quaternion.Identity 0.0f world
         for index in 0 .. 11 do
             let angle = single index * MathF.PI * 2.0f / 12.0f
             let position =
@@ -254,7 +253,6 @@ module SlugDemoHud =
                     (clockCenter.Y + MathF.Cos angle * 44.0f)
                     0.0f
             placeContour
-                (sprintf "HudClockTick%02d" index)
                 clockTick
                 position
                 (v3 3.5f 11.0f 0.0f)
@@ -284,7 +282,6 @@ module SlugDemoHud =
         let minutePosition = clockCenter + Vector3.Transform (v3 0.0f 18.0f 0.0f, minuteRotation)
         let secondPosition = clockCenter + Vector3.Transform (v3 0.0f 16.0f 0.0f, secondRotation)
         placeContour
-            "HudClockHourHand"
             clockHand
             hourPosition
             (v3 4.5f 32.0f 0.0f)
@@ -292,7 +289,6 @@ module SlugDemoHud =
             3.0f
             world
         placeContour
-            "HudClockMinuteHand"
             clockHand
             minutePosition
             (v3 3.5f 42.0f 0.0f)
@@ -300,14 +296,13 @@ module SlugDemoHud =
             4.0f
             world
         placeContour
-            "HudClockSecondHand"
             clockSecondHand
             secondPosition
             (v3 1.8f 48.0f 0.0f)
             secondRotation
             5.0f
             world
-        placeContour "HudClockHub" clockHub clockCenter (v3 8.0f 8.0f 0.0f) Quaternion.Identity 6.0f world
+        placeContour clockHub clockCenter (v3 8.0f 8.0f 0.0f) Quaternion.Identity 6.0f world
 
     let private drawGauge world =
         SlugDemoContours.placeComposite
@@ -320,7 +315,6 @@ module SlugDemoHud =
             None
             world
         placeContour
-            "HudGaugeOutline"
             gaugeOutline
             gaugeCenter
             (v3 150.0f 120.0f 0.0f)
@@ -338,10 +332,9 @@ module SlugDemoHud =
             world
 
     let private drawRadar seconds world =
-        placeContour "HudRadarTrail" radarTrail radarCenter (v3 (174.0f * radarScale) (174.0f * radarScale) 0.0f) Quaternion.Identity 0.0f world
-        placeContour "HudRadarCrossHorizontal" radarCrosshair radarCenter (v3 (164.0f * radarScale) (2.0f * radarScale) 0.0f) Quaternion.Identity 1.0f world
+        SlugDemoContours.placeComposite "HudRadarTrail" radarTrail radarCenter (v3 (174.0f * radarScale) (174.0f * radarScale) 0.0f) Quaternion.Identity 0.0f None world
+        placeContour radarCrosshair radarCenter (v3 (164.0f * radarScale) (2.0f * radarScale) 0.0f) Quaternion.Identity 1.0f world
         placeContour
-            "HudRadarCrossVertical"
             radarCrosshair
             radarCenter
             (v3 (164.0f * radarScale) (2.0f * radarScale) 0.0f)
@@ -357,7 +350,6 @@ module SlugDemoHud =
                         (radarCenter.Y + MathF.Sin angle * 80.0f * radarScale)
                         0.0f
                 placeContour
-                    (sprintf "HudRadarMinor%02d" index)
                     radarTick
                     position
                     (v3 (2.0f * radarScale) (8.0f * radarScale) 0.0f)
@@ -372,21 +364,19 @@ module SlugDemoHud =
                         (radarCenter.Y + MathF.Sin angle * 80.0f * radarScale)
                         0.0f
                 placeContour
-                    (sprintf "HudRadarMajor%02d" index)
                     radarMajorTick
                     position
                     (v3 (3.0f * radarScale) (13.0f * radarScale) 0.0f)
                     (Quaternion.CreateFromAxisAngle (Vector3.UnitZ, angle - MathF.PI / 2.0f))
                     2.0f
                     world
-        placeContour "HudRadarBrackets" radarBrackets radarCenter (v3 (210.0f * radarScale) (148.0f * radarScale) 0.0f) Quaternion.Identity 2.0f world
-        placeContour "HudRadarCenterRing" radarCenterRing radarCenter (v3 (22.0f * radarScale) (22.0f * radarScale) 0.0f) Quaternion.Identity 3.0f world
+        placeContour radarBrackets radarCenter (v3 (210.0f * radarScale) (148.0f * radarScale) 0.0f) Quaternion.Identity 2.0f world
+        placeContour radarCenterRing radarCenter (v3 (22.0f * radarScale) (22.0f * radarScale) 0.0f) Quaternion.Identity 3.0f world
         let sweepRotation = Quaternion.CreateFromAxisAngle (Vector3.UnitZ, -0.65f * seconds)
         let sweepPosition =
             radarCenter +
             Vector3.Transform (v3 radarSweepMidpointRadius 0.0f 0.0f, sweepRotation)
         placeContour
-            "HudRadarSweep"
             radarSweep
             sweepPosition
             (v3 radarSweepLength (2.0f * radarScale) 0.0f)
@@ -397,7 +387,6 @@ module SlugDemoHud =
             let radius, speed, shape = radarRings.[index]
             let diameter = 170.0f * radarScale * radius / 0.48f
             placeContour
-                (sprintf "HudRadarRing%02d" index)
                 shape
                 radarCenter
                 (v3 diameter diameter 0.0f)
@@ -406,7 +395,6 @@ module SlugDemoHud =
                 world
         let pulse = 1.0f + 0.18f * MathF.Sin (seconds * 1.8f)
         placeContour
-            "HudRadarDot"
             radarDot
             radarCenter
             (v3 (8.0f * radarScale * pulse) (8.0f * radarScale * pulse) 0.0f)

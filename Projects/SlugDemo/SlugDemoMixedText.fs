@@ -131,7 +131,7 @@ module SlugDemoMixedText =
         let state =
             { SlugLayerState.defaultState 0 with
                 Color = triangleColor }
-        AnalyticSlug (SlugShapeRuntime.createComposite triangleData.Value [|state|], None)
+        SlugShapeRuntime.createComposite triangleData.Value [|state|]
 
     let private replacementTriangleShape = lazy (makeTriangleShape sourceOrange)
     let private spinningTriangleShape = lazy (makeTriangleShape sourceSpinner)
@@ -168,21 +168,23 @@ module SlugDemoMixedText =
             sourceOrange
             3.0f
             world
-        SlugDemoContours.placeContour
+        SlugDemoContours.placeComposite
             "MixedTextReplacementF"
             replacementTriangleShape.Value
             layout.TriangleCenter
             layout.TriangleSize
             Quaternion.Identity
             3.0f
+            None
             world
-        SlugDemoContours.placeContour
+        SlugDemoContours.placeComposite
             "MixedTextSpinningF"
             spinningTriangleShape.Value
             layout.TriangleCenter
             layout.TriangleSize
             (Quaternion.CreateFromAxisAngle (Vector3.UnitZ, single (SlugDemo.clockSeconds world)))
             4.0f
+            None
             world
         drawRun
             "MixedTextLine0AfterF"

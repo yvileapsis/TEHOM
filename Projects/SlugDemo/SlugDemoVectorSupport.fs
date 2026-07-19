@@ -6,8 +6,8 @@ open Nu
 
 module SlugDemoVectorSupport =
 
-    let private contour commands fillColor winding strokeColor strokeThickness scale =
-        SlugDemoContours.makeFilled commands fillColor winding strokeColor strokeThickness scale
+    let private contour commands fillColor winding strokeColor strokeThickness =
+        SlugDemoContours.makeFilled commands fillColor winding strokeColor strokeThickness
 
     let panel name x y width height fill elevation world =
         SlugDemo.panel
@@ -66,7 +66,7 @@ module SlugDemoVectorSupport =
                        NonZero
                        (color 0.62f 0.95f 1.0f 1.0f)
                        3.0f
-                       (v2 154.0f 138.0f) |]
+        |]
 
     let morphDebugTessellation =
         contour
@@ -75,7 +75,6 @@ module SlugDemoVectorSupport =
             NonZero
             (color 0.62f 0.95f 1.0f 1.0f)
             2.0f
-            (v2 82.0f 76.0f)
 
     let private linearColors =
         [| color 0.28f 0.84f 1.0f 0.95f
@@ -115,7 +114,7 @@ module SlugDemoVectorSupport =
             { SlugLayerState.defaultState 0 with
                 Color = Color.One
                 FillSource = SlugFillSource.Gradient 0 }
-        AnalyticSlug (SlugShapeRuntime.createComposite data [|state|], None)
+        SlugShapeRuntime.createComposite data [|state|]
 
     let linearGradientShape =
         makeGradientShape
@@ -170,7 +169,7 @@ module SlugDemoVectorSupport =
                 FillSource = SlugFillSource.Gradient 0
                 MaskIndex = if masks.Length = 0 then -1 else 0
                 MaterialValues = if masks.Length = 0 then Vector4.Zero else Vector4.UnitX }
-        AnalyticSlug (SlugShapeRuntime.createComposite data [|state|], None)
+        SlugShapeRuntime.createComposite data [|state|]
 
     let unmaskedGradientShape = makeMaskedGradientShape None
     let normalMaskedGradientShape = makeMaskedGradientShape (Some false)
@@ -186,7 +185,6 @@ module SlugDemoVectorSupport =
             NonZero
             (color 1.0f 0.76f 0.80f 1.0f)
             2.0f
-            (v2 58.0f 58.0f)
 
     let shapeCircle =
         contour
@@ -195,7 +193,6 @@ module SlugDemoVectorSupport =
             NonZero
             (color 0.72f 0.94f 1.0f 1.0f)
             2.0f
-            (v2 56.0f 56.0f)
 
     let shapeRoundedRect =
         contour
@@ -204,7 +201,6 @@ module SlugDemoVectorSupport =
             NonZero
             (color 1.0f 0.92f 0.60f 1.0f)
             2.0f
-            (v2 94.0f 52.0f)
 
     let compositeBody =
         contour
@@ -213,7 +209,6 @@ module SlugDemoVectorSupport =
             NonZero
             (color 0.62f 1.0f 0.82f 1.0f)
             2.0f
-            (v2 104.0f 66.0f)
 
     let compositeCore =
         contour
@@ -222,7 +217,6 @@ module SlugDemoVectorSupport =
             NonZero
             (color 0.86f 1.0f 0.95f 1.0f)
             1.5f
-            (v2 42.0f 42.0f)
 
     let compositeFin =
         contour
@@ -234,7 +228,6 @@ module SlugDemoVectorSupport =
             NonZero
             (color 1.0f 0.74f 0.84f 1.0f)
             1.5f
-            (v2 24.0f 22.0f)
 
     let private punchOuter =
         rectCommands -0.5f -0.5f 0.5f 0.5f
@@ -252,7 +245,6 @@ module SlugDemoVectorSupport =
             NonZero
             (color 1.0f 0.78f 0.82f 1.0f)
             1.8f
-            (v2 104.0f 62.0f)
 
     let punchOppositeTessellation =
         contour
@@ -261,5 +253,4 @@ module SlugDemoVectorSupport =
             NonZero
             (color 0.72f 0.90f 1.0f 1.0f)
             1.8f
-            (v2 104.0f 62.0f)
 

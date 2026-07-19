@@ -3871,23 +3871,24 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                 match OpenProjectDllsOpt with
                 | None ->
                     let openProjectDlls =
-                        Directory.EnumerateDirectories projectsDirPaths
-                        |> Seq.filter (fun dir -> not (Array.isEmpty (Directory.GetFiles (dir, "*.fsproj"))))
-                        |> Seq.collect (fun dir -> Directory.EnumerateDirectories (dir, "bin"))
-                        |> Seq.collect (fun dir -> Directory.EnumerateDirectories (dir, Constants.Gaia.BuildName))
-                        |> Seq.map (fun dir -> dir + "/" + Constants.Engine.TargetFramework)
-                        |> Seq.filter Directory.Exists
-                        |> Seq.collect (fun dir -> Directory.EnumerateFiles (dir, "*.dll"))
-                        |> Seq.map PathF.Normalize // ensure we're in '/' mode
-                        |> Seq.filter nuAssemblyFileFilter
-                        |> Seq.filter (fun filePath ->
-                            match tryValidateNuProjectOutput filePath with
-                            | Right _ -> true
-                            | Left message ->
-                                Log.infoOnce ("Skipping Nu game project '" + filePath + "' because " + message)
-                                false)
-                        |> Seq.sort
-                        |> Seq.toArray
+                        gaiaDir + "../../../../../Projects"
+                        |> PathF.GetFullPath
+                        |> Directory.GetDirectories
+                        |> Array.choose (fun projectDir ->
+                            let projectDir = PathF.Normalize projectDir
+                            let projectName = PathF.GetFileName projectDir
+                            let dllFilePath =
+                                projectDir + "/bin/" + Constants.Gaia.BuildName + "/" +
+                                Constants.Engine.TargetFramework + "/" + projectName + ".dll"
+                            if File.Exists dllFilePath then
+                                let dllFilePath = PathF.Normalize dllFilePath
+                                match tryValidateNuProjectOutput dllFilePath with
+                                | Right _ -> Some dllFilePath
+                                | Left message ->
+                                    Log.infoOnce ("Skipping Nu game project '" + dllFilePath + "' because " + message)
+                                    None
+                            else None)
+                        |> Array.sort
                     let openProjectNames =
                         Array.map PathF.GetFileNameWithoutExtension openProjectDlls
                     let (openProjectDlls, openProjectNames, openProjectIndex) =

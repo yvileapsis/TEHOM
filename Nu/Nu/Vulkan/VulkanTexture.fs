@@ -710,7 +710,7 @@ type [<CustomEquality; NoComparison>] Texture =
         | LazyTexture lazyTexture -> TextureInternal.updateSize metadata lazyTexture.TextureInternal context
 
     /// Create an uncompressed texture directly from a managed texel array.
-    static member createFromArray width height (internalFormat : ImageFormat) pixelFormat (texels : 'a array) thread context =
+    static member createFromArray width height (internalFormat : Nu.Vulkan.ImageFormat) pixelFormat (texels : 'a array) thread context =
         let metadata = TextureMetadata.make width height
         let textureInternal =
             TextureInternal.create

@@ -64,11 +64,12 @@ module SlugDemoAnimatedScenes =
 
     let draw (world : World) =
 
-        SlugDemoContours.placeContour
+        SlugDemoContours.placeComposite
             "AnimatedScenePills"
-            (AnalyticSlug (animatedPill, None))
+            animatedPill
             (v3 0.0f -68.0f 0.0f)
             (v3 260.0f 8.0f 0.0f)
             Quaternion.Identity
             0.0f
+            None
             world

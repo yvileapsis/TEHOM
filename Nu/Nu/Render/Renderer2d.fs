@@ -299,11 +299,11 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         | TextureAsset texture -> Texture.destroy texture renderer.VulkanContext
         | FontAsset (_, font) -> SDL3_ttf.TTF_CloseFont font
         | MsdfFontAsset (_, textures) ->
-            for texture in textures do texture.Destroy renderer.VulkanContext
+            for texture in textures do Texture.destroy texture renderer.VulkanContext
         | SlugFontAsset (_, shaperOpt, curveTexture, bandTexture) ->
             shaperOpt |> Option.iter (fun shaper -> (shaper :> IDisposable).Dispose ())
-            curveTexture.Destroy renderer.VulkanContext
-            bandTexture.Destroy renderer.VulkanContext
+            Texture.destroy curveTexture renderer.VulkanContext
+            Texture.destroy bandTexture renderer.VulkanContext
         | CubeMapAsset _ -> ()
         | StaticModelAsset _ -> ()
         | AnimatedModelAsset _ -> ()
@@ -346,12 +346,12 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                     let mutable errorOpt = None
                     for atlas in fontData.Atlases do
                         if Option.isNone errorOpt then
-                            match assetClient.TextureClient.TryCreateTexture (false, false, Texture.Uncompressed, atlas.FilePath, Texture.RenderThread, renderer.VulkanContext) with
+                            match assetClient.TextureClient.TryCreateTextureFiltered false Uncompressed atlas.FilePath RenderThread renderer.VulkanContext with
                             | Right atlasTexture -> atlasTextures.Add atlasTexture
                             | Left error -> errorOpt <- Some (atlas.FilePath, error)
                     match errorOpt with
                     | Some (atlasFilePath, error) ->
-                        for atlasTexture in atlasTextures do atlasTexture.Destroy renderer.VulkanContext
+                        for atlasTexture in atlasTextures do Texture.destroy atlasTexture renderer.VulkanContext
                         Log.infoOnce ("Could not load MTSDF atlas '" + atlasFilePath + "' due to '" + error + "'.")
                         None
                     | None -> Some (MsdfFontAsset (fontData, atlasTextures.ToArray ()))
@@ -363,24 +363,24 @@ type [<ReferenceEquality>] VulkanRenderer2d =
             match SlugFontRuntime.tryLoad asset.FilePath with
             | Some fontData ->
                 let curveTexture =
-                    Texture.EagerTexture
-                        (Texture.Texture.createFromArray
+                    EagerTexture
+                        (Texture.createFromArray
                             fontData.CurveTextureWidth
                             fontData.CurveTextureHeight
-                            Hl.Rgba32f
-                            Hl.Rgba
+                            Rgba32f
+                            Rgba
                             fontData.CurveTexels
-                            Texture.RenderThread
+                            RenderThread
                             renderer.VulkanContext)
                 let bandTexture =
-                    Texture.EagerTexture
-                        (Texture.Texture.createFromArray
+                    EagerTexture
+                        (Texture.createFromArray
                             fontData.BandTextureWidth
                             fontData.BandTextureHeight
-                            Hl.Rgba16ui
-                            Hl.Rgba
+                            Rgba16ui
+                            Rgba
                             fontData.BandTexels
-                            Texture.RenderThread
+                            RenderThread
                             renderer.VulkanContext)
                 // Retain one serialized HarfBuzz context with the GPU asset when possible. This
                 // removes native Blob / Face / Font reconstruction from every text run while
@@ -537,7 +537,6 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         | None -> ()
 
     static member private handleReloadShaders renderer =
-        let (_, _, spritePipeline) = renderer.SpritePipeline
         let (_, _, spritePipeline) = renderer.SpritePipeline
         let (_, _, _, _, _, contourPipeline) = renderer.ContourPipeline
         Pipeline.reloadShaders spritePipeline renderer.VulkanContext
@@ -1109,7 +1108,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                                      &texCoords,
                                      &clipOpt,
                                      &glyphColor,
-                                     Pipeline.Transparent,
+                                     VulkanTransparent,
                                      glyph.DistanceRange,
                                      shader,
                                      atlasTextures[glyph.AtlasIndex],
@@ -1183,7 +1182,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                         for glyph in layout.Glyphs do
                             let mutable glyph = { glyph with Position = position + glyph.Position }
                             SlugText.SubmitSlugTextBatchGlyph
-                                (absolute, glyph, fontSize, &rootTransform, &clipOpt, Pipeline.Transparent, curveTexture, bandTexture, renderer.Viewport, renderer.SlugTextBatchEnv)
+                                (absolute, glyph, fontSize, &rootTransform, &clipOpt, VulkanTransparent, curveTexture, bandTexture, renderer.Viewport, renderer.SlugTextBatchEnv)
                         SlugText.EndSlugTextBatchFrame renderer.Viewport renderer.SlugTextBatchEnv
                 | ValueSome _ -> Log.infoOnce ("Cannot render Slug text with a non-Slug font asset for '" + scstring slugFont + "'.")
                 | ValueNone -> Log.infoOnce ("SlugTextDescriptor failed due to unloadable asset for '" + scstring slugFont + "'.")
@@ -1213,7 +1212,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                     textureSlots
                     viewProjection
                     renderer.Viewport
-                    Pipeline.Transparent
+                    VulkanTransparent
                     renderer.SlugShapeEnv
                     renderer.VulkanContext
 
@@ -1314,7 +1313,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                                                  &texCoords,
                                                  &clipOpt,
                                                  &glyphColor,
-                                                 Pipeline.Transparent,
+                                                 VulkanTransparent,
                                                  glyph.DistanceRange,
                                                  shader,
                                                  atlasTextures[glyph.AtlasIndex],
@@ -1472,14 +1471,14 @@ type [<ReferenceEquality>] VulkanRenderer2d =
         let msdfTextBatchEnv = MsdfText.CreateMsdfTextBatchEnv filteredSampler context
         let slugShapeEnv = SlugShape.CreateSlugShapeEnv unfilteredSampler filteredSampler context
         let slugShapeFallbackTexture =
-            Texture.EagerTexture
-                (Texture.Texture.createFromArray
+            EagerTexture
+                (Texture.createFromArray
                     1
                     1
-                    Hl.Rgba8
-                    Hl.Rgba
+                    Rgba8
+                    Rgba
                     [|255uy; 255uy; 255uy; 255uy|]
-                    Texture.RenderThread
+                    RenderThread
                     context)
 
         // create contour pipeline (Slug analytic coverage)

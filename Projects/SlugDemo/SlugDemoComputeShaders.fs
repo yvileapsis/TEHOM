@@ -48,9 +48,9 @@ module SlugDemoComputeShaders =
                 FillSource = SlugFillSource.Solid }
         SlugShapeRuntime.createComposite data [| circleState; pentagonState |]
 
-    let private canonicalComputeConfig : Vortice.Vulkan.SlugShape.SlugShapeComputeConfig =
+    let private canonicalComputeConfig : Nu.Vulkan.SlugShape.SlugShapeComputeConfig =
         { LayerCount = 2
-          Mode = Vortice.Vulkan.SlugShape.SlugShapeComputeMode.CanonicalColor
+          Mode = Nu.Vulkan.SlugShape.SlugShapeComputeMode.CanonicalColor
           Flags = 0u
           Seed = 0u
           Speed = 1.0f

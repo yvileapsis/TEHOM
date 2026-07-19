@@ -25,14 +25,14 @@ const vec4 SSVF_DITHERING[4] =
         vec4(0.1875, 0.6875, 0.0625, 0.5625),
         vec4(0.9375, 0.4375, 0.8125, 0.3125));
 
-struct Transform
+struct Eye
 {
+    vec3 center;
     mat4 view;
-    mat4 projection;
-    mat4 viewProjection;
     mat4 viewInverse;
+    mat4 projection;
     mat4 projectionInverse;
-    vec3 eyeCenter;
+    mat4 viewProjection;
 };
 
 struct Lighting
@@ -66,7 +66,23 @@ struct Lighting
     float ssrrDistanceCutoffMargin;
     float ssrrEdgeHorizontalMargin;
     float ssrrEdgeVerticalMargin;
-    float shadowNear; // NOTE: currently unused.
+    int ssrlEnabled;
+    float ssrlIntensity;
+    float ssrlDetail;
+    int ssrlRefinementsMax;
+    float ssrlRayThickness;
+    float ssrlTowardEyeCutoff;
+    float ssrlDepthCutoff;
+    float ssrlDepthCutoffMargin;
+    float ssrlDistanceCutoff;
+    float ssrlDistanceCutoffMargin;
+    float ssrlRoughnessCutoff;
+    float ssrlRoughnessCutoffMargin;
+    float ssrlSlopeCutoff;
+    float ssrlSlopeCutoffMargin;
+    float ssrlEdgeHorizontalMargin;
+    float ssrlEdgeVerticalMargin;
+    float shadowNear;
 };
 
 struct LightMap
@@ -101,67 +117,38 @@ struct Light
     int lightShadowIndices;
 };
 
-struct ShadowMatrix
-{
-    mat4 shadowMatrix;
-};
+layout(set = 0, binding = 0) uniform EyeBlock { Eye eye; };
+layout(set = 0, binding = 1) uniform LightingBlock { Lighting lighting; };
+layout(set = 0, binding = 2) uniform texture2D depthTexture;
+layout(set = 0, binding = 3) uniform texture2D colorTexture;
+layout(set = 0, binding = 4) uniform texture2D brdfTexture;
+layout(set = 0, binding = 5) uniform textureCube irradianceMap;
+layout(set = 0, binding = 6) uniform textureCube environmentFilterMap;
 
-layout(binding = 0) buffer readonly TransformBlock
-{
-    Transform transform;
-};
+layout(set = 1, binding = 0) uniform texture2D albedoTexture;
+layout(set = 1, binding = 1) uniform texture2D roughnessTexture;
+layout(set = 1, binding = 2) uniform texture2D metallicTexture;
+layout(set = 1, binding = 3) uniform texture2D ambientOcclusionTexture;
+layout(set = 1, binding = 4) uniform texture2D emissionTexture;
+layout(set = 1, binding = 5) uniform texture2D normalTexture;
+layout(set = 1, binding = 6) uniform texture2D heightTexture;
 
-layout(binding = 1) buffer readonly LightingBlock
-{
-    Lighting lighting;
-};
+layout(set = 2, binding = 1) uniform LightMapBlock { LightMap lightMaps[LIGHT_MAPS_MAX]; };
+layout(set = 2, binding = 2) uniform LightsGeneralBlock { LightsGeneral lightsGeneral; };
+layout(set = 2, binding = 3) uniform LightBlock { Light lights[LIGHTS_MAX]; };
+layout(set = 2, binding = 4) uniform ShadowMatrixBlock { mat4 shadowMatrices[SHADOW_TEXTURES_MAX + SHADOW_CASCADES_MAX * SHADOW_CASCADE_LEVELS]; };
+layout(set = 2, binding = 5) uniform textureCube irradianceMaps[LIGHT_MAPS_MAX];
+layout(set = 2, binding = 6) uniform textureCube environmentFilterMaps[LIGHT_MAPS_MAX];
+layout(set = 2, binding = 7) uniform texture2DArray shadowTextures;
+layout(set = 2, binding = 8) uniform textureCube shadowMaps[SHADOW_MAPS_MAX];
+layout(set = 2, binding = 9) uniform texture2DArray shadowCascades[SHADOW_CASCADES_MAX];
 
-layout(binding = 2) uniform texture2D depthTexture;
-layout(binding = 3) uniform texture2D colorTexture;
-layout(binding = 4) uniform texture2D brdfTexture;
-layout(binding = 5) uniform textureCube irradianceMap;
-layout(binding = 6) uniform textureCube environmentFilterMap;
-
-layout(set = 1, binding = 1) buffer readonly LightMapBlock
-{
-    LightMap lightMaps[LIGHT_MAPS_MAX];
-};
-
-layout(set = 1, binding = 2) buffer readonly LightsGeneralBlock
-{
-    LightsGeneral lightsGeneral;
-};
-
-layout(set = 1, binding = 3) buffer readonly LightBlock
-{
-    Light lights[LIGHTS_MAX];
-};
-
-layout(set = 1, binding = 4) buffer readonly ShadowMatrixBlock
-{
-    ShadowMatrix shadowMatrices[SHADOW_TEXTURES_MAX + SHADOW_CASCADES_MAX * SHADOW_CASCADE_LEVELS];
-};
-
-layout(set = 1, binding = 5) uniform texture2D albedoTexture;
-layout(set = 1, binding = 6) uniform texture2D roughnessTexture;
-layout(set = 1, binding = 7) uniform texture2D metallicTexture;
-layout(set = 1, binding = 8) uniform texture2D ambientOcclusionTexture;
-layout(set = 1, binding = 9) uniform texture2D emissionTexture;
-layout(set = 1, binding = 10) uniform texture2D normalTexture;
-layout(set = 1, binding = 11) uniform texture2D heightTexture;
-// NOTE: bindings 12 - 17 unused in forward rendering.
-layout(set = 1, binding = 18) uniform textureCube irradianceMaps[LIGHT_MAPS_MAX];
-layout(set = 1, binding = 19) uniform textureCube environmentFilterMaps[LIGHT_MAPS_MAX];
-layout(set = 1, binding = 20) uniform texture2DArray shadowTextures;
-layout(set = 1, binding = 21) uniform textureCube shadowMaps[SHADOW_MAPS_MAX];
-layout(set = 1, binding = 22) uniform texture2DArray shadowCascades[SHADOW_CASCADES_MAX];
-
-layout(set = 2, binding = 0) uniform sampler filteredSampler;
-layout(set = 2, binding = 1) uniform sampler cubeMapSampler;
-layout(set = 2, binding = 2) uniform sampler shadowSampler;
-layout(set = 2, binding = 3) uniform sampler colorSampler;
-layout(set = 2, binding = 4) uniform sampler depthSampler;
-layout(set = 2, binding = 5) uniform sampler brdfSampler;
+layout(set = 3, binding = 0) uniform sampler filteredSampler;
+layout(set = 3, binding = 1) uniform sampler cubeMapSampler;
+layout(set = 3, binding = 2) uniform sampler shadowSampler;
+layout(set = 3, binding = 3) uniform sampler colorSampler;
+layout(set = 3, binding = 4) uniform sampler depthSampler;
+layout(set = 3, binding = 5) uniform sampler brdfSampler;
 
 layout(location = 0) in vec4 positionOut;
 layout(location = 1) in vec2 texCoordsOut;
@@ -205,11 +192,10 @@ bool inBounds(vec3 point, vec3 min, vec3 size)
 
 vec4 depthToPosition(float depth, vec2 texCoords)
 {
-    float z = depth * 2.0 - 1.0;
-    vec4 positionClip = vec4(texCoords * 2.0 - 1.0, z, 1.0);
-    vec4 positionView = transform.projectionInverse * positionClip;
+    vec4 positionClip = vec4(texCoords * 2.0 - 1.0, depth, 1.0);
+    vec4 positionView = eye.projectionInverse * positionClip;
     positionView /= positionView.w;
-    return transform.viewInverse * positionView;
+    return eye.viewInverse * positionView;
 }
 
 float distanceToOutside(vec3 point, vec3 boxMin, vec3 boxSize)
@@ -287,7 +273,7 @@ float computeDepthRatio(vec3 minA, vec3 sizeA, vec3 minB, vec3 sizeB, vec3 posit
 
 vec3 parallaxCorrection(vec3 lightMapOrigin, vec3 lightMapMin, vec3 lightMapSize, vec3 positionWorld, vec3 normalWorld)
 {
-    vec3 directionWorld = positionWorld - transform.eyeCenter;
+    vec3 directionWorld = positionWorld - eye.center;
     vec3 reflectionWorld = reflect(directionWorld, normalWorld);
     vec3 firstPlaneIntersect = (lightMapMin + lightMapSize - positionWorld) / reflectionWorld;
     vec3 secondPlaneIntersect = (lightMapMin - positionWorld) / reflectionWorld;
@@ -327,20 +313,20 @@ float computeShadowScalarPoint(vec4 position, vec3 lightOrigin, int shadowIndex)
 
 float computeShadowScalarSpot(vec4 position, float lightConeOuter, int shadowIndex)
 {
-    mat4 shadowMatrix = shadowMatrices[shadowIndex].shadowMatrix;
+    mat4 shadowMatrix = shadowMatrices[shadowIndex];
     vec4 positionShadowClip = shadowMatrix * position;
     vec3 shadowTexCoordsProj = positionShadowClip.xyz / positionShadowClip.w; // ndc space
     if (shadowTexCoordsProj.x >= -1.0 && shadowTexCoordsProj.x < 1.0 &&
         shadowTexCoordsProj.y >= -1.0 && shadowTexCoordsProj.y < 1.0 &&
-        shadowTexCoordsProj.z >= -1.0 && shadowTexCoordsProj.z < 1.0)
+        shadowTexCoordsProj.z >= 0.0 && shadowTexCoordsProj.z < 1.0)
     {
-        vec3 shadowTexCoords = shadowTexCoordsProj * 0.5 + 0.5;
-        float shadowZ = shadowTexCoords.z;
+        vec2 shadowTexCoords = shadowTexCoordsProj.xy * 0.5 + 0.5;
+        float shadowZ = shadowTexCoordsProj.z;
         float shadowZExp = exp(-lighting.lightShadowExponent * shadowZ);
-        float shadowDepthExp = texture(sampler2DArray(shadowTextures, shadowSampler), vec3(shadowTexCoords.xy, float(shadowIndex))).y;
+        float shadowDepthExp = texture(sampler2DArray(shadowTextures, shadowSampler), vec3(shadowTexCoords, float(shadowIndex))).y;
         float shadowScalar = clamp(shadowZExp * shadowDepthExp, 0.0, 1.0);
         shadowScalar = pow(shadowScalar, lighting.lightShadowDensity);
-        shadowScalar = lightConeOuter > SHADOW_FOV_MAX ? fadeShadowScalar(shadowTexCoords.xy, shadowScalar) : shadowScalar;
+        shadowScalar = lightConeOuter > SHADOW_FOV_MAX ? fadeShadowScalar(shadowTexCoords, shadowScalar) : shadowScalar;
         return shadowScalar;
     }
     return 1.0;
@@ -348,17 +334,17 @@ float computeShadowScalarSpot(vec4 position, float lightConeOuter, int shadowInd
 
 float computeShadowScalarDirectional(vec4 position, int shadowIndex)
 {
-    mat4 shadowMatrix = shadowMatrices[shadowIndex].shadowMatrix;
+    mat4 shadowMatrix = shadowMatrices[shadowIndex];
     vec4 positionShadowClip = shadowMatrix * position;
     vec3 shadowTexCoordsProj = positionShadowClip.xyz / positionShadowClip.w; // ndc space
     if (shadowTexCoordsProj.x >= -1.0 + SHADOW_DIRECTIONAL_SEAM_INSET && shadowTexCoordsProj.x < 1.0 - SHADOW_DIRECTIONAL_SEAM_INSET &&
         shadowTexCoordsProj.y >= -1.0 + SHADOW_DIRECTIONAL_SEAM_INSET && shadowTexCoordsProj.y < 1.0 - SHADOW_DIRECTIONAL_SEAM_INSET &&
-        shadowTexCoordsProj.z >= -1.0 + SHADOW_DIRECTIONAL_SEAM_INSET && shadowTexCoordsProj.z < 1.0 - SHADOW_DIRECTIONAL_SEAM_INSET)
+        shadowTexCoordsProj.z >= SHADOW_DIRECTIONAL_SEAM_INSET && shadowTexCoordsProj.z < 1.0 - SHADOW_DIRECTIONAL_SEAM_INSET)
     {
-        vec3 shadowTexCoords = shadowTexCoordsProj * 0.5 + 0.5;
-        float shadowZ = shadowTexCoords.z;
+        vec2 shadowTexCoords = shadowTexCoordsProj.xy * 0.5 + 0.5;
+        float shadowZ = shadowTexCoordsProj.z;
         float shadowZExp = exp(-lighting.lightShadowExponent * shadowZ);
-        float shadowDepthExp = texture(sampler2DArray(shadowTextures, shadowSampler), vec3(shadowTexCoords.xy, float(shadowIndex))).y;
+        float shadowDepthExp = texture(sampler2DArray(shadowTextures, shadowSampler), vec3(shadowTexCoords, float(shadowIndex))).y;
         float shadowScalar = clamp(shadowZExp * shadowDepthExp, 0.0, 1.0);
         shadowScalar = pow(shadowScalar, lighting.lightShadowDensity);
         return shadowScalar;
@@ -370,17 +356,17 @@ float computeShadowScalarCascaded(vec4 position, float shadowCutoff, int shadowI
 {
     for (int i = 0; i < SHADOW_CASCADE_LEVELS; ++i)
     {
-        mat4 shadowMatrix = shadowMatrices[SHADOW_TEXTURES_MAX + (shadowIndex - SHADOW_TEXTURES_MAX) * SHADOW_CASCADE_LEVELS + i].shadowMatrix;
+        mat4 shadowMatrix = shadowMatrices[SHADOW_TEXTURES_MAX + (shadowIndex - SHADOW_TEXTURES_MAX) * SHADOW_CASCADE_LEVELS + i];
         vec4 positionShadowClip = shadowMatrix * position;
         vec3 shadowTexCoordsProj = positionShadowClip.xyz / positionShadowClip.w; // ndc space
         if (shadowTexCoordsProj.x >= -1.0 + SHADOW_CASCADE_SEAM_INSET && shadowTexCoordsProj.x < 1.0 - SHADOW_CASCADE_SEAM_INSET &&
             shadowTexCoordsProj.y >= -1.0 + SHADOW_CASCADE_SEAM_INSET && shadowTexCoordsProj.y < 1.0 - SHADOW_CASCADE_SEAM_INSET &&
-            shadowTexCoordsProj.z >= -1.0 + SHADOW_CASCADE_SEAM_INSET && shadowTexCoordsProj.z < 1.0 - SHADOW_CASCADE_SEAM_INSET)
+            shadowTexCoordsProj.z >= SHADOW_CASCADE_SEAM_INSET && shadowTexCoordsProj.z < 1.0 - SHADOW_CASCADE_SEAM_INSET)
         {
-            vec3 shadowTexCoords = shadowTexCoordsProj * 0.5 + 0.5;
-            float shadowZ = shadowTexCoords.z;
+            vec2 shadowTexCoords = shadowTexCoordsProj.xy * 0.5 + 0.5;
+            float shadowZ = shadowTexCoordsProj.z;
             float shadowZExp = exp(-lighting.lightShadowExponent * shadowZ);
-            float shadowDepthExp = texture(sampler2DArray(shadowCascades[shadowIndex - SHADOW_TEXTURES_MAX], shadowSampler), vec3(shadowTexCoords.xy, float(i))).y;
+            float shadowDepthExp = texture(sampler2DArray(shadowCascades[shadowIndex - SHADOW_TEXTURES_MAX], shadowSampler), vec3(shadowTexCoords, float(i))).y;
             float shadowScalar = clamp(shadowZExp * shadowDepthExp, 0.0, 1.0);
             float densityScalar = 1.0f + float(i) * SHADOW_CASCADE_DENSITY_BONUS;
             shadowScalar = pow(shadowScalar, lighting.lightShadowDensity * densityScalar);
@@ -403,7 +389,7 @@ vec3 computeFogAccumPoint(vec4 position, int lightIndex)
     float lightConeOuter = light.lightConeOuters;
 
     // compute ray info
-    vec3 startPosition = transform.eyeCenter;
+    vec3 startPosition = eye.center;
     vec3 stopPosition = position.xyz;
     vec3 rayVector = stopPosition - startPosition;
     float rayLength = length(rayVector);
@@ -430,7 +416,7 @@ vec3 computeFogAccumPoint(vec4 position, int lightIndex)
         for (int i = 0; i < lighting.ssvfSteps; ++i)
         {
             // compute intensity inside light volume
-            vec3 v = normalize(transform.eyeCenter - currentPosition);
+            vec3 v = normalize(eye.center - currentPosition);
             vec3 d = lightOrigin - currentPosition;
             vec3 l = normalize(d);
             vec3 h = normalize(v + l);
@@ -467,7 +453,7 @@ vec3 computeFogAccumPoint(vec4 position, int lightIndex)
             float shadowDepth = texture(samplerCube(shadowMaps[shadowIndex - SHADOW_TEXTURES_MAX], shadowSampler), positionShadow).x;
 
             // compute intensity inside light volume
-            vec3 v = normalize(transform.eyeCenter - currentPosition);
+            vec3 v = normalize(eye.center - currentPosition);
             vec3 d = lightOrigin - currentPosition;
             vec3 l = normalize(d);
             vec3 h = normalize(v + l);
@@ -515,7 +501,7 @@ vec3 computeFogAccumSpot(vec4 position, int lightIndex)
     float lightConeOuter = light.lightConeOuters;
 
     // compute ray info
-    vec3 startPosition = transform.eyeCenter;
+    vec3 startPosition = eye.center;
     vec3 rayVector = position.xyz - startPosition;
     float rayLength = length(rayVector);
     vec3 rayDirection = rayVector / rayLength;
@@ -541,7 +527,7 @@ vec3 computeFogAccumSpot(vec4 position, int lightIndex)
         for (int i = 0; i < lighting.ssvfSteps; ++i)
         {
             // compute intensity inside light volume
-            vec3 v = normalize(transform.eyeCenter - currentPosition);
+            vec3 v = normalize(eye.center - currentPosition);
             vec3 d = lightOrigin - currentPosition;
             vec3 l = normalize(d);
             vec3 h = normalize(v + l);
@@ -570,19 +556,19 @@ vec3 computeFogAccumSpot(vec4 position, int lightIndex)
     else
     {
         // march over ray, accumulating fog light value with shadows
-        mat4 shadowMatrix = shadowMatrices[shadowIndex].shadowMatrix;
+        mat4 shadowMatrix = shadowMatrices[shadowIndex];
         for (int i = 0; i < lighting.ssvfSteps; ++i)
         {
             // compute depths
             vec4 positionShadowClip = shadowMatrix * vec4(currentPosition, 1.0);
             vec3 shadowTexCoordsProj = positionShadowClip.xyz / positionShadowClip.w; // ndc space
-            vec3 shadowTexCoords = shadowTexCoordsProj * 0.5 + 0.5;
+            vec2 shadowTexCoords = shadowTexCoordsProj.xy * 0.5 + 0.5;
             bool shadowTexCoordsInRange = shadowTexCoords.x >= 0.0 && shadowTexCoords.x < 1.0 && shadowTexCoords.y >= 0.0 && shadowTexCoords.y < 1.0;
-            float shadowZ = shadowTexCoords.z;
-            float shadowDepth = shadowTexCoordsInRange ? texture(sampler2DArray(shadowTextures, shadowSampler), vec3(shadowTexCoords.xy, float(shadowIndex))).x : 1.0;
+            float shadowZ = shadowTexCoordsProj.z;
+            float shadowDepth = shadowTexCoordsInRange ? texture(sampler2DArray(shadowTextures, shadowSampler), vec3(shadowTexCoords, float(shadowIndex))).x : 1.0;
 
             // compute intensity inside light volume
-            vec3 v = normalize(transform.eyeCenter - currentPosition);
+            vec3 v = normalize(eye.center - currentPosition);
             vec3 d = lightOrigin - currentPosition;
             vec3 l = normalize(d);
             vec3 h = normalize(v + l);
@@ -625,7 +611,7 @@ vec3 computeFogAccumDirectional(vec4 position, int lightIndex)
     vec3 lightDirection = light.lightDirections;
 
     // compute ray info
-    vec3 startPosition = transform.eyeCenter;
+    vec3 startPosition = eye.center;
     vec3 rayVector = position.xyz - startPosition;
     float rayLength = length(rayVector);
     vec3 rayDirection = rayVector / rayLength;
@@ -661,16 +647,16 @@ vec3 computeFogAccumDirectional(vec4 position, int lightIndex)
     else
     {
         // march over ray, accumulating fog light value with shadows
-        mat4 shadowMatrix = shadowMatrices[shadowIndex].shadowMatrix;
+        mat4 shadowMatrix = shadowMatrices[shadowIndex];
         for (int i = 0; i < lighting.ssvfSteps; ++i)
         {
             // compute depths
             vec4 positionShadowClip = shadowMatrix * vec4(currentPosition, 1.0);
             vec3 shadowTexCoordsProj = positionShadowClip.xyz / positionShadowClip.w; // ndc space
-            vec3 shadowTexCoords = shadowTexCoordsProj * 0.5 + 0.5;
+            vec2 shadowTexCoords = shadowTexCoordsProj.xy * 0.5 + 0.5;
             bool shadowTexCoordsInRange = shadowTexCoords.x >= 0.0 && shadowTexCoords.x < 1.0 && shadowTexCoords.y >= 0.0 && shadowTexCoords.y < 1.0;
-            float shadowZ = shadowTexCoords.z;
-            float shadowDepth = shadowTexCoordsInRange ? texture(sampler2DArray(shadowTextures, shadowSampler), vec3(shadowTexCoords.xy, float(shadowIndex))).x : 1.0;
+            float shadowZ = shadowTexCoordsProj.z;
+            float shadowDepth = shadowTexCoordsInRange ? texture(sampler2DArray(shadowTextures, shadowSampler), vec3(shadowTexCoords, float(shadowIndex))).x : 1.0;
 
             // step through ray, accumulating fog light moment
             if (shadowZ <= shadowDepth || shadowZ >= 1.0f)
@@ -698,7 +684,7 @@ vec3 computeFogAccumCascaded(vec4 position, int lightIndex)
     vec3 lightDirection = light.lightDirections;
 
     // compute ray info
-    vec3 startPosition = transform.eyeCenter;
+    vec3 startPosition = eye.center;
     vec3 rayVector = position.xyz - startPosition;
     float rayLength = length(rayVector);
     vec3 rayDirection = rayVector / rayLength;
@@ -744,13 +730,13 @@ vec3 computeFogAccumCascaded(vec4 position, int lightIndex)
             for (int j = 0; j < SHADOW_CASCADE_LEVELS; ++j)
             {
                 // compute depths
-                mat4 shadowMatrix = shadowMatrices[SHADOW_TEXTURES_MAX + (shadowIndex - SHADOW_TEXTURES_MAX) * SHADOW_CASCADE_LEVELS + j].shadowMatrix;
+                mat4 shadowMatrix = shadowMatrices[SHADOW_TEXTURES_MAX + (shadowIndex - SHADOW_TEXTURES_MAX) * SHADOW_CASCADE_LEVELS + j];
                 vec4 positionShadowClip = shadowMatrix * vec4(currentPosition, 1.0);
                 vec3 shadowTexCoordsProj = positionShadowClip.xyz / positionShadowClip.w; // ndc space
-                vec3 shadowTexCoords = shadowTexCoordsProj * 0.5 + 0.5;
+                vec2 shadowTexCoords = shadowTexCoordsProj.xy * 0.5 + 0.5;
                 bool shadowTexCoordsInRange = shadowTexCoords.x >= 0.0 && shadowTexCoords.x < 1.0 && shadowTexCoords.y >= 0.0 && shadowTexCoords.y < 1.0;
-                float shadowZ = shadowTexCoords.z;
-                float shadowDepth = shadowTexCoordsInRange ? texture(sampler2DArray(shadowCascades[shadowIndex - SHADOW_TEXTURES_MAX], shadowSampler), vec3(shadowTexCoords.xy, float(i))).x : 1.0;
+                float shadowZ = shadowTexCoordsProj.z;
+                float shadowDepth = shadowTexCoordsInRange ? texture(sampler2DArray(shadowCascades[shadowIndex - SHADOW_TEXTURES_MAX], shadowSampler), vec3(shadowTexCoords, float(i))).x : 1.0;
 
                 // step through ray, accumulating fog light moment
                 if (shadowZ <= shadowDepth || shadowZ >= 1.0f)
@@ -774,9 +760,9 @@ vec3 computeFogAccumCascaded(vec4 position, int lightIndex)
 void computeSsrr(float depth, vec4 position, vec3 normal, float refractiveIndex, float subsurfaceCutoff, float subsurfaceCutoffMargin, inout vec3 diffuseScreen, inout float diffuseSurfaceWeight, inout float diffuseScreenWeight)
 {
     // compute view values
-    vec4 positionView = transform.view * position;
+    vec4 positionView = eye.view * position;
     vec3 positionViewNormal = normalize(positionView.xyz);
-    vec3 normalView = mat3(transform.view) * normal;
+    vec3 normalView = mat3(eye.view) * normal;
     vec3 refractionView = refract(positionViewNormal, normalView, refractiveIndex);
     vec4 startView = vec4(positionView.xyz, 1.0);
     vec4 stopView = vec4(positionView.xyz + refractionView * lighting.ssrrDistanceCutoff, 1.0);
@@ -784,13 +770,13 @@ void computeSsrr(float depth, vec4 position, vec3 normal, float refractiveIndex,
 
     // compute the fragment at which to start marching
     vec2 texSize = textureSize(sampler2D(depthTexture, depthSampler), 0).xy;
-    vec4 startFrag4 = transform.projection * startView;
+    vec4 startFrag4 = eye.projection * startView;
     vec2 startFrag = startFrag4.xy / startFrag4.w;
     startFrag = startFrag * 0.5 + 0.5;
     startFrag *= texSize;
 
     // compute the fragment at which to end marching as well as total length
-    vec4 stopFrag4 = transform.projection * stopView;
+    vec4 stopFrag4 = eye.projection * stopView;
     vec2 stopFrag = stopFrag4.xy / stopFrag4.w;
     stopFrag = stopFrag * 0.5 + 0.5;
     stopFrag *= texSize;
@@ -821,7 +807,7 @@ void computeSsrr(float depth, vec4 position, vec3 normal, float refractiveIndex,
         currentTexCoords = currentFrag / texSize;
         currentDepth = texture(sampler2D(depthTexture, depthSampler), currentTexCoords).r;
         currentPosition = depthToPosition(currentDepth, currentTexCoords);
-        currentPositionView = transform.view * currentPosition;
+        currentPositionView = eye.view * currentPosition;
         currentProgressB = length(currentFrag - startFrag) / lengthFrag;
         currentDepthView = -startView.z * -stopView.z / max(0.00001, mix(-stopView.z, -startView.z, currentProgressB)); // NOTE: uses perspective correct interpolation for depth.
 
@@ -841,7 +827,7 @@ void computeSsrr(float depth, vec4 position, vec3 normal, float refractiveIndex,
                 currentTexCoords = currentFrag / texSize;
                 currentDepth = texture(sampler2D(depthTexture, depthSampler), currentTexCoords).r;
                 currentPosition = depthToPosition(currentDepth, currentTexCoords);
-                currentPositionView = transform.view * currentPosition;
+                currentPositionView = eye.view * currentPosition;
                 currentDepthView = -startView.z * -stopView.z / max(0.00001, mix(-stopView.z, -startView.z, currentProgressB)); // NOTE: uses perspective correct interpolation for depth.
 
                 // compute depth delta and thickness based on view state
@@ -896,7 +882,7 @@ void main()
     // compute basic fragment data
     vec4 position = positionOut;
     vec3 normal = normalize(normalOut);
-    float distance = length(position.xyz - transform.eyeCenter);
+    float distance = length(position.xyz - eye.center);
 
     // compute spatial converters
     vec3 q1 = dFdx(positionOut.xyz);
@@ -911,7 +897,7 @@ void main()
     mat3 toTangent = transpose(toWorld);
 
     // compute tex coords in parallax occlusion space
-    vec3 eyeCenterTangent = toTangent * transform.eyeCenter;
+    vec3 eyeCenterTangent = toTangent * eye.center;
     vec3 positionTangent = toTangent * position.xyz;
     vec3 toEyeTangent = normalize(eyeCenterTangent - positionTangent);
     float height = texture(sampler2D(heightTexture, filteredSampler), texCoordsOut).x * heightPlusOut.x;
@@ -956,7 +942,7 @@ void main()
     float refractiveIndex = subsurfacePlusOut.w;
 
     // accumulate light and fog
-    vec3 v = normalize(transform.eyeCenter - position.xyz);
+    vec3 v = normalize(eye.center - position.xyz);
     float nDotV = saturate(dot(n, v));
     vec3 f0 = mix(vec3(0.04), albedo.rgb, metallic); // if dia-electric (plastic) use f0 of 0.04f and if metal, use the albedo color as f0.
     vec3 lightAccumDiffuse = vec3(0.0);

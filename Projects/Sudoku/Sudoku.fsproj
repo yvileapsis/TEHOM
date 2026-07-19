@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFrameworks>net10.0</TargetFrameworks>
+		<TargetFrameworks Condition="$([System.OperatingSystem]::IsMacOS())">net10.0-ios;net10.0</TargetFrameworks>
+		<TargetFrameworks Condition="'$(BuildMobile)' != 'true'">net10.0</TargetFrameworks>
+	</PropertyGroup>
+
+	<Import Project="../../Nu/Nu.targets" />
+
+	<PropertyGroup>
+		<ApplicationTitle>Sudoku</ApplicationTitle>
+		<ApplicationId>com.yvileapsis.sudoku</ApplicationId>
+		<ApplicationDisplayVersion>1.0.0</ApplicationDisplayVersion>
+		<ApplicationVersion>1</ApplicationVersion>
+		<ValidateXcodeVersion>false</ValidateXcodeVersion>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="Assets\*" />
+		<None Include="Assets\*\*" />
+		<Compile Include="Simulants.fs" />
+		<Compile Include="Assets.fs" />
+		<Compile Include="SudokuGrid.fs" />
+		<Compile Include="ProgressionTypes.fs" />
+		<Compile Include="Events.fs" />
+		<Compile Include="SudokuHints.fs" />
+		<Compile Include="PuzzleAnalysis.fs" />
+		<Compile Include="PuzzleGeneration.fs" />
+		<Compile Include="PuzzleCorpus.fs" />
+		<Compile Include="PuzzleBank.fs" />
+		<Compile Include="ProgressionMap.fs" />
+		<Compile Include="Gameplay.fs" />
+		<Compile Include="Sudoku.fs" />
+		<Compile Include="SudokuPlugin.fs" />
+		<Compile Include="Program.fs" />
+		<None Include="AssetGraph.nuag" />
+		<None Include="Overlayer.nuol" />
+		<None Include="App.config" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<MauiIcon Include="mobile_icon_bg.svg" ForegroundFile="mobile_icon_fg.svg" />
+		<MauiSplashScreen Include="mobile_icon_fg.svg" Color="#1F2937" />
+		<None Include="Info.plist" LogicalName="Info.plist" />
+		<BundleResource Include="PrivacyInfo.xcprivacy" LogicalName="PrivacyInfo.xcprivacy" />
+	</ItemGroup>
+
+</Project>

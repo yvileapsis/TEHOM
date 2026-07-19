@@ -16,7 +16,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.12f 0.35f 0.52f 1.0f)
             1.3f
-            (v2 566.0f 166.0f)
 
 
     let clockOuterTessellation =
@@ -26,7 +25,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.28f 0.88f 0.96f 1.0f)
             1.2f
-            (v2 116.0f 116.0f)
 
     let clockInnerTessellation =
         SlugDemoContours.makeFilled
@@ -35,7 +33,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.08f 0.30f 0.38f 1.0f)
             0.7f
-            (v2 102.0f 102.0f)
 
     let radarOuterTessellation =
         SlugDemoContours.makeFilled
@@ -44,7 +41,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.20f 0.76f 0.68f 1.0f)
             1.0f
-            (v2 130.0f 130.0f)
 
     let radarMidTessellation =
         SlugDemoContours.makeFilled
@@ -53,7 +49,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.10f 0.43f 0.40f 1.0f)
             0.8f
-            (v2 96.0f 96.0f)
 
     let radarInnerTessellation =
         SlugDemoContours.makeFilled
@@ -62,16 +57,14 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.08f 0.30f 0.30f 1.0f)
             0.7f
-            (v2 62.0f 62.0f)
 
     let radarDotTessellation =
         SlugDemoContours.makeFilled
             circleCommands
             (color 0.95f 0.92f 0.45f 1.0f)
-            Positive
+            NonZero
             (color 1.0f 0.98f 0.72f 1.0f)
             0.8f
-            (v2 10.0f 10.0f)
 
     let gaugeTessellation =
         SlugDemoContours.makeFilled
@@ -80,7 +73,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.18f 0.38f 0.54f 1.0f)
             1.0f
-            (v2 158.0f 130.0f)
 
     let gaugeTrackTessellation =
         SlugDemoContours.makeFilled
@@ -89,7 +81,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.08f 0.30f 0.34f 1.0f)
             0.8f
-            (v2 126.0f 20.0f)
 
 
     let tickTessellation =
@@ -99,7 +90,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.62f 0.98f 0.98f 1.0f)
             0.6f
-            (v2 5.0f 17.0f)
 
     let majorTickTessellation =
         SlugDemoContours.makeFilled
@@ -108,7 +98,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 1.0f 0.92f 0.58f 1.0f)
             0.7f
-            (v2 7.0f 21.0f)
 
     let handTessellation =
         SlugDemoContours.makeFilled
@@ -117,7 +106,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.60f 0.92f 1.0f 1.0f)
             0.8f
-            (v2 6.0f 49.0f)
 
     let needleTessellation =
         SlugDemoContours.makeFilled
@@ -126,7 +114,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 1.0f 0.72f 0.48f 1.0f)
             0.8f
-            (v2 7.0f 78.0f)
 
     let sweepTessellation =
         let commands =
@@ -140,7 +127,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.40f 1.0f 0.90f 0.82f)
             0.7f
-            (v2 122.0f 122.0f)
 
     let arcSliceTessellation =
         let commands =
@@ -160,7 +146,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.64f 0.90f 1.0f 0.95f)
             0.8f
-            (v2 126.0f 126.0f)
 
     let crossbarTessellation =
         SlugDemoContours.makeFilled
@@ -169,7 +154,6 @@ module SlugDemoHudComputeSupport =
             NonZero
             (color 0.42f 0.95f 0.82f 0.95f)
             0.6f
-            (v2 108.0f 3.0f)
 
     let clockCenter = v3 -205.0f -13.0f 0.0f
     let radarCenter = v3 -32.0f -13.0f 0.0f
@@ -198,8 +182,8 @@ module SlugDemoHudComputeSupport =
             position, rotation)
 
 
-    let placeContour name tessellation position size rotation elevation world =
-        SlugDemoContours.placeContour name tessellation position size rotation elevation world
+    let placeContour contour position size rotation elevation world =
+        SlugDemoContours.placeContour contour position size rotation elevation world
 
     let placeSlug name text position size fontSize color elevation world =
         SlugDemo.slug name SlugDemo.font text position size fontSize color elevation world
@@ -260,9 +244,9 @@ module SlugDemoHudComputeSupport =
     let radialComputeField = makeComputeField 9 SlugDemo.cyan
     let spiralComputeField = makeComputeField 10 SlugDemo.magenta
 
-    let radialComputeConfig : Vortice.Vulkan.SlugShape.SlugShapeComputeConfig =
+    let radialComputeConfig : Nu.Vulkan.SlugShape.SlugShapeComputeConfig =
         { LayerCount = 39
-          Mode = Vortice.Vulkan.SlugShape.SlugShapeComputeMode.Radial
+          Mode = Nu.Vulkan.SlugShape.SlugShapeComputeMode.Radial
           Flags = 0u
           Seed = 0x51a9u
           Speed = 1.2f
@@ -271,9 +255,9 @@ module SlugDemoHudComputeSupport =
           Phase = 0.0f
           Params1 = Vector4.Zero }
 
-    let spiralComputeConfig : Vortice.Vulkan.SlugShape.SlugShapeComputeConfig =
+    let spiralComputeConfig : Nu.Vulkan.SlugShape.SlugShapeComputeConfig =
         { LayerCount = 39
-          Mode = Vortice.Vulkan.SlugShape.SlugShapeComputeMode.Interference
+          Mode = Nu.Vulkan.SlugShape.SlugShapeComputeMode.Interference
           Flags = 0u
           Seed = 0x7c31u
           Speed = 0.9f

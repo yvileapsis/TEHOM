@@ -80,7 +80,7 @@ module SlugDemoGradients =
     let private strokeCommands =
         Array.append strokeOuterCommands (roundedRectCommands 0.11f 0.11f 0.88f 0.88f 0.09f)
 
-    let private makeGradientShape fillRule commands kind stops strokeOpt =
+    let private makeGradientShape fillRule commands kind stops =
         let source =
             SlugShapeRuntime.fromContourCommands commands fillRule 1.0e-3f
         let gradient =
@@ -96,17 +96,7 @@ module SlugDemoGradients =
             { SlugLayerState.defaultState 0 with
                 Color = Color.One
                 FillSource = SlugFillSource.Gradient 0 }
-        let stroke =
-            match strokeOpt with
-            | Some (strokeCommands, strokeColor, strokeThickness, scale) ->
-                Some
-                    (ContourTessellation.make
-                        strokeCommands
-                        (ContourFill.ofColorWinding Color.Zero NonZero)
-                        (ContourStroke.antiAliased strokeColor strokeThickness)
-                        scale)
-            | None -> None
-        AnalyticSlug (SlugShapeRuntime.createComposite data [| state |], stroke)
+        SlugShapeRuntime.createComposite data [| state |]
 
     // The source canvas examples use pad extension (the default), including the
     // transparent final stop in the gauge range.
@@ -117,7 +107,6 @@ module SlugDemoGradients =
             (SlugGradientKind.Linear (v2 0.1f 0.1f, v2 1.0f 1.0f))
             [| stop 0.0f 0.0f 0.8f 1.0f 1.0f
                stop 1.0f 1.0f 0.0f 0.6f 0.01f |]
-            None
 
     let private linear0Shape =
         makeGradientShape
@@ -127,7 +116,6 @@ module SlugDemoGradients =
             [| stop 0.0f 1.0f 0.5f 0.0f 1.0f
                stop 0.5f 1.0f 1.0f 0.0f 1.0f
                stop 1.0f 1.0f 1.0f 1.0f 1.0f |]
-            None
 
     let private linear1Shape =
         makeGradientShape
@@ -139,7 +127,6 @@ module SlugDemoGradients =
                stop 0.4f 0.6f 0.1f 0.2f 1.0f
                stop 0.9f 0.8f 0.7f 0.3f 1.0f
                stop 1.0f 1.0f 0.2f 0.7f 1.0f |]
-            None
 
     let private linear2Shape =
         makeGradientShape
@@ -149,7 +136,6 @@ module SlugDemoGradients =
             [| stop 0.0f 0.0f 0.8f 1.0f 1.0f
                stop 0.5f 0.6f 0.0f 1.0f 1.0f
                stop 1.0f 1.0f 0.0f 0.8f 1.0f |]
-            None
 
     let private radial0Shape =
         makeGradientShape
@@ -159,7 +145,6 @@ module SlugDemoGradients =
             [| stop 0.0f 0.2f 0.4f 0.6f 1.0f
                stop 0.75f 1.0f 1.0f 1.0f 1.0f
                stop 1.0f 0.2f 0.4f 0.6f 1.0f |]
-            None
 
     let private radial1Shape =
         makeGradientShape
@@ -168,7 +153,6 @@ module SlugDemoGradients =
             (SlugGradientKind.FocalRadial (v2 0.3f 0.3f, 0.2f, v2 0.3f 0.3f, 0.65f))
             [| stop 0.0f 0.0f 1.0f 0.0f 1.0f
                stop 1.0f 0.1f 0.25f 0.5f 1.0f |]
-            None
 
     let private sweep0Shape =
         makeGradientShape
@@ -182,7 +166,6 @@ module SlugDemoGradients =
                stop 0.667f 0.0f 0.0f 1.0f 1.0f
                stop 0.833f 1.0f 0.0f 1.0f 1.0f
                stop 1.0f 1.0f 0.0f 0.0f 1.0f |]
-            None
 
     let private sweep1Shape =
         makeGradientShape
@@ -191,22 +174,19 @@ module SlugDemoGradients =
             (SlugGradientKind.SweepRange (v2 0.5f 0.5f, -MathF.PI * 0.75f, MathF.PI * 0.75f))
             [| stop 0.0f 1.0f 1.0f 1.0f 1.0f
                stop 1.0f 1.0f 1.0f 1.0f 0.0f |]
-            None
 
-    let private setGradientTransform shape transform =
-        match shape with
-        | AnalyticSlug (composite, _) ->
-            composite.SetLayerGradientTransform (0, transform)
-        | TessellatedNu _ -> ()
+    let private setGradientTransform (shape : SlugCompositeShape) transform =
+        shape.SetLayerGradientTransform (0, transform)
 
     let private place name shape x y width height world =
-        SlugDemoContours.placeContour
+        SlugDemoContours.placeComposite
             name
             shape
             (v3 x y 0.0f)
             (v3 width height 0.0f)
             Quaternion.Identity
             0.0f
+            None
             world
 
     let draw (world : World) =

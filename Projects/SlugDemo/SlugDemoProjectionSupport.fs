@@ -9,8 +9,8 @@ module SlugDemoProjectionSupport =
     let zRotation radians =
         Quaternion.CreateFromAxisAngle (Vector3.UnitZ, radians)
 
-    let contour fill stroke scale commands =
-        SlugDemoContours.makeFilled commands fill NonZero stroke 1.2f scale
+    let contour fill stroke commands =
+        SlugDemoContours.makeFilled commands fill NonZero stroke 1.2f
 
     let sprite name position size rotation color elevation world =
         World.doStaticSprite
@@ -41,7 +41,6 @@ module SlugDemoProjectionSupport =
         contour
             (color 1.0f 0.79f 0.36f 1.0f)
             (color 1.0f 0.96f 0.68f 1.0f)
-            (v2 10.0f 10.0f)
             SlugDemoContours.circleCommands
 
 
@@ -49,14 +48,12 @@ module SlugDemoProjectionSupport =
         contour
             (color 0.055f 0.12f 0.19f 1.0f)
             (color 0.26f 0.75f 0.91f 1.0f)
-            (v2 78.0f 78.0f)
             SlugDemoContours.circleCommands
 
     let projectionCircleSmall =
         contour
             (color 0.10f 0.12f 0.22f 1.0f)
             (color 0.98f 0.52f 0.72f 1.0f)
-            (v2 48.0f 48.0f)
             SlugDemoContours.circleCommands
 
     let projection2dGridXs = [| -266.0f; -236.0f; -206.0f; -176.0f; -146.0f; -116.0f; -86.0f; -56.0f; -26.0f |]

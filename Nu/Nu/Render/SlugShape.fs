@@ -810,7 +810,6 @@ module SlugShapeRuntime =
         match winding with
         | ContourWinding.EvenOdd -> fromContourCommands commands SlugFillEvenOdd tolerance
         | ContourWinding.NonZero -> fromContourCommands commands SlugFillNonzero tolerance
-        | _ -> invalidArg (nameof winding) "Slug supports only EvenOdd and NonZero winding."
 
     let private makeBandTexel x y =
         if x < 0 || x > int UInt16.MaxValue || y < 0 || y > int UInt16.MaxValue then failwith "Slug texture address exceeds the 16-bit band format."

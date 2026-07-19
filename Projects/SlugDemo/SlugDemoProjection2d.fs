@@ -48,7 +48,6 @@ module SlugDemoProjection2d =
             NonZero
             Color.Zero
             0.0f
-            (v2 annularPseudostrokeExtent annularPseudostrokeExtent)
 
     let private drawGrid (world : World) =
         let anchorY = frameCenterY
@@ -116,7 +115,6 @@ module SlugDemoProjection2d =
         // origin, so place its center one half-extent above and right of that origin.
         let halfExtent = annularPseudostrokeExtent * 0.5f
         SlugDemoContours.placeContour
-            "Projection2dAnnularPseudostroke"
             annularPseudostroke
             (v3 halfExtent (frameCenterY + halfExtent) 0.0f)
             (v3 annularPseudostrokeExtent annularPseudostrokeExtent 0.0f)

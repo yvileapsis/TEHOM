@@ -17,4 +17,4 @@ module Program =
         let sdlWindowConfig = { SdlWindowConfig.defaultConfig with WindowTitle = "Nu SlugDemo" }
         let sdlConfig = { SdlConfig.defaultConfig with WindowConfig = sdlWindowConfig }
         let worldConfig = { WorldConfig.defaultConfig with SdlConfig = sdlConfig }
-        World.run worldConfig (SlugDemoPlugin ())
+        World.run ignore worldConfig (SlugDemoPlugin ())

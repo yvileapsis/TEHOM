@@ -1,7 +1,7 @@
 // Nu Game Engine.
 // Copyright (C) Bryan Edds.
 
-namespace Vortice.Vulkan
+namespace Nu.Vulkan
 
 open System
 open System.Collections.Generic
@@ -10,6 +10,7 @@ open System.Runtime.InteropServices
 open FSharp.NativeInterop
 open Prime
 open Nu
+open Vortice.Vulkan
 
 /// Vulkan implementation of the analytic SlugShape curve renderer.  The module owns
 /// only the resources it creates; samplers supplied to CreateSlugShapeEnv remain
@@ -105,31 +106,28 @@ module SlugShape =
     type private CompositeGpu =
         { Id : Guid
           Revision : int64
-          CurveTexture : Texture.Texture
-          BandTexture : Texture.Texture
-          ViewBuffer : Buffer.Buffer
-          LayerBuffer : Buffer.Buffer
-          ShapeBuffer : Buffer.Buffer
-          GradientBuffer : Buffer.Buffer
-          StopBuffer : Buffer.Buffer
-          MaskBuffer : Buffer.Buffer
-          ConfigBuffer : Buffer.Buffer
+          CurveTexture : Texture
+          BandTexture : Texture
+          ViewBuffer : VulkanBuffer
+          LayerBuffer : VulkanBuffer
+          ShapeBuffer : VulkanBuffer
+          GradientBuffer : VulkanBuffer
+          StopBuffer : VulkanBuffer
+          MaskBuffer : VulkanBuffer
+          ConfigBuffer : VulkanBuffer
           Layers : LayerGpu array
           Masks : MaskGpu array
-          mutable CpuLayerRevision : int64
-          StaticInitialized : bool array
-          mutable DrawIndex : int }
+          mutable CpuLayerRevision : int64 }
 
     type [<ReferenceEquality>] SlugShapeEnv =
         private
-            { VulkanContext : Hl.VulkanContext
-              UnfilteredSampler : Texture.Sampler
-              FilteredSampler : Texture.Sampler
-              GraphicsPipeline : Pipeline.Pipeline
-              ComputePipeline : Pipeline.ComputePipeline
-              FallbackTexture : Texture.Texture
-              Composites : Dictionary<SlugCompositeShape, CompositeGpu>
-              mutable DrawIndex : int }
+            { VulkanContext : VulkanContext
+              UnfilteredSampler : Sampler
+              FilteredSampler : Sampler
+              GraphicsPipeline : Pipeline
+              ComputePipeline : ComputePipeline
+              FallbackTexture : Texture
+              Composites : Dictionary<SlugCompositeShape, CompositeGpu> }
     let private shaderPath = Constants.Paths.SlugShapeShaderFilePath
     let private maxFillTextures = 8
 
@@ -252,48 +250,44 @@ module SlugShape =
         gpu
 
 
-    let private descriptorDefinitions stage bulkMode =
-        [| Pipeline.descriptorSet bulkMode 1
-               [| Pipeline.descriptor 0 Hl.StorageBuffer stage 1
-                  Pipeline.descriptor 1 Hl.StorageBuffer stage 1
-                  Pipeline.descriptor 2 Hl.StorageBuffer stage 1
-                  Pipeline.descriptor 3 Hl.CombinedImageSampler stage 1
-                  Pipeline.descriptor 4 Hl.CombinedImageSampler stage 1
-                  Pipeline.descriptor 5 Hl.StorageBuffer stage 1
-                  Pipeline.descriptor 6 Hl.StorageBuffer stage 1
-                  Pipeline.descriptor 7 Hl.StorageBuffer stage 1
-                  Pipeline.descriptor 8 Hl.CombinedImageSampler stage maxFillTextures
-                  Pipeline.descriptor 9 Hl.StorageBuffer stage 1 |] |]
+    let private descriptorDefinitions stage : DescriptorSetDefinition array =
+        [|(Pipeline.descriptorSet<int>
+            [|Pipeline.descriptor 0 StorageBuffer stage 1
+              Pipeline.descriptor 1 StorageBuffer stage 1
+              Pipeline.descriptor 2 StorageBuffer stage 1
+              Pipeline.descriptor 3 CombinedImageSampler stage 1
+              Pipeline.descriptor 4 CombinedImageSampler stage 1
+              Pipeline.descriptor 5 StorageBuffer stage 1
+              Pipeline.descriptor 6 StorageBuffer stage 1
+              Pipeline.descriptor 7 StorageBuffer stage 1
+              Pipeline.descriptor 8 CombinedImageSampler stage maxFillTextures
+              Pipeline.descriptor 9 StorageBuffer stage 1|] :> DescriptorSetDefinition)|]
 
-    let private createGraphicsPipeline (vkc : Hl.VulkanContext) =
-        Pipeline.Pipeline.create
+    let private createGraphicsPipeline (context : VulkanContext) =
+        Pipeline.create
             shaderPath
-            Constants.Render.SpriteBatchesMax
-            [| Pipeline.Transparent; Pipeline.Additive; Pipeline.Overwrite |]
-            // COLRv1 and user-authored layer transforms may reflect the quad, so both windings must rasterize.
-            [| false |]
+            [|VulkanTransparent; VulkanAdditive; VulkanOverwrite|]
+            [|false|]
             [||]
-            (descriptorDefinitions Hl.VertexFragmentStage Hl.BulkSetIndexed)
+            (descriptorDefinitions VertexFragmentStage)
             [||]
-            [| vkc.SwapFormat |]
+            [|context.SwapFormat|]
             None
-            vkc
-
-    let private createComputePipeline (vkc : Hl.VulkanContext) =
-        Pipeline.ComputePipeline.create
-            shaderPath
-            Constants.Render.SpriteBatchesMax
-            (descriptorDefinitions Hl.ComputeStage Hl.BulkSetIndexed)
             [||]
-            vkc
 
-    let private makeRenderArea (viewport : Viewport) (vkc : Hl.VulkanContext) =
-        let pixelDensity = Hl.getWindowPixelDensity vkc.Window
+    let private createComputePipeline () =
+        ComputePipeline.create
+            shaderPath
+            (descriptorDefinitions ComputeStage)
+            [||]
+
+    let private makeRenderArea (viewport : Viewport) (context : VulkanContext) =
+        let pixelDensity = Hl.getWindowPixelDensity context.Window
         let renderAreaLogical = VkRect2D (viewport.Inner.Min.X, viewport.Outer.Max.Y - viewport.Inner.Max.Y, uint viewport.Inner.Size.X, uint viewport.Inner.Size.Y)
         Hl.scaleRectForPixelDensity pixelDensity renderAreaLogical
 
-    let private makeScissor (clipOpt : Box2 voption) (effectiveViewProjection : Matrix4x4) (viewport : Viewport) (renderArea : VkRect2D) (vkc : Hl.VulkanContext) =
-        let pixelDensity = Hl.getWindowPixelDensity vkc.Window
+    let private makeScissor (clipOpt : Box2 voption) (effectiveViewProjection : Matrix4x4) (viewport : Viewport) (renderArea : VkRect2D) (context : VulkanContext) =
+        let pixelDensity = Hl.getWindowPixelDensity context.Window
         match clipOpt with
         | ValueNone -> renderArea
         | ValueSome clip ->
@@ -307,16 +301,16 @@ module SlugShape =
             let logical = VkRect2D ((minScissor.X |> round |> int) + offset.X, (single renderArea.extent.height - minScissor.Y |> round |> int) + offset.Y, uint (max 0 (sizeScissor.X |> round |> int)), uint (max 0 (sizeScissor.Y |> round |> int)))
             Hl.clipRect renderArea (Hl.scaleRectForPixelDensity pixelDensity logical)
 
-    let private destroyComposite (gpu : CompositeGpu) vkc =
-        gpu.CurveTexture.Destroy vkc
-        gpu.BandTexture.Destroy vkc
-        Buffer.Buffer.destroy gpu.ViewBuffer vkc
-        Buffer.Buffer.destroy gpu.LayerBuffer vkc
-        Buffer.Buffer.destroy gpu.ShapeBuffer vkc
-        Buffer.Buffer.destroy gpu.GradientBuffer vkc
-        Buffer.Buffer.destroy gpu.StopBuffer vkc
-        Buffer.Buffer.destroy gpu.MaskBuffer vkc
-        Buffer.Buffer.destroy gpu.ConfigBuffer vkc
+    let private destroyComposite (gpu : CompositeGpu) context =
+        Texture.destroy gpu.CurveTexture context
+        Texture.destroy gpu.BandTexture context
+        VulkanBuffer.destroy gpu.ViewBuffer context
+        VulkanBuffer.destroy gpu.LayerBuffer context
+        VulkanBuffer.destroy gpu.ShapeBuffer context
+        VulkanBuffer.destroy gpu.GradientBuffer context
+        VulkanBuffer.destroy gpu.StopBuffer context
+        VulkanBuffer.destroy gpu.MaskBuffer context
+        VulkanBuffer.destroy gpu.ConfigBuffer context
 
     let private populateBaseLayers (gpu : CompositeGpu) (composite : SlugCompositeShape) =
         let data = composite.Data
@@ -342,16 +336,16 @@ module SlugShape =
             capturedRevision <- revision))
         capturedRevision
 
-    let private uploadStatic (gpu : CompositeGpu) (data : SlugCompositeShapeData) (vkc : Hl.VulkanContext) =
+    let private uploadStatic (gpu : CompositeGpu) (data : SlugCompositeShapeData) context =
         let shapes = data.Metadata |> Array.map (makeShapeGpu data)
-        Buffer.Buffer.uploadArray 0 0 0 shapes gpu.ShapeBuffer vkc
+        VulkanBuffer.uploadArray shapes gpu.ShapeBuffer context
         if data.Gradients.Length > 0 then
             let gradients = Array.zeroCreate<GradientGpu> data.Gradients.Length
             let mutable stopCursor = 0
             for i in 0 .. dec gradients.Length do
                 gradients[i] <- makeGradientGpu data.Gradients[i] stopCursor
                 stopCursor <- stopCursor + data.Gradients[i].Stops.Length
-            Buffer.Buffer.uploadArray 0 0 0 gradients gpu.GradientBuffer vkc
+            VulkanBuffer.uploadArray gradients gpu.GradientBuffer context
         if data.GradientStops.Length > 0 then
             let stops =
                 data.GradientStops
@@ -360,15 +354,15 @@ module SlugShape =
                     gpuStop.Color <- stop.Color.V4
                     gpuStop.Offset <- Vector4 (stop.Offset, 0.0f, 0.0f, 0.0f)
                     gpuStop)
-            Buffer.Buffer.uploadArray 0 0 0 stops gpu.StopBuffer vkc
-        if gpu.Masks.Length > 0 then Buffer.Buffer.uploadArray 0 0 0 gpu.Masks gpu.MaskBuffer vkc
+            VulkanBuffer.uploadArray stops gpu.StopBuffer context
+        if gpu.Masks.Length > 0 then VulkanBuffer.uploadArray gpu.Masks gpu.MaskBuffer context
 
-    let private createCompositeGpu (composite : SlugCompositeShape) (vkc : Hl.VulkanContext) =
+    let private createCompositeGpu (composite : SlugCompositeShape) context =
         let data = composite.Data
         let curveTexels = if data.CurveTexels.Length = 0 then Array.zeroCreate<Vector4> (data.CurveTextureWidth * data.CurveTextureHeight) else data.CurveTexels
         let bandTexels = if data.BandTexels.Length = 0 then Array.zeroCreate<SlugShapeBandTexel> (data.BandTextureWidth * data.BandTextureHeight) else data.BandTexels
-        let curveTexture = Texture.EagerTexture (Texture.Texture.createFromArray data.CurveTextureWidth data.CurveTextureHeight Hl.Rgba32f Hl.Rgba curveTexels Texture.RenderThread vkc)
-        let bandTexture = Texture.EagerTexture (Texture.Texture.createFromArray data.BandTextureWidth data.BandTextureHeight Hl.Rgba16ui Hl.Rgba bandTexels Texture.RenderThread vkc)
+        let curveTexture = EagerTexture (Texture.createFromArray data.CurveTextureWidth data.CurveTextureHeight Rgba32f Rgba curveTexels RenderThread context)
+        let bandTexture = EagerTexture (Texture.createFromArray data.BandTextureWidth data.BandTextureHeight Rgba16ui Rgba bandTexels RenderThread context)
         let layerCount = max 1 composite.LayerCount
         let shapeCount = max 1 data.ShapeCount
         let gradientCount = max 1 data.Gradients.Length
@@ -377,13 +371,13 @@ module SlugShape =
         let layers = Array.zeroCreate<LayerGpu> composite.LayerCount
         let masks = Array.zeroCreate<MaskGpu> maskCount
         for i in 0 .. dec data.Masks.Length do masks[i] <- makeMaskGpu data.Masks[i]
-        let viewBuffer = Buffer.Buffer.create (max 1 (sizeof<ViewGpu>)) Buffer.Storage vkc
-        let layerBuffer = Buffer.Buffer.create (max 1 (sizeof<LayerGpu>) * layerCount) Buffer.Storage vkc
-        let shapeBuffer = Buffer.Buffer.create (max 1 (sizeof<ShapeGpu>) * shapeCount) Buffer.Storage vkc
-        let gradientBuffer = Buffer.Buffer.create (max 1 (sizeof<GradientGpu>) * gradientCount) Buffer.Storage vkc
-        let stopBuffer = Buffer.Buffer.create (max 1 (sizeof<StopGpu>) * stopCount) Buffer.Storage vkc
-        let maskBuffer = Buffer.Buffer.create (max 1 (sizeof<MaskGpu>) * maskCount) Buffer.Storage vkc
-        let configBuffer = Buffer.Buffer.create (max 1 (sizeof<ComputeConfigGpu>)) Buffer.Storage vkc
+        let viewBuffer = VulkanBuffer.create Storage (max 1 sizeof<ViewGpu>) context
+        let layerBuffer = VulkanBuffer.create Storage (max 1 (sizeof<LayerGpu> * layerCount)) context
+        let shapeBuffer = VulkanBuffer.create Storage (max 1 (sizeof<ShapeGpu> * shapeCount)) context
+        let gradientBuffer = VulkanBuffer.create Storage (max 1 (sizeof<GradientGpu> * gradientCount)) context
+        let stopBuffer = VulkanBuffer.create Storage (max 1 (sizeof<StopGpu> * stopCount)) context
+        let maskBuffer = VulkanBuffer.create Storage (max 1 (sizeof<MaskGpu> * maskCount)) context
+        let configBuffer = VulkanBuffer.create Storage (max 1 sizeof<ComputeConfigGpu>) context
         let gpu =
             { Id = data.Id
               Revision = data.Revision
@@ -398,91 +392,94 @@ module SlugShape =
               ConfigBuffer = configBuffer
               Layers = layers
               Masks = masks
-              CpuLayerRevision = -1L
-              StaticInitialized = Array.zeroCreate Constants.Vulkan.MaxFramesInFlight
-              DrawIndex = 0 }
+              CpuLayerRevision = -1L }
         gpu.CpuLayerRevision <- populateBaseLayers gpu composite
+        uploadStatic gpu data context
         gpu
 
-    let private uploadBaseLayerBuffers bufferIndex (gpu : CompositeGpu) (vkc : Hl.VulkanContext) =
-        Buffer.Buffer.uploadArray bufferIndex 0 0 gpu.Layers gpu.LayerBuffer vkc
-        Buffer.Buffer.uploadArray 0 0 0 gpu.Masks gpu.MaskBuffer vkc
+    let private uploadBaseLayerBuffers (gpu : CompositeGpu) context =
+        VulkanBuffer.uploadArray gpu.Layers gpu.LayerBuffer context
+        VulkanBuffer.uploadArray gpu.Masks gpu.MaskBuffer context
 
-    let CreateSlugShapeEnv (unfilteredSampler : Texture.Sampler) (filteredSampler : Texture.Sampler) (vkc : Hl.VulkanContext) =
-        let fallback = Texture.EagerTexture (Texture.Texture.createFromArray 1 1 Hl.Rgba8 Hl.Rgba [| 255uy; 255uy; 255uy; 255uy |] Texture.RenderThread vkc)
-        { VulkanContext = vkc
+    let CreateSlugShapeEnv (unfilteredSampler : Sampler) (filteredSampler : Sampler) (context : VulkanContext) =
+        let fallback = EagerTexture (Texture.createFromArray 1 1 Rgba8 Rgba [|255uy; 255uy; 255uy; 255uy|] RenderThread context)
+        { VulkanContext = context
           UnfilteredSampler = unfilteredSampler
           FilteredSampler = filteredSampler
-          GraphicsPipeline = createGraphicsPipeline vkc
-          ComputePipeline = createComputePipeline vkc
+          GraphicsPipeline = createGraphicsPipeline context
+          ComputePipeline = createComputePipeline ()
           FallbackTexture = fallback
-          Composites = Dictionary<SlugCompositeShape, CompositeGpu> HashIdentity.Reference
-          DrawIndex = 0 }
-    let private ensureComposite (composite : SlugCompositeShape) (env : SlugShapeEnv) (vkc : Hl.VulkanContext) =
+          Composites = Dictionary<SlugCompositeShape, CompositeGpu> HashIdentity.Reference }
+    let private ensureComposite (composite : SlugCompositeShape) (env : SlugShapeEnv) (context : VulkanContext) =
         let data = composite.Data
         match env.Composites.TryGetValue composite with
         | true, gpu when gpu.Revision = data.Revision -> gpu
         | true, gpu ->
-            Hl.Queue.waitIdle vkc.RenderQueue
-            destroyComposite gpu vkc
-            let created = createCompositeGpu composite vkc
+            ConcurrentCommandQueue.waitIdle context.RenderQueue
+            destroyComposite gpu context
+            let created = createCompositeGpu composite context
             env.Composites[composite] <- created
             created
         | false, _ ->
-            let created = createCompositeGpu composite vkc
+            let created = createCompositeGpu composite context
             env.Composites.Add (composite, created)
             created
 
-    let private writeDescriptors (drawIndex : int) bufferIndex (gpu : CompositeGpu) (fillTextures : Texture.Texture array) (env : SlugShapeEnv) (vkc : Hl.VulkanContext) =
-        let pipeline = env.GraphicsPipeline
-        let fillTexture index =
-            if not (isNull fillTextures) && index < fillTextures.Length && not (obj.ReferenceEquals (fillTextures[index], null)) then fillTextures[index]
-            else env.FallbackTexture
-        Pipeline.Pipeline.writeDescriptorStorageBuffer 0 0 drawIndex 0 gpu.ViewBuffer[bufferIndex] pipeline vkc
-        Pipeline.Pipeline.writeDescriptorStorageBuffer 0 1 drawIndex 0 gpu.LayerBuffer[bufferIndex] pipeline vkc
-        Pipeline.Pipeline.writeDescriptorStorageBuffer 0 2 drawIndex 0 gpu.ShapeBuffer[0] pipeline vkc
-        Pipeline.Pipeline.writeDescriptorCombinedImageSampler 0 3 drawIndex 0 gpu.CurveTexture env.UnfilteredSampler pipeline vkc
-        Pipeline.Pipeline.writeDescriptorCombinedImageSampler 0 4 drawIndex 0 gpu.BandTexture env.UnfilteredSampler pipeline vkc
-        Pipeline.Pipeline.writeDescriptorStorageBuffer 0 5 drawIndex 0 gpu.GradientBuffer[0] pipeline vkc
-        Pipeline.Pipeline.writeDescriptorStorageBuffer 0 6 drawIndex 0 gpu.StopBuffer[0] pipeline vkc
-        Pipeline.Pipeline.writeDescriptorStorageBuffer 0 7 drawIndex 0 gpu.MaskBuffer[0] pipeline vkc
-        for i in 0 .. maxFillTextures - 1 do Pipeline.Pipeline.writeDescriptorCombinedImageSampler 0 8 drawIndex i (fillTexture i) env.FilteredSampler pipeline vkc
-        Pipeline.Pipeline.writeDescriptorStorageBuffer 0 9 drawIndex 0 gpu.ConfigBuffer[bufferIndex] pipeline vkc
+    let private writeStorageDescriptor binding descriptorIndex (buffer : VulkanBuffer) vkDescriptorSet =
+        let mutable info = VkDescriptorBufferInfo ()
+        info.buffer <- buffer.VkBuffer
+        info.range <- Vulkan.VK_WHOLE_SIZE
+        let mutable write = VkWriteDescriptorSet ()
+        write.dstSet <- vkDescriptorSet
+        write.dstBinding <- uint binding
+        write.dstArrayElement <- uint descriptorIndex
+        write.descriptorCount <- 1u
+        write.descriptorType <- VkDescriptorType.StorageBuffer
+        write.pBufferInfo <- &&info
+        DeviceApi.vkUpdateDescriptorSets (1u, &&write, 0u, nullPtr)
 
-    let private writeComputeDescriptors (drawIndex : int) bufferIndex (gpu : CompositeGpu) (env : SlugShapeEnv) (vkc : Hl.VulkanContext) =
-        let pipeline = env.ComputePipeline
-        Pipeline.ComputePipeline.writeDescriptorStorageBuffer 0 0 drawIndex 0 gpu.ViewBuffer[bufferIndex] pipeline vkc
-        Pipeline.ComputePipeline.writeDescriptorStorageBuffer 0 1 drawIndex 0 gpu.LayerBuffer[bufferIndex] pipeline vkc
-        Pipeline.ComputePipeline.writeDescriptorStorageBuffer 0 2 drawIndex 0 gpu.ShapeBuffer[0] pipeline vkc
-        Pipeline.ComputePipeline.writeDescriptorStorageBuffer 0 5 drawIndex 0 gpu.GradientBuffer[0] pipeline vkc
-        Pipeline.ComputePipeline.writeDescriptorStorageBuffer 0 6 drawIndex 0 gpu.StopBuffer[0] pipeline vkc
-        Pipeline.ComputePipeline.writeDescriptorStorageBuffer 0 7 drawIndex 0 gpu.MaskBuffer[0] pipeline vkc
-        Pipeline.ComputePipeline.writeDescriptorStorageBuffer 0 9 drawIndex 0 gpu.ConfigBuffer[bufferIndex] pipeline vkc
+    let private writeDescriptors (gpu : CompositeGpu) (fillTextures : Texture array) (env : SlugShapeEnv) vkDescriptorSet =
+        let fillTexture index =
+            if not (isNull fillTextures) && index < fillTextures.Length then fillTextures[index]
+            else env.FallbackTexture
+        writeStorageDescriptor 0 0 gpu.ViewBuffer vkDescriptorSet
+        writeStorageDescriptor 1 0 gpu.LayerBuffer vkDescriptorSet
+        writeStorageDescriptor 2 0 gpu.ShapeBuffer vkDescriptorSet
+        Pipeline.writeDescriptorCombinedTextureSampler 3 0 gpu.CurveTexture env.UnfilteredSampler vkDescriptorSet
+        Pipeline.writeDescriptorCombinedTextureSampler 4 0 gpu.BandTexture env.UnfilteredSampler vkDescriptorSet
+        writeStorageDescriptor 5 0 gpu.GradientBuffer vkDescriptorSet
+        writeStorageDescriptor 6 0 gpu.StopBuffer vkDescriptorSet
+        writeStorageDescriptor 7 0 gpu.MaskBuffer vkDescriptorSet
+        for i in 0 .. maxFillTextures - 1 do
+            Pipeline.writeDescriptorCombinedTextureSampler 8 i (fillTexture i) env.FilteredSampler vkDescriptorSet
+        writeStorageDescriptor 9 0 gpu.ConfigBuffer vkDescriptorSet
 
     /// Reset per-render-frame descriptor allocation.
     let BeginSlugShapeFrame (env : SlugShapeEnv) =
-        env.DrawIndex <- 0
-        for gpu in env.Composites.Values do gpu.DrawIndex <- 0
+        Pipeline.beginFrame env.GraphicsPipeline
+        ComputePipeline.beginFrame env.ComputePipeline
+        for gpu in env.Composites.Values do
+            VulkanBuffer.beginFrame gpu.ViewBuffer
+            VulkanBuffer.beginFrame gpu.LayerBuffer
+            VulkanBuffer.beginFrame gpu.ShapeBuffer
+            VulkanBuffer.beginFrame gpu.GradientBuffer
+            VulkanBuffer.beginFrame gpu.StopBuffer
+            VulkanBuffer.beginFrame gpu.MaskBuffer
+            VulkanBuffer.beginFrame gpu.ConfigBuffer
 
-    let RenderSlugShape rootTransform (clipOpt : Box2 voption) (composite : SlugCompositeShape) (seconds : single) (delta : single) (frame : uint32) (seed : uint32) (computeConfigOpt : SlugShapeComputeConfig option) (fillTextures : Texture.Texture array) (viewProjection : Matrix4x4) (viewport : Viewport) blend env vkc =
+    let RenderSlugShape rootTransform (clipOpt : Box2 voption) (composite : SlugCompositeShape) (seconds : single) (delta : single) (frame : uint32) (seed : uint32) (computeConfigOpt : SlugShapeComputeConfig option) (fillTextures : Texture array) (viewProjection : Matrix4x4) (viewport : Viewport) blend env context =
         if obj.ReferenceEquals (composite, null) then nullArg (nameof composite)
-        if env.DrawIndex >= env.GraphicsPipeline.BulkDrawLimit then
-            Log.warnOnce "SlugShape draw limit reached for this frame."
-        else
-            let gpu = ensureComposite composite env vkc
-            let bufferIndex = gpu.DrawIndex
-            let currentFrame = Hl.CurrentFrame
-            let layerRevision = composite.LayerRevision
-            if gpu.CpuLayerRevision <> layerRevision then
-                gpu.CpuLayerRevision <- populateBaseLayers gpu composite
-            if not gpu.StaticInitialized[currentFrame] then
-                uploadStatic gpu composite.Data vkc
-                gpu.StaticInitialized[currentFrame] <- true
-            uploadBaseLayerBuffers bufferIndex gpu vkc
-            let effectiveViewProjection = rootTransform * viewProjection
-            let renderArea = makeRenderArea viewport vkc
-            let mutable scissor = makeScissor clipOpt effectiveViewProjection viewport renderArea vkc
-            if Hl.validateRect scissor then
+        let gpu = ensureComposite composite env context
+        let layerRevision = composite.LayerRevision
+        if gpu.CpuLayerRevision <> layerRevision then
+            gpu.CpuLayerRevision <- populateBaseLayers gpu composite
+        uploadBaseLayerBuffers gpu context
+        let effectiveViewProjection = rootTransform * viewProjection
+        let renderArea = makeRenderArea viewport context
+        let mutable scissor = makeScissor clipOpt effectiveViewProjection viewport renderArea context
+        if Hl.validateRect scissor then
+            match Pipeline.tryGetVkPipeline blend false env.GraphicsPipeline with
+            | Some vkPipeline ->
                 let mutable view = ViewGpu ()
                 let pixelWidth = single renderArea.extent.width
                 let pixelHeight = single renderArea.extent.height
@@ -490,63 +487,82 @@ module SlugShape =
                 view.Viewport <- Vector4 (pixelWidth, pixelHeight, 1.0f / max pixelWidth 1.0f, 1.0f / max pixelHeight 1.0f)
                 view.Time <- Vector4 (seconds, delta, single frame, single seed)
                 view.Counts <- uintVector4 (uint32 composite.LayerCount) (uint32 composite.Data.ShapeCount) 0u 0u
-                Buffer.Buffer.uploadValue bufferIndex 0 0 view gpu.ViewBuffer vkc
-                let mutable computeEnabled = false
-                match computeConfigOpt with
-                | Some config ->
-                    let configGpu = makeComputeGpu { config with LayerCount = if config.LayerCount > 0 then min config.LayerCount composite.LayerCount else composite.LayerCount }
-                    Buffer.Buffer.uploadValue bufferIndex 0 0 configGpu gpu.ConfigBuffer vkc
-                    computeEnabled <- true
-                | None ->
-                    let configGpu = makeComputeGpu { LayerCount = composite.LayerCount; Mode = SlugShapeComputeMode.Radial; Flags = 0u; Seed = seed; Speed = 0.0f; Amplitude = 0.0f; Frequency = 0.0f; Phase = 0.0f; Params1 = Vector4.Zero }
-                    Buffer.Buffer.uploadValue bufferIndex 0 0 configGpu gpu.ConfigBuffer vkc
-                writeDescriptors env.DrawIndex bufferIndex gpu fillTextures env vkc
-                if computeEnabled then writeComputeDescriptors env.DrawIndex bufferIndex gpu env vkc
-                let cb = vkc.RenderCommandBuffer
+                VulkanBuffer.uploadValue view gpu.ViewBuffer context
+                let computeEnabled, configGpu =
+                    match computeConfigOpt with
+                    | Some config ->
+                        true,
+                        makeComputeGpu
+                            { config with
+                                LayerCount =
+                                    if config.LayerCount > 0
+                                    then min config.LayerCount composite.LayerCount
+                                    else composite.LayerCount }
+                    | None ->
+                        false,
+                        makeComputeGpu
+                            { LayerCount = composite.LayerCount
+                              Mode = SlugShapeComputeMode.Radial
+                              Flags = 0u
+                              Seed = seed
+                              Speed = 0.0f
+                              Amplitude = 0.0f
+                              Frequency = 0.0f
+                              Phase = 0.0f
+                              Params1 = Vector4.Zero }
+                VulkanBuffer.uploadValue configGpu gpu.ConfigBuffer context
+                let viewBuffer = gpu.ViewBuffer.VkBuffer
+                let layerBuffer = gpu.LayerBuffer.VkBuffer
+                let configBuffer = gpu.ConfigBuffer.VkBuffer
+                let mutable descriptorSet =
+                    Pipeline.specifyDescriptorSet 0 env.GraphicsPipeline.DrawIndex env.GraphicsPipeline $ fun vkSet ->
+                        writeDescriptors gpu fillTextures env vkSet
+                let commandBuffer = context.RenderCommandBuffer
                 if computeEnabled then
-                    Hl.recordHostWritesToCompute cb (fst gpu.ViewBuffer[bufferIndex])
-                    Hl.recordHostWritesToCompute cb (fst gpu.LayerBuffer[bufferIndex])
-                    Hl.recordHostWritesToCompute cb (fst gpu.ConfigBuffer[bufferIndex])
-                    Pipeline.ComputePipeline.bind cb env.ComputePipeline
-                    Pipeline.ComputePipeline.bindDescriptorSet cb 0 env.DrawIndex env.ComputePipeline
+                    Hl.recordHostWritesToCompute commandBuffer viewBuffer
+                    Hl.recordHostWritesToCompute commandBuffer layerBuffer
+                    Hl.recordHostWritesToCompute commandBuffer configBuffer
+                    ComputePipeline.bind commandBuffer env.ComputePipeline
+                    ComputePipeline.bindDescriptorSet commandBuffer 0u descriptorSet env.ComputePipeline
                     let groups = max 1u (uint32 ((composite.LayerCount + 63) / 64))
-                    Pipeline.ComputePipeline.dispatch cb groups 1u 1u env.ComputePipeline
-                    Hl.recordComputeWritesToGraphics cb (fst gpu.LayerBuffer[bufferIndex])
+                    ComputePipeline.dispatch commandBuffer groups 1u 1u env.ComputePipeline
+                    Hl.recordComputeWritesToGraphics commandBuffer layerBuffer
                 let mutable vkViewport = Hl.makeViewport true renderArea
-                let mutable rendering = Hl.makeRenderingInfo [| vkc.SwapchainImageView |] None renderArea None
-                Vulkan.vkCmdBeginRendering (cb, asPointer &rendering)
-                match Pipeline.Pipeline.tryGetVkPipeline blend false env.GraphicsPipeline with
-                | Some vkPipeline ->
-                    Vulkan.vkCmdBindPipeline (cb, VkPipelineBindPoint.Graphics, vkPipeline)
-                    Vulkan.vkCmdSetViewport (cb, 0u, 1u, asPointer &vkViewport)
-                    Vulkan.vkCmdSetScissor (cb, 0u, 1u, asPointer &scissor)
-                    let mutable descriptorSet = env.GraphicsPipeline.VkDescriptorSet 0 env.DrawIndex
-                    Vulkan.vkCmdBindDescriptorSets (cb, VkPipelineBindPoint.Graphics, env.GraphicsPipeline.PipelineLayout, 0u, 1u, asPointer &descriptorSet, 0u, nullPtr)
-                    Vulkan.vkCmdDraw (cb, 6u, uint composite.LayerCount, 0u, 0u)
-                    Hl.reportDrawCall composite.LayerCount
-                | None -> Log.warnOnce "Cannot draw SlugShape because VkPipeline does not exist."
-                Vulkan.vkCmdEndRendering cb
-                gpu.DrawIndex <- inc gpu.DrawIndex
-                env.DrawIndex <- inc env.DrawIndex
+                let mutable renderingInfo = Hl.makeRenderingInfo [|context.SwapchainImageView|] None renderArea None
+                DeviceApi.vkCmdBeginRendering (commandBuffer, &&renderingInfo)
+                DeviceApi.vkCmdSetViewport (commandBuffer, 0u, 1u, &&vkViewport)
+                DeviceApi.vkCmdSetScissor (commandBuffer, 0u, 1u, &&scissor)
+                DeviceApi.vkCmdBindPipeline (commandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)
+                DeviceApi.vkCmdBindDescriptorSets (commandBuffer, VkPipelineBindPoint.Graphics, env.GraphicsPipeline.PipelineLayout, 0u, 1u, &&descriptorSet, 0u, nullPtr)
+                DeviceApi.vkCmdDraw (commandBuffer, 6u, uint composite.LayerCount, 0u, 0u)
+                DeviceApi.vkCmdEndRendering commandBuffer
+                Hl.reportDrawCall composite.LayerCount true
+                Pipeline.advance env.GraphicsPipeline
+                VulkanContext.advanceRenderCommandBuffer context
+                VulkanBuffer.advance gpu.ViewBuffer
+                VulkanBuffer.advance gpu.LayerBuffer
+                VulkanBuffer.advance gpu.MaskBuffer
+                VulkanBuffer.advance gpu.ConfigBuffer
+            | None -> Log.warnOnce "Cannot draw SlugShape because VkPipeline does not exist."
 
-    let ReloadShaders env vkc =
-        Pipeline.Pipeline.reloadShaders env.GraphicsPipeline vkc
-        Pipeline.ComputePipeline.reload env.ComputePipeline vkc
+    let ReloadShaders env context =
+        Pipeline.reloadShaders env.GraphicsPipeline context
+        ComputePipeline.reload env.ComputePipeline context
 
-    let DestroySlugShapeComposite (id : Guid) (env : SlugShapeEnv) (vkc : Hl.VulkanContext) =
+    let DestroySlugShapeComposite (id : Guid) (env : SlugShapeEnv) (context : VulkanContext) =
         let matching = ResizeArray<SlugCompositeShape> ()
         for pair in env.Composites do
             if pair.Key.Data.Id = id then matching.Add pair.Key
         if matching.Count > 0 then
-            Hl.Queue.waitIdle vkc.RenderQueue
+            ConcurrentCommandQueue.waitIdle context.RenderQueue
             for composite in matching do
-                destroyComposite env.Composites[composite] vkc
+                destroyComposite env.Composites[composite] context
                 env.Composites.Remove composite |> ignore
 
-    let DestroySlugShapeEnv (env : SlugShapeEnv) (vkc : Hl.VulkanContext) =
-        Hl.Queue.waitIdle vkc.RenderQueue
-        for pair in env.Composites do destroyComposite pair.Value vkc
+    let DestroySlugShapeEnv (env : SlugShapeEnv) (context : VulkanContext) =
+        ConcurrentCommandQueue.waitIdle context.RenderQueue
+        for pair in env.Composites do destroyComposite pair.Value context
         env.Composites.Clear ()
-        Pipeline.Pipeline.destroy env.GraphicsPipeline vkc
-        Pipeline.ComputePipeline.destroy env.ComputePipeline vkc
-        env.FallbackTexture.Destroy vkc
+        Pipeline.destroy env.GraphicsPipeline context
+        ComputePipeline.destroy env.ComputePipeline
+        Texture.destroy env.FallbackTexture context

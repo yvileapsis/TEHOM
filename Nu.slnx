@@ -61,13 +61,25 @@
     <Project Path="Projects/Nelmish/Nelmish.fsproj">
       <BuildType Solution="Mixed|*" Project="Debug" />
     </Project>
+    <Project Path="Projects/Psychocrawl/Psychocrawl.fsproj">
+      <BuildType Solution="Mixed|*" Project="Debug" />
+    </Project>
     <Project Path="Projects/Sand Box 2d/Sand Box 2d.fsproj">
       <BuildType Solution="Mixed|*" Project="Debug" />
     </Project>
     <Project Path="Projects/Sand Box 3d/Sand Box 3d.fsproj">
       <BuildType Solution="Mixed|*" Project="Debug" />
     </Project>
+    <Project Path="Projects/SlugDemo/SlugDemo.fsproj">
+      <BuildType Solution="Mixed|*" Project="Debug" />
+    </Project>
+    <Project Path="Projects/Sudoku/Sudoku.fsproj">
+      <BuildType Solution="Mixed|*" Project="Debug" />
+    </Project>
     <Project Path="Projects/Terra Firma/Terra Firma.fsproj">
+      <BuildType Solution="Mixed|*" Project="Debug" />
+    </Project>
+    <Project Path="Projects/Truthlock/Truthlock.fsproj">
       <BuildType Solution="Mixed|*" Project="Debug" />
     </Project>
     <Project Path="Projects/Twenty 48/Twenty 48.fsproj">

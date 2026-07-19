@@ -57,25 +57,27 @@ module SlugDemoMasking =
                     Color = fillColor
                     MaskIndex = 0
                     MaterialValues = Vector4.UnitX })
-        AnalyticSlug (SlugShapeRuntime.createComposite data layers, None)
+        SlugShapeRuntime.createComposite data layers
 
     let private canonicalQuadrants = makeMaskedQuadrants false
     let private invertedQuadrants = makeMaskedQuadrants true
 
     let draw (world : World) =
-        SlugDemoContours.placeContour
+        SlugDemoContours.placeComposite
             "MaskCanonicalQuadrants"
             canonicalQuadrants
             (v3 -74.0f -24.0f 0.0f)
             (v3 210.0f 210.0f 0.0f)
             Quaternion.Identity
             0.0f
+            None
             world
-        SlugDemoContours.placeContour
+        SlugDemoContours.placeComposite
             "MaskInvertedQuadrants"
             invertedQuadrants
             (v3 156.0f -24.0f 0.0f)
             (v3 126.0f 126.0f 0.0f)
             Quaternion.Identity
             0.0f
+            None
             world

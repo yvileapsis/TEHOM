@@ -43,11 +43,12 @@ module SlugDemoTextAlongPath =
                    LineTo endpoint |]
 
     let private pathStroke =
-        ContourTessellation.make
+        SlugDemoContours.makeFilled
             pathCommands
-            ContourFill.none
-            (ContourStroke.antiAliased (Color (228uy, 122uy, 18uy, 255uy)) 1.15f)
-            (v2 1.0f 1.0f)
+            Color.Zero
+            NonZero
+            (Color (228uy, 122uy, 18uy, 255uy))
+            1.15f
 
     let private phrase = "This is some text that follows a Path..."
 
@@ -129,8 +130,7 @@ module SlugDemoTextAlongPath =
 
     let draw (world : World) =
         SlugDemoContours.placeContour
-            "TextPath"
-            (TessellatedNu pathStroke)
+            pathStroke
             (v3 0.0f 0.0f 0.0f)
             (v3 1.0f 1.0f 0.0f)
             identityRotation

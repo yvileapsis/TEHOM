@@ -24,20 +24,6 @@ module SlugDemoTextSupport =
     let mixedLetterXs = [| -108.0f; -36.0f; 108.0f |]
     let mixedLetters = [| "S"; "L"; "G" |]
 
-    let private triangleCommands =
-        [| MoveTo (v2 0.0f 0.46f)
-           LineTo (v2 -0.40f -0.40f)
-           LineTo (v2 0.40f -0.40f)
-           CloseContour |]
-
-    let triangleTessellation =
-        SlugDemoContours.makeFilled
-            triangleCommands
-            (color 0.25f 0.90f 0.80f 1.0f)
-            NonZero
-            (color 0.75f 1.0f 0.92f 1.0f)
-            2.0f
-            (v2 55.0f 64.0f)
 
     let private textPath =
         SlugPath (
@@ -46,35 +32,6 @@ module SlugDemoTextSupport =
                SlugPathSegment.Cubic (v2 68.0f -74.0f, v2 165.0f 32.0f, v2 220.0f -20.0f) |],
             tolerance = 0.05f)
 
-    // A narrow closed ribbon is used only as the visible guide in Text Along Path. It is
-    // deliberately labelled as a Nu contour, rather than implying that Slug consumes it.
-    let private pathGuideCommands =
-        let sampleCount = 48
-        let samples = Array.init sampleCount (fun index -> textPath.SampleNormalized (single index / single (sampleCount - 1)))
-        let normals =
-            samples
-            |> Array.map (fun (_, tangent) ->
-                let normal = Vector2 (-tangent.Y, tangent.X)
-                if normal.LengthSquared () > 1.0e-8f then Vector2.Normalize normal else Vector2.UnitY)
-        let top = Array.mapi (fun index (point, _) -> point + normals.[index] * 2.0f) samples
-        let bottom = Array.init sampleCount (fun index ->
-            let sourceIndex = sampleCount - index - 1
-            let point, _ = samples.[sourceIndex]
-            point - normals.[sourceIndex] * 2.0f)
-        Array.concat
-            [| [| MoveTo top.[0] |]
-               top.[1..] |> Array.map LineTo
-               bottom |> Array.map LineTo
-               [| CloseContour |] |]
-
-    let pathGuideTessellation =
-        SlugDemoContours.makeFilled
-            pathGuideCommands
-            (color 0.05f 0.16f 0.23f 1.0f)
-            NonZero
-            (color 0.20f 0.70f 0.82f 1.0f)
-            1.5f
-            (v2 500.0f 80.0f)
 
     let pathPoint index =
         let amount = single index / single (pathGlyphs.Length - 1)
