@@ -11,6 +11,9 @@
     <Project Path="Nu/Nu.Gaia/Nu.Gaia.fsproj">
       <BuildType Solution="Mixed|*" Project="Debug" />
     </Project>
+    <Project Path="Nu/Nu.Mcp/Nu.Mcp.fsproj">
+      <BuildType Solution="Mixed|*" Project="Debug" />
+    </Project>
     <Project Path="Nu/Nu.Math/Nu.Math.csproj">
       <BuildType Solution="Mixed|*" Project="Release" />
     </Project>

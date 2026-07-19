@@ -1,0 +1,215 @@
+#version 450 core
+
+// Slug shader code Copyright 2017 by Eric Lengyel.
+// Vulkan GLSL adaptation derived from https://github.com/EricLengyel/Slug.
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+// Shared SlugShape std430 ABI. Binding 1 is deliberately the exact layer SSBO
+// consumed by SlugShape.vert/.frag; a compute-to-vertex/fragment memory barrier
+// is required by the command encoder after this dispatch and before the draw.
+
+struct SlugViewState
+{
+    mat4 viewProjection;
+    vec4 viewport;       // xy = pixel size, zw = reciprocal pixel size.
+    vec4 time;           // x = seconds, y = delta, z = frame, w = deterministic seed.
+    uvec4 counts;        // x = graphics layer count, y = shape count, z/w reserved.
+};
+
+struct SlugLayerState
+{
+    mat4 transform;       // local em coordinates -> composite/world coordinates.
+    vec4 color;           // linear RGBA base color.
+    vec4 origin;          // xy = em pivot/composite origin, zw = layer scale/phase.
+    uvec4 stateIds;        // x shape, y fill, z effect, w mask (0xffffffff = none).
+    uvec4 resourceIds;     // x gradient, y fill texture, z material, w reserved.
+    vec4 effectParams;     // x/y primary effect parameters, z/w effect auxiliaries.
+    vec4 effectParams2;    // x/y secondary effect parameters, z/w morph/reveal addressing.
+    mat4 gradientTransform;// local/composite coordinates -> gradient coordinates.
+    vec4 maskMaterial;    // x mask opacity, y roughness, z metallic, w fill texture slot.
+};
+
+struct SlugShapeMetadata
+{
+    vec4 bounds;          // xy = minimum, zw = maximum in em coordinates.
+    vec4 bandTransform;   // xy = band scale, zw = band offset.
+    uvec4 bandAddress;    // xy = header origin, zw = curve-list origin in band texture.
+    uvec4 bandFlags;      // x/y = band maxima, z = band texture row width, w = fill flags.
+};
+
+struct SlugGradientDescription
+{
+    uvec4 stopRange;      // x = first stop, y = count, z = 0 linear/1 radial/2 sweep, w = flags.
+    vec4 params;          // linear: origin.xy + direction.zw; radial: center.xy + radii.zw; sweep: center.xy/start.z/scale.w.
+    vec4 params2;         // focal radial: center1.xy; reserved for other kinds.
+};
+
+struct SlugGradientStop
+{
+    vec4 color;
+    vec4 offset;
+};
+
+struct SlugMaskState
+{
+    vec4 params;
+    vec4 params2;
+    uvec4 state;           // x type, y MSDF texture layer, z invert, w flags.
+};
+
+struct SlugComputeConfig
+{
+    uvec4 dispatch;        // x layer count, y mode, z flags, w deterministic seed.
+    vec4 params0;          // speed, amplitude, frequency, phase.
+    vec4 params1;          // center/scale controls.
+};
+
+layout(std430, binding = 0) readonly buffer SlugViewBlock
+{
+    SlugViewState view;
+};
+layout(std430, binding = 1) buffer SlugLayerBlock
+{
+    SlugLayerState layers[];
+};
+layout(std430, binding = 2) readonly buffer SlugShapeBlock
+{
+    SlugShapeMetadata shapes[];
+};
+layout(binding = 3) uniform sampler2D curveSampler;
+layout(binding = 4) uniform usampler2D bandSampler;
+layout(std430, binding = 5) readonly buffer SlugGradientBlock
+{
+    SlugGradientDescription gradients[];
+};
+layout(std430, binding = 6) readonly buffer SlugStopBlock
+{
+    SlugGradientStop stops[];
+};
+layout(std430, binding = 7) readonly buffer SlugMaskBlock
+{
+    SlugMaskState masks[];
+};
+layout(binding = 8) uniform sampler2D fillTextures[8];
+layout(std430, binding = 9) readonly buffer SlugComputeConfigBlock
+{
+    SlugComputeConfig computeConfig;
+};
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+mat4 SlugRotation(float angle)
+{
+    float c = cos(angle);
+    float s = sin(angle);
+    return mat4(
+        vec4(c, s, 0.0, 0.0),
+        vec4(-s, c, 0.0, 0.0),
+        vec4(0.0, 0.0, 1.0, 0.0),
+        vec4(0.0, 0.0, 0.0, 1.0));
+}
+
+mat4 SlugScale(float amount)
+{
+    return mat4(
+        vec4(amount, 0.0, 0.0, 0.0),
+        vec4(0.0, amount, 0.0, 0.0),
+        vec4(0.0, 0.0, 1.0, 0.0),
+        vec4(0.0, 0.0, 0.0, 1.0));
+}
+
+void main()
+{
+    uint layerIndex = gl_GlobalInvocationID.x;
+    uint configuredCount = min(computeConfig.dispatch.x, view.counts.x);
+    if (layerIndex >= configuredCount || layerIndex >= layers.length()) return;
+
+    SlugLayerState layer = layers[layerIndex];
+    float seconds = view.time.x;
+    float speed = max(abs(computeConfig.params0.x), 0.01);
+    float amplitude = clamp(abs(computeConfig.params0.y), 0.001, 0.75);
+    float frequency = max(abs(computeConfig.params0.z), 0.25);
+    float phase = computeConfig.params0.w + float(computeConfig.dispatch.w) * 0.0001 + float(layerIndex) * 0.17;
+    uint mode = computeConfig.dispatch.y % 4u;
+
+    if (mode == 3u) // canonical osgslug-compute pentagon color animation.
+    {
+        // The original demo leaves layer 0 (the raymarched circle) untouched
+        // and writes only layer 1's color.  No transform/effect/origin fields
+        // are changed in this mode.
+        if (layerIndex == 1u)
+        {
+            float t = seconds * 1.5;
+            layer.color = vec4(
+                0.5 + 0.5 * sin(t),
+                0.5 + 0.5 * sin(t + 2.09439510239),
+                0.5 + 0.5 * sin(t + 4.18879020479),
+                0.5);
+            layers[layerIndex] = layer;
+        }
+        return;
+    }
+
+    // Existing modes change transform, effect parameters, and color.  Mode 0
+    // is radial, 1 is spiral, and 2 is interference.
+    if (mode == 0u) // radial breathing and rotation.
+    {
+        float radial = sin(seconds * speed + phase + float(layerIndex) * 0.13);
+        float scale = 1.0 + radial * amplitude * 0.15;
+        float angle = radial * amplitude * 0.35;
+        layer.transform = layer.transform * SlugRotation(angle) * SlugScale(scale);
+        layer.effectParams.x = amplitude * (0.5 + 0.5 * radial);
+        layer.effectParams.y = frequency;
+        layer.effectParams2.x = radial;
+        layer.effectParams2.y = seconds * speed;
+        layer.color.rgb = clamp(layer.color.rgb * (0.88 + 0.12 * (0.5 + 0.5 * radial)), vec3(0.0), vec3(1.0));
+    }
+    else if (mode == 1u) // spiral phase and tangential rotation.
+    {
+        float spiral = sin(seconds * speed * 0.75 + phase + float(layerIndex) * 0.07);
+        float angle = (seconds * speed + phase) * 0.05 + spiral * amplitude * 0.4;
+        float scale = 1.0 + spiral * amplitude * 0.08;
+        layer.transform = layer.transform * SlugRotation(angle) * SlugScale(scale);
+        layer.effectParams.x = angle;
+        layer.effectParams.y = frequency + spiral * amplitude;
+        layer.effectParams2.x = spiral;
+        layer.effectParams2.y = angle;
+        layer.color.rgb = clamp(mix(layer.color.rgb, layer.color.rgb.bgr, 0.08 + 0.08 * spiral), vec3(0.0), vec3(1.0));
+    }
+    else // interference: deterministic orthogonal modulation.
+    {
+        float xWave = sin(seconds * speed + phase + float(layerIndex) * frequency * 0.05);
+        float yWave = cos(seconds * speed * 1.31 + phase * 1.7 + float(layerIndex) * frequency * 0.03);
+        float interference = xWave * yWave;
+        float angle = interference * amplitude * 0.5;
+        float scale = 1.0 + interference * amplitude * 0.1;
+        layer.transform = layer.transform * SlugRotation(angle) * SlugScale(scale);
+        layer.effectParams.x = xWave * amplitude;
+        layer.effectParams.y = yWave * frequency;
+        layer.effectParams2.x = interference;
+        layer.effectParams2.y = xWave - yWave;
+        layer.color.rgb = clamp(layer.color.rgb + vec3(interference * 0.08, -interference * 0.04, -interference * 0.08), vec3(0.0), vec3(1.0));
+    }
+
+    layer.origin.z = seconds;
+    layer.origin.w = float(mode);
+    layers[layerIndex] = layer;
+}

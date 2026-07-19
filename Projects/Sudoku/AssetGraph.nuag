@@ -5,7 +5,7 @@
    [Assets Assets/Default [wav ogg mp3] [] [Audio]]
    [Assets Assets/Default [cur] [] [Cursor]]
    [Assets Assets/Default [nueffect nuscript csv] [] [Symbol]]
-   [Assets Assets/Default [nuentity nugroup tsx tmx atlas nav nbrd glsl bin] [] []]]]
+   [Assets Assets/Default [nuentity nugroup tsx tmx atlas nav nbrd glsl frag vert comp bin] [] []]]]
  [Gui
   [[Assets Assets/Gui [bmp png psd ttf skel json] [PsdToPng] [Render2d]]
    [Assets Assets/Gui [jpg jpeg tga tif tiff dds ktx] [BlockCompress] [Render3d]]
