@@ -220,16 +220,15 @@ vec2 SlugApplyVertexEffect(
         float displacement = sin(radius * max(abs(b), 0.25) - seconds * d + c) * a;
         local += (radius > 1.0e-5 ? q / radius : vec2(0.0)) * displacement;
     }
-    else if (effectId == 20u) // canonical osgslug-font-animation glyph wave + pivot pulse.
+    else if (effectId == 20u) // historical osgslug-font-animation effect shown in the reference media.
     {
-        // The wave uses the translated vertex position so adjacent glyphs
-        // form one continuous ripple.  origin.x is shared by every vertex of
-        // one glyph and supplies its pivot pulse phase.
-        float waveX = (layer.transform * vec4(local, 0.0, 1.0)).x;
-        local.y += sin(waveX * 2.0 + seconds * 4.0) * 0.1;
-        float originX = (layer.transform * vec4(pivot, 0.0, 1.0)).x;
-        float scale = 1.0 + 0.4 * sin(originX * 2.0 + seconds * 3.0);
-        local = pivot + (local - pivot) * scale;
+        float u = local.x;
+        float v = local.y;
+        float wave = sin(u * 6.28318 * 2.0 - seconds * 3.0);
+        float center = clamp(1.0 - abs(v - 0.5) * 2.0, 0.0, 1.0);
+        center *= center;
+        local.y += wave * center * 0.3;
+        local.x += (u - 0.5) * sin(seconds) * 0.3;
     }
     else if (effectId == 21u) // canonical simple-animation triangle morph.
     {

@@ -50,6 +50,9 @@ module SlugDemoTextAlongPath =
             (Color (228uy, 122uy, 18uy, 255uy))
             1.15f
 
+    let private pathStrokeExtent = pathStroke.Bounds.Size
+    let private pathStrokeCenter = pathStroke.Bounds.Min + pathStrokeExtent * 0.5f
+
     let private phrase = "This is some text that follows a Path..."
 
     type private PathGlyph =
@@ -131,8 +134,8 @@ module SlugDemoTextAlongPath =
     let draw (world : World) =
         SlugDemoContours.placeContour
             pathStroke
-            (v3 0.0f 0.0f 0.0f)
-            (v3 1.0f 1.0f 0.0f)
+            (v3 pathStrokeCenter.X pathStrokeCenter.Y 0.0f)
+            (v3 pathStrokeExtent.X pathStrokeExtent.Y 0.0f)
             identityRotation
             1.0f
             world

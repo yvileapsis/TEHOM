@@ -7,27 +7,26 @@ open Nu
 [<RequireQualifiedAccess>]
 module SlugDemoAnimatedGlyphs =
 
-    // These amplitudes mirror effect 20 in SlugShape.vert and the canonical
-    // osgslug-font-animation.cpp vertex hook.
-    let private waveAmplitude = 0.1f
-    let private pulseAmplitude = 0.4f
+    // The reference media was recorded from osgslug-font-animation's original
+    // effect 6: a local em-space wave and subtle horizontal morph, not a pulse.
+    let private horizontalAmplitude = 0.3f
+    let private verticalAmplitude = 0.3f
 
-    let private conservativePulseRange minValue maxValue =
-        let minScale = 1.0f - pulseAmplitude
-        let maxScale = 1.0f + pulseAmplitude
-        let a = minValue * minScale
-        let b = minValue * maxScale
-        let c = maxValue * minScale
-        let d = maxValue * maxScale
+    let private conservativeHorizontalRange minValue maxValue =
+        let deform value phase = value + (value - 0.5f) * phase
+        let a = deform minValue -horizontalAmplitude
+        let b = deform minValue horizontalAmplitude
+        let c = deform maxValue -horizontalAmplitude
+        let d = deform maxValue horizontalAmplitude
         struct (min (min a b) (min c d), max (max a b) (max c d))
 
-    // Match osgslug-font-animation.cpp: one aggregate drawable with seven font
-    // layers. A shared composite gives the vertex effect a continuous x domain
-    // and one conservative submission instead of seven independently clipped
-    // glyph drawables.
+    // Match the recorded osgSlug demo: Ubuntu Mono, one aggregate drawable,
+    // seven translated layers, and its historical effect 6 equations.
+    let private fontFilePath =
+        IO.Path.Combine (AppContext.BaseDirectory, "Assets", "Default", "UbuntuMono-Regular.ttf")
     let private animatedText =
         lazy
-            (use loader = new SlugColorFontLoader (SlugDemo.fontFilePath, fontScale = 1)
+            (use loader = new SlugColorFontLoader (fontFilePath, fontScale = 1)
              let sources =
                  "osgSlug"
                  |> Seq.map (fun character ->
@@ -38,22 +37,19 @@ module SlugDemoAnimatedGlyphs =
                      | SlugColorGlyph.ColrV1 _ ->
                          invalidOp "The animated mono-font demo requires outline glyphs.")
                  |> Seq.toArray
-             // Effect 20 first adds the wave and then pulses each glyph about
-             // its layer origin. Derive one fixed all-time envelope from the
-             // actual outlines rather than giving each glyph a clipping box.
+             // Derive one fixed all-time envelope for the local wave and morph
+             // rather than relying on an undersized per-frame submission.
              let mutable minX = Single.PositiveInfinity
              let mutable minY = Single.PositiveInfinity
              let mutable maxX = Single.NegativeInfinity
              let mutable maxY = Single.NegativeInfinity
              for index in 0 .. sources.Length - 1 do
                  let sourceBounds = sources[index].Bounds
-                 let struct (sourceMinX, sourceMaxX) =
-                     conservativePulseRange sourceBounds.Min.X sourceBounds.Max.X
-                 let struct (sourceMinY, sourceMaxY) =
-                     conservativePulseRange
-                         (sourceBounds.Min.Y - waveAmplitude)
-                         (sourceBounds.Max.Y + waveAmplitude)
                  let glyphX = single index
+                 let struct (sourceMinX, sourceMaxX) =
+                     conservativeHorizontalRange sourceBounds.Min.X sourceBounds.Max.X
+                 let sourceMinY = sourceBounds.Min.Y - verticalAmplitude
+                 let sourceMaxY = sourceBounds.Max.Y + verticalAmplitude
                  minX <- min minX (glyphX + sourceMinX)
                  minY <- min minY sourceMinY
                  maxX <- max maxX (glyphX + sourceMaxX)

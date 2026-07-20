@@ -141,7 +141,7 @@ module SlugDemoHud =
                { Offset = 1.00f; Color = color 0.60f 0.85f 1.00f 0.75f } |]
         let gradient =
             SlugGradient
-                (SlugGradientKind.Sweep (Vector2.Zero, -MathF.PI * 0.5f), stops)
+                (SlugGradientKind.Sweep (Vector2.Zero, -MathF.PI), stops)
         let data =
             SlugShapeRuntime.packWithResources
                 [| source |]
@@ -230,6 +230,10 @@ module SlugDemoHud =
                     (arcStripCommands 0.5f inner gap (MathF.PI * 2.0f - gap) 64)
                     (color 0.60f 0.85f 1.00f 1.00f)
                     NonZero
+            let shape =
+                // The gap makes the tight bounds asymmetric. Preserve the circle origin
+                // as the rotation pivot, matching osgSlug's explicit Origin(CX, CY).
+                { shape with Bounds = Box2 (v2 -0.5f -0.5f, v2One) }
             radius, speed, shape)
 
     let private clockCenter = v3 -154.0f 57.0f 0.0f
@@ -405,8 +409,8 @@ module SlugDemoHud =
             let angle = single index * MathF.PI * 2.0f / 12.0f
             let position =
                 v3
-                    (radarCenter.X + MathF.Sin angle * 93.0f * radarScale)
-                    (radarCenter.Y + MathF.Cos angle * 93.0f * radarScale)
+                    (radarCenter.X + MathF.Cos angle * 93.0f * radarScale)
+                    (radarCenter.Y + MathF.Sin angle * 93.0f * radarScale)
                     0.0f
             let degrees = ((3 - index + 12) % 12) * 30
             placeSlug

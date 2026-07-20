@@ -13,6 +13,7 @@ open Nu
 
 type SlugDemoContour =
     { Commands : ContourCommand array
+      Bounds : Box2
       Fill : ContourFill
       Stroke : ContourStroke }
 
@@ -43,8 +44,31 @@ module SlugDemoContours =
            CloseContour|]
 
 
+    let private getCommandBounds commands =
+        let mutable minPoint = Vector2 (Single.PositiveInfinity, Single.PositiveInfinity)
+        let mutable maxPoint = Vector2 (Single.NegativeInfinity, Single.NegativeInfinity)
+        let includePoint point =
+            minPoint <- Vector2.Min (minPoint, point)
+            maxPoint <- Vector2.Max (maxPoint, point)
+        for command in commands do
+            match command with
+            | MoveTo point
+            | LineTo point ->
+                includePoint point
+            | QuadraticCurveTo (control, point) ->
+                includePoint control
+                includePoint point
+            | CubicCurveTo (control1, control2, point) ->
+                includePoint control1
+                includePoint control2
+                includePoint point
+            | CloseContour -> ()
+        Box2 (minPoint, maxPoint - minPoint)
+
+
     let makeFilled commands fillColor winding strokeColor strokeThickness =
         { Commands = commands
+          Bounds = getCommandBounds commands
           Fill = ContourFill.ofColorWinding fillColor winding
           Stroke = ContourStroke.ofColorThickness strokeColor strokeThickness }
 
@@ -166,13 +190,18 @@ module SlugDemoContours =
         placeCompositeWithProjectiveAndTextures
             name composite position size rotation elevation computeConfigOpt Matrix4x4.Identity [||] world
 
-    let placeContour contour position (size : Vector3) rotation elevation (world : World) =
+    let placeContour contour position (size : Vector3) (rotation : Quaternion) elevation (world : World) =
+        let extent = contour.Bounds.Size
+        let scale = v2 (size.X / extent.X) (size.Y / extent.Y)
+        let center = contour.Bounds.Min + extent * 0.5f
+        let rotatedCenter =
+            Vector3.Transform (v3 (center.X * scale.X) (center.Y * scale.Y) 0.0f, rotation)
         let mutable transform =
-            Transform.makeIntuitive false position v3One Vector3.Zero size Vector3.Zero elevation
+            Transform.makeIntuitive false (position - rotatedCenter) v3One Vector3.Zero size Vector3.Zero elevation
         transform.Rotation <- rotation
         World.renderContour
             { Transform = transform
               ClipOpt = ValueNone
-              Contour = Contour.make contour.Fill contour.Stroke contour.Commands size.V2 }
+              Contour = Contour.make contour.Fill contour.Stroke contour.Commands scale }
             world
 
