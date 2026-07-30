@@ -904,7 +904,7 @@ module WorldModule2 =
                 World.unregisterEntityPhysics entity world
 
         static member private synchronizeViewports world =
-            let windowSize = World.getWindowSize world
+            let windowSize = World.getWindowSizeOtherwiseViewportSize world
             let windowViewport = Viewport.makeWindow1 windowSize
             World.setWindowViewport windowViewport world
             World.setGeometryViewport (Viewport.makeGeometry windowViewport.Bounds.Size) world
@@ -1130,18 +1130,18 @@ module WorldModule2 =
         static member internal processWindowResized (world : World) =
 
             // ensure window size is a factor of display virtual resolution, going to full screen otherwise
-            let windowSize = World.getWindowSize world
+            let windowSize = World.getWindowSizeOtherwiseViewportSize world
             let windowScalar =
                 max (single windowSize.X / single Constants.Render.DisplayVirtualResolution.X |> ceil |> int |> max 1)
                     (single windowSize.Y / single Constants.Render.DisplayVirtualResolution.Y |> ceil |> int |> max 1)
             let windowSize' = windowScalar * Constants.Render.DisplayVirtualResolution
             World.trySetWindowSize windowSize' world
-            let windowSize'' = World.getWindowSize world
+            let windowSize'' = World.getWindowSizeOtherwiseViewportSize world
             if windowSize''.X < windowSize'.X || windowSize''.Y < windowSize'.Y then
                 World.trySetWindowFullScreen true world
 
             // synchronize display virtual scalar
-            let windowSize'' = World.getWindowSize world
+            let windowSize'' = World.getWindowSizeOtherwiseViewportSize world
             let xScalar = windowSize''.X / Constants.Render.DisplayVirtualResolution.X
             let yScalar = windowSize''.Y / Constants.Render.DisplayVirtualResolution.Y
             Globals.Render.DisplayScalar <- min xScalar yScalar
@@ -1154,12 +1154,15 @@ module WorldModule2 =
             | SDL_EventType.SDL_EVENT_QUIT ->
                 let eventTrace = EventTrace.debug "World" "processInput2" "ExitRequest" EventTrace.empty
                 World.publishPlus () Nu.Game.Handle.ExitRequestEvent eventTrace Nu.Game.Handle true true world
-            | SDL_EventType.SDL_EVENT_WINDOW_RESIZED ->
+            | SDL_EventType.SDL_EVENT_WINDOW_RESIZED | SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ->
                 World.processWindowResized world
             | SDL_EventType.SDL_EVENT_MOUSE_MOTION ->
                 let io = ImGui.GetIO ()
-                let boundsMin = world.WindowViewport.Bounds.Min
-                io.AddMousePosEvent (evt.button.x - single boundsMin.X, evt.button.y - single boundsMin.Y)
+                let pixelDensity = World.tryGetWindowPixelDensity world |> Option.defaultValue 1.0f
+                let viewport = World.getWindowViewport world
+                io.AddMousePosEvent // scale by pixel density because SDL IO comes in from unscale window coords and offset by bounds min
+                    (evt.button.x * pixelDensity + single viewport.Bounds.Min.X,
+                     evt.button.y * pixelDensity - single viewport.Bounds.Min.Y)
                 let mousePosition = v2 (single evt.button.x) (single evt.button.y)
                 if World.isMouseButtonDown MouseLeft world then
                     let eventTrace = EventTrace.debug "World" "processInput2" "MouseDrag" EventTrace.empty
@@ -1641,7 +1644,7 @@ module WorldModule2 =
                         World.renderEntity renderPass element.Entry world
             world.Timers.RenderEntityMessagesTimer.Stop ()
 
-        static member private renderSimulantsInternal renderPass (world : World) =
+        static member private renderSimulantsInternal excludeGlobalLights renderPass (world : World) =
 
             // use a finally block to free cached values
             try
@@ -1660,6 +1663,8 @@ module WorldModule2 =
                     World.getElements3dInViewBox lightMapBounds WorldModuleInternal2.HashSet3dNormalCached world
                     for element in WorldModuleInternal2.HashSet3dNormalCached do
                         if not element.StaticInPlay then
+                            WorldModuleInternal2.HashSet3dNormalCached.Remove element |> ignore<bool>
+                        elif excludeGlobalLights && element.Light && (element.Entry.GetLightType world).IsGlobalLight then
                             WorldModuleInternal2.HashSet3dNormalCached.Remove element |> ignore<bool>
                 | ShadowPass (_, _, lightType, dynamicShadows, _, shadowFrustum) ->
                     let shadowInterior = LightType.shouldShadowInterior lightType
@@ -1698,10 +1703,11 @@ module WorldModule2 =
                     let lightProbesStale = Seq.filter (fun (lightProbe : Entity) -> lightProbe.GetProbeStale world) lightProbes
                     for lightProbe in lightProbesStale do
                         let id = lightProbe.GetId world
+                        let excludeGlobalLights = lightProbe.GetExcludeGlobalLights world
                         let bounds = lightProbe.GetProbeBounds world
                         let boundsPlus = bounds.ScaleUniform 4.0f // TODO: allow user to specify bounds scalar?
                         let renderPass = LightMapPass (id, boundsPlus)
-                        World.renderSimulantsInternal renderPass world
+                        World.renderSimulantsInternal excludeGlobalLights renderPass world
                         World.enqueueRenderMessage3d (RenderLightMap3d { LightProbeId = id; RenderPass = renderPass }) world
                         lightProbe.SetProbeStale false world
 
@@ -1768,14 +1774,14 @@ module WorldModule2 =
                                 let shadowView = Matrix4x4.CreateLookAt (shadowOrigin, shadowOrigin + eyeForward, eyeUp)
                                 let shadowViewProjection = shadowView * shadowProjection
                                 let shadowFrustum = Frustum shadowViewProjection
-                                World.renderSimulantsInternal (ShadowPass (lightId, Some (i, shadowView, shadowProjection), lightType, dynamicShadows, shadowRotation, shadowFrustum)) world
+                                World.renderSimulantsInternal false (ShadowPass (lightId, Some (i, shadowView, shadowProjection), lightType, dynamicShadows, shadowRotation, shadowFrustum)) world
 
                             // fin
                             shadowMapsCount <- inc shadowMapsCount
 
                     | SpotLight (_, _) ->
                         if shadowTexturesCount < Constants.Render.ShadowTexturesMax then
-                            World.renderSimulantsInternal (ShadowPass (light.GetId world, None, lightType, dynamicShadows, light.GetRotation world, shadowFrustum)) world
+                            World.renderSimulantsInternal false (ShadowPass (light.GetId world, None, lightType, dynamicShadows, light.GetRotation world, shadowFrustum)) world
                             shadowTexturesCount <- inc shadowTexturesCount
 
                     | DirectionalLight offsetForwardScalar ->
@@ -1790,16 +1796,11 @@ module WorldModule2 =
                             let shadowNearDistance = Constants.Render.NearPlaneDistanceInterior
                             let shadowFarDistance = max shadowCutoff (shadowNearDistance * 2.0f)
                             let cullView = Matrix4x4.CreateLookAt (shadowOrigin, shadowOrigin + shadowForward, shadowUp)
-                            let cullProjection =
-                                Matrix4x4.CreateOrthographic
-                                    (shadowFarDistance * +2.0f * inc Constants.Render.ShadowDirectionalMarginRatioCull,
-                                     shadowFarDistance * +2.0f * inc Constants.Render.ShadowDirectionalMarginRatioCull,
-                                     shadowFarDistance * -1.0f * inc Constants.Render.ShadowDirectionalMarginRatioCull,
-                                     shadowFarDistance * +1.0f * inc Constants.Render.ShadowDirectionalMarginRatioCull)
+                            let cullProjection = Matrix4x4.CreateOrthographic (shadowFarDistance * +2.0f, shadowFarDistance * +2.0f, shadowFarDistance * -1.0f, shadowFarDistance * +1.0f)
                             let cullFrustum = Frustum (cullView * cullProjection)
 
                             // render
-                            World.renderSimulantsInternal (ShadowPass (light.GetId world, None, lightType, dynamicShadows, light.GetRotation world, cullFrustum)) world
+                            World.renderSimulantsInternal false (ShadowPass (light.GetId world, None, lightType, dynamicShadows, light.GetRotation world, cullFrustum)) world
 
                             // fin
                             shadowTexturesCount <- inc shadowTexturesCount
@@ -1828,14 +1829,9 @@ module WorldModule2 =
 
                             // compute cull frustum
                             let cullView = Matrix4x4.CreateLookAt (shadowOrigin, shadowOrigin + shadowForward, shadowUp)
-                            let cullProjection =
-                                Matrix4x4.CreateOrthographic
-                                    (shadowFarDistance * +2.0f * inc Constants.Render.ShadowCascadeMarginRatioCull,
-                                     shadowFarDistance * +2.0f * inc Constants.Render.ShadowCascadeMarginRatioCull,
-                                     shadowFarDistance * -1.0f * inc Constants.Render.ShadowCascadeMarginRatioCull,
-                                     shadowFarDistance * +1.0f * inc Constants.Render.ShadowCascadeMarginRatioCull)
+                            let cullProjection = Matrix4x4.CreateOrthographic (shadowFarDistance * +2.0f, shadowFarDistance * +2.0f,shadowFarDistance * -1.0f, shadowFarDistance * +1.0f)
                             let cullFrustum = Frustum (cullView * cullProjection)
-                            
+
                             // use a finally block to free cached values
                             try
 
@@ -1889,15 +1885,8 @@ module WorldModule2 =
                                         minZ <- min minZ cornerView.Z
                                         maxZ <- max maxZ cornerView.Z
 
-                                    // add margins to section along Z's
-                                    let depth = maxZ - minZ
-                                    let margin = depth * Constants.Render.ShadowCascadeMarginRatio
-                                    let margin = max margin Constants.Render.ShadowCascadeMarginSizeMin
-                                    let minZ' = minZ - margin
-                                    let maxZ' = maxZ + margin
-
                                     // compute ortho projection
-                                    let sectionProjectionOrtho = Matrix4x4.CreateOrthographicOffCenter (minX, maxX, minY, maxY, minZ', maxZ')
+                                    let sectionProjectionOrtho = Matrix4x4.CreateOrthographicOffCenter (minX, maxX, minY, maxY, minZ, maxZ)
 
                                     // render
                                     World.renderSimulantsInternal8
@@ -1914,7 +1903,7 @@ module WorldModule2 =
                             shadowCascadesCount <- inc shadowCascadesCount
 
                 // render simulants normally
-                World.renderSimulantsInternal NormalPass world
+                World.renderSimulantsInternal false NormalPass world
 
             // free cached values
             finally
@@ -2117,6 +2106,12 @@ module WorldModule2 =
                                                                     World.clearEditDeferrals world
                                                                     world.Timers.ImGuiTimer.Stop ()
 
+                                                                    // compute window properties
+                                                                    let windowProperties =
+                                                                        match World.tryGetWindowProperties world with
+                                                                        | Some windowProperties -> windowProperties
+                                                                        | None -> WindowProperties.empty
+
                                                                     // process rendering (2/2)
                                                                     rendererProcess.SubmitMessages
                                                                         world.Eye3dFrustumInterior
@@ -2127,10 +2122,10 @@ module WorldModule2 =
                                                                         world.Eye3dFieldOfView
                                                                         world.Eye2dCenter
                                                                         world.Eye2dSize
-                                                                        (World.getWindowSize world)
                                                                         world.GeometryViewport
                                                                         world.WindowViewport
                                                                         drawData
+                                                                        windowProperties
 
                                                                     // post-process imgui frame
                                                                     World.imGuiPostProcess world
@@ -3228,7 +3223,9 @@ module GamePropertyDescriptor =
     /// Get whether the described property is editable.
     let getEditable propertyDescriptor =
         let propertyName = propertyDescriptor.PropertyName
-        not (Reflection.isPropertyNonPersistentByName propertyName)
+        not (Reflection.isPropertyNonPersistentByName propertyName) &&
+        not (propertyName.StartsWith "Eye2d") &&
+        not (propertyName.StartsWith "Eye3d")
 
     /// Get the value of the described property for the game.
     let getValue propertyDescriptor (game : Game) world : obj =

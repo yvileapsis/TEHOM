@@ -269,7 +269,7 @@ module SlugShape =
             [|VulkanTransparent; VulkanAdditive; VulkanOverwrite|]
             [|false|]
             [||]
-            (descriptorDefinitions VertexFragmentStage)
+            (descriptorDefinitions VertexAndFragmentStage)
             [||]
             [|context.SwapFormat|]
             None
@@ -281,13 +281,10 @@ module SlugShape =
             (descriptorDefinitions ComputeStage)
             [||]
 
-    let private makeRenderArea (viewport : Viewport) (context : VulkanContext) =
-        let pixelDensity = Hl.getWindowPixelDensity context.Window
-        let renderAreaLogical = VkRect2D (viewport.Inner.Min.X, viewport.Outer.Max.Y - viewport.Inner.Max.Y, uint viewport.Inner.Size.X, uint viewport.Inner.Size.Y)
-        Hl.scaleRectForPixelDensity pixelDensity renderAreaLogical
+    let private makeRenderArea (viewport : Viewport) =
+        VkRect2D (viewport.Inner.Min.X, viewport.Outer.Max.Y - viewport.Inner.Max.Y, uint viewport.Inner.Size.X, uint viewport.Inner.Size.Y)
 
-    let private makeScissor (clipOpt : Box2 voption) (effectiveViewProjection : Matrix4x4) (viewport : Viewport) (renderArea : VkRect2D) (context : VulkanContext) =
-        let pixelDensity = Hl.getWindowPixelDensity context.Window
+    let private makeScissor (clipOpt : Box2 voption) (effectiveViewProjection : Matrix4x4) (viewport : Viewport) (renderArea : VkRect2D) =
         match clipOpt with
         | ValueNone -> renderArea
         | ValueSome clip ->
@@ -298,8 +295,8 @@ module SlugShape =
             let sizeNdc = sizeClip * single viewport.DisplayScalar
             let sizeScissor = sizeNdc * 0.5f * viewport.Inner.Size.V2
             let offset = v2i viewport.Inner.Min.X (viewport.Outer.Max.Y - viewport.Inner.Max.Y)
-            let logical = VkRect2D ((minScissor.X |> round |> int) + offset.X, (single renderArea.extent.height - minScissor.Y |> round |> int) + offset.Y, uint (max 0 (sizeScissor.X |> round |> int)), uint (max 0 (sizeScissor.Y |> round |> int)))
-            Hl.clipRect renderArea (Hl.scaleRectForPixelDensity pixelDensity logical)
+            let scissor = VkRect2D ((minScissor.X |> round |> int) + offset.X, (single renderArea.extent.height - minScissor.Y |> round |> int) + offset.Y, uint (max 0 (sizeScissor.X |> round |> int)), uint (max 0 (sizeScissor.Y |> round |> int)))
+            Hl.clipRect renderArea scissor
 
     let private destroyComposite (gpu : CompositeGpu) context =
         Texture.destroy gpu.CurveTexture context
@@ -475,8 +472,8 @@ module SlugShape =
             gpu.CpuLayerRevision <- populateBaseLayers gpu composite
         uploadBaseLayerBuffers gpu context
         let effectiveViewProjection = rootTransform * viewProjection
-        let renderArea = makeRenderArea viewport context
-        let mutable scissor = makeScissor clipOpt effectiveViewProjection viewport renderArea context
+        let renderArea = makeRenderArea viewport
+        let mutable scissor = makeScissor clipOpt effectiveViewProjection viewport renderArea
         if Hl.validateRect scissor then
             match Pipeline.tryGetVkPipeline blend false env.GraphicsPipeline with
             | Some vkPipeline ->

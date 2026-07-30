@@ -12,10 +12,7 @@ open Nu
 [<RequireQualifiedAccess>]
 module Attachment =
     
-    // NOTE: DJL: in the context of individual attachment textures, depth component attachments used for depth testing are named "z" to easily distinguish them
-    // from color component attachments using the name "depth". Otherwise color and depth component textures are just called "color" and "depth" attachments,
-    // as they are called when passed to Vulkan structures.
-
+    /// Create a color attachment.
     let createColorAttachment textureType optionalUsages internalFormat pixelFormat resolutionX resolutionY (context : VulkanContext) =
         let metadata = TextureMetadata.make resolutionX resolutionY
         let textureInternal =
@@ -50,6 +47,32 @@ module Attachment =
     /// Destroy depth attachment.
     let destroyDepthAttachment (depth : Texture) context =
         Texture.destroy depth context
+
+    /// Create tone-mapping attachments.
+    let createToneMappingAttachments resolutionX resolutionY context =
+        createColorAttachment Texture2d (VkImageUsageFlags.Sampled ||| VkImageUsageFlags.TransferSrc ||| VkImageUsageFlags.TransferDst) Rgb16f Rgb resolutionX resolutionY context
+
+    /// Update size of tone-mapping attachments.
+    let updateToneMappingAttachmentSize resolutionX resolutionY toneMapping context =
+        let metadata = TextureMetadata.make resolutionX resolutionY
+        Texture.updateSize metadata toneMapping context
+
+    /// Destroy tone-mapping attachments.
+    let destroyToneMappingAttachment (toneMapping : Texture) context =
+        Texture.destroy toneMapping context
+
+    /// Create gamma correction attachments.
+    let createGammaCorrectionAttachments resolutionX resolutionY context =
+        createColorAttachment Texture2d (VkImageUsageFlags.Sampled ||| VkImageUsageFlags.TransferSrc) Rgba16f Rgba resolutionX resolutionY context
+
+    /// Update size of gamma-correction attachments.
+    let updateGammaCorrectionAttachmentSize resolutionX resolutionY gammaCorrection context =
+        let metadata = TextureMetadata.make resolutionX resolutionY
+        Texture.updateSize metadata gammaCorrection context
+
+    /// Destroy gamma-correction attachments.
+    let destroyGammaCorrectionAttachment (gammaCorrection : Texture) context =
+        Texture.destroy gammaCorrection context
 
     /// Create shadow texture array attachments.
     let createShadowTextureArrayAttachments shadowResolutionX shadowResolutionY shadowResolutionZ context =
@@ -236,8 +259,8 @@ module Attachment =
         Texture.destroy depth context
 
     /// Create composition attachments.
-    let createCompositionAttachments resolutionX resolutionY context =
-        createColorAttachment Texture2d VkImageUsageFlags.Sampled Rgb16f Rgb resolutionX resolutionY context
+    let createCompositionAttachment resolutionX resolutionY context =
+        createColorAttachment Texture2d (VkImageUsageFlags.Sampled ||| VkImageUsageFlags.TransferSrc ||| VkImageUsageFlags.TransferDst) Rgba16f Rgba resolutionX resolutionY context
 
     /// Update size of composition attachments.
     let updateCompositionAttachmentSize resolutionX resolutionY color context =
@@ -247,29 +270,3 @@ module Attachment =
     /// Destroy composition attachments.
     let destroyCompositionAttachment (color : Texture) context =
         Texture.destroy color context
-
-    /// Create tone-mapping attachments.
-    let createToneMappingAttachments resolutionX resolutionY context =
-        createColorAttachment Texture2d (VkImageUsageFlags.Sampled ||| VkImageUsageFlags.TransferDst) Rgba16f Rgba resolutionX resolutionY context
-
-    /// Update size of tone-mapping attachments.
-    let updateToneMappingAttachmentSize resolutionX resolutionY toneMapping context =
-        let metadata = TextureMetadata.make resolutionX resolutionY
-        Texture.updateSize metadata toneMapping context
-
-    /// Destroy tone-mapping attachments.
-    let destroyToneMappingAttachment (toneMapping : Texture) context =
-        Texture.destroy toneMapping context
-
-    /// Create gamma correction attachments.
-    let createGammaCorrectionAttachments resolutionX resolutionY context =
-        createColorAttachment Texture2d (VkImageUsageFlags.Sampled ||| VkImageUsageFlags.TransferSrc) Rgba16f Rgba resolutionX resolutionY context
-
-    /// Update size of gamma-correction attachments.
-    let updateGammaCorrectionAttachmentSize resolutionX resolutionY gammaCorrection context =
-        let metadata = TextureMetadata.make resolutionX resolutionY
-        Texture.updateSize metadata gammaCorrection context
-
-    /// Destroy gamma-correction attachments.
-    let destroyGammaCorrectionAttachment (gammaCorrection : Texture) context =
-        Texture.destroy gammaCorrection context

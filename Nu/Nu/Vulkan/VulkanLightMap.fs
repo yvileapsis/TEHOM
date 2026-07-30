@@ -13,7 +13,7 @@ open Prime
 open Nu
 
 [<Struct; StructLayout (LayoutKind.Explicit)>]
-type EnvironmentFilter =
+type EnvironmentFilterStruct =
     [<FieldOffset(0)>] val mutable roughness : single
     [<FieldOffset(4)>] val mutable resolution : single
 
@@ -37,7 +37,7 @@ type [<Struct>] LightMap =
 module LightMap =
 
     /// Create a reflection map.
-    let createReflectionMap render resolution origin ambientColor ambientBrightness getCommandBuffer advanceCommandBufferWhenNeeded context =
+    let createReflectionMap render resolution origin ambientColor ambientBrightness getCommandBuffer context =
 
         // create reflection cube map
         let metadata = TextureMetadata.make resolution resolution
@@ -130,8 +130,8 @@ module LightMap =
             let (eyeForward, eyeUp) = eyeRotations[i]
             let view = Matrix4x4.CreateLookAt (v3Zero, eyeForward, eyeUp)
             CubeMap.drawCubeMap
-                eyeCenter view projection cubeMapSurface.CubeMap sampler
-                cubeMapSurface.CubeMapGeometry resolution cubeMap.SubViews[0, i]
+                eyeCenter view projection cubeMapSurface.Flipped cubeMapSurface.CubeMap sampler
+                cubeMapSurface.Geometry resolution cubeMap.SubViews[0, i]
                 irradiancePipeline getCommandBuffer advanceCommandBufferWhenNeeded context
 
             // take a snapshot for testing
@@ -147,8 +147,8 @@ module LightMap =
     let createEnvironmentFilterPipeline shaderPath colorAttachmentFormat (context : VulkanContext) =
 
         // create uniform buffers
-        let eyeUniform = VulkanBuffer.create Uniform sizeof<Eye> context
-        let environmentFilterUniform = VulkanBuffer.create Uniform sizeof<EnvironmentFilter> context
+        let eyeUniform = VulkanBuffer.create Uniform sizeof<EyeStruct> context
+        let environmentFilterUniform = VulkanBuffer.create Uniform sizeof<EnvironmentFilterStruct> context
 
         // create pipeline
         let pipeline =
@@ -180,6 +180,7 @@ module LightMap =
         (projectionUnflipped : Matrix4x4)
         (roughness : single)
         (resolution : single)
+        (flipped : bool)
         (cubeMap : Texture)
         (sampler : Sampler)
         (geometry : CubeMapGeometry)
@@ -191,7 +192,7 @@ module LightMap =
 
         // compute vulkan-appropriate matrices
         let viewInverse = view.Inverted
-        let projection = projectionUnflipped.Flipped
+        let projection = if flipped then projectionUnflipped.Flipped else projectionUnflipped
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
@@ -203,12 +204,12 @@ module LightMap =
             let mutable uniformDescriptorSet = Pipeline.specifyDescriptorSet 0 pipeline.Pipeline.DrawIndex pipeline.Pipeline $ fun vkSet ->
 
                 // specify eye
-                let eye = Eye (center = eyeCenter, view = view, viewInverse = viewInverse, projection = projection, projectionInverse = projectionInverse, viewProjection = viewProjection)
+                let eye = EyeStruct (center = eyeCenter, view = view, viewInverse = viewInverse, projection = projection, projectionInverse = projectionInverse, viewProjection = viewProjection)
                 VulkanBuffer.uploadValue eye pipeline.EyeUniform context
                 Pipeline.writeDescriptorUniformBuffer 0 0 pipeline.EyeUniform vkSet
 
                 // specify environment filter
-                let environmentFilter = EnvironmentFilter (roughness = roughness, resolution = resolution)
+                let environmentFilter = EnvironmentFilterStruct (roughness = roughness, resolution = resolution)
                 VulkanBuffer.uploadValue environmentFilter pipeline.EnvironmentFilterUniform context
                 Pipeline.writeDescriptorUniformBuffer 1 0 pipeline.EnvironmentFilterUniform vkSet
 
@@ -259,7 +260,7 @@ module LightMap =
             advanceCommandBufferWhenNeeded ()
 
         // abort
-        | None -> Log.warnOnce "Cannot draw because VkPipeline does not exist."
+        | None -> Log.warnOnce ("Cannot draw " + getTypeName pipeline + " because VkPipeline does not exist.")
     
     /// Create an environment filter map.
     let createEnvironmentFilterMap resolution (environmentFilterSurface : CubeMapSurface) sampler colorFormat environmentFilterPipeline getCommandBuffer advanceCommandBufferWhenNeeded context =
@@ -295,8 +296,8 @@ module LightMap =
                 let eyeCenter = v3Zero // assuming origin
                 let view = views[i]
                 drawEnvironmentFilter
-                    eyeCenter view projection mipRoughness mipResolution environmentFilterSurface.CubeMap sampler
-                    environmentFilterSurface.CubeMapGeometry cubeMap.SubViews[mip, i]
+                    eyeCenter view projection mipRoughness mipResolution environmentFilterSurface.Flipped environmentFilterSurface.CubeMap sampler
+                    environmentFilterSurface.Geometry cubeMap.SubViews[mip, i]
                     environmentFilterPipeline getCommandBuffer advanceCommandBufferWhenNeeded context
 
                 // take a snapshot for testing

@@ -37,6 +37,7 @@
         <Compile Include="Core\Constants.fs" />
         <Compile Include="Core\Globals.fs" />
         <Compile Include="Transform\Viewport.fs" />
+        <Compile Include="Transform\WindowProperties.fs" />
         <Compile Include="Transform\Protection.fs" />
         <Compile Include="Transform\Presence.fs" />
         <Compile Include="Transform\Quadtree.fs" />
@@ -163,7 +164,7 @@
         <PackageReference Include="JoltPhysicsSharp" Version="2.19.5" />
         <PackageReference Include="HarfBuzzSharp" Version="8.3.1.5" />
         <PackageReference Include="LibTessDotNet" Version="1.1.15" />
-        <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.14.0" />
+        <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.15.0" />
         <PackageReference Include="Pfim" Version="0.11.4" />
         <PackageReference Include="Prime" Version="11.5.1" />
         <PackageReference Include="System.Configuration.ConfigurationManager" Version="10.0.1" />
@@ -171,11 +172,11 @@
         <PackageReference Include="System.Drawing.Common" Version="10.0.1" />
         <PackageReference Include="System.Formats.Nrbf" Version="10.0.1" /> <!-- we need this to AOT System.Drawing.Common for macOS/mobile when building in Release -->
         <PackageReference Include="Twizzle.ImGui-Bundle.NET" Version="1.91.5.2" />
-        <PackageReference Include="ppy.SDL3-CS" Version="2026.512.0" />
-        <PackageReference Include="ppy.SDL3_ttf-CS" Version="2026.512.0" />
-        <PackageReference Include="ppy.SDL3_image-CS" Version="2026.512.0" />
-        <PackageReference Include="ppy.SDL3_mixer-CS" Version="2026.512.0" />
-        <PackageReference Include="Vortice.ShaderCompiler" Version="1.8.0" />
+        <PackageReference Include="ppy.SDL3-CS" Version="2026.722.0" />
+        <PackageReference Include="ppy.SDL3_ttf-CS" Version="2026.722.0" />
+        <PackageReference Include="ppy.SDL3_image-CS" Version="2026.722.0" />
+        <PackageReference Include="ppy.SDL3_mixer-CS" Version="2026.722.0" />
+        <PackageReference Include="Vortice.ShaderCompiler" Version="1.9.0" />
         <PackageReference Include="Vortice.Vulkan" Version="3.2.3" />
         <PackageReference Include="Vortice.VulkanMemoryAllocator" Version="1.7.0" />
     </ItemGroup>

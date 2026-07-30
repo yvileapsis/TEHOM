@@ -108,14 +108,12 @@ module SlugText =
         match env.State.TextureOpt with
         | ValueSome (curveTexture, bandTexture) when env.GlyphIndex > 0 ->
             let context = env.VulkanContext
-            let pixelDensity = Hl.getWindowPixelDensity context.Window
-            let renderAreaLogical =
+            let renderArea =
                 VkRect2D
                     (viewport.Inner.Min.X,
                      viewport.Outer.Max.Y - viewport.Inner.Max.Y,
                      uint viewport.Inner.Size.X,
                      uint viewport.Inner.Size.Y)
-            let renderArea = Hl.scaleRectForPixelDensity pixelDensity renderAreaLogical
             let mutable vkViewport = Hl.makeViewport true renderArea
             let mutable scissor = renderArea
             match env.State.ClipOpt with
@@ -134,10 +132,10 @@ module SlugText =
                 let scissorLogical =
                     VkRect2D
                         ((minScissor.X |> round |> int) + offset.X,
-                         (single renderAreaLogical.extent.height - minScissor.Y |> round |> int) + offset.Y,
+                         (single renderArea.extent.height - minScissor.Y |> round |> int) + offset.Y,
                          uint sizeScissor.X,
                          uint sizeScissor.Y)
-                scissor <- Hl.scaleRectForPixelDensity pixelDensity scissorLogical
+                scissor <- scissorLogical
                 scissor <- Hl.clipRect renderArea scissor
             | ValueNone -> ()
             if Hl.validateRect scissor then

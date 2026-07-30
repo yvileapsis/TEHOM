@@ -44,7 +44,7 @@ const vec3[SSAO_SAMPLES_MAX] SSAO_SAMPLING_DIRECTIONS = vec3[](
     vec3(0.430, -0.194, -0.881),    vec3(-0.568, -0.537, -0.623),   vec3(-0.598, 0.707, -0.377),    vec3(0.366, -0.804, 0.469),
     vec3(0.062, 0.981, -0.184),     vec3(0.211, -0.936, 0.281),     vec3(0.151, -0.988, -0.027),    vec3(-0.949, -0.169, 0.266));
 
-struct Eye
+struct EyeStruct
 {
     vec3 center;
     mat4 view;
@@ -54,7 +54,7 @@ struct Eye
     mat4 viewProjection;
 };
 
-struct Ssao
+struct SsaoStruct
 {
     ivec2 resolution;
     float intensity;
@@ -64,14 +64,14 @@ struct Ssao
     int sampleCount;
 };
 
-layout(set = 0, binding = 0) uniform EyeBlock { Eye eye; };
-layout(set = 0, binding = 1) uniform SsaoBlock { Ssao ssao; };
+layout(set = 0, binding = 0) uniform EyeUniform { EyeStruct eye; };
+layout(set = 0, binding = 1) uniform SsaoUniform { SsaoStruct ssao; };
 layout(set = 0, binding = 2) uniform texture2D depthTexture;
 layout(set = 0, binding = 3) uniform texture2D normalPlusTexture;
 
-layout(set = 1, binding = 0) uniform sampler colorSampler;
+layout(set = 1, binding = 0) uniform sampler unfilteredSampler;
 
-layout(location = 0) in vec2 texCoordsOut;
+layout(location = 0) in vec2 texCoords;
 
 layout(location = 0) out float frag;
 
@@ -102,14 +102,14 @@ vec4 depthToPosition(float depth, vec2 texCoords)
 void main()
 {
     // ensure fragment was written
-    float depth = texture(sampler2D(depthTexture, colorSampler), texCoordsOut).r;
+    float depth = texture(sampler2D(depthTexture, unfilteredSampler), texCoords).r;
     if (depth == 0.0) discard;
 
     // recover position from depth
-    vec4 position = depthToPosition(depth, texCoordsOut);
+    vec4 position = depthToPosition(depth, texCoords);
 
     // retrieve remaining data from geometry buffers
-    vec3 normal = normalize(texture(sampler2D(normalPlusTexture, colorSampler), texCoordsOut).xyz);
+    vec3 normal = normalize(texture(sampler2D(normalPlusTexture, unfilteredSampler), texCoords).xyz);
 
     // pre-compute resolution inverse
     vec2 ssaoResolutionInverse = vec2(1.0) / vec2(ssao.resolution);
@@ -149,7 +149,7 @@ void main()
         if (distanceScreen < ssao.distanceMax)
         {
             // ensure sample is actually written
-            float sampleDepth = texture(sampler2D(depthTexture, colorSampler), samplingPositionScreen).r;
+            float sampleDepth = texture(sampler2D(depthTexture, unfilteredSampler), samplingPositionScreen).r;
             if (sampleDepth != 0.0)
             {
                 // compute sample position in view space

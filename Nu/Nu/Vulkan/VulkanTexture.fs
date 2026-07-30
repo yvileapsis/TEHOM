@@ -47,7 +47,7 @@ type Sampler =
         info.addressModeV <- addressMode
         info.addressModeW <- addressMode
         if anisoFilter then
-            info.anisotropyEnable <- true
+            info.anisotropyEnable <- context.AnisotropySupported
             info.maxAnisotropy <- min context.MaxAnisotropy Constants.Render.TextureAnisotropyMax
         info.maxLod <- Vulkan.VK_LOD_CLAMP_NONE
         let mutable vkSampler = Unchecked.defaultof<VkSampler>
@@ -332,7 +332,7 @@ type TextureWrapper =
             | AttachmentColor _ -> Hl.recordTransitionLayout true mipLevels 0 textureType.Layers internalFormat.VkImageAspectFlags Undefined ColorAttachmentRead image commandBuffer
             | AttachmentDepth _ -> Hl.recordTransitionLayout true mipLevels 0 textureType.Layers internalFormat.VkImageAspectFlags Undefined DepthAttachmentRead image commandBuffer
             | _ -> ()
-            ConcurrentCommandQueue.executeTransient commandBuffer pool fence queue
+            ConcurrentCommandQueue.runTransient commandBuffer pool fence queue
 
         // fin
         { Image = image
@@ -423,7 +423,7 @@ type [<CustomEquality; NoComparison>] TextureInternal =
                 | AttachmentNone ->
 
                     // check if hardware supports mipmap generation; this is done here to prevent unused (i.e. blank) mip levels
-                    // TODO: DJL: check for VkFormatFeatureFlags.BlitSrc/Dst as well.
+                    // TODO: P0: check for VkFormatFeatureFlags.BlitSrc/Dst as well.
                     let mutable formatProperties = Unchecked.defaultof<VkFormatProperties>
                     InstanceApi.vkGetPhysicalDeviceFormatProperties (context.PhysicalDevice.VkPhysicalDevice, internalFormat.VkFormat, &formatProperties)
                     let mipGenSupport = formatProperties.optimalTilingFeatures &&& VkFormatFeatureFlags.SampledImageFilterLinear <> VkFormatFeatureFlags.None
@@ -454,7 +454,8 @@ type [<CustomEquality; NoComparison>] TextureInternal =
         textureInternal
 
     /// Create an empty TextureInternal.
-    /// NOTE: DJL: this is for fast empty texture creation. It is not preferred for TextureInternal.empty, which is created from Assets.Default.Image.
+    /// NOTE: this is for fast empty texture creation. It is not preferred for TextureInternal.empty, which is created
+    /// from Assets.Default.Image.
     static member createEmpty (context : VulkanContext) =
         TextureInternal.create
             MipmapNone AttachmentNone Texture2d VkImageUsageFlags.None
@@ -542,18 +543,21 @@ type [<CustomEquality; NoComparison>] TextureInternal =
             let uploadSize = ImageFormat.getImageSize metadata.TextureWidth metadata.TextureHeight textureInternal.InternalFormat_
             let stagingBuffer = VulkanBuffer.stageData uploadSize pixels context
             textureInternal.TextureWrapper_.StagingBuffers.Add stagingBuffer // TODO: P0: make sure this isn't a source of leaks and deal with it if it is!
-            Hl.recordBufferToImageCopy commandBuffer metadata.TextureWidth metadata.TextureHeight mipLevel layer stagingBuffer.VkBuffer textureInternal.Image
+            Hl.recordCopyBufferToImage commandBuffer metadata.TextureWidth metadata.TextureHeight mipLevel layer stagingBuffer.VkBuffer textureInternal.Image
         | AttachmentColor _
         | AttachmentDepth _ -> Log.warn "Upload not supported for attachment texture."
 
     /// Upload pixel data to TextureInternal. Can only be done once.
     static member upload metadata mipLevel layer pixels thread (textureInternal : TextureInternal) (context : VulkanContext) =
+
+        // upload pixel data
         let (queue, pool, fence) = TextureLoadThread.getResources thread context
         let commandBuffer = Hl.createTransientCommandBuffer pool
         TextureInternal.uploadAsync commandBuffer metadata mipLevel layer pixels textureInternal context
-        ConcurrentCommandQueue.executeTransient commandBuffer pool fence queue
-        
-        // destroy staging buffer (only) if it was created by async function in synchronous context to prevent massive waste of vram
+        ConcurrentCommandQueue.runTransient commandBuffer pool fence queue
+
+        // destroy staging buffer (only) when it was created by async function in synchronous context to prevent
+        // massive waste of vram
         if textureInternal.AttachmentMode_.IsAttachmentNone then
             let lastIndex = dec textureInternal.TextureWrapper_.StagingBuffers.Count
             VulkanBuffer.destroy textureInternal.TextureWrapper_.StagingBuffers[lastIndex] context
@@ -569,14 +573,13 @@ type [<CustomEquality; NoComparison>] TextureInternal =
         use arrayPin = new ArrayPin<_> (array)
         TextureInternal.upload metadata mipLevel layer arrayPin.NativeInt thread textureInternal context
 
-    /// Generate mipmaps in TextureInternal. Can only be done once, after upload to (only) mipLevel 0.
-    /// TODO: DJL: get this working with compressed textures.
+    /// Generate mipmaps in TextureInternal. Can be done only once, after upload to (only) mip level 0.
     static member generateMipmaps metadata layer thread (textureInternal : TextureInternal) (context : VulkanContext) =
         if textureInternal.MipLevels > 1 then
             let (queue, pool, fence) = TextureLoadThread.getResources thread context
             let commandBuffer = Hl.createTransientCommandBuffer pool
             Hl.recordGenerateMipmaps commandBuffer metadata.TextureWidth metadata.TextureHeight textureInternal.MipLevels layer textureInternal.Image
-            ConcurrentCommandQueue.executeTransient commandBuffer pool fence queue
+            ConcurrentCommandQueue.runTransient commandBuffer pool fence queue
         else Log.warn "Mipmap generation attempted on texture with only one mip level."
 
     /// Represents the empty texture used in Vulkan.
@@ -592,7 +595,6 @@ type [<CustomEquality; NoComparison>] TextureInternal =
 
     override this.GetHashCode () = 
         hash this.Id_
-
 
 /// A texture that can be loaded from another thread.
 type LazyTexture (filePath : string, minimalTexture : TextureInternal) =
@@ -698,7 +700,7 @@ type [<CustomEquality; NoComparison>] Texture =
     
     static member destroy texture context =
         match texture with
-        | EmptyTexture -> () // TODO: DJL: protect TextureInternal.empty from premature destruction.
+        | EmptyTexture -> ()
         | EagerTexture texture -> TextureInternal.destroy texture context
         | LazyTexture lazyTexture -> lazyTexture.Destroy context
 
@@ -748,7 +750,7 @@ type TextureDumpster =
         { Textures_ : Texture List }
 
     /// Destroy all textures from latest finished frame.
-    static member sweep dumpster context =
+    static member dump dumpster context =
         for texture in dumpster.Textures_ do
             Texture.destroy texture context
         dumpster.Textures_.Clear ()
@@ -763,7 +765,7 @@ type TextureDumpster =
 
     /// Destroy a TextureDumpster.
     static member destroy dumpster context =
-        TextureDumpster.sweep dumpster context
+        TextureDumpster.dump dumpster context
 
 /// Memoizes and optionally threads texture loads.
 type TextureClient (lazyTextureQueuesOpt : ConcurrentDictionary<_, _> option) =

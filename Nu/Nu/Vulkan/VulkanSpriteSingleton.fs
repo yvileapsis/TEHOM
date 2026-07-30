@@ -13,12 +13,12 @@ open Prime
 open Nu
 
 [<Struct; StructLayout (LayoutKind.Explicit)>]
-type SpriteVert =
+type SpriteVertStruct =
     [<FieldOffset(0)>] val mutable modelViewProjection : Matrix4x4
     [<FieldOffset(64)>] val mutable texCoords4 : Vector4
     
 [<Struct; StructLayout (LayoutKind.Explicit)>]
-type SpriteFrag =
+type SpriteFragStruct =
     [<FieldOffset(0)>] val mutable color : Vector4
 
 [<RequireQualifiedAccess>]
@@ -30,8 +30,8 @@ module SpriteSingleton =
     let createSpriteSingletonPipeline (context : VulkanContext) =
 
         // create sprite uniform buffers
-        let spriteVertUniform = VulkanBuffer.create Uniform sizeof<SpriteVert> context
-        let spriteFragUniform = VulkanBuffer.create Uniform sizeof<SpriteFrag> context
+        let spriteVertUniform = VulkanBuffer.create Uniform sizeof<SpriteVertStruct> context
+        let spriteFragUniform = VulkanBuffer.create Uniform sizeof<SpriteFragStruct> context
         
         // create sprite pipeline
         let pipeline =
@@ -102,9 +102,7 @@ module SpriteSingleton =
          context : VulkanContext) =
 
         // only draw if scissor (and therefore also viewport) is valid
-        let pixelDensity = Hl.getWindowPixelDensity context.Window
-        let renderAreaLogical = VkRect2D (viewport.Inner.Min.X, viewport.Outer.Max.Y - viewport.Inner.Max.Y, uint viewport.Inner.Size.X, uint viewport.Inner.Size.Y)
-        let mutable renderArea = Hl.scaleRectForPixelDensity pixelDensity renderAreaLogical
+        let mutable renderArea = VkRect2D (viewport.Inner.Min.X, viewport.Outer.Max.Y - viewport.Inner.Max.Y, uint viewport.Inner.Size.X, uint viewport.Inner.Size.Y)
         let mutable vkViewport = Hl.makeViewport true renderArea
         let mutable scissor = renderArea
         match clipOpt with
@@ -117,13 +115,12 @@ module SpriteSingleton =
             let sizeNdc = sizeClip * single viewport.DisplayScalar
             let sizeScissor = sizeNdc * 0.5f * viewport.Inner.Size.V2
             let offset = v2i viewport.Inner.Min.X (viewport.Outer.Max.Y - viewport.Inner.Max.Y)
-            let scissorLogical =
+            scissor <-
                 VkRect2D
                     ((minScissor.X |> round |> int) + offset.X,
-                        (single renderAreaLogical.extent.height - minScissor.Y |> round |> int) + offset.Y,
+                        (single renderArea.extent.height - minScissor.Y |> round |> int) + offset.Y,
                         uint sizeScissor.X,
                         uint sizeScissor.Y)
-            scissor <- Hl.scaleRectForPixelDensity pixelDensity scissorLogical
             scissor <- Hl.clipRect renderArea scissor
         | ValueNone -> ()
         if Hl.validateRect scissor then
@@ -173,8 +170,8 @@ module SpriteSingleton =
                 // specify uniforms
                 let color = color
                 let mutable uniformDescriptorSet = Pipeline.specifyDescriptorSet 0 pipeline.DrawIndex pipeline $ fun vkSet ->
-                    let spriteVert = SpriteVert (modelViewProjection = modelViewProjection, texCoords4 = v4 texCoords.Min.X texCoords.Min.Y texCoords.Size.X texCoords.Size.Y)
-                    let spriteFrag = SpriteFrag (color = color.V4)
+                    let spriteVert = SpriteVertStruct (modelViewProjection = modelViewProjection, texCoords4 = v4 texCoords.Min.X texCoords.Min.Y texCoords.Size.X texCoords.Size.Y)
+                    let spriteFrag = SpriteFragStruct (color = color.V4)
                     VulkanBuffer.uploadValue spriteVert spriteVertUniform context
                     VulkanBuffer.uploadValue spriteFrag spriteFragUniform context
                     Pipeline.writeDescriptorUniformBuffer 0 0 spriteVertUniform vkSet
@@ -224,4 +221,4 @@ module SpriteSingleton =
                 VulkanContext.advanceRenderCommandBuffer context
 
             // abort
-            | None -> Log.warnOnce "Cannot draw because VkPipeline does not exist."
+            | None -> Log.warnOnce ("Cannot draw " + getTypeName pipeline + " because VkPipeline does not exist.")

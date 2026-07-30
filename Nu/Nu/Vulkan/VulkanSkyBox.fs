@@ -13,7 +13,7 @@ open Prime
 open Nu
 
 [<Struct; StructLayout (LayoutKind.Explicit)>]
-type SkyBox =
+type SkyBoxStruct =
     [<FieldOffset(0)>] val mutable color : Vector3
     [<FieldOffset(12)>] val mutable brightness : single
 
@@ -30,8 +30,8 @@ module SkyBox =
     let createSkyBoxPipeline colorAttachmentFormat depthAttachmentFormat (context : VulkanContext) =
 
         // create uniform buffers
-        let eyeUniform = VulkanBuffer.create Uniform sizeof<Eye> context
-        let skyBoxPropertiesUniform = VulkanBuffer.create Uniform sizeof<SkyBox> context
+        let eyeUniform = VulkanBuffer.create Uniform sizeof<EyeStruct> context
+        let skyBoxPropertiesUniform = VulkanBuffer.create Uniform sizeof<SkyBoxStruct> context
 
         // create pipeline
         let pipeline =
@@ -73,9 +73,9 @@ module SkyBox =
         (cubeMap : Texture)
         (geometry : CubeMapGeometry)
         (sampler : Sampler)
-        (viewport : Viewport)
         (colorAttachment : Texture)
         (depthAttachment : Texture)
+        (resolution : Vector2i)
         (pipeline : SkyBoxPipeline)
         (context : VulkanContext) =
 
@@ -93,12 +93,12 @@ module SkyBox =
             let mutable uniformDescriptorSet = Pipeline.specifyDescriptorSet 0 pipeline.Pipeline.DrawIndex pipeline.Pipeline $ fun vkSet ->
                     
                 // specify eye
-                let eye = Eye (center = eyeCenter, view = view, viewInverse = viewInverse, projection = projection, projectionInverse = projectionInverse, viewProjection = viewProjection)
+                let eye = EyeStruct (center = eyeCenter, view = view, viewInverse = viewInverse, projection = projection, projectionInverse = projectionInverse, viewProjection = viewProjection)
                 VulkanBuffer.uploadValue eye pipeline.EyeUniform context
                 Pipeline.writeDescriptorUniformBuffer 0 0 pipeline.EyeUniform vkSet
 
                 // specify sky box
-                let skyBox = SkyBox (color = color.V3, brightness = brightness)
+                let skyBox = SkyBoxStruct (color = color.V3, brightness = brightness)
                 VulkanBuffer.uploadValue skyBox pipeline.SkyBoxPropertiesUniform context
                 Pipeline.writeDescriptorUniformBuffer 1 0 pipeline.SkyBoxPropertiesUniform vkSet
 
@@ -111,7 +111,7 @@ module SkyBox =
                 Pipeline.writeDescriptorSampler 0 0 sampler vkSet
 
             // set up render
-            let mutable renderArea = VkRect2D (0, 0, uint viewport.Bounds.Size.X, uint viewport.Bounds.Size.Y)
+            let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
             let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] (Some depthAttachment.ImageView) renderArea None
             DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
@@ -150,4 +150,4 @@ module SkyBox =
             VulkanContext.advanceRenderCommandBuffer context
 
         // abort
-        | None -> Log.warnOnce "Cannot draw because VkPipeline does not exist."
+        | None -> Log.warnOnce ("Cannot draw " + getTypeName pipeline + " because VkPipeline does not exist.")

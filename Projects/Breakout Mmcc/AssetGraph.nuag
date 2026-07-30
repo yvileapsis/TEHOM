@@ -15,7 +15,7 @@
    [Assets Assets/Gui [wav ogg mp3] [] [Audio]]
    [Assets Assets/Gui [cur] [] [Cursor]]
    [Assets Assets/Gui [nueffect nuscript csv] [] [Symbol]]
-   [Assets Assets/Gui [nuentity nugroup tsx tmx atlas nav nbrd glsl frag vert bin] [] []]]]
+   [Assets Assets/Gui [nuentity nugroup tsx tmx atlas nav nbrd frag vert bin] [] []]]]
  [Gameplay
   [[Assets Assets/Gameplay [bmp png psd ttf skel json] [PsdToPng] [Render2d]]
    [Assets Assets/Gameplay [jpg jpeg tga tif tiff dds ktx] [BlockCompress] [Render3d]]
@@ -23,4 +23,4 @@
    [Assets Assets/Gameplay [wav ogg mp3] [] [Audio]]
    [Assets Assets/Gameplay [cur] [] [Cursor]]
    [Assets Assets/Gameplay [nueffect nuscript csv] [] [Symbol]]
-   [Assets Assets/Gameplay [nuentity nugroup tsx tmx atlas nav nbrd glsl frag vert bin] [] []]]]]
+   [Assets Assets/Gameplay [nuentity nugroup tsx tmx atlas nav nbrd frag vert bin] [] []]]]]

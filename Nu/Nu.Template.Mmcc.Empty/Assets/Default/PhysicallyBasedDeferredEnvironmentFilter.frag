@@ -4,7 +4,7 @@ const float PI = 3.141592654;
 const float REFLECTION_LOD_MAX = 7.0;
 const int LIGHT_MAPS_MAX = 26;
 
-struct Eye
+struct EyeStruct
 {
     vec3 center;
     mat4 view;
@@ -14,17 +14,17 @@ struct Eye
     mat4 viewProjection;
 };
 
-struct LightMap
+struct LightMapStruct
 {
-    vec3 lightMapOrigins;
-    vec3 lightMapMins;
-    vec3 lightMapSizes;
-    vec3 lightMapAmbientColors;
-    float lightMapAmbientBrightnesses;
+    vec3 origin;
+    vec3 min;
+    vec3 size;
+    vec3 ambientColor;
+    float ambientBrightness;
 };
 
-layout(set = 0, binding = 0) uniform EyeBlock { Eye eye; };
-layout(set = 0, binding = 1) uniform LightMapsBlock { LightMap lightMaps[LIGHT_MAPS_MAX]; };
+layout(set = 0, binding = 0) uniform EyeUniform { EyeStruct eye; };
+layout(set = 0, binding = 1) uniform LightMapsUniform { LightMapStruct lightMaps[LIGHT_MAPS_MAX]; };
 layout(set = 0, binding = 2) uniform texture2D depthTexture;
 layout(set = 0, binding = 3) uniform texture2D materialTexture;
 layout(set = 0, binding = 4) uniform texture2D normalPlusTexture;
@@ -33,10 +33,10 @@ layout(set = 0, binding = 6) uniform texture2D lightMappingTexture;
 layout(set = 0, binding = 7) uniform textureCube environmentFilterMap;
 layout(set = 0, binding = 8) uniform textureCube environmentFilterMaps[LIGHT_MAPS_MAX];
 
-layout(set = 1, binding = 0) uniform sampler colorSampler;
-layout(set = 1, binding = 1) uniform sampler environmentFilterSampler;
+layout(set = 1, binding = 0) uniform sampler unfilteredSampler;
+layout(set = 1, binding = 1) uniform sampler filteredSampler;
 
-layout(location = 0) in vec2 texCoordsOut;
+layout(location = 0) in vec2 texCoords;
 
 layout(location = 0) out vec4 frag;
 
@@ -65,16 +65,16 @@ vec4 depthToPosition(float depth, vec2 texCoords)
     return eye.viewInverse * positionView;
 }
 
-vec3 parallaxCorrection(vec3 lightMapOrigin, vec3 lightMapMin, vec3 lightMapSize, vec3 positionWorld, vec3 normalWorld)
+vec3 parallaxCorrection(LightMapStruct lightMap, vec3 positionWorld, vec3 normalWorld)
 {
     vec3 directionWorld = positionWorld - eye.center;
     vec3 reflectionWorld = reflect(directionWorld, normalWorld);
-    vec3 firstPlaneIntersect = (lightMapMin + lightMapSize - positionWorld) / reflectionWorld;
-    vec3 secondPlaneIntersect = (lightMapMin - positionWorld) / reflectionWorld;
+    vec3 firstPlaneIntersect = (lightMap.min + lightMap.size - positionWorld) / reflectionWorld;
+    vec3 secondPlaneIntersect = (lightMap.min - positionWorld) / reflectionWorld;
     vec3 furthestPlane = max(firstPlaneIntersect, secondPlaneIntersect);
     float distance = min(min(furthestPlane.x, furthestPlane.y), furthestPlane.z);
     vec3 intersectPositionWorld = positionWorld + reflectionWorld * distance;
-    return intersectPositionWorld - lightMapOrigin;
+    return intersectPositionWorld - lightMap.origin;
 }
 
 vec3 computeEnvironmentFilter(vec4 position, vec3 normal, float roughness, vec4 lmData)
@@ -90,24 +90,24 @@ vec3 computeEnvironmentFilter(vec4 position, vec3 normal, float roughness, vec4 
     if (lm1 == -1 && lm2 == -1)
     {
         vec3 r = reflect(-v, normal);
-        environmentFilter = textureLod(samplerCube(environmentFilterMap, environmentFilterSampler), r, roughness * REFLECTION_LOD_MAX).rgb;
+        environmentFilter = textureLod(samplerCube(environmentFilterMap, filteredSampler), r, roughness * REFLECTION_LOD_MAX).rgb;
     }
     else if (lm2 == -1)
     {
         // compute blended environment filter
-        vec3 r1 = parallaxCorrection(lightMaps[lm1].lightMapOrigins, lightMaps[lm1].lightMapMins, lightMaps[lm1].lightMapSizes, position.xyz, normal);
+        vec3 r1 = parallaxCorrection(lightMaps[lm1], position.xyz, normal);
         vec3 r2 = reflect(-v, normal);
-        vec3 environmentFilter1 = textureLod(samplerCube(environmentFilterMaps[lm1], environmentFilterSampler), r1, roughness * REFLECTION_LOD_MAX).rgb;
-        vec3 environmentFilter2 = textureLod(samplerCube(environmentFilterMap, environmentFilterSampler), r2, roughness * REFLECTION_LOD_MAX).rgb;
+        vec3 environmentFilter1 = textureLod(samplerCube(environmentFilterMaps[lm1], filteredSampler), r1, roughness * REFLECTION_LOD_MAX).rgb;
+        vec3 environmentFilter2 = textureLod(samplerCube(environmentFilterMap, filteredSampler), r2, roughness * REFLECTION_LOD_MAX).rgb;
         environmentFilter = mix(environmentFilter1, environmentFilter2, lmRatio);
     }
     else
     {
         // compute blended environment filter
-        vec3 r1 = parallaxCorrection(lightMaps[lm1].lightMapOrigins, lightMaps[lm1].lightMapMins, lightMaps[lm1].lightMapSizes, position.xyz, normal);
-        vec3 r2 = parallaxCorrection(lightMaps[lm2].lightMapOrigins, lightMaps[lm2].lightMapMins, lightMaps[lm2].lightMapSizes, position.xyz, normal);
-        vec3 environmentFilter1 = textureLod(samplerCube(environmentFilterMaps[lm1], environmentFilterSampler), r1, roughness * REFLECTION_LOD_MAX).rgb;
-        vec3 environmentFilter2 = textureLod(samplerCube(environmentFilterMaps[lm2], environmentFilterSampler), r2, roughness * REFLECTION_LOD_MAX).rgb;
+        vec3 r1 = parallaxCorrection(lightMaps[lm1], position.xyz, normal);
+        vec3 r2 = parallaxCorrection(lightMaps[lm2], position.xyz, normal);
+        vec3 environmentFilter1 = textureLod(samplerCube(environmentFilterMaps[lm1], filteredSampler), r1, roughness * REFLECTION_LOD_MAX).rgb;
+        vec3 environmentFilter2 = textureLod(samplerCube(environmentFilterMaps[lm2], filteredSampler), r2, roughness * REFLECTION_LOD_MAX).rgb;
         environmentFilter = mix(environmentFilter1, environmentFilter2, lmRatio);
     }
 
@@ -118,22 +118,22 @@ vec3 computeEnvironmentFilter(vec4 position, vec3 normal, float roughness, vec4 
 void main()
 {
     // ensure fragment was written
-    float depth = texture(sampler2D(depthTexture, colorSampler), texCoordsOut).r;
+    float depth = texture(sampler2D(depthTexture, unfilteredSampler), texCoords).r;
     if (depth == 0.0) discard;
 
     // recover position from depth
-    vec4 position = depthToPosition(depth, texCoordsOut);
+    vec4 position = depthToPosition(depth, texCoords);
 
     // retrieve remaining data from geometry buffers
-    float roughness = texture(sampler2D(materialTexture, colorSampler), texCoordsOut).r;
-    vec3 normal = normalize(texture(sampler2D(normalPlusTexture, colorSampler), texCoordsOut).xyz);
-    vec4 clearCoatPlus = texture(sampler2D(clearCoatPlusTexture, colorSampler), texCoordsOut);
+    float roughness = texture(sampler2D(materialTexture, unfilteredSampler), texCoords).r;
+    vec3 normal = normalize(texture(sampler2D(normalPlusTexture, unfilteredSampler), texCoords).xyz);
+    vec4 clearCoatPlus = texture(sampler2D(clearCoatPlusTexture, unfilteredSampler), texCoords);
     float clearCoat = clearCoatPlus.r;
     float clearCoatRoughness = clearCoatPlus.g;
     vec3 clearCoatNormal = decodeOctahedral(clearCoatPlus.ba);
 
     // compute environment filters
-    vec4 lmData = texture(sampler2D(lightMappingTexture, colorSampler), texCoordsOut);
+    vec4 lmData = texture(sampler2D(lightMappingTexture, unfilteredSampler), texCoords);
     vec3 environmentFilter = computeEnvironmentFilter(position, normal, roughness, lmData);
     vec3 clearCoatEnvironmentFilter = computeEnvironmentFilter(position, clearCoatNormal, clearCoatRoughness, lmData);
     environmentFilter = mix(environmentFilter, clearCoatEnvironmentFilter, clearCoat);

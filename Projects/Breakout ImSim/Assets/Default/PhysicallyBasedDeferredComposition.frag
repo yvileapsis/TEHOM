@@ -1,6 +1,6 @@
 #version 450 core
 
-struct Eye
+struct EyeStruct
 {
     vec3 center;
     mat4 view;
@@ -10,7 +10,7 @@ struct Eye
     mat4 viewProjection;
 };
 
-struct Lighting
+struct LightingStruct
 {
     float lightCutoffMargin;
     vec3 lightAmbientColor;
@@ -60,15 +60,15 @@ struct Lighting
     float shadowNear;
 };
 
-layout(set = 0, binding = 0) uniform EyeBlock { Eye eye; };
-layout(set = 0, binding = 1) uniform LightingBlock { Lighting lighting; };
+layout(set = 0, binding = 0) uniform EyeUniform { EyeStruct eye; };
+layout(set = 0, binding = 1) uniform LightingUniform { LightingStruct lighting; };
 layout(set = 0, binding = 2) uniform texture2D depthTexture;
 layout(set = 0, binding = 3) uniform texture2D colorTexture;
 layout(set = 0, binding = 4) uniform texture2D fogAccumTexture;
 
-layout(set = 1, binding = 0) uniform sampler colorSampler;
+layout(set = 1, binding = 0) uniform sampler unfilteredSampler;
 
-layout(location = 0) in vec2 texCoordsOut;
+layout(location = 0) in vec2 texCoords;
 
 layout(location = 0) out vec4 frag;
 
@@ -83,15 +83,15 @@ vec4 depthToPosition(float depth, vec2 texCoords)
 void main()
 {
     // ensure fragment written
-    float depth = texture(sampler2D(depthTexture, colorSampler), texCoordsOut, 0).r;
+    float depth = texture(sampler2D(depthTexture, unfilteredSampler), texCoords, 0).r;
     if (depth == 0.0) discard;
 
     // apply volumetric fog
-    vec3 fogAccum = texture(sampler2D(fogAccumTexture, colorSampler), texCoordsOut, 0).xyz;
-    vec3 color = texture(sampler2D(colorTexture, colorSampler), texCoordsOut, 0).xyz + fogAccum;
+    vec3 fogAccum = texture(sampler2D(fogAccumTexture, unfilteredSampler), texCoords, 0).xyz;
+    vec3 color = texture(sampler2D(colorTexture, unfilteredSampler), texCoords, 0).xyz + fogAccum;
 
     // compute and apply distance fog when enabled
-    vec4 position = depthToPosition(depth, texCoordsOut);
+    vec4 position = depthToPosition(depth, texCoords);
     float distance = length(position.xyz - eye.center);
     if (lighting.fogEnabled == 1)
     {

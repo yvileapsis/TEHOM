@@ -164,20 +164,21 @@ module SdlDeps =
         | Some window ->
 
             // get a snapshot of whether screen was full
-            let mutable width, height = 0, 0
-            SDL3.SDL_GetWindowSize (window, &&width, &&height) |> ignore<SDLBool>
+            let mutable (windowWidth, windowHeight) = (0, 0)
+            SDL3.SDL_GetWindowSizeInPixels (window, &&windowWidth, &&windowHeight) |> ignore<SDLBool>
             let displayMode = getDisplayModeInternal window
-            let wasFullScreen = width = displayMode.w || height = displayMode.h
+            let wasFullScreen = windowWidth = displayMode.w || windowHeight = displayMode.h
 
             // change full screen status via flags
             SDL3.SDL_SetWindowFullscreen (window, fullScreen) |> ignore<SDLBool>
 
             // when changing from full screen, set window to windowed size and make sure its title bar is visible
             if wasFullScreen && not fullScreen then
-                let windowSizeWindowed = Constants.Render.DisplayVirtualResolution * 2
+                let pixelDensity = SDL3.SDL_GetWindowPixelDensity window
+                let sizeWindowed = Constants.Render.DisplayVirtualResolution * 2
                 SDL3.SDL_RestoreWindow window |> ignore<SDLBool>
-                SDL3.SDL_SetWindowSize (window, windowSizeWindowed.X, windowSizeWindowed.Y) |> ignore<SDLBool>
-                SDL3.SDL_SetWindowPosition (window, 100, 100) |> ignore<SDLBool>
+                SDL3.SDL_SetWindowSize (window, int (single sizeWindowed.X / pixelDensity), int (single sizeWindowed.Y / pixelDensity)) |> ignore
+                SDL3.SDL_SetWindowPosition (window, 100, 100) |> ignore<SDLBool> // NOTE: pretty arbitrary numbers here...
 
         | None -> ()
         sdlDeps
@@ -273,7 +274,7 @@ module SdlDeps =
                 (fun () ->
 
                     // init sdl callback for app backgrounding on mobile devices
-                    // NOTE: DJL: this happens before SDL window creation to ensure no backgrounding events are missed.
+                    // NOTE: this happens before SDL window creation to ensure no backgrounding events are missed.
                     SDL3.SDL_SetEventFilter (Vulkan.Hl.backgroundingCallback (), 0n) // TODO: P0: pass this in as a parameter to reduce critical coupling.
                     
                     // attempt to create window

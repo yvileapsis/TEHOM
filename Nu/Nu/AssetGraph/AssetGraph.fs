@@ -118,7 +118,7 @@ module AssetGraph =
   [Assets Assets/Default [wav ogg mp3] [] [Audio]]
   [Assets Assets/Default [cur] [] [Cursor]]
   [Assets Assets/Default [nueffect nuscript csv] [] [Symbol]]
-  [Assets Assets/Default [nuentity nugroup tsx tmx atlas nav nbrd glsl frag vert bin] [] []]]]]"""
+  [Assets Assets/Default [nuentity nugroup tsx tmx atlas nav nbrd frag vert bin] [] []]]]]"""
 
     let private getAssetExtension2 blockCompression rawAssetExtension refinement =
         match refinement with
@@ -431,7 +431,7 @@ module AssetGraph =
                             let mipmapLevels = inc mipmapTail.Length
                             use stream = File.OpenWrite refinementFilePath
                             use writer = new BinaryWriter (stream)
-                            Hl.writeKtxHeader resolution mipmapLevels false writer                // ktx header
+                            Hl.writeKtxHeader resolution mipmapLevels false writer                      // ktx header
                             writer.Write (uint mipmapHead.Length)                                       // mip head size
                             writer.Write mipmapHead                                                     // mip head data
                             let padding = Array.zeroCreate<byte> ((4 - (mipmapHead.Length % 4)) % 4)    // mip head padding
@@ -462,16 +462,16 @@ module AssetGraph =
                             let mipmapLevels = inc mipmapTail.Length
                             use stream = File.OpenWrite refinementFilePath
                             use writer = new BinaryWriter (stream)
-                            Hl.writeKtxHeader resolution mipmapLevels true writer                 // mip header
-                            writer.Write (uint mipmapHead.Length)                                       // mip head size
-                            writer.Write mipmapHead                                                     // mip head data
-                            let padding = 3 - (mipmapHead.Length + 3) % 4 |> Array.zeroCreate<byte>     // mip head padding
-                            writer.Write padding                                                        //
-                            for (_, mipmap) in mipmapTail do                                            // mip tail
-                                writer.Write (uint mipmap.Length)                                       // mip tail N height
-                                writer.Write mipmap                                                     // mip tail N data
-                                let padding = 3 - (mipmap.Length + 3) % 4 |> Array.zeroCreate<byte>     // mip tail N padding
-                                writer.Write padding                                                    //
+                            Hl.writeKtxHeader resolution mipmapLevels true writer                   // mip header
+                            writer.Write (uint mipmapHead.Length)                                   // mip head size
+                            writer.Write mipmapHead                                                 // mip head data
+                            let padding = 3 - (mipmapHead.Length + 3) % 4 |> Array.zeroCreate<byte> // mip head padding
+                            writer.Write padding                                                    //
+                            for (_, mipmap) in mipmapTail do                                        // mip tail
+                                writer.Write (uint mipmap.Length)                                   // mip tail N height
+                                writer.Write mipmap                                                 // mip tail N data
+                                let padding = 3 - (mipmap.Length + 3) % 4 |> Array.zeroCreate<byte> // mip tail N padding
+                                writer.Write padding                                                //
                         | None -> Log.error ("Failed to " + scstring refinement + " refine asset '" + intermediateFilePath + "'.")
                     | None -> Log.error ("Failed to " + scstring refinement + " refine asset '" + intermediateFilePath + "'.")
 
@@ -498,16 +498,16 @@ module AssetGraph =
                             let mipmapLevels = inc mipmapTail.Length
                             use stream = File.OpenWrite refinementFilePath
                             use writer = new BinaryWriter (stream)
-                            Hl.writeKtxHeader resolution mipmapLevels true writer                 // mip header
-                            writer.Write (uint mipmapHead.Length)                                       // mip head size
-                            writer.Write mipmapHead                                                     // mip head data
-                            let padding = 3 - (mipmapHead.Length + 3) % 4 |> Array.zeroCreate<byte>     // mip head padding
-                            writer.Write padding                                                        //
-                            for (_, mipmap) in mipmapTail do                                            // mip tail
-                                writer.Write (uint mipmap.Length)                                       // mip tail N height
-                                writer.Write mipmap                                                     // mip tail N data
-                                let padding = 3 - (mipmap.Length + 3) % 4 |> Array.zeroCreate<byte>     // mip tail N padding
-                                writer.Write padding                                                    //
+                            Hl.writeKtxHeader resolution mipmapLevels true writer                   // mip header
+                            writer.Write (uint mipmapHead.Length)                                   // mip head size
+                            writer.Write mipmapHead                                                 // mip head data
+                            let padding = 3 - (mipmapHead.Length + 3) % 4 |> Array.zeroCreate<byte> // mip head padding
+                            writer.Write padding                                                    //
+                            for (_, mipmap) in mipmapTail do                                        // mip tail
+                                writer.Write (uint mipmap.Length)                                   // mip tail N height
+                                writer.Write mipmap                                                 // mip tail N data
+                                let padding = 3 - (mipmap.Length + 3) % 4 |> Array.zeroCreate<byte> // mip tail N padding
+                                writer.Write padding                                                //
                         | None -> Log.error ("Failed to " + scstring refinement + " refine asset '" + intermediateFilePath + "'.")
                     | None -> Log.error ("Failed to " + scstring refinement + " refine asset '" + intermediateFilePath + "'.")
 
