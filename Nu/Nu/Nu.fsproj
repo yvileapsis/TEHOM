@@ -79,6 +79,7 @@
         <Compile Include="EventGraph\EventGraph.fs" />
         <Compile Include="Metadata\Metadata.fs" />
         <Compile Include="Metadata\HeightMap.fs" />
+        <Compile Include="Metadata\VoxelModel.fs" />
         <Compile Include="Physics\PhysicsPrelude.fs" />
         <Compile Include="Physics\PhysicsEngine.fs" />
         <Compile Include="Physics\AetherPhysicsEngine.fs" />
@@ -90,6 +91,8 @@
         <Compile Include="Render\SlugSvg.fs" />
         <Compile Include="Render\SlugFont.fs" />
         <Compile Include="Render\RendererPrelude.fs" />
+        <Compile Include="Vulkan\Vulkan.Voxel.fs" />
+        <Compile Include="Vulkan\Vulkan.Portal.fs" />
         <Compile Include="Vulkan\Vulkan.MsdfText.fs" />
         <Compile Include="Vulkan\Vulkan.SlugText.fs" />
         <Compile Include="Vulkan\Vulkan.SlugShape.fs" />

@@ -421,7 +421,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                 let (lastWriteTime, asset, renderAsset) = assetEntry.Value
                 let lastWriteTime' =
                     try DateTimeOffset (File.GetLastWriteTime asset.FilePath)
-                    with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue.DateTime
+                    with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue
                 if lastWriteTime < lastWriteTime'
                 then assetsToFree.Add (asset.FilePath, renderAsset)
                 else assetsToKeep.Add (assetName, (lastWriteTime, asset, renderAsset))
@@ -457,7 +457,7 @@ type [<ReferenceEquality>] VulkanRenderer2d =
                 | Some renderAsset ->
                     let lastWriteTime =
                         try DateTimeOffset (File.GetLastWriteTime asset.FilePath)
-                        with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue.DateTime
+                        with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue
                     assetsLoaded[asset.AssetTag.AssetName] <- (lastWriteTime, asset, renderAsset)
                 | None -> ()
 

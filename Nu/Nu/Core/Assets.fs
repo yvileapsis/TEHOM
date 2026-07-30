@@ -98,6 +98,7 @@ module Default =
     let [<Literal>] TerrainLayer1BlendName = "TerrainLayer1Blend"
     let [<Literal>] TerrainTintName = "TerrainTint"
     let [<Literal>] StaticModelName = "StaticModel"
+    let [<Literal>] VoxelModelName = "VoxelModel"
     let [<Literal>] BallModelName = "BallModel"
     let [<Literal>] HighlightModelName = "HighlightModel"
     let [<Literal>] LightbulbModelName = "LightbulbModel"

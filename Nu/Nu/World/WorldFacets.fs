@@ -3764,6 +3764,41 @@ type StaticModelFacet () =
         | ValueNone -> [|Miss|]
 
 [<AutoOpen>]
+module VoxelFacetExtensions =
+    type Entity with
+        member this.GetVoxelModel world : VoxelModel AssetTag = this.Get (nameof this.VoxelModel) world
+        member this.SetVoxelModel (value : VoxelModel AssetTag) world = this.Set (nameof this.VoxelModel) value world
+        member this.VoxelModel = lens (nameof this.VoxelModel) this this.GetVoxelModel this.SetVoxelModel
+
+/// Augments an entity with a render-only voxel model.
+type VoxelFacet () =
+    inherit Facet (false, false, false)
+
+    static member Properties =
+        [define Entity.Size v3One
+         define Entity.Presence Omnipresent
+         define Entity.Static true
+         define Entity.AlwaysRender true
+         define Entity.MaterialProperties MaterialProperties.empty
+         define Entity.VoxelModel Assets.Default.VoxelModel]
+
+    override this.Render (renderPass, entity, world) =
+        let mutable transform = entity.GetTransform world
+        let castShadow = (World.getRenderer3dConfig world).LightShadowingEnabled && transform.CastShadow
+        if transform.Visible && (not renderPass.IsShadowPass || castShadow) then
+            let affineMatrix = transform.AffineMatrix
+            let presence = transform.Presence
+            let properties = entity.GetMaterialProperties world
+            let voxelModel = entity.GetVoxelModel world
+            World.renderVoxelModelFast (&affineMatrix, castShadow, presence, &properties, voxelModel, renderPass, world)
+
+    override this.GetAttributesInferred (entity, world) =
+        AttributesInferred.important (entity.GetSize world) v3Zero
+
+    override this.RayCast (ray, entity, world) =
+        [|Intersection.ofNullable (ray.Intersects (entity.GetBounds world))|]
+
+[<AutoOpen>]
 module StaticModelSurfaceFacetExtensions =
     type Entity with
         member this.GetSurfaceIndex world : int = this.Get (nameof this.SurfaceIndex) world

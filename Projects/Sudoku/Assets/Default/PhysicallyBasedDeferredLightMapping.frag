@@ -4,7 +4,7 @@ const float PI = 3.141592654;
 const float FLOAT_MAX = 3.402823466e+38;
 const int LIGHT_MAPS_MAX = 26;
 
-struct Eye
+struct EyeStruct
 {
     vec3 center;
     mat4 view;
@@ -14,31 +14,31 @@ struct Eye
     mat4 viewProjection;
 };
 
-struct LightMap
+struct LightMapStruct
 {
-    vec3 lightMapOrigins;
-    vec3 lightMapMins;
-    vec3 lightMapSizes;
-    vec3 lightMapAmbientColors;
-    float lightMapAmbientBrightnesses;
+    vec3 origin;
+    vec3 min;
+    vec3 size;
+    vec3 ambientColor;
+    float ambientBrightness;
 };
 
-struct LightsGeneral
+struct LightsGeneralStruct
 {
     int lightMapsCount;
     float lightMapSingletonBlendMargin;
     int lightsCount;
 };
 
-layout(set = 0, binding = 0) uniform EyeBlock { Eye eye; };
-layout(set = 0, binding = 1) uniform LightMapsBlock { LightMap lightMaps[LIGHT_MAPS_MAX]; };
-layout(set = 0, binding = 2) uniform LightsGeneralBlock { LightsGeneral lightsGeneral; };
+layout(set = 0, binding = 0) uniform EyeUniform { EyeStruct eye; };
+layout(set = 0, binding = 1) uniform LightMapsUniform { LightMapStruct lightMaps[LIGHT_MAPS_MAX]; };
+layout(set = 0, binding = 2) uniform LightsGeneralUniform { LightsGeneralStruct lightsGeneral; };
 layout(set = 0, binding = 3) uniform texture2D depthTexture;
 layout(set = 0, binding = 4) uniform texture2D normalPlusTexture;
 
-layout(set = 1, binding = 0) uniform sampler colorSampler;
+layout(set = 1, binding = 0) uniform sampler unfilteredSampler;
 
-layout(location = 0) in vec2 texCoordsOut;
+layout(location = 0) in vec2 texCoords;
 
 layout(location = 0) out vec4 frag;
 
@@ -102,14 +102,14 @@ float computeDepthRatio(vec3 minA, vec3 sizeA, vec3 minB, vec3 sizeB, vec3 posit
 void main()
 {
     // ensure fragment was written
-    float depth = texture(sampler2D(depthTexture, colorSampler), texCoordsOut).r;
+    float depth = texture(sampler2D(depthTexture, unfilteredSampler), texCoords).r;
     if (depth == 0.0) discard;
 
     // recover position from depth
-    vec4 position = depthToPosition(depth, texCoordsOut);
+    vec4 position = depthToPosition(depth, texCoords);
 
     // retrieve remaining data from geometry buffers
-    vec4 normalPlus = texture(sampler2D(normalPlusTexture, colorSampler), texCoordsOut);
+    vec4 normalPlus = texture(sampler2D(normalPlusTexture, unfilteredSampler), texCoords);
     vec3 normal = normalize(normalPlus.xyz);
     bool ignoreLightMaps = normalPlus.w == 1.0;
 
@@ -122,9 +122,10 @@ void main()
     {
         for (int i = 0; i < lightsGeneral.lightMapsCount; ++i)
         {
-            if (inBounds(position.xyz, lightMaps[i].lightMapMins, lightMaps[i].lightMapSizes))
+            LightMapStruct lightMap = lightMaps[i];
+            if (inBounds(position.xyz, lightMap.min, lightMap.size))
             {
-                vec3 delta = lightMaps[i].lightMapOrigins - position.xyz;
+                vec3 delta = lightMap.origin - position.xyz;
                 float distanceSquared = dot(delta, delta);
                 if (distanceSquared < lm1DistanceSquared)
                 {
@@ -146,17 +147,17 @@ void main()
     float ratio = 0.0;
     if (lm1 != -1 && lm2 == -1)
     {
-        vec3 min1 = lightMaps[lm1].lightMapMins;
-        vec3 size1 = lightMaps[lm1].lightMapSizes;
+        vec3 min1 = lightMaps[lm1].min;
+        vec3 size1 = lightMaps[lm1].size;
         float distance = distanceToOutside(position.xyz, min1, size1);
         ratio = 1.0 - smoothstep(0.0, lightsGeneral.lightMapSingletonBlendMargin, distance);
     }
     else if (lm1 != -1 && lm2 != -1)
     {
-        vec3 min1 = lightMaps[lm1].lightMapMins;
-        vec3 size1 = lightMaps[lm1].lightMapSizes;
-        vec3 min2 = lightMaps[lm2].lightMapMins;
-        vec3 size2 = lightMaps[lm2].lightMapSizes;
+        vec3 min1 = lightMaps[lm1].min;
+        vec3 size1 = lightMaps[lm1].size;
+        vec3 min2 = lightMaps[lm2].min;
+        vec3 size2 = lightMaps[lm2].size;
         if (contains(min1, size1, min2, size2))
         {
             lm2 = -1;

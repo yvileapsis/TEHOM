@@ -119,6 +119,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
           CharacterCollisions : Dictionary<CharacterVirtual, Dictionary<SubShapeID, Vector3>>
           CharacterUserData : Dictionary<CharacterID, CharacterUserData>
           Characters : Dictionary<BodyId, CharacterVirtual>
+          RetainedShapes : Dictionary<BodyId, ResizeArray<Shape>>
           VehicleConstraints : Dictionary<BodyId, VehicleConstraint>
           mutable BodyUnoptimizedCreationCount : int
           BodyContactLock : obj
@@ -159,6 +160,30 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             if not (BodyShapeProperties.validateUtilization3d properties) then
                 Log.warnOnce "Invalid utilization of BodyShape.PropertiesOpt in JoltPhysicsEngine. Only BodyShapeProperties.BodyShapeIndex can be utilized in the context of Jolt physics."
         | None -> ()
+
+    static member private getBodyShapeTransform (transformOpt : Affine option) =
+        match transformOpt with
+        | Some transform -> struct (transform.Translation, transform.Rotation)
+        | None -> struct (v3Zero, quatIdentity)
+
+    static member private computeShapeScale (bodyProperties : BodyProperties) (transformOpt : Affine option) =
+        let scale =
+            match transformOpt with
+            | Some transform -> bodyProperties.Scale * transform.Scale
+            | None -> bodyProperties.Scale
+        JoltPhysicsEngine.sanitizeScale scale
+
+    static member private addSubShapeSettings (scShapeSettings : StaticCompoundShapeSettings) (retainedShapes : ResizeArray<Shape>) (center : Vector3) (rotation : Quaternion) (shapeScale : Vector3) (shapeSettings : ShapeSettings) (bodyShapeId : int) =
+        let mutable center = center
+        let mutable rotation = rotation
+        let shape =
+            if shapeScale <> v3One then
+                let mutable shapeScale = shapeScale
+                use scaledShapeSettings = new ScaledShapeSettings (shapeSettings, &shapeScale)
+                scaledShapeSettings.Create ()
+            else shapeSettings.Create ()
+        scShapeSettings.AddShape (&center, &rotation, shape, uint bodyShapeId)
+        retainedShapes.Add shape
 
     static member private handleBodyPenetration (bodyId : BodyId) (body2Id : BodyId) (contactNormal : Vector3) physicsEngine =
 
@@ -227,19 +252,19 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
         | BoxShape boxShape ->
             let extent = boxShape.Size |> JoltPhysicsEngine.sanitizeExtent
             let halfExtent = extent * 0.5f
-            let shapeSettings = new BoxShapeSettings (&halfExtent)
+            use shapeSettings = new BoxShapeSettings (&halfExtent)
             let shape = new BoxShape (shapeSettings)
             Some (shape :> ConvexShape, boxShape.TransformOpt)
         | SphereShape sphereShape ->
             let radius = sphereShape.Radius |> JoltPhysicsEngine.sanitizeRadius
-            let shapeSettings = new SphereShapeSettings (radius)
+            use shapeSettings = new SphereShapeSettings (radius)
             let shape = new SphereShape (shapeSettings)
             Some (shape :> ConvexShape, sphereShape.TransformOpt)
         | CapsuleShape capsuleShape ->
             let height = capsuleShape.Height |> JoltPhysicsEngine.sanitizeHeight
             let halfHeight = height * 0.5f
             let radius = capsuleShape.Radius |> JoltPhysicsEngine.sanitizeRadius
-            let shapeSettings = new CapsuleShapeSettings (halfHeight, radius)
+            use shapeSettings = new CapsuleShapeSettings (halfHeight, radius)
             let shape = new CapsuleShape (shapeSettings)
             Some (shape :> ConvexShape, capsuleShape.TransformOpt)
         | BoxRoundedShape boxRoundedShape ->
@@ -263,25 +288,14 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
         | BodyShapes _ ->
             None // TODO: implement?
 
-    static member private attachBoxShape (bodyProperties : BodyProperties) (boxShape : Nu.BoxShape) (scShapeSettings : StaticCompoundShapeSettings) masses =
+    static member private attachBoxShape (bodyProperties : BodyProperties) (boxShape : Nu.BoxShape) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses =
         let extent = boxShape.Size |> JoltPhysicsEngine.sanitizeExtent
         let halfExtent = extent * 0.5f
-        let shapeSettings = new BoxShapeSettings (&halfExtent)
-        let struct (center, rotation) =
-            match boxShape.TransformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let shapeSettings =
-            match boxShape.TransformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale)
-            | None -> shapeSettings
+        use shapeSettings = new BoxShapeSettings (&halfExtent)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform boxShape.TransformOpt
+        let shapeScale = JoltPhysicsEngine.computeShapeScale bodyProperties boxShape.TransformOpt
         let bodyShapeId = match boxShape.PropertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings retainedShapes center rotation shapeScale shapeSettings bodyShapeId
         let mass =
             match bodyProperties.Substance with
             | Density density ->
@@ -290,24 +304,13 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             | Mass mass -> mass
         mass :: masses
 
-    static member private attachSphereShape (bodyProperties : BodyProperties) (sphereShape : Nu.SphereShape) (scShapeSettings : StaticCompoundShapeSettings) masses =
+    static member private attachSphereShape (bodyProperties : BodyProperties) (sphereShape : Nu.SphereShape) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses =
         let radius = sphereShape.Radius |> JoltPhysicsEngine.sanitizeRadius
-        let shapeSettings = new SphereShapeSettings (radius)
-        let struct (center, rotation) =
-            match sphereShape.TransformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let shapeSettings =
-            match sphereShape.TransformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale)
-            | None -> shapeSettings
+        use shapeSettings = new SphereShapeSettings (radius)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform sphereShape.TransformOpt
+        let shapeScale = JoltPhysicsEngine.computeShapeScale bodyProperties sphereShape.TransformOpt
         let bodyShapeId = match sphereShape.PropertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings retainedShapes center rotation shapeScale shapeSettings bodyShapeId
         let mass =
             match bodyProperties.Substance with
             | Density density ->
@@ -316,26 +319,15 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             | Mass mass -> mass
         mass :: masses
 
-    static member private attachCapsuleShape (bodyProperties : BodyProperties) (capsuleShape : Nu.CapsuleShape) (scShapeSettings : StaticCompoundShapeSettings) masses =
+    static member private attachCapsuleShape (bodyProperties : BodyProperties) (capsuleShape : Nu.CapsuleShape) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses =
         let height = capsuleShape.Height |> JoltPhysicsEngine.sanitizeHeight
         let halfHeight = height * 0.5f
         let radius = capsuleShape.Radius |> JoltPhysicsEngine.sanitizeRadius
-        let shapeSettings = new CapsuleShapeSettings (halfHeight, radius)
-        let struct (center, rotation) =
-            match capsuleShape.TransformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let shapeSettings =
-            match capsuleShape.TransformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                new ScaledShapeSettings (shapeSettings, &shapeScale)
-            | None -> shapeSettings
+        use shapeSettings = new CapsuleShapeSettings (halfHeight, radius)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform capsuleShape.TransformOpt
+        let shapeScale = JoltPhysicsEngine.computeShapeScale bodyProperties capsuleShape.TransformOpt
         let bodyShapeId = match capsuleShape.PropertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings retainedShapes center rotation shapeScale shapeSettings bodyShapeId
         let mass =
             match bodyProperties.Substance with
             | Density density ->
@@ -344,22 +336,22 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             | Mass mass -> mass
         mass :: masses
 
-    static member private attachBoxRoundedShape (bodyProperties : BodyProperties) (boxRoundedShape : Nu.BoxRoundedShape) (scShapeSettings : StaticCompoundShapeSettings) masses =
+    static member private attachBoxRoundedShape (bodyProperties : BodyProperties) (boxRoundedShape : Nu.BoxRoundedShape) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses =
         Log.info "Rounded box not yet implemented via JoltPhysicsEngine; creating a normal box instead."
         let boxShape = { Size = boxRoundedShape.Size; TransformOpt = boxRoundedShape.TransformOpt; PropertiesOpt = boxRoundedShape.PropertiesOpt }
-        JoltPhysicsEngine.attachBoxShape bodyProperties boxShape scShapeSettings masses
+        JoltPhysicsEngine.attachBoxShape bodyProperties boxShape scShapeSettings retainedShapes masses
 
-    static member private attachEdgeShape (bodyProperties : BodyProperties) (edgeShape : Nu.EdgeShape) (scShapeSettings : StaticCompoundShapeSettings) masses =
+    static member private attachEdgeShape (bodyProperties : BodyProperties) (edgeShape : Nu.EdgeShape) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses =
         // TODO: implement this.
         Log.warnOnce "Jolt edge shapes are currently unsupported. Degrading to a convex points shape."
-        JoltPhysicsEngine.attachPointsShape bodyProperties { Points = [|edgeShape.Start; edgeShape.Stop|]; Profile = Convex; TransformOpt = edgeShape.TransformOpt; PropertiesOpt = edgeShape.PropertiesOpt } scShapeSettings masses
+        JoltPhysicsEngine.attachPointsShape bodyProperties { Points = [|edgeShape.Start; edgeShape.Stop|]; Profile = Convex; TransformOpt = edgeShape.TransformOpt; PropertiesOpt = edgeShape.PropertiesOpt } scShapeSettings retainedShapes masses
 
-    static member private attachContourShape (bodyProperties : BodyProperties) (contourShape : Nu.ContourShape) (scShapeSettings : StaticCompoundShapeSettings) masses =
+    static member private attachContourShape (bodyProperties : BodyProperties) (contourShape : Nu.ContourShape) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses =
         // TODO: implement this. Untested AI attempt at implementation: https://github.com/bryanedds/Nu/pull/1113/commits/082ff7db1b05d691ebc6776ad32dd8965e7bbe4d#diff-7be7db6f2992557124644202960c26adb7192d0fb54ccacb3dcfc7b8d1a49deb
         Log.warnOnce "Jolt contour shapes are currently unsupported. Degrading to a convex points shape."
-        JoltPhysicsEngine.attachPointsShape bodyProperties { Points = contourShape.Links; Profile = Convex; TransformOpt = contourShape.TransformOpt; PropertiesOpt = contourShape.PropertiesOpt } scShapeSettings masses
+        JoltPhysicsEngine.attachPointsShape bodyProperties { Points = contourShape.Links; Profile = Convex; TransformOpt = contourShape.TransformOpt; PropertiesOpt = contourShape.PropertiesOpt } scShapeSettings retainedShapes masses
 
-    static member private attachBodyConvexHullShape (bodyProperties : BodyProperties) (points : Vector3 array) (transformOpt : Affine option) (propertiesOpt : BodyShapeProperties option) (scShapeSettings : StaticCompoundShapeSettings) masses (physicsEngine : JoltPhysicsEngine) =
+    static member private attachBodyConvexHullShape (bodyProperties : BodyProperties) (points : Vector3 array) (transformOpt : Affine option) (propertiesOpt : BodyShapeProperties option) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses (physicsEngine : JoltPhysicsEngine) =
         let unscaledPointsKey = UnscaledPointsKey.make points
         let (optimized, unscaledPoints) =
             match physicsEngine.UnscaledPointsCache.TryGetValue unscaledPointsKey with
@@ -367,7 +359,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             | (false, _) -> (false, points)
         let unscaledPoints =
             if not optimized then
-                let hull = new BulletSharp.ConvexHullShape (unscaledPoints) // TODO: P1: attempt to find a way to remove dependency on Bullet here.
+                use hull = new BulletSharp.ConvexHullShape (unscaledPoints) // TODO: P1: attempt to find a way to remove dependency on Bullet here.
                 hull.OptimizeConvexHull ()
                 let unscaledPoints =
                     match hull.UnscaledPoints with
@@ -376,22 +368,11 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
                 physicsEngine.UnscaledPointsCache.Add (unscaledPointsKey, unscaledPoints)
                 unscaledPoints
             else unscaledPoints
-        let shapeSettings = new ConvexHullShapeSettings (unscaledPoints)
-        let struct (center, rotation) =
-            match transformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let (scale, shapeSettings) =
-            match transformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, (new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings))
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, new ScaledShapeSettings (shapeSettings, &shapeScale))
-            | None -> (v3One, shapeSettings)
+        use shapeSettings = new ConvexHullShapeSettings (unscaledPoints)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform transformOpt
+        let scale = JoltPhysicsEngine.computeShapeScale bodyProperties transformOpt
         let bodyShapeId = match propertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings retainedShapes center rotation scale shapeSettings bodyShapeId
         // NOTE: we approximate volume with the volume of a bounding box.
         // TODO: use a more accurate volume calculation.
         let box = box3 v3Zero ((Box3.Enclose points).Size * scale)
@@ -403,29 +384,18 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             | Mass mass -> mass
         mass :: masses
 
-    static member private attachBodyBvhTriangles (bodyProperties : BodyProperties) (vertices : Vector3 array) (transformOpt : Affine option) (propertiesOpt : BodyShapeProperties option) (scShapeSettings : StaticCompoundShapeSettings) masses =
+    static member private attachBodyBvhTriangles (bodyProperties : BodyProperties) (vertices : Vector3 array) (transformOpt : Affine option) (propertiesOpt : BodyShapeProperties option) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses =
         let triangles =
             vertices
             |> Seq.chunkBySize 3
             |> Seq.map (fun t -> Triangle (&t[0], &t[1], &t[2]))
             |> Array.ofSeq
-        let shapeSettings = new MeshShapeSettings (triangles)
+        use shapeSettings = new MeshShapeSettings (triangles)
         shapeSettings.Sanitize ()
-        let struct (center, rotation) =
-            match transformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let (scale, shapeSettings) =
-            match transformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, (new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings))
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, new ScaledShapeSettings (shapeSettings, &shapeScale))
-            | None -> (v3One, shapeSettings)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform transformOpt
+        let scale = JoltPhysicsEngine.computeShapeScale bodyProperties transformOpt
         let bodyShapeId = match propertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings retainedShapes center rotation scale shapeSettings bodyShapeId
         // NOTE: we approximate volume with the volume of a bounding box.
         // TODO: use a more accurate volume calculation.
         let box = box3 v3Zero ((Box3.Enclose vertices).Size * scale)
@@ -437,24 +407,13 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             | Mass mass -> mass
         mass :: masses
 
-    static member private attachBodyBoundsShape (bodyProperties : BodyProperties) (points : Vector3 array) (transformOpt : Affine option) (propertiesOpt : BodyShapeProperties option) (scShapeSettings : StaticCompoundShapeSettings) masses =
+    static member private attachBodyBoundsShape (bodyProperties : BodyProperties) (points : Vector3 array) (transformOpt : Affine option) (propertiesOpt : BodyShapeProperties option) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses =
         let bounds = Box3.Enclose points
-        let shapeSettings = new ConvexHullShapeSettings (bounds.Corners)
-        let struct (center, rotation) =
-            match transformOpt with
-            | Some transform -> struct (transform.Translation, transform.Rotation)
-            | None -> (v3Zero, quatIdentity)
-        let (scale, shapeSettings) =
-            match transformOpt with
-            | Some transform ->
-                let shapeScale = bodyProperties.Scale * transform.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, (new ScaledShapeSettings (shapeSettings, &shapeScale) : ShapeSettings))
-            | None when bodyProperties.Scale <> v3One ->
-                let shapeScale = bodyProperties.Scale |> JoltPhysicsEngine.sanitizeScale
-                (shapeScale, new ScaledShapeSettings (shapeSettings, &shapeScale))
-            | None -> (v3One, shapeSettings)
+        use shapeSettings = new ConvexHullShapeSettings (bounds.Corners)
+        let struct (center, rotation) = JoltPhysicsEngine.getBodyShapeTransform transformOpt
+        let scale = JoltPhysicsEngine.computeShapeScale bodyProperties transformOpt
         let bodyShapeId = match propertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-        scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+        JoltPhysicsEngine.addSubShapeSettings scShapeSettings retainedShapes center rotation scale shapeSettings bodyShapeId
         // NOTE: we approximate volume with the volume of a bounding box.
         // TODO: use a more accurate volume calculation.
         let box = box3 v3Zero ((Box3.Enclose points).Size * scale)
@@ -466,21 +425,21 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             | Mass mass -> mass
         mass :: masses
 
-    static member private attachPointsShape (bodyProperties : BodyProperties) (pointsShape : PointsShape) (scShapeSettings : StaticCompoundShapeSettings) masses physicsEngine =
+    static member private attachPointsShape (bodyProperties : BodyProperties) (pointsShape : PointsShape) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses physicsEngine =
         match pointsShape.Profile with
-        | Convex -> JoltPhysicsEngine.attachBodyConvexHullShape bodyProperties pointsShape.Points pointsShape.TransformOpt pointsShape.PropertiesOpt scShapeSettings masses physicsEngine
+        | Convex -> JoltPhysicsEngine.attachBodyConvexHullShape bodyProperties pointsShape.Points pointsShape.TransformOpt pointsShape.PropertiesOpt scShapeSettings retainedShapes masses physicsEngine
         | Concave ->
             Log.warnOnce "Creating body bvh triangles with PointsShape; PointsShape generally specifies individual points rather than triangulated vertices, so unintended behavior may arise."
-            JoltPhysicsEngine.attachBodyBvhTriangles bodyProperties pointsShape.Points pointsShape.TransformOpt pointsShape.PropertiesOpt scShapeSettings masses
-        | Bounds -> JoltPhysicsEngine.attachBodyBoundsShape bodyProperties pointsShape.Points pointsShape.TransformOpt pointsShape.PropertiesOpt scShapeSettings masses
+            JoltPhysicsEngine.attachBodyBvhTriangles bodyProperties pointsShape.Points pointsShape.TransformOpt pointsShape.PropertiesOpt scShapeSettings retainedShapes masses
+        | Bounds -> JoltPhysicsEngine.attachBodyBoundsShape bodyProperties pointsShape.Points pointsShape.TransformOpt pointsShape.PropertiesOpt scShapeSettings retainedShapes masses
 
-    static member private attachGeometryShape bodyProperties (geometryShape : GeometryShape) scShapeSettings masses physicsEngine =
+    static member private attachGeometryShape bodyProperties (geometryShape : GeometryShape) scShapeSettings retainedShapes masses physicsEngine =
         match geometryShape.Profile with
-        | Convex -> JoltPhysicsEngine.attachBodyConvexHullShape bodyProperties geometryShape.Vertices geometryShape.TransformOpt geometryShape.PropertiesOpt scShapeSettings masses physicsEngine
-        | Concave -> JoltPhysicsEngine.attachBodyBvhTriangles bodyProperties geometryShape.Vertices geometryShape.TransformOpt geometryShape.PropertiesOpt scShapeSettings masses
-        | Bounds -> JoltPhysicsEngine.attachBodyBoundsShape bodyProperties geometryShape.Vertices geometryShape.TransformOpt geometryShape.PropertiesOpt scShapeSettings masses
+        | Convex -> JoltPhysicsEngine.attachBodyConvexHullShape bodyProperties geometryShape.Vertices geometryShape.TransformOpt geometryShape.PropertiesOpt scShapeSettings retainedShapes masses physicsEngine
+        | Concave -> JoltPhysicsEngine.attachBodyBvhTriangles bodyProperties geometryShape.Vertices geometryShape.TransformOpt geometryShape.PropertiesOpt scShapeSettings retainedShapes masses
+        | Bounds -> JoltPhysicsEngine.attachBodyBoundsShape bodyProperties geometryShape.Vertices geometryShape.TransformOpt geometryShape.PropertiesOpt scShapeSettings retainedShapes masses
 
-    static member private attachStaticModelShape (bodyProperties : BodyProperties) (staticModelShape : StaticModelShape) (scShapeSettings : StaticCompoundShapeSettings) masses physicsEngine =
+    static member private attachStaticModelShape (bodyProperties : BodyProperties) (staticModelShape : StaticModelShape) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses physicsEngine =
         match Metadata.tryGetStaticModelMetadata staticModelShape.StaticModel with
         | ValueSome staticModel ->
             Seq.fold (fun centerMassInertiaDisposes i ->
@@ -502,16 +461,16 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
                         let transformOpt = staticModelSurfaceShape.TransformOpt
                         let propertiesOpt = staticModelSurfaceShape.PropertiesOpt
                         match staticModelSurfaceShape.Profile with
-                        | Convex -> JoltPhysicsEngine.attachBodyConvexHullShape bodyProperties geometry.Vertices transformOpt propertiesOpt scShapeSettings masses physicsEngine
-                        | Concave -> JoltPhysicsEngine.attachBodyBvhTriangles bodyProperties geometry.Triangles transformOpt propertiesOpt scShapeSettings masses
-                        | Bounds -> JoltPhysicsEngine.attachBodyBoundsShape bodyProperties geometry.Vertices transformOpt propertiesOpt scShapeSettings masses
+                        | Convex -> JoltPhysicsEngine.attachBodyConvexHullShape bodyProperties geometry.Vertices transformOpt propertiesOpt scShapeSettings retainedShapes masses physicsEngine
+                        | Concave -> JoltPhysicsEngine.attachBodyBvhTriangles bodyProperties geometry.Triangles transformOpt propertiesOpt scShapeSettings retainedShapes masses
+                        | Bounds -> JoltPhysicsEngine.attachBodyBoundsShape bodyProperties geometry.Vertices transformOpt propertiesOpt scShapeSettings retainedShapes masses
                     else centerMassInertiaDisposes
                 | ValueNone -> centerMassInertiaDisposes)
                 masses
                 [0 .. dec staticModel.Surfaces.Length]
         | ValueNone -> masses
 
-    static member private attachStaticModelShapeSurface (bodyProperties : BodyProperties) (staticModelSurfaceShape : StaticModelSurfaceShape) (scShapeSettings : StaticCompoundShapeSettings) masses physicsEngine =
+    static member private attachStaticModelShapeSurface (bodyProperties : BodyProperties) (staticModelSurfaceShape : StaticModelSurfaceShape) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses physicsEngine =
         match Metadata.tryGetStaticModelMetadata staticModelSurfaceShape.StaticModel with
         | ValueSome staticModel ->
             if  staticModelSurfaceShape.SurfaceIndex > -1 &&
@@ -521,13 +480,13 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
                 let transformOpt = staticModelSurfaceShape.TransformOpt
                 let propertiesOpt = staticModelSurfaceShape.PropertiesOpt
                 match staticModelSurfaceShape.Profile with
-                | Convex -> JoltPhysicsEngine.attachBodyConvexHullShape bodyProperties geometry.Vertices transformOpt propertiesOpt scShapeSettings masses physicsEngine
-                | Concave -> JoltPhysicsEngine.attachBodyBvhTriangles bodyProperties geometry.Triangles transformOpt propertiesOpt scShapeSettings masses
-                | Bounds -> JoltPhysicsEngine.attachBodyBoundsShape bodyProperties geometry.Vertices transformOpt propertiesOpt scShapeSettings masses
+                | Convex -> JoltPhysicsEngine.attachBodyConvexHullShape bodyProperties geometry.Vertices transformOpt propertiesOpt scShapeSettings retainedShapes masses physicsEngine
+                | Concave -> JoltPhysicsEngine.attachBodyBvhTriangles bodyProperties geometry.Triangles transformOpt propertiesOpt scShapeSettings retainedShapes masses
+                | Bounds -> JoltPhysicsEngine.attachBodyBoundsShape bodyProperties geometry.Vertices transformOpt propertiesOpt scShapeSettings retainedShapes masses
             else masses
         | ValueNone -> masses
 
-    static member private attachTerrainShape (bodyProperties : BodyProperties) (terrainShape : TerrainShape) (scShapeSettings : StaticCompoundShapeSettings) masses =
+    static member private attachTerrainShape (bodyProperties : BodyProperties) (terrainShape : TerrainShape) (scShapeSettings : StaticCompoundShapeSettings) retainedShapes masses =
         match HeightMap.tryGetMetadata Metadata.tryGetFilePath terrainShape.Bounds v2One terrainShape.HeightMap with
         | ValueSome heightMapMetadata ->
             if heightMapMetadata.Resolution = terrainShape.Resolution then
@@ -543,9 +502,9 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
                     let size = match terrainShape.TransformOpt with Some transform -> transform.Scale * size | None -> size
                     let offset = size * -0.5f
                     let tileSize = v3 (size.X / single (dec terrainShape.Resolution.X)) (size.Y / terrainShape.Bounds.Height) (size.Z / single (dec terrainShape.Resolution.Y))
-                    let shapeSettings = new HeightFieldShapeSettings (heights.AsSpan (), &offset, &tileSize, uint terrainShape.Resolution.X)
+                    use shapeSettings = new HeightFieldShapeSettings (heights.AsSpan (), &offset, &tileSize, uint terrainShape.Resolution.X)
                     let bodyShapeId = match terrainShape.PropertiesOpt with Some properties -> properties.BodyShapeIndex | None -> bodyProperties.BodyIndex
-                    scShapeSettings.AddShape (&center, &rotation, shapeSettings, uint bodyShapeId)
+                    JoltPhysicsEngine.addSubShapeSettings scShapeSettings retainedShapes center rotation v3One shapeSettings bodyShapeId
                     0.0f :: masses // infinite mass
                 else
                     Log.error ("Jolt Physics does not support non-square terrain resolution " + scstring terrainShape.Resolution + ".")
@@ -555,32 +514,31 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
                 masses
         | ValueNone -> masses
 
-    static member private attachBodyShapes bodyProperties bodyShapes scShapeSettings masses physicsEngine =
+    static member private attachBodyShapes bodyProperties bodyShapes scShapeSettings retainedShapes masses physicsEngine =
         List.fold (fun masses bodyShape ->
-            let masses' = JoltPhysicsEngine.attachBodyShape bodyProperties bodyShape scShapeSettings masses physicsEngine
-            masses' @ masses)
+            JoltPhysicsEngine.attachBodyShape bodyProperties bodyShape scShapeSettings retainedShapes masses physicsEngine)
             masses
             bodyShapes
 
-    static member private attachBodyShape bodyProperties bodyShape scShapeSettings masses physicsEngine =
+    static member private attachBodyShape bodyProperties bodyShape scShapeSettings retainedShapes masses physicsEngine =
         JoltPhysicsEngine.validateBodyShape bodyShape
         match bodyShape with
         | EmptyShape -> masses
-        | BoxShape boxShape -> JoltPhysicsEngine.attachBoxShape bodyProperties boxShape scShapeSettings masses
-        | SphereShape sphereShape -> JoltPhysicsEngine.attachSphereShape bodyProperties sphereShape scShapeSettings masses
-        | CapsuleShape capsuleShape -> JoltPhysicsEngine.attachCapsuleShape bodyProperties capsuleShape scShapeSettings masses
-        | BoxRoundedShape boxRoundedShape -> JoltPhysicsEngine.attachBoxRoundedShape bodyProperties boxRoundedShape scShapeSettings masses
-        | EdgeShape edgeShape -> JoltPhysicsEngine.attachEdgeShape bodyProperties edgeShape scShapeSettings masses physicsEngine
-        | ContourShape chainShape -> JoltPhysicsEngine.attachContourShape bodyProperties chainShape scShapeSettings masses physicsEngine
-        | PointsShape pointsShape -> JoltPhysicsEngine.attachPointsShape bodyProperties pointsShape scShapeSettings masses physicsEngine
-        | GeometryShape geometryShape -> JoltPhysicsEngine.attachGeometryShape bodyProperties geometryShape scShapeSettings masses physicsEngine
-        | StaticModelShape staticModelShape -> JoltPhysicsEngine.attachStaticModelShape bodyProperties staticModelShape scShapeSettings masses physicsEngine
-        | StaticModelSurfaceShape staticModelSurfaceShape -> JoltPhysicsEngine.attachStaticModelShapeSurface bodyProperties staticModelSurfaceShape scShapeSettings masses physicsEngine
-        | TerrainShape terrainShape -> JoltPhysicsEngine.attachTerrainShape bodyProperties terrainShape scShapeSettings masses
-        | BodyShapes bodyShapes -> JoltPhysicsEngine.attachBodyShapes bodyProperties bodyShapes scShapeSettings masses physicsEngine
+        | BoxShape boxShape -> JoltPhysicsEngine.attachBoxShape bodyProperties boxShape scShapeSettings retainedShapes masses
+        | SphereShape sphereShape -> JoltPhysicsEngine.attachSphereShape bodyProperties sphereShape scShapeSettings retainedShapes masses
+        | CapsuleShape capsuleShape -> JoltPhysicsEngine.attachCapsuleShape bodyProperties capsuleShape scShapeSettings retainedShapes masses
+        | BoxRoundedShape boxRoundedShape -> JoltPhysicsEngine.attachBoxRoundedShape bodyProperties boxRoundedShape scShapeSettings retainedShapes masses
+        | EdgeShape edgeShape -> JoltPhysicsEngine.attachEdgeShape bodyProperties edgeShape scShapeSettings retainedShapes masses physicsEngine
+        | ContourShape chainShape -> JoltPhysicsEngine.attachContourShape bodyProperties chainShape scShapeSettings retainedShapes masses physicsEngine
+        | PointsShape pointsShape -> JoltPhysicsEngine.attachPointsShape bodyProperties pointsShape scShapeSettings retainedShapes masses physicsEngine
+        | GeometryShape geometryShape -> JoltPhysicsEngine.attachGeometryShape bodyProperties geometryShape scShapeSettings retainedShapes masses physicsEngine
+        | StaticModelShape staticModelShape -> JoltPhysicsEngine.attachStaticModelShape bodyProperties staticModelShape scShapeSettings retainedShapes masses physicsEngine
+        | StaticModelSurfaceShape staticModelSurfaceShape -> JoltPhysicsEngine.attachStaticModelShapeSurface bodyProperties staticModelSurfaceShape scShapeSettings retainedShapes masses physicsEngine
+        | TerrainShape terrainShape -> JoltPhysicsEngine.attachTerrainShape bodyProperties terrainShape scShapeSettings retainedShapes masses
+        | BodyShapes bodyShapes -> JoltPhysicsEngine.attachBodyShapes bodyProperties bodyShapes scShapeSettings retainedShapes masses physicsEngine
 
-    static member private createBodyNonCharacter mass layer motionType (shapeSettings : ShapeSettings) (bodyId : BodyId) (bodyProperties : BodyProperties) (physicsEngine : JoltPhysicsEngine) =
-        let mutable bodyCreationSettings = new BodyCreationSettings (shapeSettings, &bodyProperties.Center, &bodyProperties.Rotation, motionType, layer)
+    static member private createBodyNonCharacter mass layer motionType (shape : Shape) (bodyId : BodyId) (bodyProperties : BodyProperties) (physicsEngine : JoltPhysicsEngine) =
+        use bodyCreationSettings = new BodyCreationSettings (shape, &bodyProperties.Center, &bodyProperties.Rotation, motionType, layer)
         bodyCreationSettings.AllowSleeping <- bodyProperties.SleepingAllowed
         bodyCreationSettings.Friction <- bodyProperties.Friction
         bodyCreationSettings.Restitution <- bodyProperties.Restitution
@@ -667,18 +625,19 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             match vehicleProperties with
             | VehiclePropertiesJolt vehicleConstraintSettings -> Choice3Of3 vehicleConstraintSettings
             | _ -> Choice1Of3 ()
-
     static member private createBody3 (bodyId : BodyId) (bodyProperties : BodyProperties) (physicsEngine : JoltPhysicsEngine) =
-
-        // create either a character or a non-character body, ensuring we have at least one shape child in order to
-        // avoid jolt error
         use scShapeSettings = new StaticCompoundShapeSettings ()
-        let mass = JoltPhysicsEngine.attachBodyShape bodyProperties bodyProperties.BodyShape scShapeSettings [] physicsEngine |> List.sum
-        if scShapeSettings.NumSubShapes = 0u then
-            let position = v3Zero
-            let rotation = quatIdentity
-            let centerOfMass = v3Zero
-            scShapeSettings.AddShape (&position, &rotation, new EmptyShapeSettings (&centerOfMass))
+        let retainedShapes = ResizeArray<Shape> ()
+        let mass = JoltPhysicsEngine.attachBodyShape bodyProperties bodyProperties.BodyShape scShapeSettings retainedShapes [] physicsEngine |> List.sum
+        if retainedShapes.Count > 0 then
+            JoltPhysicsEngine.createBody3WithShape bodyId bodyProperties scShapeSettings retainedShapes mass physicsEngine
+        else
+            for shape in retainedShapes do shape.Dispose ()
+
+    static member private createBody3WithShape (bodyId : BodyId) (bodyProperties : BodyProperties) (scShapeSettings : StaticCompoundShapeSettings) (retainedShapes : ResizeArray<Shape>) mass (physicsEngine : JoltPhysicsEngine) =
+        let shape = scShapeSettings.Create ()
+        retainedShapes.Add shape
+        physicsEngine.RetainedShapes.Add (bodyId, retainedShapes)
         let objectLayer = JoltPhysicsEngine.computeObjectLayer bodyProperties.Enabled bodyProperties.BodyType
         let motionType = JoltPhysicsEngine.computeMotionType bodyProperties.Enabled bodyProperties.BodyType
         let characterProperties =
@@ -690,7 +649,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
         | Choice1Of3 () ->
 
             // create body
-            JoltPhysicsEngine.createBodyNonCharacter mass objectLayer motionType scShapeSettings bodyId bodyProperties physicsEngine |> ignore
+            JoltPhysicsEngine.createBodyNonCharacter mass objectLayer motionType shape bodyId bodyProperties physicsEngine |> ignore
 
         | Choice2Of3 characterProperties ->
 
@@ -702,12 +661,10 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             characterSettings.InnerBodyLayer <- objectLayer
             characterSettings.Mass <- mass
             characterSettings.MaxSlopeAngle <- characterProperties.SlopeMax
-            characterSettings.Shape <- scShapeSettings.Create ()
+            characterSettings.Shape <- shape
 
             // inner shape config (must be set after Shape property)
-            use scShapeSettingsInner = new StaticCompoundShapeSettings ()
-            JoltPhysicsEngine.attachBodyShape bodyProperties bodyProperties.BodyShape scShapeSettingsInner [] physicsEngine |> ignore<single list>
-            characterSettings.InnerBodyShape <- scShapeSettingsInner.Create ()
+            characterSettings.InnerBodyShape <- shape
 
             // create actual character
             let character = new CharacterVirtual (characterSettings, &bodyProperties.Center, &bodyProperties.Rotation, 0UL, physicsEngine.PhysicsContext)
@@ -790,10 +747,12 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
 
             // create vehicle offset COM shape
             let offset = v3Down * 1.25f // TODO: P1: expose this as parameter.
-            let offsetComShapeSettings = new OffsetCenterOfMassShapeSettings (&offset, scShapeSettings)
+            use offsetComShapeSettings = new OffsetCenterOfMassShapeSettings (&offset, shape)
+            let offsetComShape = offsetComShapeSettings.Create ()
+            retainedShapes.Add offsetComShape
 
             // create vehicle body
-            let (bodyId, body) = JoltPhysicsEngine.createBodyNonCharacter mass objectLayer motionType offsetComShapeSettings bodyId bodyProperties physicsEngine
+            let (bodyId, body) = JoltPhysicsEngine.createBodyNonCharacter mass objectLayer motionType offsetComShape bodyId bodyProperties physicsEngine
             
             // create vehicle constraint
             let vehicleConstraint = new VehicleConstraint (body, vehicleConstraintSettings)
@@ -876,6 +835,13 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
                 physicsEngine.PhysicsContext.BodyInterface.RemoveAndDestroyBody &bodyID
             | (false, _) -> ()
 
+        // release managed shape owners only after their native body or character has been destroyed.
+        match physicsEngine.RetainedShapes.TryGetValue bodyId with
+        | (true, retainedShapes) ->
+            physicsEngine.RetainedShapes.Remove bodyId |> ignore<bool>
+            for shape in retainedShapes do shape.Dispose ()
+        | (false, _) -> ()
+
     static member private destroyBodies (destroyBodiesMessage : DestroyBodiesMessage) physicsEngine =
         List.iter (fun bodyId ->
             JoltPhysicsEngine.destroyBody { BodyId = bodyId } physicsEngine)
@@ -923,6 +889,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             physicsEngine.BodyConstraints.Remove bodyJointId |> ignore
             physicsEngine.BodyConstraintBreakingPoints.Remove bodyJointId |> ignore
             physicsEngine.PhysicsContext.RemoveConstraint joint
+            joint.Dispose ()
         | (false, _) -> ()
 
     static member private destroyBodyJoint (destroyBodyJointMessage : DestroyBodyJointMessage) physicsEngine =
@@ -1318,6 +1285,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
           CharacterUserData = dictPlus HashIdentity.Structural []
           Characters = dictPlus HashIdentity.Structural []
           VehicleConstraints = dictPlus HashIdentity.Structural []
+          RetainedShapes = dictPlus HashIdentity.Structural []
           BodyUnoptimizedCreationCount = 0
           BodyContactLock = bodyContactLock
           BodyContactEvents = bodyContactEvents
@@ -1487,6 +1455,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
         member physicsEngine.ShapeCast (shape, transformOpt, ray, collisionCategory, collisionMask, closestOnly) =
             match JoltPhysicsEngine.tryCreateShape shape with
             | Some (shape, shapeTransformOpt) ->
+                use shape = shape
                 let transformMatrix =
                     Option.map2 Affine.combineAsMatrix shapeTransformOpt transformOpt
                     |> Option.defaultValue m4Identity
@@ -1667,6 +1636,7 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             // destroy constraints
             for constrain in physicsEngine.BodyConstraints.Values do
                 physicsEngine.PhysicsContext.RemoveConstraint constrain
+                constrain.Dispose ()
             physicsEngine.BodyConstraints.Clear ()
 
             // destroy bodies
@@ -1674,6 +1644,9 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
                 physicsEngine.PhysicsContext.BodyInterface.RemoveAndDestroyBody &bodyID
             physicsEngine.BodyUserData.Clear ()
             physicsEngine.Bodies.Clear ()
+            for retainedShapes in physicsEngine.RetainedShapes.Values do
+                for shape in retainedShapes do shape.Dispose ()
+            physicsEngine.RetainedShapes.Clear ()
 
             // clear body joints
             physicsEngine.CreateBodyJointMessages.Clear ()
@@ -1685,12 +1658,14 @@ and [<ReferenceEquality>] JoltPhysicsEngine =
             for vehicleConstraint in physicsEngine.VehicleConstraints.Values do
                 physicsEngine.PhysicsContext.RemoveStepListener vehicleConstraint
                 physicsEngine.PhysicsContext.RemoveConstraint vehicleConstraint
+                vehicleConstraint.Dispose ()
             physicsEngine.VehicleConstraints.Clear ()
 
             // clear integration messages
             physicsEngine.IntegrationMessages.Clear ()
 
         member physicsEngine.CleanUp () =
+            physicsEngine.CharacterVsCharacterCollision.Dispose ()
             physicsEngine.JobSystem.Dispose ()
             physicsEngine.PhysicsContext.Dispose ()
             Foundation.Shutdown ()

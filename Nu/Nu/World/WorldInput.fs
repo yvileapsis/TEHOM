@@ -34,6 +34,22 @@ module WorldInputModule =
                 MouseState.getPositionSdl () * pixelDensity - margin
             | None -> v2Zero
 
+        /// Get the center of the mouse-constrained window viewport.
+        static member getMouseCenter (world : World) =
+            let viewportSize = world.WindowViewport.Bounds.Size
+            v2 (single viewportSize.X * 0.5f) (single viewportSize.Y * 0.5f)
+
+        /// Attempt to set the mouse position relative to the mouse-constrained window viewport.
+        static member trySetMousePosition (position : Vector2) (world : World) =
+            let boundsMin = world.WindowViewport.Bounds.Min
+            let positionPixels = position + v2 (single boundsMin.X) (single boundsMin.Y)
+            let pixelDensity = World.tryGetWindowPixelDensity world |> Option.defaultValue 1.0f
+            AmbientState.trySetMousePosition (positionPixels / pixelDensity) world.AmbientState
+
+        /// Attempt to confine the mouse cursor to the window.
+        static member trySetMouseGrabbed grabbed (world : World) =
+            AmbientState.trySetMouseGrabbed grabbed world.AmbientState
+
         /// Get the 2d inset position of the mouse.
         static member getMousePosition2dInset (world : World) =
             let viewport = world.WindowViewport

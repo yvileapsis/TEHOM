@@ -599,6 +599,13 @@ type StaticModelDispatcher () =
     static member Facets =
         [typeof<StaticModelFacet>]
 
+/// Gives an entity the base behavior of a render-only voxel model.
+type VoxelDispatcher () =
+    inherit Entity3dDispatcher (false, false, false)
+
+    static member Facets =
+        [typeof<VoxelFacet>]
+
 /// Gives an entity the base behavior of an animated model.
 type AnimatedModelDispatcher () =
     inherit Entity3dDispatcher (false, false, false)

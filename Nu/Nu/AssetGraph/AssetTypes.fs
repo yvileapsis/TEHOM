@@ -24,6 +24,9 @@ type MsdfFont = private { __ : unit }
 /// A phantom type to denote an outline-based Slug font.
 type SlugFont = private { __ : unit }
 
+/// A phantom type to denote a user-defined voxel model.
+type VoxelModel = private { __ : unit }
+
 /// A phantom type to denote the type of an asset as a tile map.
 type TileMap = private { __ : unit }
 

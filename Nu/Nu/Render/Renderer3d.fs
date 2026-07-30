@@ -451,6 +451,15 @@ type CreateUserDefinedStaticModel =
 type DestroyUserDefinedStaticModel =
     { StaticModel : StaticModel AssetTag }
 
+/// Describes how to create a user-defined voxel model.
+type CreateUserDefinedVoxelModel =
+    { VoxelModelDescriptor : VoxelModelDescriptor
+      VoxelModel : VoxelModel AssetTag }
+
+/// Describes how to destroy a user-defined voxel model.
+type DestroyUserDefinedVoxelModel =
+    { VoxelModel : VoxelModel AssetTag }
+
 /// Describes how to render a sky box.
 type RenderSkyBox =
     { AmbientColor : Color
@@ -584,6 +593,29 @@ type RenderStaticModels =
       Clipped : bool
       DepthTest : DepthTest
       RenderType : RenderType
+      RenderPass : RenderPass }
+
+/// Describes how to render a voxel model.
+type RenderVoxelModel =
+    { ModelMatrix : Matrix4x4
+      CastShadow : bool
+      Presence : Presence
+      MaterialProperties : MaterialProperties
+      VoxelModel : VoxelModel AssetTag
+      RenderPass : RenderPass }
+
+/// Describes how to render a portal aperture.
+type RenderPortal3d =
+    { SourcePortalId : int64
+      SourceCenter : Vector3
+      SourceRotation : Quaternion
+      SourceModelMatrix : Matrix4x4
+      SourceHalfExtents : Vector2
+      DestinationCenter : Vector3
+      DestinationRotation : Quaternion
+      RecursionLimit : int
+      OneSided : bool
+      Tint : Color
       RenderPass : RenderPass }
 
 /// Describes how to render an animated model.
@@ -822,6 +854,8 @@ type [<SymbolicExpansion>] Renderer3dConfig =
 type RenderMessage3d =
     | CreateUserDefinedStaticModel of CreateUserDefinedStaticModel
     | DestroyUserDefinedStaticModel of DestroyUserDefinedStaticModel
+    | CreateUserDefinedVoxelModel of CreateUserDefinedVoxelModel
+    | DestroyUserDefinedVoxelModel of DestroyUserDefinedVoxelModel
     | RenderSkyBox of RenderSkyBox
     | RenderLightProbe3d of RenderLightProbe3d
     | RenderLightMap3d of RenderLightMap3d
@@ -837,6 +871,8 @@ type RenderMessage3d =
     | RenderCachedStaticModel of CachedStaticModelMessage
     | RenderCachedStaticModelSurface of CachedStaticModelSurfaceMessage
     | RenderUserDefinedStaticModel of RenderUserDefinedStaticModel
+    | RenderVoxelModel of RenderVoxelModel
+    | RenderPortal3d of RenderPortal3d
     | RenderAnimatedModel of RenderAnimatedModel
     | RenderAnimatedModels of RenderAnimatedModels
     | RenderCachedAnimatedModel of CachedAnimatedModelMessage
@@ -1052,6 +1088,13 @@ type [<CustomEquality; NoComparison; Struct>] private AnimatedModelSurfaceKey =
         | :? AnimatedModelSurfaceKey as that -> AnimatedModelSurfaceKey.equals this that
         | _ -> false
 
+/// A portal aperture and its recursively rendered view.
+type [<Struct>] private PortalComposite =
+    { Portal : RenderPortal3d
+      Texture : Texture
+      FillOnly : bool
+      BufferIndex : int }
+
 /// A collection of tasks in a render pass.
 type [<ReferenceEquality>] private RenderTasks =
     { SkyBoxes : (Color * single * Color * single * CubeMap AssetTag) List
@@ -1064,6 +1107,8 @@ type [<ReferenceEquality>] private RenderTasks =
       DeferredStaticClipped : Dictionary<PhysicallyBasedSurface, struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties) List>
       DeferredStaticClippedPreBatches : Dictionary<Guid, struct (PhysicallyBasedSurface * (Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Box3) array)>
       DeferredAnimated : Dictionary<AnimatedModelSurfaceKey, struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties) List>
+      DeferredVoxels : struct (Matrix4x4 * bool * Presence * MaterialProperties * VoxelModelGpu) List
+      Portals : RenderPortal3d List
       DeferredTerrains : struct (TerrainDescriptor * TerrainPatchDescriptor * PhysicallyBasedGeometry) List
       Forward : struct (single * single * Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * PhysicallyBasedSurface * DepthTest) List
       ForwardSorted : struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * PhysicallyBasedSurface * DepthTest) List
@@ -1083,6 +1128,8 @@ type [<ReferenceEquality>] private RenderTasks =
           DeferredStaticClipped = dictPlus PhysicallyBasedSurfaceFns.comparer []
           DeferredStaticClippedPreBatches = dictPlus HashIdentity.Structural []
           DeferredAnimated = dictPlus AnimatedModelSurfaceKey.comparer []
+          DeferredVoxels = List ()
+          Portals = List ()
           DeferredTerrains = List ()
           Forward = List ()
           ForwardSorted = List ()
@@ -1106,6 +1153,8 @@ type [<ReferenceEquality>] private RenderTasks =
         renderTasks.DeferredStaticClippedPreBatches.Clear ()
 
         for entry in renderTasks.DeferredAnimated do entry.Value.Clear ()
+        renderTasks.DeferredVoxels.Clear ()
+        renderTasks.Portals.Clear ()
         renderTasks.DeferredAnimatedRemovals.Clear ()
 
         renderTasks.Forward.Clear ()
@@ -1272,6 +1321,11 @@ type [<ReferenceEquality>] VulkanRenderer3d =
           mutable IrradiancePipeline : CubeMapPipeline
           mutable EnvironmentFilterPipeline : EnvironmentFilterPipeline
           mutable PhysicallyBasedPipelines : PhysicallyBasedPipelines
+          VoxelPipeline : VoxelPipeline
+          VoxelModels : Dictionary<VoxelModel AssetTag, VoxelModelGpu>
+          VoxelModelsToDestroy : VoxelModel AssetTag SList
+          PortalPipeline : PortalPipeline
+          PortalTextures : Texture array
           ShadowMatricesFlipped : Matrix4x4 array
           LightShadowIndices : Dictionary<uint64, int>
           LightsDesiringShadows : Dictionary<uint64, SortableLight>
@@ -1313,6 +1367,111 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             "Render asset " + assetTag.AssetName + " is not available from " + assetTag.PackageName + " package in a " + Constants.Associations.Render3d + " context. " +
             "Note that images from a " + Constants.Associations.Render2d + " context are usually not available in a " + Constants.Associations.Render3d + " context."
         Log.warnOnce message
+
+    static member private PortalBuffersMax = 8
+    static member private PortalRecursionLimitMax = 4
+    static member private PortalSurfaceOffset = 0.03f
+
+    static member private makeLookRotation (forward : Vector3) (up : Vector3) =
+        let forward = if forward.LengthSquared () > 0.0f then forward.Normalized else v3Forward
+        let up = if up.LengthSquared () > 0.0f then up.Normalized else v3Up
+        Quaternion.CreateFromRotationMatrix (Matrix4x4.CreateWorld (v3Zero, forward, up))
+
+    static member private transferPortalEye
+        (eyeCenter : Vector3)
+        (eyeRotation : Quaternion)
+        (sourceCenter : Vector3)
+        (sourceRotation : Quaternion)
+        (destinationCenter : Vector3)
+        (destinationRotation : Quaternion) =
+        let mutable sourceMatrix = Matrix4x4.CreateFromQuaternion sourceRotation
+        sourceMatrix.Translation <- sourceCenter
+        let mutable destinationMatrix = Matrix4x4.CreateFromQuaternion destinationRotation
+        destinationMatrix.Translation <- destinationCenter
+        let (_, sourceInverse) = Matrix4x4.Invert sourceMatrix
+        let flip = Matrix4x4.CreateRotationY MathF.PI
+        let transfer = sourceInverse * flip * destinationMatrix
+        let rotationTransfer = Matrix4x4.CreateFromQuaternion sourceRotation.Inverted * flip * Matrix4x4.CreateFromQuaternion destinationRotation
+        let eyeCenter = Vector3.Transform (eyeCenter, transfer)
+        let eyeForward = Vector3.TransformNormal (eyeRotation.Forward, rotationTransfer)
+        let eyeUp = Vector3.TransformNormal (eyeRotation.Up, rotationTransfer)
+        let eyeForward = if eyeForward.LengthSquared () > 0.0f then eyeForward.Normalized else destinationRotation.Forward
+        let eyeUp = if eyeUp.LengthSquared () > 0.0f then eyeUp.Normalized else destinationRotation.Up
+        struct (eyeCenter, VulkanRenderer3d.makeLookRotation eyeForward eyeUp)
+
+    static member private makePortalClipPlane (eyeCenter : Vector3) (destinationCenter : Vector3) (destinationRotation : Quaternion) =
+        let normal = destinationRotation.Forward
+        let side = Vector3.Dot (eyeCenter - destinationCenter, normal)
+        let keepNormal = normal * (if side >= 0.0f then -1.0f else 1.0f)
+        v4 keepNormal.X keepNormal.Y keepNormal.Z (-Vector3.Dot (keepNormal, destinationCenter))
+
+    static member private isPortalAtDestination destinationCenter (destinationRotation : Quaternion) (portal : RenderPortal3d) =
+        Vector3.DistanceSquared (portal.SourceCenter, destinationCenter) <= 0.0001f &&
+        MathF.Abs (Quaternion.Dot (portal.SourceRotation, destinationRotation)) >= 0.999f
+
+    static member private getPortalBounds (portal : RenderPortal3d) =
+        let right = portal.SourceRotation.Right * (portal.SourceHalfExtents.X + VulkanRenderer3d.PortalSurfaceOffset)
+        let up = portal.SourceRotation.Up * (portal.SourceHalfExtents.Y + VulkanRenderer3d.PortalSurfaceOffset)
+        let forward = portal.SourceRotation.Forward * VulkanRenderer3d.PortalSurfaceOffset
+        let corners =
+            [|portal.SourceCenter - right - up - forward
+              portal.SourceCenter - right - up + forward
+              portal.SourceCenter - right + up - forward
+              portal.SourceCenter - right + up + forward
+              portal.SourceCenter + right - up - forward
+              portal.SourceCenter + right - up + forward
+              portal.SourceCenter + right + up - forward
+              portal.SourceCenter + right + up + forward|]
+        let mutable min = corners[0]
+        let mutable max = corners[0]
+        for i in 1 .. dec corners.Length do
+            min <- Vector3.Min (min, corners[i])
+            max <- Vector3.Max (max, corners[i])
+        box3 min (max - min)
+
+    static member private portalIntersectsView (frustum : Frustum) (portal : RenderPortal3d) =
+        portal.SourceHalfExtents.X > 0.0f &&
+        portal.SourceHalfExtents.Y > 0.0f &&
+        frustum.Intersects (VulkanRenderer3d.getPortalBounds portal)
+
+    static member private shouldFillPortalOnly eyeCenter (portal : RenderPortal3d) =
+        portal.OneSided &&
+        Vector3.Dot (eyeCenter - portal.SourceCenter, portal.SourceRotation.Forward) < 0.0f
+
+    static member private getPortalTint (portal : RenderPortal3d) =
+        if portal.Tint.R > 0.001f || portal.Tint.G > 0.001f || portal.Tint.B > 0.001f then portal.Tint
+        elif portal.SourcePortalId = 1L then color 0.35f 0.7f 1.0f 1.0f
+        elif portal.SourcePortalId = 2L then color 1.0f 0.55f 0.18f 1.0f
+        else Color.White
+
+    static member private makePortalModelMatrix fillOnly (portal : RenderPortal3d) =
+        let mutable model = portal.SourceModelMatrix
+        let surfaceOffset =
+            if fillOnly && portal.OneSided
+            then -VulkanRenderer3d.PortalSurfaceOffset
+            else VulkanRenderer3d.PortalSurfaceOffset
+        model.Translation <- portal.SourceCenter + portal.SourceRotation.Forward * surfaceOffset
+        model
+
+    static member private drawPortalComposites
+        (viewProjection : Matrix4x4)
+        (resolution : Vector2i)
+        (portalComposites : PortalComposite array)
+        (colorAttachment : Texture)
+        (depthAttachment : Texture)
+        (renderer : VulkanRenderer3d) =
+        if portalComposites.Length > 0 then
+            Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite colorAttachment renderer.VulkanContext.RenderCommandBuffer
+            Texture.recordTransitionLayout DepthAttachmentRead DepthAttachmentWrite depthAttachment renderer.VulkanContext.RenderCommandBuffer
+            for composite in portalComposites do
+                Portal.draw
+                    viewProjection resolution
+                    (VulkanRenderer3d.makePortalModelMatrix composite.FillOnly composite.Portal)
+                    (VulkanRenderer3d.getPortalTint composite.Portal)
+                    composite.FillOnly composite.Texture renderer.UnfilteredSampler
+                    colorAttachment depthAttachment renderer.PortalPipeline renderer.VulkanContext
+            Texture.recordTransitionLayout DepthAttachmentWrite DepthAttachmentRead depthAttachment renderer.VulkanContext.RenderCommandBuffer
+            Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead colorAttachment renderer.VulkanContext.RenderCommandBuffer
 
     static member private radicalInverse (bits : uint) =
         let mutable bits = bits
@@ -1528,7 +1687,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 let (lastWriteTime, asset, renderAsset) = assetEntry.Value
                 let lastWriteTime' =
                     try DateTimeOffset (File.GetLastWriteTime asset.FilePath)
-                    with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue.DateTime
+                    with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue
                 if lastWriteTime < lastWriteTime'
                 then assetsToFree.Add (asset.FilePath, renderAsset)
                 else assetsToKeep.Add (assetName, (lastWriteTime, asset, renderAsset))
@@ -1564,7 +1723,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 | Some renderAsset ->
                     let lastWriteTime =
                         try DateTimeOffset (File.GetLastWriteTime asset.FilePath)
-                        with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue.DateTime
+                        with exn -> Log.info ("Asset file write time read error due to: " + scstring exn); DateTimeOffset.MinValue
                     assetsLoaded[asset.AssetTag.AssetName] <- (lastWriteTime, asset, renderAsset)
                 | None -> ()
 
@@ -1799,7 +1958,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             match renderer.RenderPackages.TryGetValue assetTag.PackageName with
             | (true, package) ->
                 let asset = Asset.make assetTag "" [] (Set.singleton Constants.Associations.Render3d)
-                package.Assets[assetTag.AssetName] <- (DateTimeOffset.MinValue.DateTime, asset, StaticModelAsset (true, model))
+                package.Assets[assetTag.AssetName] <- (DateTimeOffset.MinValue, asset, StaticModelAsset (true, model))
             | (false, _) ->
                 let assetClient =
                     AssetClient
@@ -1807,7 +1966,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                          CubeMapClient (),
                          PhysicallyBasedSceneClient ())
                 let asset = Asset.make assetTag "" [] (Set.singleton Constants.Associations.Render3d)
-                let package = { Assets = Dictionary.singleton StringComparer.Ordinal assetTag.AssetName (DateTimeOffset.MinValue.DateTime, asset, StaticModelAsset (true, model)); PackageState = assetClient }
+                let package = { Assets = Dictionary.singleton StringComparer.Ordinal assetTag.AssetName (DateTimeOffset.MinValue, asset, StaticModelAsset (true, model)); PackageState = assetClient }
                 renderer.RenderPackages[assetTag.PackageName] <- package
 
         // attempted to replace a loaded asset
@@ -1825,9 +1984,24 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             match package.Assets.TryGetValue assetTag.AssetName with
             | (true, (_, _, asset)) ->
                 match asset with
-                | StaticModelAsset (userDefined, _) when userDefined -> VulkanRenderer3d.freeRenderAsset asset renderer
+                | StaticModelAsset (userDefined, _) when userDefined ->
+                    VulkanRenderer3d.invalidateCaches renderer
+                    VulkanRenderer3d.freeRenderAsset asset renderer
+                    package.Assets.Remove assetTag.AssetName |> ignore<bool>
                 | _ -> ()
             | (false, _) -> ()
+        | (false, _) -> ()
+
+    static member private tryCreateUserDefinedVoxelModel descriptor assetTag renderer =
+        if renderer.VoxelModels.ContainsKey assetTag then
+            Log.info ("Cannot replace a loaded voxel model asset '" + scstring assetTag + "'.")
+        else renderer.VoxelModels[assetTag] <- Voxel.createModel descriptor renderer.VulkanContext
+
+    static member private tryDestroyUserDefinedVoxelModel assetTag renderer =
+        match renderer.VoxelModels.TryGetValue assetTag with
+        | (true, model) ->
+            Voxel.destroyModel model renderer.VulkanContext
+            renderer.VoxelModels.Remove assetTag |> ignore<bool>
         | (false, _) -> ()
 
     static member private getRenderTasks renderPass renderer =
@@ -2287,6 +2461,8 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         Pipeline.reloadShaders renderer.IrradiancePipeline.Pipeline renderer.VulkanContext
         Pipeline.reloadShaders renderer.EnvironmentFilterPipeline.Pipeline renderer.VulkanContext
         PhysicallyBased.reloadPhysicallyBasedShaders renderer.PhysicallyBasedPipelines renderer.VulkanContext
+        Voxel.reloadShaders renderer.VoxelPipeline renderer.VulkanContext
+        Portal.reloadShaders renderer.PortalPipeline renderer.VulkanContext
     
     static member private handleLoadRenderPackage hintPackageName renderer =
         VulkanRenderer3d.tryLoadRenderPackage hintPackageName renderer
@@ -2894,6 +3070,34 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         // mark patch geometry as utilized regardless of visibility (to keep it from being destroyed)
         renderer.TerrainGeometriesUtilized.Add geometryDescriptor |> ignore<bool>
 
+    static member private categorizeVoxelModel
+        (frustumInterior : Frustum,
+         frustumExterior : Frustum,
+         frustumImposter : Frustum,
+         modelMatrix : Matrix4x4,
+         castShadow,
+         presence,
+         properties,
+         voxelModel,
+         renderPass,
+         renderTasks : RenderTasks,
+         renderer) =
+        match renderer.VoxelModels.TryGetValue voxelModel with
+        | (true, voxelModelGpu) ->
+            let bounds = voxelModelGpu.Bounds.Transform modelMatrix
+            let visible =
+                match renderPass with
+                | LightMapPass _ -> true
+                | ShadowPass _ -> false
+                | ReflectionPass (_, reflectionFrustum) ->
+                    Presence.intersects3d ValueNone reflectionFrustum reflectionFrustum false presence bounds
+                | NormalPass ->
+                    Presence.intersects3d (ValueSome frustumInterior) frustumExterior frustumImposter false presence bounds
+            if visible then
+                renderTasks.DeferredVoxels.Add struct (modelMatrix, castShadow, presence, properties, voxelModelGpu)
+        | (false, _) ->
+            Log.infoOnce ("Cannot render voxel model due to an unavailable asset '" + scstring voxelModel + "'.")
+
     static member private categorize
         frustumInterior
         frustumExterior
@@ -2907,7 +3111,11 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             | CreateUserDefinedStaticModel cudsm ->
                 VulkanRenderer3d.tryCreateUserDefinedStaticModel cudsm.StaticModelSurfaceDescriptors cudsm.Bounds cudsm.StaticModel renderer
             | DestroyUserDefinedStaticModel dudsm ->
-                renderer.UserDefinedStaticModelsToDestroy.Add dudsm.StaticModel 
+                renderer.UserDefinedStaticModelsToDestroy.Add dudsm.StaticModel
+            | CreateUserDefinedVoxelModel cudvm ->
+                VulkanRenderer3d.tryCreateUserDefinedVoxelModel cudvm.VoxelModelDescriptor cudvm.VoxelModel renderer
+            | DestroyUserDefinedVoxelModel dudvm ->
+                renderer.VoxelModelsToDestroy.Add dudvm.VoxelModel
             | RenderSkyBox rsb ->
                 let renderTasks = VulkanRenderer3d.getRenderTasks rsb.RenderPass renderer
                 renderTasks.SkyBoxes.Add (rsb.AmbientColor, rsb.AmbientBrightness, rsb.CubeMapColor, rsb.CubeMapBrightness, rsb.CubeMap)
@@ -3000,6 +3208,15 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 let renderTasks = VulkanRenderer3d.getRenderTasks rudsm.RenderPass renderer
                 VulkanRenderer3d.categorizeStaticModel (frustumInterior, frustumExterior, frustumImposter, &rudsm.ModelMatrix, rudsm.CastShadow, rudsm.Presence, &insetOpt, &rudsm.MaterialProperties, assetTag, rudsm.Clipped, rudsm.DepthTest, rudsm.RenderType, rudsm.RenderPass, renderTasks, renderer)
                 renderer.UserDefinedStaticModelsToDestroy.Add assetTag
+            | RenderVoxelModel rvm ->
+                let renderTasks = VulkanRenderer3d.getRenderTasks rvm.RenderPass renderer
+                VulkanRenderer3d.categorizeVoxelModel
+                    (frustumInterior, frustumExterior, frustumImposter,
+                     rvm.ModelMatrix, rvm.CastShadow, rvm.Presence, rvm.MaterialProperties,
+                     rvm.VoxelModel, rvm.RenderPass, renderTasks, renderer)
+            | RenderPortal3d rp ->
+                let renderTasks = VulkanRenderer3d.getRenderTasks rp.RenderPass renderer
+                renderTasks.Portals.Add rp
             | RenderAnimatedModel rsm ->
                 let insetOpt = Option.toValueOption rsm.InsetOpt
                 let renderTasks = VulkanRenderer3d.getRenderTasks rsm.RenderPass renderer
@@ -3320,7 +3537,9 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         Pipeline.beginFrame renderer.SkyBoxPipeline.Pipeline
         Pipeline.beginFrame renderer.IrradiancePipeline.Pipeline
         Pipeline.beginFrame renderer.EnvironmentFilterPipeline.Pipeline
+        Portal.beginFrame renderer.PortalPipeline
         PhysicallyBased.beginPhysicallyBasedPipelines renderer.PhysicallyBasedPipelines
+        Voxel.beginFrame renderer.VoxelPipeline
 
         // categorize messages
         VulkanRenderer3d.categorize frustumInterior frustumExterior frustumImposter eyeCenter eyeRotation renderMessages renderer
@@ -4011,7 +4230,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         // track geometry instancing
         renderer.GeometryInstanced.Add geometry |> ignore<bool>
 
-    static member private renderGeometry
+    static member private renderGeometryCore
         frustumInterior
         frustumExterior
         frustumImposter
@@ -4026,6 +4245,8 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         (geometryFrustum : Frustum)
         (geometryProjection : Matrix4x4)
         (windowProjection : Matrix4x4)
+        (clipPlane : Vector4)
+        (portalComposites : PortalComposite array)
         targetBounds
         targetLayer
         targetImage =
@@ -4234,6 +4455,30 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         // end deferred animated rendering
         VulkanRenderer3d.endPhysicallyBasedDeferredSurfaces
             renderer.PhysicallyBasedPipelines.DeferredAnimatedPipeline renderer.VulkanContext
+
+        // render voxel splats directly into the deferred geometry attachments
+        if renderTasks.DeferredVoxels.Count > 0 then
+            let eyeDescriptorSet =
+                Voxel.beginDeferred
+                    eyeCenter view geometryProjection geometryTextureViews zTexture
+                    geometryResolution renderer.RenderPassIndex renderer.VoxelPipeline renderer.VulkanContext
+            for struct (modelMatrix, _, presence, properties, voxelModel) in renderTasks.DeferredVoxels do
+                let voxelMaterial : VoxelMaterial =
+                    { Albedo = properties.Albedo
+                      Roughness = properties.Roughness
+                      Metallic = properties.Metallic
+                      AmbientOcclusion = properties.AmbientOcclusion
+                      Emission = properties.Emission
+                      Height = properties.Height
+                      IgnoreLightMaps = properties.IgnoreLightMaps
+                      FinenessOffset = properties.FinenessOffset
+                      ScatterType = properties.ScatterType.Enumerate
+                      ClearCoat = properties.ClearCoat
+                      ClearCoatRoughness = properties.ClearCoatRoughness }
+                Voxel.drawDeferred
+                    modelMatrix presence.DepthCutoff voxelMaterial geometryResolution clipPlane voxelModel
+                    eyeDescriptorSet renderer.VoxelPipeline renderer.VulkanContext
+            Voxel.endDeferred renderer.VulkanContext
 
         // render terrains deferred
         let terrainTextureViews = [|depthTexture.ImageView; albedoTexture.ImageView; materialTexture.ImageView; normalPlusTexture.ImageView; subdermalPlusTexture.ImageView; scatterPlusTexture.ImageView|]
@@ -4587,6 +4832,11 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterToneMappingPipeline renderer.VulkanContext
         Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead toneMappingTexture renderer.VulkanContext.RenderCommandBuffer
 
+        // composite recursively rendered portal views into the tone-mapped scene.
+        VulkanRenderer3d.drawPortalComposites
+            (view * geometryProjection) geometryResolution portalComposites
+            toneMappingTexture zTexture renderer
+
         // apply fxaa filter when desired
         if renderer.RendererConfig.FxaaEnabled then
 
@@ -4650,6 +4900,124 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         // advance render pass index
         renderer.RenderPassIndex <- inc renderer.RenderPassIndex
 
+    static member private renderPortalCompositesForView
+        (eyeCenter : Vector3)
+        (eyeRotation : Quaternion)
+        eyeFieldOfView
+        geometryViewport
+        (renderTasks : RenderTasks)
+        (renderer : VulkanRenderer3d) =
+        let portals =
+            renderTasks.Portals
+            |> Seq.truncate VulkanRenderer3d.PortalBuffersMax
+            |> Seq.toArray
+        if portals.Length = 0 then Array.empty
+        else
+            let bufferLimitPerPath = max 1 (VulkanRenderer3d.PortalBuffersMax / portals.Length)
+            let usedBuffers = Array.zeroCreate<bool> renderer.PortalTextures.Length
+            let allocateBuffer () =
+                let mutable found = ValueNone
+                let mutable i = 0
+                while found.IsNone && i < usedBuffers.Length do
+                    if not usedBuffers[i] then
+                        usedBuffers[i] <- true
+                        found <- ValueSome i
+                    i <- inc i
+                found
+            let releaseBuffer index =
+                if index >= 0 && index < usedBuffers.Length then usedBuffers[index] <- false
+            let rec renderPortalView
+                (depth : int)
+                (eyeCenter : Vector3)
+                (eyeRotation : Quaternion)
+                (frustum : Frustum)
+                (portal : RenderPortal3d) =
+                if depth <= 0 || not (VulkanRenderer3d.portalIntersectsView frustum portal) then ValueNone
+                elif VulkanRenderer3d.shouldFillPortalOnly eyeCenter portal then
+                    ValueSome
+                        { Portal = portal
+                          Texture = renderer.WhiteTexture
+                          FillOnly = true
+                          BufferIndex = -1 }
+                else
+                    match allocateBuffer () with
+                    | ValueNone -> ValueNone
+                    | ValueSome bufferIndex ->
+                        let struct (portalEyeCenter, portalEyeRotation) =
+                            VulkanRenderer3d.transferPortalEye
+                                eyeCenter eyeRotation
+                                portal.SourceCenter portal.SourceRotation
+                                portal.DestinationCenter portal.DestinationRotation
+                        let portalView = Viewport.getView3d portalEyeCenter portalEyeRotation
+                        let portalViewSkyBox = Matrix4x4.CreateFromQuaternion portalEyeRotation.Inverted
+                        let portalFrustum = Viewport.getFrustum portalEyeCenter portalEyeRotation eyeFieldOfView geometryViewport
+                        let portalProjection = Viewport.getProjection3d eyeFieldOfView geometryViewport
+                        let childComposites =
+                            if depth > 1 then
+                                let children = List<PortalComposite> ()
+                                for childPortal in portals do
+                                    if not (VulkanRenderer3d.isPortalAtDestination portal.DestinationCenter portal.DestinationRotation childPortal) then
+                                        match renderPortalView (dec depth) portalEyeCenter portalEyeRotation portalFrustum childPortal with
+                                        | ValueSome childComposite -> children.Add childComposite
+                                        | ValueNone -> ()
+                                children.ToArray ()
+                            else Array.empty
+                        let target = renderer.PortalTextures[bufferIndex]
+                        let targetBounds = VkRect2D (0, 0, uint geometryViewport.Bounds.Size.X, uint geometryViewport.Bounds.Size.Y)
+                        let clipPlane =
+                            VulkanRenderer3d.makePortalClipPlane
+                                portalEyeCenter portal.DestinationCenter portal.DestinationRotation
+                        Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite target renderer.VulkanContext.RenderCommandBuffer
+                        VulkanRenderer3d.renderGeometryCore
+                            portalFrustum portalFrustum portalFrustum NormalPass renderTasks renderer
+                            false None portalEyeCenter portalView portalViewSkyBox portalFrustum
+                            portalProjection portalProjection clipPlane childComposites
+                            targetBounds 0 target.Image
+                        Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead target renderer.VulkanContext.RenderCommandBuffer
+                        for childComposite in childComposites do
+                            releaseBuffer childComposite.BufferIndex
+                        ValueSome
+                            { Portal = portal
+                              Texture = target
+                              FillOnly = false
+                              BufferIndex = bufferIndex }
+            let frustum = Viewport.getFrustum eyeCenter eyeRotation eyeFieldOfView geometryViewport
+            let composites = List<PortalComposite> ()
+            for portal in portals do
+                let depth =
+                    Math.Clamp
+                        (max 1 portal.RecursionLimit,
+                         1,
+                         min VulkanRenderer3d.PortalRecursionLimitMax bufferLimitPerPath)
+                match renderPortalView depth eyeCenter eyeRotation frustum portal with
+                | ValueSome composite -> composites.Add composite
+                | ValueNone -> ()
+            composites.ToArray ()
+
+    static member private renderGeometry
+        frustumInterior
+        frustumExterior
+        frustumImposter
+        renderPass
+        (renderTasks : RenderTasks)
+        renderer
+        topLevelRender
+        lightAmbientOverride
+        (eyeCenter : Vector3)
+        (view : Matrix4x4)
+        (viewSkyBox : Matrix4x4)
+        (geometryFrustum : Frustum)
+        (geometryProjection : Matrix4x4)
+        (windowProjection : Matrix4x4)
+        targetBounds
+        targetLayer
+        targetImage =
+        VulkanRenderer3d.renderGeometryCore
+            frustumInterior frustumExterior frustumImposter renderPass renderTasks renderer
+            topLevelRender lightAmbientOverride eyeCenter view viewSkyBox geometryFrustum
+            geometryProjection windowProjection Vector4.Zero Array.empty
+            targetBounds targetLayer targetImage
+
     /// Render 3d surfaces.
     static member render
         frustumInterior
@@ -4673,6 +5041,10 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         // update attachment sizes
         PhysicallyBased.updatePhysicallyBasedAttachmentsSize
             geometryViewport renderer.PhysicallyBasedAttachments renderer.VulkanContext
+        for portalTexture in renderer.PortalTextures do
+            Attachment.updateColorAttachmentSize
+                geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y
+                portalTexture renderer.VulkanContext
 
         // delete textures as requested on previous frame
         TextureDumpster.dump renderer.TextureDumpster renderer.VulkanContext
@@ -4706,10 +5078,13 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                          uint renderer.WindowViewport.Inner.Size.Y)
                 let normalPass = NormalPass
                 let normalTasks = VulkanRenderer3d.getRenderTasks normalPass renderer
-                VulkanRenderer3d.renderGeometry
+                let portalComposites =
+                    VulkanRenderer3d.renderPortalCompositesForView
+                        eyeCenter eyeRotation eyeFieldOfView geometryViewport normalTasks renderer
+                VulkanRenderer3d.renderGeometryCore
                     frustumInterior frustumExterior frustumImposter normalPass normalTasks renderer true None
                     eyeCenter view viewSkyBox geometryFrustum geometryProjection windowProjection
-                    targetBounds 0 renderer.VulkanContext.SwapchainImage
+                    Vector4.Zero portalComposites targetBounds 0 renderer.VulkanContext.SwapchainImage
         
         // clear config dirty flags
         renderer.LightingConfigChanged <- false
@@ -4733,6 +5108,11 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         for staticModel in renderer.UserDefinedStaticModelsToDestroy do
             VulkanRenderer3d.tryDestroyUserDefinedStaticModel staticModel renderer
         renderer.UserDefinedStaticModelsToDestroy.Clear ()
+
+        // destroy user-defined voxel models after their final render pass
+        for voxelModel in renderer.VoxelModelsToDestroy do
+            VulkanRenderer3d.tryDestroyUserDefinedVoxelModel voxelModel renderer
+        renderer.VoxelModelsToDestroy.Clear ()
 
         // swap render passes
         for renderTasks in renderer.RenderPasses.Values do RenderTasks.sweep renderTasks
@@ -4784,6 +5164,25 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 Constants.Render.LightsMaxDeferred
                 physicallyBasedAttachments
                 context
+
+        // create voxel splat pipeline
+        let voxelPipeline = Voxel.createPipeline physicallyBasedAttachments context
+
+        // create recursive portal compositor and render targets
+        let (_, _, _, _, _, _, _, geometryDepth) = physicallyBasedAttachments.GeometryAttachments
+        let portalPipeline =
+            Portal.createPipeline
+                physicallyBasedAttachments.ToneMappingAttachment.VkFormat
+                geometryDepth.VkFormat
+                context
+        let portalTextures =
+            Array.init VulkanRenderer3d.PortalBuffersMax (fun _ ->
+                Attachment.createColorAttachment
+                    Texture2d
+                    (VkImageUsageFlags.Sampled ||| VkImageUsageFlags.TransferDst)
+                    Rgb16f Rgb
+                    geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y
+                    context)
 
         // create shadow matrices flipped buffer
         let shadowMatricesFlippedCount = Constants.Render.ShadowTexturesMax + Constants.Render.ShadowCascadesMax * Constants.Render.ShadowCascadeLevels
@@ -4972,6 +5371,11 @@ type [<ReferenceEquality>] VulkanRenderer3d =
               IrradiancePipeline = irradiancePipeline
               EnvironmentFilterPipeline = environmentFilterPipeline
               PhysicallyBasedPipelines = physicallyBasedPipelines
+              VoxelPipeline = voxelPipeline
+              VoxelModels = Dictionary HashIdentity.Structural
+              VoxelModelsToDestroy = SList.make ()
+              PortalPipeline = portalPipeline
+              PortalTextures = portalTextures
               ShadowMatricesFlipped = shadowMatricesFlipped
               LightShadowIndices = dictPlus HashIdentity.Structural []
               LightsDesiringShadows = dictPlus HashIdentity.Structural []
@@ -5029,6 +5433,17 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             Sampler.destroy renderer.FilteredSampler
             Sampler.destroy renderer.UnfilteredSampler
             Sampler.destroy renderer.MaterialSampler
+
+            // destroy voxel model buffers and pipeline
+            for voxelModel in renderer.VoxelModels.Values do
+                Voxel.destroyModel voxelModel renderer.VulkanContext
+            renderer.VoxelModels.Clear ()
+            Voxel.destroyPipeline renderer.VoxelPipeline renderer.VulkanContext
+
+            // destroy recursive portal resources
+            for portalTexture in renderer.PortalTextures do
+                Attachment.destroyColorAttachment portalTexture renderer.VulkanContext
+            Portal.destroyPipeline renderer.PortalPipeline renderer.VulkanContext
 
             // destroy omnipresent pipelines
             SkyBox.destroySkyBoxPipeline renderer.SkyBoxPipeline renderer.VulkanContext

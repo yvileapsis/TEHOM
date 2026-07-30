@@ -88,5 +88,8 @@
     <Project Path="Projects/Twenty 48/Twenty 48.fsproj">
       <BuildType Solution="Mixed|*" Project="Debug" />
     </Project>
+    <Project Path="Projects/VoxelForge/VoxelForge.fsproj">
+      <BuildType Solution="Mixed|*" Project="Debug" />
+    </Project>
   </Folder>
 </Solution>
