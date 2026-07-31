@@ -88,6 +88,8 @@ type PhysicalDevice =
     /// Supports anisotropy.
     member this.SupportsAnisotropy =
         this.Features.samplerAnisotropy = VkBool32.True
+
+
     
     static member private checkSurface window instance =
         if  Hl.getBackgroundingRequested () then
@@ -541,6 +543,7 @@ type [<ReferenceEquality>] VulkanContext =
 
     /// Anisotropy supported.
     member this.AnisotropySupported = this.PhysicalDevice_.SupportsAnisotropy
+
 
     /// Maximum anisotropy.
     member this.MaxAnisotropy = this.PhysicalDevice_.Properties.limits.maxSamplerAnisotropy

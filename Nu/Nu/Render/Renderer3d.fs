@@ -822,8 +822,7 @@ type [<SymbolicExpansion>] Lighting3dConfig =
 
 /// Configures 3d renderer.
 type [<SymbolicExpansion>] Renderer3dConfig =
-    { VoxelRenderMode : VoxelRenderMode
-      LightMappingEnabled : bool
+    { LightMappingEnabled : bool
       LightShadowingEnabled : bool
       SssEnabled : bool
       SsaoEnabled : bool
@@ -840,8 +839,7 @@ type [<SymbolicExpansion>] Renderer3dConfig =
       FxaaReduceMulDivisor : single }
 
     static member val defaultConfig =
-        { VoxelRenderMode = VoxelRenderMode.Faces
-          LightMappingEnabled = Constants.Render.LightMappingEnabledDefault
+        { LightMappingEnabled = Constants.Render.LightMappingEnabledDefault
           LightShadowingEnabled = Constants.Render.LightShadowingEnabledDefault
           SssEnabled = Constants.Render.SssEnabledGlobalDefault
           SsaoEnabled = Constants.Render.SsaoEnabledGlobalDefault
@@ -4484,11 +4482,10 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                         let center2 = Vector3.Transform (voxelModel2.Bounds.Center, modelMatrix2)
                         (Vector3.DistanceSquared (eyeCenter, center)).CompareTo (Vector3.DistanceSquared (eyeCenter, center2)))
             renderTasks.DeferredVoxels.Sort voxelComparison
-            let voxelRenderMode = renderer.RendererConfig.VoxelRenderMode
             let voxelPass =
                 Voxel.beginDeferred
-                    voxelRenderMode eyeCenter view geometryProjection geometryTextureViews zTexture
-                    geometryResolution renderer.RenderPassIndex renderer.VoxelPipeline renderer.VulkanContext
+                    view geometryProjection geometryTextureViews zTexture
+                    geometryResolution renderer.VulkanContext
             for struct (modelMatrix, _, presence, properties, voxelModel) in renderTasks.DeferredVoxels do
                 let voxelMaterial : VoxelMaterial =
                     { Albedo = properties.Albedo

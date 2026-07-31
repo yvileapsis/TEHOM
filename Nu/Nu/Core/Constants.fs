@@ -497,7 +497,6 @@ module Paths =
     let [<Literal>] PhysicallyBasedDeferredStaticShaderFilePath = "Assets/Default/PhysicallyBasedDeferredStatic"
     let [<Literal>] PhysicallyBasedDeferredStaticClippedShaderFilePath = "Assets/Default/PhysicallyBasedDeferredStaticClipped"
     let [<Literal>] PhysicallyBasedDeferredVoxelShaderFilePath = "Assets/Default/PhysicallyBasedDeferredVoxel"
-    let [<Literal>] PhysicallyBasedDeferredVoxelSplatShaderFilePath = "Assets/Default/PhysicallyBasedDeferredVoxelSplat"
     let [<Literal>] PortalShaderFilePath = "Assets/Default/Portal"
     let [<Literal>] PhysicallyBasedDeferredAnimatedShaderFilePath = "Assets/Default/PhysicallyBasedDeferredAnimated"
     let [<Literal>] PhysicallyBasedDeferredTerrainShaderFilePath = "Assets/Default/PhysicallyBasedDeferredTerrain"

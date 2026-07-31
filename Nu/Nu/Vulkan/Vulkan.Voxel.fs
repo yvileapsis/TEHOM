@@ -14,20 +14,8 @@ open Vortice.Vulkan
 open Prime
 open Nu
 
-[<Struct; StructLayout (LayoutKind.Explicit, Size = 192)>]
+[<Struct; StructLayout (LayoutKind.Explicit, Size = 240)>]
 type VoxelFaceInstanceStruct =
-    [<FieldOffset(0)>] val mutable model : Matrix4x4
-    [<FieldOffset(64)>] val mutable voxelOrigin : Vector4
-    [<FieldOffset(80)>] val mutable voxelSize : Vector4
-    [<FieldOffset(96)>] val mutable albedo : Vector4
-    [<FieldOffset(112)>] val mutable material : Vector4
-    [<FieldOffset(128)>] val mutable heightPlus : Vector4
-    [<FieldOffset(144)>] val mutable subsurfacePlus : Vector4
-    [<FieldOffset(160)>] val mutable clearCoatPlus : Vector4
-    [<FieldOffset(176)>] val mutable clipPlane : Vector4
-
-[<Struct; StructLayout (LayoutKind.Explicit, Size = 368)>]
-type VoxelSplatInstanceStruct =
     [<FieldOffset(0)>] val mutable modelViewProjection : Matrix4x4
     [<FieldOffset(64)>] val mutable voxelOrigin : Vector4
     [<FieldOffset(80)>] val mutable voxelSize : Vector4
@@ -40,26 +28,16 @@ type VoxelSplatInstanceStruct =
     [<FieldOffset(192)>] val mutable normalY : Vector4
     [<FieldOffset(208)>] val mutable normalZ : Vector4
     [<FieldOffset(224)>] val mutable clipPlaneLocal : Vector4
-    [<FieldOffset(240)>] val mutable rayOriginBase : Vector4
-    [<FieldOffset(256)>] val mutable rayOriginU : Vector4
-    [<FieldOffset(272)>] val mutable rayOriginV : Vector4
-    [<FieldOffset(288)>] val mutable rayDirectionBase : Vector4
-    [<FieldOffset(304)>] val mutable rayDirectionU : Vector4
-    [<FieldOffset(320)>] val mutable rayDirectionV : Vector4
-    [<FieldOffset(336)>] val mutable cameraLocal : Vector4
-    [<FieldOffset(352)>] val mutable proxyParams : Vector4
 
-/// A voxel model resident in exposed-face and analytic cube-splat GPU representations.
+/// A voxel model resident as packed, neighbor-exposed GPU faces.
 type VoxelModelGpu =
     { Id : uint64
       Bounds : Box3
       VoxelSize : Vector3
       Origin : Vector3
       FaceCount : int
+      CompactFaces : bool
       FaceBuffer : VulkanBuffer
-      SplatCount : int
-      CompactSplats : bool
-      SplatBuffer : VulkanBuffer
       PaletteBuffer : VulkanBuffer }
 
 /// Material values written by a voxel into the physically-based G-buffer.
@@ -76,30 +54,13 @@ type VoxelMaterial =
       ClearCoat : single
       ClearCoatRoughness : single }
 
-type VoxelFacePipeline =
-    { EyeUniform : VulkanBuffer
-      InstanceUniform : VulkanBuffer
+type VoxelPipeline =
+    { InstanceUniform : VulkanBuffer
       IndexBuffer : VulkanBuffer
       Pipeline : Pipeline }
 
-type VoxelSplatPipeline =
-    { EyeUniform : VulkanBuffer
-      InstanceUniform : VulkanBuffer
-      IndexBuffer : VulkanBuffer
-      GraphicsPipeline : Pipeline }
-
-/// Pipeline state for selectable exposed-face and analytic splat rendering.
-type VoxelPipeline =
-    { Faces : VoxelFacePipeline
-      Splats : VoxelSplatPipeline }
-
 type VoxelPass =
-    { Mode : VoxelRenderMode
-      EyeDescriptorSet : VkDescriptorSet
-      EyeCenter : Vector3
-      Projection : Matrix4x4
-      ViewProjection : Matrix4x4
-      Resolution : Vector2i }
+    { ViewProjection : Matrix4x4 }
 
 [<RequireQualifiedAccess>]
 module Voxel =
@@ -224,10 +185,8 @@ module Voxel =
           VoxelSize : Vector3
           Origin : Vector3
           FaceCount : int
+          CompactFaces : bool
           PackedFaces : uint array
-          SplatCount : int
-          PackedSplats : uint array
-          CompactSplats : bool
           Palette : Vector4 array }
 
     let private makeModelData (descriptor : VoxelModelDescriptor) =
@@ -277,10 +236,9 @@ module Voxel =
         let faceCount =
             descriptor.Splats
             |> Array.sumBy (fun splat -> BitOperations.PopCount (uint splat.Faces &&& uint VoxelFaces.AllFaces))
-        let packedFaces = Array.zeroCreate<uint> (max 2 (faceCount * 2))
-        let compactSplats = Option.isSome gridOpt && palette.Length <= 256
-        let splatStride = if compactSplats then 1 else 2
-        let packedSplats = Array.zeroCreate<uint> (max 2 (descriptor.Splats.Length * splatStride))
+        let compactFaces = Option.isSome gridOpt && palette.Length <= 2048
+        let faceStride = if compactFaces then 1 else 2
+        let packedFaces = Array.zeroCreate<uint> (max 2 (faceCount * faceStride))
         let voxelOrigin = descriptor.Bounds.Min + descriptor.VoxelSize * 0.5f
         let quantize position origin voxelSize =
             let coordinate = int (MathF.Round ((position - origin) / voxelSize))
@@ -290,46 +248,38 @@ module Voxel =
                 invalidArg (nameof descriptor) "Voxel splats must lie on the descriptor's 1024-cubed voxel grid."
             coordinate
         let mutable faceIndex = 0
-        for splatIndex in 0 .. dec descriptor.Splats.Length do
-            let splat = descriptor.Splats[splatIndex]
+        for splat in descriptor.Splats do
             let paletteIndex = paletteIndices[splat.Albedo]
             let x = quantize splat.Position.X voxelOrigin.X descriptor.VoxelSize.X
             let y = quantize splat.Position.Y voxelOrigin.Y descriptor.VoxelSize.Y
             let z = quantize splat.Position.Z voxelOrigin.Z descriptor.VoxelSize.Z
             let packedPosition = uint x ||| (uint y <<< 10) ||| (uint z <<< 20)
-            let faces = uint splat.Faces &&& uint VoxelFaces.AllFaces
-            if compactSplats then
-                if x > 63 || y > 63 || z > 63 then
-                    invalidArg (nameof descriptor) "Compact voxel splats must lie on the descriptor's 64-cubed voxel grid."
-                packedSplats[splatIndex] <-
-                    uint x |||
-                    (uint y <<< 6) |||
-                    (uint z <<< 12) |||
-                    (faces <<< 18) |||
-                    (uint paletteIndex <<< 24)
-            else
-                packedSplats[splatIndex * 2] <- packedPosition
-                packedSplats[splatIndex * 2 + 1] <- faces ||| (uint paletteIndex <<< 6)
+            if compactFaces && (x > 63 || y > 63 || z > 63) then
+                invalidArg (nameof descriptor) "Compact voxel faces must lie on the descriptor's 64-cubed voxel grid."
             for face in 0 .. 5 do
                 if int splat.Faces &&& (1 <<< face) <> 0 then
-                    packedFaces[faceIndex * 2] <- packedPosition
-                    packedFaces[faceIndex * 2 + 1] <- uint face ||| (uint paletteIndex <<< 3)
+                    if compactFaces then
+                        packedFaces[faceIndex] <-
+                            uint x |||
+                            (uint y <<< 6) |||
+                            (uint z <<< 12) |||
+                            (uint face <<< 18) |||
+                            (uint paletteIndex <<< 21)
+                    else
+                        packedFaces[faceIndex * 2] <- packedPosition
+                        packedFaces[faceIndex * 2 + 1] <- uint face ||| (uint paletteIndex <<< 3)
                     faceIndex <- inc faceIndex
         { Bounds = descriptor.Bounds
           VoxelSize = descriptor.VoxelSize
           Origin = voxelOrigin
           FaceCount = faceCount
+          CompactFaces = compactFaces
           PackedFaces = packedFaces
-          SplatCount = descriptor.Splats.Length
-          CompactSplats = compactSplats
-          PackedSplats = packedSplats
           Palette = palette }
 
     let private createModelFromData data context =
         let faceBuffer = VulkanBuffer.create Storage (data.PackedFaces.Length * sizeof<uint>) context
         VulkanBuffer.uploadArray data.PackedFaces faceBuffer context
-        let splatBuffer = VulkanBuffer.create Storage (data.PackedSplats.Length * sizeof<uint>) context
-        VulkanBuffer.uploadArray data.PackedSplats splatBuffer context
         let paletteBuffer = VulkanBuffer.create Storage (max sizeof<Vector4> (data.Palette.Length * sizeof<Vector4>)) context
         VulkanBuffer.uploadArray data.Palette paletteBuffer context
         { Id = Gen.id64
@@ -337,10 +287,8 @@ module Voxel =
           VoxelSize = data.VoxelSize
           Origin = data.Origin
           FaceCount = data.FaceCount
+          CompactFaces = data.CompactFaces
           FaceBuffer = faceBuffer
-          SplatCount = data.SplatCount
-          CompactSplats = data.CompactSplats
-          SplatBuffer = splatBuffer
           PaletteBuffer = paletteBuffer }
 
     let createModel descriptor context =
@@ -351,11 +299,9 @@ module Voxel =
         let data = makeModelData descriptor
         let canUpdateInPlace =
             data.PackedFaces.Length * sizeof<uint> <= model.FaceBuffer.Size &&
-            data.PackedSplats.Length * sizeof<uint> <= model.SplatBuffer.Size &&
             data.Palette.Length * sizeof<Vector4> <= model.PaletteBuffer.Size
         if canUpdateInPlace then
             VulkanBuffer.uploadArray data.PackedFaces model.FaceBuffer context
-            VulkanBuffer.uploadArray data.PackedSplats model.SplatBuffer context
             VulkanBuffer.uploadArray data.Palette model.PaletteBuffer context
             let updated =
                 { model with
@@ -363,14 +309,12 @@ module Voxel =
                     VoxelSize = data.VoxelSize
                     Origin = data.Origin
                     FaceCount = data.FaceCount
-                    SplatCount = data.SplatCount
-                    CompactSplats = data.CompactSplats }
+                    CompactFaces = data.CompactFaces }
             struct (updated, false)
         else struct (createModelFromData data context, true)
 
     let destroyModel (model : VoxelModelGpu) (context : VulkanContext) =
         VulkanBuffer.destroy model.FaceBuffer context
-        VulkanBuffer.destroy model.SplatBuffer context
         VulkanBuffer.destroy model.PaletteBuffer context
 
     let private getColorAttachmentFormats (attachments : PhysicallyBasedAttachments) =
@@ -383,16 +327,13 @@ module Voxel =
           scatterPlus.VkFormat
           clearCoatPlus.VkFormat|], z
 
-    let private createFacePipeline attachments context =
-        let eyeUniform = VulkanBuffer.create Uniform sizeof<EyeStruct> context
+    let createPipeline attachments context =
         let instanceUniform = VulkanBuffer.create Uniform sizeof<VoxelFaceInstanceStruct> context
         let quadIndices = [|0u; 1u; 2u; 0u; 2u; 3u|]
         let indexBuffer = VulkanBuffer.createIndexStagedFromArray quadIndices context
         let colorAttachmentFormats, z = getColorAttachmentFormats attachments
         let descriptorDefinitions : DescriptorSetDefinition array =
-            [|(Pipeline.descriptorSet<int>
-                [|Pipeline.descriptor 0 UniformBuffer VertexAndFragmentStage 1|] :> DescriptorSetDefinition)
-              (Pipeline.descriptorSet<uint64>
+            [|(Pipeline.descriptorSet<uint64>
                 [|Pipeline.descriptor 0 StorageBuffer VertexStage 1
                   Pipeline.descriptor 1 StorageBuffer VertexStage 1|] :> DescriptorSetDefinition)
               (Pipeline.descriptorSet<int>
@@ -407,180 +348,54 @@ module Voxel =
                 [||]
                 colorAttachmentFormats
                 (Some z.VkFormat)
-                [|eyeUniform; instanceUniform|]
-        { EyeUniform = eyeUniform
-          InstanceUniform = instanceUniform
+                [|instanceUniform|]
+        { InstanceUniform = instanceUniform
           IndexBuffer = indexBuffer
           Pipeline = pipeline }
 
-    let private splatDescriptorDefinitions : DescriptorSetDefinition array =
-        [|(Pipeline.descriptorSet<int>
-            [|Pipeline.descriptor 0 UniformBuffer VertexAndFragmentStage 1|] :> DescriptorSetDefinition)
-          (Pipeline.descriptorSet<uint64>
-            [|Pipeline.descriptor 0 StorageBuffer VertexStage 1
-              Pipeline.descriptor 2 StorageBuffer VertexStage 1|] :> DescriptorSetDefinition)
-          (Pipeline.descriptorSet<int>
-            [|Pipeline.descriptor 0 UniformBuffer VertexAndFragmentStage 1|] :> DescriptorSetDefinition)|]
-
-    let private createSplatPipeline attachments context =
-        let eyeUniform = VulkanBuffer.create Uniform sizeof<EyeStruct> context
-        let instanceUniform = VulkanBuffer.create Uniform sizeof<VoxelSplatInstanceStruct> context
-        let quadIndices = [|0u; 1u; 2u; 0u; 2u; 3u|]
-        let indexBuffer = VulkanBuffer.createIndexStagedFromArray quadIndices context
-        let colorAttachmentFormats, z = getColorAttachmentFormats attachments
-        let graphicsPipeline =
-            Pipeline.create
-                Constants.Paths.PhysicallyBasedDeferredVoxelSplatShaderFilePath
-                [|VulkanUnblended|]
-                [|false|]
-                [||]
-                splatDescriptorDefinitions
-                [||]
-                colorAttachmentFormats
-                (Some z.VkFormat)
-                [|eyeUniform; instanceUniform|]
-        { EyeUniform = eyeUniform
-          InstanceUniform = instanceUniform
-          IndexBuffer = indexBuffer
-          GraphicsPipeline = graphicsPipeline }
-
-    let createPipeline attachments context =
-        { Faces = createFacePipeline attachments context
-          Splats = createSplatPipeline attachments context }
-
     let beginFrame (pipeline : VoxelPipeline) =
-        Pipeline.beginFrame pipeline.Faces.Pipeline
-        Pipeline.beginFrame pipeline.Splats.GraphicsPipeline
-
-    let private specifySplatModelDescriptorSet (model : VoxelModelGpu) (pipeline : VoxelSplatPipeline) =
-        Pipeline.specifyDescriptorSet 1 model.Id pipeline.GraphicsPipeline $ fun vkSet ->
-            writeStorageDescriptor 0 model.SplatBuffer vkSet
-            writeStorageDescriptor 2 model.PaletteBuffer vkSet
+        Pipeline.beginFrame pipeline.Pipeline
 
     let beginDeferred
-        (mode : VoxelRenderMode)
-        (eyeCenter : Vector3)
         (view : Matrix4x4)
         (projectionUnflipped : Matrix4x4)
         (colorAttachments : VkImageView array)
         (depthAttachment : Texture)
         (resolution : Vector2i)
-        (renderPassIndex : int)
-        (pipeline : VoxelPipeline)
         (context : VulkanContext) =
         let projection = projectionUnflipped.Flipped
-        let viewProjection = view * projection
-        let graphicsPipeline, eyeUniform =
-            match mode with
-            | VoxelRenderMode.Faces -> pipeline.Faces.Pipeline, pipeline.Faces.EyeUniform
-            | VoxelRenderMode.Splats -> pipeline.Splats.GraphicsPipeline, pipeline.Splats.EyeUniform
-        let mutable eyeDescriptorSet = Pipeline.specifyDescriptorSet 0 renderPassIndex graphicsPipeline $ fun vkSet ->
-            let eye =
-                EyeStruct
-                    (center = eyeCenter,
-                     view = view,
-                     viewInverse = view.Inverted,
-                     projection = projection,
-                     projectionInverse = projection.Inverted,
-                     viewProjection = viewProjection)
-            VulkanBuffer.uploadValue eye eyeUniform context
-            Pipeline.writeDescriptorUniformBuffer 0 0 eyeUniform vkSet
         let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
         let mutable viewport = Hl.makeViewport false renderArea
         let mutable renderingInfo = Hl.makeRenderingInfo colorAttachments (Some depthAttachment.ImageView) renderArea None
         DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
         DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&viewport)
         DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
-        { Mode = mode
-          EyeDescriptorSet = eyeDescriptorSet
-          EyeCenter = eyeCenter
-          Projection = projection
-          ViewProjection = viewProjection
-          Resolution = resolution }
+        { ViewProjection = view * projection }
 
-    let private bindDescriptorSets eyeDescriptorSet modelDescriptorSet instanceDescriptorSet (graphicsPipeline : Pipeline) (context : VulkanContext) =
-        let mutable eyeDescriptorSet = eyeDescriptorSet
+    let private bindDescriptorSets modelDescriptorSet instanceDescriptorSet (pipeline : Pipeline) (context : VulkanContext) =
         let mutable modelDescriptorSet = modelDescriptorSet
         let mutable instanceDescriptorSet = instanceDescriptorSet
-        DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, graphicsPipeline.PipelineLayout, 0u, 1u, &&eyeDescriptorSet, 0u, nullPtr)
-        DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, graphicsPipeline.PipelineLayout, 1u, 1u, &&modelDescriptorSet, 0u, nullPtr)
-        DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, graphicsPipeline.PipelineLayout, 2u, 1u, &&instanceDescriptorSet, 0u, nullPtr)
-
-    let private drawFaces (modelMatrix : Matrix4x4) depthCutoff (materialProperties : VoxelMaterial) (clipPlane : Vector4) (model : VoxelModelGpu) (pass : VoxelPass) (pipeline : VoxelPipeline) (context : VulkanContext) =
-        if model.FaceCount > 0 then
-            match Pipeline.tryGetVkPipeline VulkanUnblended true pipeline.Faces.Pipeline with
-            | Some vkPipeline ->
-                let modelDescriptorSet = Pipeline.specifyDescriptorSet 1 model.Id pipeline.Faces.Pipeline $ fun vkSet ->
-                    writeStorageDescriptor 0 model.FaceBuffer vkSet
-                    writeStorageDescriptor 1 model.PaletteBuffer vkSet
-                let ignoreLightMaps = if materialProperties.IgnoreLightMaps then 1.0f else 0.0f
-                let instance =
-                    VoxelFaceInstanceStruct
-                        (model = modelMatrix,
-                         voxelOrigin = Vector4 (model.Origin, 0.0f),
-                         voxelSize = Vector4 (model.VoxelSize, 0.0f),
-                         albedo = Vector4 (materialProperties.Albedo.R, materialProperties.Albedo.G, materialProperties.Albedo.B, materialProperties.Albedo.A),
-                         material = Vector4 (materialProperties.Roughness, materialProperties.Metallic, materialProperties.AmbientOcclusion, materialProperties.Emission),
-                         heightPlus = Vector4 (materialProperties.Height, ignoreLightMaps, depthCutoff, 0.0f),
-                         subsurfacePlus = Vector4 (materialProperties.FinenessOffset, materialProperties.ScatterType, 0.0f, 0.0f),
-                         clearCoatPlus = Vector4 (materialProperties.ClearCoat, materialProperties.ClearCoatRoughness, 0.0f, 0.0f),
-                         clipPlane = clipPlane)
-                let instanceDescriptorSet = Pipeline.specifyDescriptorSet 2 pipeline.Faces.Pipeline.DrawIndex pipeline.Faces.Pipeline $ fun vkSet ->
-                    VulkanBuffer.uploadValue instance pipeline.Faces.InstanceUniform context
-                    Pipeline.writeDescriptorUniformBuffer 0 0 pipeline.Faces.InstanceUniform vkSet
-                DeviceApi.vkCmdBindPipeline (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)
-                DeviceApi.vkCmdSetDepthTestEnable (context.RenderCommandBuffer, true)
-                DeviceApi.vkCmdSetDepthCompareOp (context.RenderCommandBuffer, VkCompareOp.Less)
-                bindDescriptorSets pass.EyeDescriptorSet modelDescriptorSet instanceDescriptorSet pipeline.Faces.Pipeline context
-                DeviceApi.vkCmdBindIndexBuffer (context.RenderCommandBuffer, pipeline.Faces.IndexBuffer.VkBuffer, 0UL, VkIndexType.Uint32)
-                DeviceApi.vkCmdDrawIndexed (context.RenderCommandBuffer, 6u, uint model.FaceCount, 0u, 0, 0u)
-                Hl.reportDrawCall model.FaceCount false
-                Pipeline.advance pipeline.Faces.Pipeline
-            | None -> Log.warnOnce "Cannot draw voxel faces because the Vulkan voxel face pipeline does not exist."
-
+        DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.PipelineLayout, 0u, 1u, &&modelDescriptorSet, 0u, nullPtr)
+        DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.PipelineLayout, 1u, 1u, &&instanceDescriptorSet, 0u, nullPtr)
 
     let private normalizedOr fallback (value : Vector3) =
         if value.LengthSquared () > 0.0000001f then value.Normalized else fallback
 
-    let private drawSplats (modelMatrix : Matrix4x4) depthCutoff (materialProperties : VoxelMaterial) (clipPlane : Vector4) (model : VoxelModelGpu) (pass : VoxelPass) (pipeline : VoxelPipeline) (context : VulkanContext) =
-        if model.SplatCount > 0 then
-            match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Splats.GraphicsPipeline with
+    let drawDeferred
+        (modelMatrix : Matrix4x4)
+        depthCutoff
+        (materialProperties : VoxelMaterial)
+        (clipPlane : Vector4)
+        (model : VoxelModelGpu)
+        (pass : VoxelPass)
+        (pipeline : VoxelPipeline)
+        (context : VulkanContext) =
+        if model.FaceCount > 0 then
+            match Pipeline.tryGetVkPipeline VulkanUnblended true pipeline.Pipeline with
             | Some vkPipeline ->
-                let modelDescriptorSet = specifySplatModelDescriptorSet model pipeline.Splats
-                let modelViewProjection = modelMatrix * pass.ViewProjection
-                let modelInverse = modelMatrix.Inverted
-                let cameraLocal = Vector3.Transform (pass.EyeCenter, modelInverse)
-                let clipToLocal = modelViewProjection.Inverted
-                let unprojectLocal x y z =
-                    let point = Vector4.Transform (Vector4 (x, y, z, 1.0f), clipToLocal)
-                    Vector3 (point.X, point.Y, point.Z) / point.W
-                let near00 = unprojectLocal -1.0f -1.0f 0.0f
-                let near10 = unprojectLocal 1.0f -1.0f 0.0f
-                let near01 = unprojectLocal -1.0f 1.0f 0.0f
-                let far00 = unprojectLocal -1.0f -1.0f 1.0f
-                let far10 = unprojectLocal 1.0f -1.0f 1.0f
-                let far01 = unprojectLocal -1.0f 1.0f 1.0f
-                let rayOriginBase, rayOriginU, rayOriginV, rayDirectionBase, rayDirectionU, rayDirectionV =
-                    if MathF.Abs pass.Projection.M44 < 0.5f then
-                        let direction00 = far00 - cameraLocal
-                        let direction10 = far10 - cameraLocal
-                        let direction01 = far01 - cameraLocal
-                        cameraLocal,
-                        Vector3.Zero,
-                        Vector3.Zero,
-                        direction00,
-                        direction10 - direction00,
-                        direction01 - direction00
-                    else
-                        let direction00 = far00 - near00
-                        let direction10 = far10 - near10
-                        let direction01 = far01 - near01
-                        near00,
-                        near10 - near00,
-                        near01 - near00,
-                        direction00,
-                        direction10 - direction00,
-                        direction01 - direction00
+                let modelDescriptorSet = Pipeline.specifyDescriptorSet 0 model.Id pipeline.Pipeline $ fun vkSet ->
+                    writeStorageDescriptor 0 model.FaceBuffer vkSet
+                    writeStorageDescriptor 1 model.PaletteBuffer vkSet
                 let axisX = Vector3.TransformNormal (v3Right, modelMatrix)
                 let axisY = Vector3.TransformNormal (v3Up, modelMatrix)
                 let axisZ = Vector3.TransformNormal (v3Forward, modelMatrix)
@@ -593,10 +408,10 @@ module Voxel =
                 let clipPlaneLocal = Vector4.Transform (clipPlane, Matrix4x4.Transpose modelMatrix)
                 let ignoreLightMaps = if materialProperties.IgnoreLightMaps then 1.0f else 0.0f
                 let instance =
-                    VoxelSplatInstanceStruct
-                        (modelViewProjection = modelViewProjection,
+                    VoxelFaceInstanceStruct
+                        (modelViewProjection = modelMatrix * pass.ViewProjection,
                          voxelOrigin = Vector4 (model.Origin, 0.0f),
-                         voxelSize = Vector4 (model.VoxelSize, 0.0f),
+                         voxelSize = Vector4 (model.VoxelSize, if model.CompactFaces then 1.0f else -1.0f),
                          albedo = Vector4 (materialProperties.Albedo.R, materialProperties.Albedo.G, materialProperties.Albedo.B, materialProperties.Albedo.A),
                          material = Vector4 (materialProperties.Roughness, materialProperties.Metallic, materialProperties.AmbientOcclusion, materialProperties.Emission),
                          heightPlus = Vector4 (materialProperties.Height, ignoreLightMaps, depthCutoff, 0.0f),
@@ -605,39 +420,19 @@ module Voxel =
                          normalX = Vector4 (normalX, 0.0f),
                          normalY = Vector4 (normalY, 0.0f),
                          normalZ = Vector4 (normalZ, 0.0f),
-                         clipPlaneLocal = clipPlaneLocal,
-                         rayOriginBase = Vector4 (rayOriginBase, 0.0f),
-                         rayOriginU = Vector4 (rayOriginU, 0.0f),
-                         rayOriginV = Vector4 (rayOriginV, 0.0f),
-                         rayDirectionBase = Vector4 (rayDirectionBase, 0.0f),
-                         rayDirectionU = Vector4 (rayDirectionU, 0.0f),
-                         rayDirectionV = Vector4 (rayDirectionV, 0.0f),
-                         cameraLocal = Vector4 (cameraLocal, 0.0f),
-                         proxyParams =
-                            Vector4
-                                (1.0f / single pass.Resolution.X,
-                                 1.0f / single pass.Resolution.Y,
-                                 2.0f / single pass.Resolution.X,
-                                 (if model.CompactSplats then 2.0f else -2.0f) / single pass.Resolution.Y))
-                let instanceDescriptorSet = Pipeline.specifyDescriptorSet 2 pipeline.Splats.GraphicsPipeline.DrawIndex pipeline.Splats.GraphicsPipeline $ fun vkSet ->
-                    VulkanBuffer.uploadValue instance pipeline.Splats.InstanceUniform context
-                    Pipeline.writeDescriptorUniformBuffer 0 0 pipeline.Splats.InstanceUniform vkSet
+                         clipPlaneLocal = clipPlaneLocal)
+                let instanceDescriptorSet = Pipeline.specifyDescriptorSet 1 pipeline.Pipeline.DrawIndex pipeline.Pipeline $ fun vkSet ->
+                    VulkanBuffer.uploadValue instance pipeline.InstanceUniform context
+                    Pipeline.writeDescriptorUniformBuffer 0 0 pipeline.InstanceUniform vkSet
                 DeviceApi.vkCmdBindPipeline (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)
                 DeviceApi.vkCmdSetDepthTestEnable (context.RenderCommandBuffer, true)
                 DeviceApi.vkCmdSetDepthCompareOp (context.RenderCommandBuffer, VkCompareOp.Less)
-                bindDescriptorSets pass.EyeDescriptorSet modelDescriptorSet instanceDescriptorSet pipeline.Splats.GraphicsPipeline context
-                DeviceApi.vkCmdBindIndexBuffer (context.RenderCommandBuffer, pipeline.Splats.IndexBuffer.VkBuffer, 0UL, VkIndexType.Uint32)
-                DeviceApi.vkCmdDrawIndexed (context.RenderCommandBuffer, 6u, uint model.SplatCount, 0u, 0, 0u)
-                Hl.reportDrawCall model.SplatCount false
-                Pipeline.advance pipeline.Splats.GraphicsPipeline
-            | None -> Log.warnOnce "Cannot draw voxel splats because the Vulkan voxel splat pipeline does not exist."
-
-    let drawDeferred modelMatrix depthCutoff materialProperties clipPlane (model : VoxelModelGpu) pass pipeline context =
-        match pass.Mode with
-        | VoxelRenderMode.Faces ->
-            drawFaces modelMatrix depthCutoff materialProperties clipPlane model pass pipeline context
-        | VoxelRenderMode.Splats ->
-            drawSplats modelMatrix depthCutoff materialProperties clipPlane model pass pipeline context
+                bindDescriptorSets modelDescriptorSet instanceDescriptorSet pipeline.Pipeline context
+                DeviceApi.vkCmdBindIndexBuffer (context.RenderCommandBuffer, pipeline.IndexBuffer.VkBuffer, 0UL, VkIndexType.Uint32)
+                DeviceApi.vkCmdDrawIndexed (context.RenderCommandBuffer, 6u, uint model.FaceCount, 0u, 0, 0u)
+                Hl.reportDrawCall model.FaceCount false
+                Pipeline.advance pipeline.Pipeline
+            | None -> Log.warnOnce "Cannot draw voxel faces because the Vulkan voxel face pipeline does not exist."
 
     let endDeferred (context : VulkanContext) =
         DeviceApi.vkCmdEndRendering context.RenderCommandBuffer
@@ -645,11 +440,8 @@ module Voxel =
         VulkanContext.advanceRenderCommandBuffer context
 
     let reloadShaders (pipeline : VoxelPipeline) context =
-        Pipeline.reloadShaders pipeline.Faces.Pipeline context
-        Pipeline.reloadShaders pipeline.Splats.GraphicsPipeline context
+        Pipeline.reloadShaders pipeline.Pipeline context
 
     let destroyPipeline (pipeline : VoxelPipeline) context =
-        Pipeline.destroy pipeline.Faces.Pipeline context
-        VulkanBuffer.destroy pipeline.Faces.IndexBuffer context
-        Pipeline.destroy pipeline.Splats.GraphicsPipeline context
-        VulkanBuffer.destroy pipeline.Splats.IndexBuffer context
+        Pipeline.destroy pipeline.Pipeline context
+        VulkanBuffer.destroy pipeline.IndexBuffer context

@@ -9,11 +9,6 @@ open System
 open System.Numerics
 open Prime
 
-/// Selects the GPU representation used to render voxel models.
-[<RequireQualifiedAccess>]
-type VoxelRenderMode =
-    | Faces
-    | Splats
 
 /// Dense palette-indexed voxel data used by editable splat rendering.
 type VoxelGridDescriptor =

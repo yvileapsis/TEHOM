@@ -193,6 +193,7 @@ type Pipeline =
           VkPipelineLayout_ : VkPipelineLayout
           VkDescriptorSetLayouts_ : VkDescriptorSetLayout array
           ShaderPath_ : string
+          PrimitiveTopology_ : VkPrimitiveTopology
           PipelineSettings_ : (VulkanBlend * bool) array
           VkVertexBindings_ : VkVertexInputBindingDescription array
           VkVertexAttributes_ : VkVertexInputAttributeDescription array
@@ -247,6 +248,7 @@ type Pipeline =
     /// Try to create the VkPipelines.
     static member private tryCreateVkPipelines
         shaderPath
+        (primitiveTopology : VkPrimitiveTopology)
         (pipelineSettings : (VulkanBlend * bool) array)
         (vertexBindings : VkVertexInputBindingDescription array)
         (vertexAttributes : VkVertexInputAttributeDescription array)
@@ -297,7 +299,7 @@ type Pipeline =
             rInfo.lineWidth <- 1.0f
 
             // input assembly; multisample
-            let mutable iaInfo = VkPipelineInputAssemblyStateCreateInfo (topology = VkPrimitiveTopology.TriangleList)
+            let mutable iaInfo = VkPipelineInputAssemblyStateCreateInfo (topology = primitiveTopology)
             let mutable mInfo = VkPipelineMultisampleStateCreateInfo (rasterizationSamples = VkSampleCountFlags.Count1)
             
             // depth-stencil info
@@ -394,6 +396,7 @@ type Pipeline =
         let vkPipelines =
             Pipeline.tryCreateVkPipelines
                 pipeline.ShaderPath_
+                pipeline.PrimitiveTopology_
                 pipeline.PipelineSettings_
                 pipeline.VkVertexBindings_
                 pipeline.VkVertexAttributes_
@@ -607,8 +610,9 @@ type Pipeline =
         Pipeline.createVkPipelines pipeline
 
     /// Create a Pipeline.
-    static member create<'k when 'k : equality>
+    static member createWithTopology<'k when 'k : equality>
         shaderPath
+        (primitiveTopology : VkPrimitiveTopology)
         (blends : VulkanBlend array)
         (cullModes : bool array)
         (vertexBindings : VertexBinding array)
@@ -646,7 +650,16 @@ type Pipeline =
         if blends.Length < 1 then Log.fail "No pipeline blend was specified."
         let pipelineSettings = Array.allPairs blends cullModes
         let vkPipelineLayout = Pipeline.createVkPipelineLayout descriptorSetLayouts pushConstantRanges
-        let vkPipelines = Pipeline.tryCreateVkPipelines shaderPath pipelineSettings vertexBindingDescriptions vertexAttributes vkPipelineLayout colorAttachmentFormats depthTestFormatOpt
+        let vkPipelines =
+            Pipeline.tryCreateVkPipelines
+                shaderPath
+                primitiveTopology
+                pipelineSettings
+                vertexBindingDescriptions
+                vertexAttributes
+                vkPipelineLayout
+                colorAttachmentFormats
+                depthTestFormatOpt
 
         // make Pipeline
         let pipeline =
@@ -655,6 +668,7 @@ type Pipeline =
               VkPipelineLayout_ = vkPipelineLayout
               VkDescriptorSetLayouts_ = descriptorSetLayouts
               ShaderPath_ = shaderPath
+              PrimitiveTopology_ = primitiveTopology
               PipelineSettings_ = pipelineSettings
               VkVertexBindings_ = vertexBindingDescriptions
               VkVertexAttributes_ = vertexAttributes
@@ -665,6 +679,29 @@ type Pipeline =
 
         // fin
         pipeline
+
+    /// Create a triangle-list Pipeline.
+    static member create<'k when 'k : equality>
+        shaderPath
+        (blends : VulkanBlend array)
+        (cullModes : bool array)
+        (vertexBindings : VertexBinding array)
+        (descriptorSetDefinitions : DescriptorSetDefinition array)
+        (pushConstants : PushConstant array)
+        colorAttachmentFormats
+        depthTestFormatOpt
+        buffers =
+        Pipeline.createWithTopology
+            shaderPath
+            VkPrimitiveTopology.TriangleList
+            blends
+            cullModes
+            vertexBindings
+            descriptorSetDefinitions
+            pushConstants
+            colorAttachmentFormats
+            depthTestFormatOpt
+            buffers
     
     /// Destroy a Pipeline.
     static member destroy pipeline context =

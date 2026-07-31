@@ -1,24 +1,12 @@
 #version 450 core
 
-struct EyeStruct
-{
-    vec3 center;
-    mat4 view;
-    mat4 viewInverse;
-    mat4 projection;
-    mat4 projectionInverse;
-    mat4 viewProjection;
-};
-
-layout(set = 0, binding = 0) uniform EyeUniform { EyeStruct eye; };
-
-layout(location = 0) in vec3 position;
-flat layout(location = 1) in vec4 color;
-flat layout(location = 2) in vec4 albedo;
-flat layout(location = 3) in vec4 material;
-flat layout(location = 4) in vec4 heightPlus;
-flat layout(location = 5) in vec4 subsurfacePlus;
-flat layout(location = 6) in vec4 clearCoatPlus;
+flat layout(location = 0) in vec4 color;
+flat layout(location = 1) in vec4 albedo;
+flat layout(location = 2) in vec4 material;
+flat layout(location = 3) in vec4 heightPlus;
+flat layout(location = 4) in vec4 subsurfacePlus;
+flat layout(location = 5) in vec4 clearCoatPlus;
+flat layout(location = 6) in vec3 faceNormal;
 layout(location = 7) in float clipDistance;
 
 layout(location = 0) out float depthOut;
@@ -65,9 +53,6 @@ void main()
         discard;
     if (clipDistance < 0.0)
         discard;
-    vec3 faceNormal = normalize(cross(dFdx(position), dFdy(position)));
-    if (dot(faceNormal, eye.center - position) < 0.0)
-        faceNormal = -faceNormal;
 
     depthOut = gl_FragCoord.z;
     albedoOut = color.rgb * albedo.rgb;
