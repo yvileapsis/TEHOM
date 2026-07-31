@@ -1711,23 +1711,7 @@ type GameplayDispatcher () =
 
                  Content.composite<FirstPersonPlayerDispatcher> Simulants.GameplayPlayer.Name
                     [Entity.Position == playerSpawnPosition]
-                    [Content.staticModel Simulants.GameplayPlayerBody.Name
-                        [Entity.PositionLocal == v3 0.0f 0.85f 0.0f
-                         Entity.Size == v3 0.7f 1.7f 0.7f
-                         Entity.Scale == v3 0.7f 1.7f 0.7f
-                         Entity.Presence == Omnipresent
-                         Entity.AlwaysRender == true
-                         Entity.Static == false
-                         Entity.Pickable == false
-                         Entity.CastShadow == false
-                         Entity.StaticModel == Assets.Default.BallModel
-                         Entity.MaterialProperties ==
-                            { MaterialProperties.empty with
-                                AlbedoOpt = ValueSome (color 0.28f 0.9f 0.65f 1.0f)
-                                RoughnessOpt = ValueSome 0.8f
-                                MetallicOpt = ValueSome 0.0f
-                                AmbientOcclusionOpt = ValueSome 1.0f
-                                EmissionOpt = ValueSome 0.08f }]]
+                    []
 
                  for portal in PortalLogic.portals gameplay.PortalPair do
                     let destination = PortalLogic.pairedPortal gameplay.PortalPair portal

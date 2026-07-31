@@ -45,7 +45,6 @@ module Simulants =
     let VoxelLevelChunk x y z = GameplayScene / ("VoxelLevel" + string x + "_" + string y + "_" + string z)
     let FarTerrainLod = GameplayScene / "FarTerrainLod"
     let GameplayPlayer = GameplayScene / "GameplayPlayer"
-    let GameplayPlayerBody = GameplayPlayer / "Body"
     let AimBlockHighlightFace index = GameplayScene / ("AimBlockHighlightFace" + string index)
     let AimBlockHighlightLight = GameplayScene / "AimBlockHighlightLight"
     let SelectedBlockPreview = GameplayScene / "SelectedBlockPreview"
