@@ -25,6 +25,7 @@ module VoxelBake =
           struct (v3iForward, v3Forward, VoxelFaces.ForwardFace)
           struct (v3iBack, v3Back, VoxelFaces.BackFace)|]
 
+
     let makeGridDescriptor (size : Vector3i) (origin : Vector3) (voxelSize : Vector3) (occupiedVoxels : struct (Vector3i * Color) seq) : VoxelGridDescriptor =
         if size.X <= 0 || size.Y <= 0 || size.Z <= 0 || size.X > 64 || size.Y > 64 || size.Z > 64 then
             invalidArg (nameof size) "Voxel grid dimensions must each be between 1 and 64."

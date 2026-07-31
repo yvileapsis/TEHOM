@@ -7,8 +7,9 @@ open Prime
 open Nu
 
 type GameplayState =
+    | Inactive
     | Playing
-    | Quit
+    | Paused
 
 type VoxelAimPick =
     { Position : Vector3
@@ -32,7 +33,7 @@ type [<ReferenceEquality>] Gameplay =
 
     static member val empty =
         { GameplayTime = 0L
-          GameplayState = Quit
+          GameplayState = Inactive
           VoxelModelReady = false
           VoxelLevelOpt = None
           VoxelChunks = [||]
@@ -50,8 +51,10 @@ type [<ReferenceEquality>] Gameplay =
 
 type GameplayMessage =
     | StartPlaying
-    | FinishQuitting
+    | FinishLeaving
     | TimeUpdate
+    | KeyPressed of KeyboardKeyData
+    | ResumePlaying
     | TryDestroyBlock
     | TryPlaceBlock
     interface Message
@@ -64,7 +67,8 @@ type GameplayCommand =
     | PlaceBlock of VoxelAimPick
     | StreamVoxelChunks
     | ResolvePortalTraversal
-    | StartQuitting
+    | ReturnToMainMenu
+    | QuitGame
     interface Command
 
 [<NoEquality; NoComparison>]
@@ -86,7 +90,7 @@ module GameplayExtensions =
         member this.GetGameplay world = this.GetModelGeneric<Gameplay> world
         member this.SetGameplay value world = this.SetModelGeneric<Gameplay> value world
         member this.Gameplay = this.ModelGeneric<Gameplay> ()
-        member this.QuitEvent = Events.QuitEvent --> this
+        member this.MainMenuEvent = Events.MainMenuEvent --> this
 
 [<RequireQualifiedAccess>]
 module VoxelChunkVisibility =
@@ -383,7 +387,7 @@ type VoxelChunkFacet () =
                     let affineMatrix = transform.AffineMatrix
                     let presence = transform.Presence
                     let properties = entity.GetMaterialProperties world
-                    World.renderVoxelModelFast (&affineMatrix, castShadow, presence, &properties, voxelModel, renderPass, world)
+                    World.renderVoxelModelFast (&affineMatrix, castShadow, presence, &properties, voxelModel, false, renderPass, world)
         | None -> ()
 
     override this.GetAttributesInferred (entity, world) =
@@ -400,6 +404,50 @@ type VoxelChunkDispatcher () =
     static member Facets =
         [typeof<VoxelChunkFacet>
          typeof<RigidBodyFacet>]
+
+type FirstPersonVoxelFacet () =
+    inherit Facet (false, false, false)
+
+    static member Properties =
+        [define Entity.Size v3One
+         define Entity.Presence Omnipresent
+         define Entity.Static false
+         define Entity.AlwaysRender true
+         define Entity.CastShadow false
+         define Entity.Pickable false
+         define Entity.MaterialProperties MaterialProperties.empty
+         define Entity.VoxelModel Assets.Default.VoxelModel]
+
+    override this.Render (renderPass, entity, world) =
+        if renderPass.IsNormalPass && entity.GetVisible world then
+            let scale = entity.GetScaleLocal world
+            let mutable modelMatrix = Matrix4x4.CreateFromQuaternion (entity.GetRotationLocal world)
+            modelMatrix.M11 <- modelMatrix.M11 * scale.X
+            modelMatrix.M12 <- modelMatrix.M12 * scale.X
+            modelMatrix.M13 <- modelMatrix.M13 * scale.X
+            modelMatrix.M21 <- modelMatrix.M21 * scale.Y
+            modelMatrix.M22 <- modelMatrix.M22 * scale.Y
+            modelMatrix.M23 <- modelMatrix.M23 * scale.Y
+            modelMatrix.M31 <- modelMatrix.M31 * scale.Z
+            modelMatrix.M32 <- modelMatrix.M32 * scale.Z
+            modelMatrix.M33 <- modelMatrix.M33 * scale.Z
+            modelMatrix.Translation <- entity.GetPositionLocal world
+            let properties = entity.GetMaterialProperties world
+            let voxelModel = entity.GetVoxelModel world
+            World.renderVoxelModelFast
+                (&modelMatrix, false, Omnipresent, &properties, voxelModel, true, renderPass, world)
+
+    override this.GetAttributesInferred (entity, world) =
+        AttributesInferred.important (entity.GetSize world) v3Zero
+
+    override this.RayCast (_, _, _) =
+        [||]
+
+type FirstPersonVoxelDispatcher () =
+    inherit Entity3dDispatcher (false, false, false)
+
+    static member Facets =
+        [typeof<FirstPersonVoxelFacet>]
 
 [<RequireQualifiedAccess>]
 module GameplayLogic =
@@ -418,7 +466,7 @@ module GameplayLogic =
     let private portalRayRecursionLimitMax = 8
     let private aimBlockHighlightPadding = 0.01f
     let private aimBlockHighlightThickness = 0.0125f
-    let private streamChunkRadius = 8
+    let private streamChunkRadius = 16
     let private streamInitialBuildLimit = 96
     let private streamBuildsPerUpdate = 24
     let private streamBuildJobsMax = 96
@@ -829,9 +877,6 @@ module GameplayLogic =
             else gameplay
         | Some _ | None -> gameplay
 
-    let private selectedBlockPreviewPosition (world : World) =
-        let rotation = world.Eye3dRotation
-        world.Eye3dCenter + rotation.Forward * 1.25f + rotation.Right * 0.55f + rotation.Down * 0.35f
 
     let tryGetSelectedBlock (gameplay : Gameplay) =
         match gameplay.VoxelLevelOpt with
@@ -1164,7 +1209,6 @@ module GameplayLogic =
         if preview.GetExists world then
             match tryGetSelectedBlock gameplay with
             | Some placeableBlock ->
-                preview.SetPosition (selectedBlockPreviewPosition world) world
                 preview.SetVoxelModel placeableBlock.PreviewModel world
                 preview.SetVisible true world
             | None ->
@@ -1360,6 +1404,7 @@ module GameplayLogic =
             FirstPersonPlayerLogic.syncCamera playerEntity player world
 
     let tryWriteProfileReadyMarker mode (world : World) =
+
         let filePath = Environment.GetEnvironmentVariable "VOXELFORGE_PROFILE_READY_FILE"
         if not (String.IsNullOrWhiteSpace filePath) then
             try
@@ -1375,6 +1420,23 @@ module GameplayLogic =
                 System.IO.File.WriteAllText (filePath, payload)
             with exn ->
                 Log.warnOnce ("VoxelForge failed to write profile ready marker due to: " + scstring exn)
+
+    let releaseCursor (world : World) =
+        World.trySetMouseGrabbed false world
+        World.setCursorVisible true world
+
+    let private setPauseMenuVisible visible (world : World) =
+        if Simulants.GameplayPauseBackdrop.GetExists world then
+            Simulants.GameplayPauseBackdrop.SetVisible visible world
+        if Simulants.GameplayPausePanel.GetExists world then
+            Simulants.GameplayPausePanel.SetVisible visible world
+            Simulants.GameplayPausePanel.SetEnabled visible world
+
+    let setPaused paused (gameplay : Gameplay) (world : World) =
+        setPauseMenuVisible paused world
+        World.setAdvancing (not paused) world
+        if paused then releaseCursor world
+        { gameplay with GameplayState = if paused then Paused else Playing }
 
 type GameplayDispatcher () =
     inherit ScreenDispatcher<Gameplay, GameplayMessage, GameplayCommand> (Gameplay.empty)
@@ -1400,25 +1462,42 @@ type GameplayDispatcher () =
 
     override this.Definitions (_, _) =
         [Screen.SelectEvent => StartPlaying
-         Screen.DeselectingEvent => FinishQuitting
+         Screen.DeselectingEvent => FinishLeaving
          Screen.TimeUpdateEvent => TimeUpdate
+         Game.KeyboardKeyDownEvent =|> fun evt -> KeyPressed evt.Data
          Game.MouseLeftDownEvent => TryDestroyBlock
          Game.MouseRightDownEvent => TryPlaceBlock]
 
     override this.Message (gameplay, message, _, world) =
         match message with
         | StartPlaying ->
+            World.setAdvancing true world
             let gameplay = { Gameplay.initial with VoxelModelReady = true }
             match (Game.GetVoxelForge world).GeneratedWorldPackageOpt with
             | Some package -> withSignal (signal (UseGeneratedWorld package)) gameplay
             | None -> withSignal (signal EnsureVoxelModel) gameplay
 
-        | FinishQuitting ->
+        | FinishLeaving ->
+            World.setAdvancing true world
+            GameplayLogic.releaseCursor world
             let placeableBlocks =
                 match gameplay.VoxelLevelOpt with
                 | Some level -> level.PlaceableBlocks
                 | None -> [||]
             withSignal (signal (DestroyVoxelModel (gameplay.VoxelChunks, placeableBlocks, gameplay.VoxelLevelOpt))) Gameplay.empty
+
+        | KeyPressed data ->
+            if data.Repeated || data.KeyboardKey <> KeyboardKey.Escape then just gameplay
+            else
+                match gameplay.GameplayState with
+                | Playing -> just (GameplayLogic.setPaused true gameplay world)
+                | Paused -> just (GameplayLogic.setPaused false gameplay world)
+                | Inactive -> just gameplay
+
+        | ResumePlaying ->
+            if gameplay.GameplayState = Paused
+            then just (GameplayLogic.setPaused false gameplay world)
+            else just gameplay
 
         | TimeUpdate ->
             let gameplay = GameplayLogic.updateSelectedBlockFromInput gameplay world
@@ -1532,8 +1611,13 @@ type GameplayDispatcher () =
                 GameplayLogic.updateAimVisuals gameplay world
         | ResolvePortalTraversal ->
             GameplayLogic.resolvePortalTraversal gameplay screen world
-        | StartQuitting ->
-            World.publish () screen.QuitEvent screen world
+        | ReturnToMainMenu ->
+            World.setAdvancing true world
+            GameplayLogic.releaseCursor world
+            World.publish () screen.MainMenuEvent screen world
+        | QuitGame ->
+            GameplayLogic.releaseCursor world
+            if world.Unaccompanied then World.exit world
 
     override this.PostUpdate (screen, world) =
         let gameplay = screen.GetGameplay world
@@ -1542,7 +1626,7 @@ type GameplayDispatcher () =
 
     override this.Content (gameplay, _) =
 
-        [if gameplay.GameplayState = Playing then
+        [if gameplay.GameplayState <> Inactive then
             let playerSpawnPosition =
                 match gameplay.VoxelLevelOpt with
                 | Some level -> level.SpawnPosition
@@ -1676,12 +1760,13 @@ type GameplayDispatcher () =
                     | Some placeableBlock -> placeableBlock.PreviewModel
                     | None -> Assets.Default.VoxelModel
 
-                 Content.voxel Simulants.SelectedBlockPreview.Name
-                    [Entity.Size == v3One
-                     Entity.Scale == v3Dup 0.35f
+                 Content.entity<FirstPersonVoxelDispatcher> Simulants.SelectedBlockPreview.Name
+                    [Entity.PositionLocal == v3 0.38f -0.27f -1.15f
+                     Entity.RotationLocal == Quaternion.CreateFromYawPitchRoll (-0.45f, 0.25f, -0.08f)
+                     Entity.Size == v3One
+                     Entity.ScaleLocal == v3Dup 0.24f
                      Entity.VoxelModel := selectedBlockPreviewModel
                      Entity.Visible == Option.isSome selectedBlockOpt
-                     Entity.Static == true
                      Entity.MaterialProperties ==
                         { MaterialProperties.empty with
                             RoughnessOpt = ValueSome 0.88f
@@ -1726,7 +1811,67 @@ type GameplayDispatcher () =
                                 EmissionOpt = ValueSome 1.65f
                                 SpecularScalarOpt = ValueSome 0.0f }]
 
-                 Content.button Simulants.GameplayQuit.Name
-                    [Entity.Position == v3 232.0f -144.0f 0.0f
-                     Entity.Text == "Quit"
-                     Entity.ClickEvent => StartQuitting]]]
+                ]
+         if gameplay.GameplayState <> Inactive then
+            Content.group Simulants.GameplayGui.Name []
+                [Content.panel Simulants.GameplayPauseBackdrop.Name
+                    [Entity.Position == v3Zero
+                     Entity.Size == v3 640.0f 360.0f 0.0f
+                     Entity.Elevation == 100.0f
+                     Entity.Absolute == true
+                     Entity.AlwaysUpdate == true
+                     Entity.Visible := gameplay.GameplayState = Paused
+                     Entity.BackdropImageOpt == Some Assets.Default.White
+                     Entity.Color == color 0.0f 0.0f 0.0f 0.22f]
+                    []
+
+                 Content.panel Simulants.GameplayPausePanel.Name
+                    [Entity.Position == v3Zero
+                     Entity.Size == v3 280.0f 252.0f 0.0f
+                     Entity.Elevation == 110.0f
+                     Entity.Absolute == true
+                     Entity.AlwaysUpdate == true
+                     Entity.BackdropImageOpt == Some Assets.Default.White
+                     Entity.Visible := gameplay.GameplayState = Paused
+                     Entity.Enabled := gameplay.GameplayState = Paused
+                     Entity.Color == color 0.035f 0.075f 0.095f 0.50f]
+
+                    [Content.text Simulants.GameplayPauseTitle.Name
+                        [Entity.PositionLocal == v3 0.0f 86.0f 0.0f
+                         Entity.Size == v3 220.0f 44.0f 0.0f
+                         Entity.ElevationLocal == 1.0f
+                         Entity.AlwaysUpdate == true
+                         Entity.Justification == Justified (JustifyCenter, JustifyMiddle)
+                         Entity.FontSizing == Some 28.0f
+                         Entity.TextColor == Color.White
+                         Entity.Text == "Paused"]
+
+                     Content.button Simulants.GameplayResume.Name
+                        [Entity.PositionLocal == v3 0.0f 28.0f 0.0f
+                         Entity.Size == v3 210.0f 40.0f 0.0f
+                         Entity.ElevationLocal == 2.0f
+                         Entity.AlwaysUpdate == true
+                         Entity.Color == color 0.10f 0.50f 0.62f 1.0f
+                         Entity.TextColor == Color.White
+                         Entity.Text == "Resume"
+                         Entity.ClickEvent => ResumePlaying]
+
+                     Content.button Simulants.GameplayMainMenu.Name
+                        [Entity.PositionLocal == v3 0.0f -28.0f 0.0f
+                         Entity.Size == v3 210.0f 40.0f 0.0f
+                         Entity.ElevationLocal == 2.0f
+                         Entity.AlwaysUpdate == true
+                         Entity.Color == color 0.14f 0.22f 0.25f 1.0f
+                         Entity.TextColor == Color.White
+                         Entity.Text == "Main Menu"
+                         Entity.ClickEvent => ReturnToMainMenu]
+
+                     Content.button Simulants.GameplayQuit.Name
+                        [Entity.PositionLocal == v3 0.0f -84.0f 0.0f
+                         Entity.Size == v3 210.0f 40.0f 0.0f
+                         Entity.ElevationLocal == 2.0f
+                         Entity.AlwaysUpdate == true
+                         Entity.Color == color 0.52f 0.12f 0.11f 1.0f
+                         Entity.TextColor == Color.White
+                         Entity.Text == "Quit"
+                         Entity.ClickEvent => QuitGame]]]]

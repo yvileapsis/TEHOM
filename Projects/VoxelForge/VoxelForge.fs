@@ -31,7 +31,7 @@ type VoxelForgeDispatcher () =
          Simulants.TitleExit.ClickEvent => Exit
          Simulants.CreditsBack.ClickEvent => ShowTitle
          Simulants.WorldGeneration.WorldGeneratedEvent =|> fun evt -> FinishWorldGeneration evt.Data
-         Simulants.Gameplay.QuitEvent => ShowTitle]
+         Simulants.Gameplay.MainMenuEvent => ShowTitle]
 
     override this.Message (_, message, _, _) =
         match message with

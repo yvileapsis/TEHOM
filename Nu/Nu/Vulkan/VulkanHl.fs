@@ -623,6 +623,32 @@ module Hl =
         if depthAttachmentOpt.IsSome then renderingInfo.pDepthAttachment <- &&depthInfo
         renderingInfo
 
+    /// Make a VkRenderingInfo that preserves color while clearing depth.
+    /// NOTE: this function MUST be declared inline to keep its pointers valid!
+    let inline makeRenderingInfoWithDepthClear (colorAttachments : VkImageView array) depthAttachment renderArea =
+        let colorInfos = Array.zeroCreate colorAttachments.Length
+        for i in 0 .. dec colorInfos.Length do
+            let mutable colorInfo = VkRenderingAttachmentInfo ()
+            colorInfo.imageView <- colorAttachments[i]
+            colorInfo.imageLayout <- ColorAttachmentWrite.VkImageLayout
+            colorInfo.storeOp <- VkAttachmentStoreOp.Store
+            colorInfo.loadOp <- VkAttachmentLoadOp.Load
+            colorInfos[i] <- colorInfo
+        use cInfosPin = new ArrayPin<_> (colorInfos)
+        let mutable depthInfo = VkRenderingAttachmentInfo ()
+        depthInfo.imageView <- depthAttachment
+        depthInfo.imageLayout <- DepthAttachmentWrite.VkImageLayout
+        depthInfo.storeOp <- VkAttachmentStoreOp.Store
+        depthInfo.loadOp <- VkAttachmentLoadOp.Clear
+        depthInfo.clearValue <- VkClearValue (1.0f, 0u)
+        let mutable renderingInfo = VkRenderingInfo ()
+        renderingInfo.renderArea <- renderArea
+        renderingInfo.layerCount <- 1u
+        renderingInfo.colorAttachmentCount <- uint colorInfos.Length
+        renderingInfo.pColorAttachments <- cInfosPin.Pointer
+        renderingInfo.pDepthAttachment <- &&depthInfo
+        renderingInfo
+
     /// Check that VkRect2D has non-zero area.
     let validateRect (rect : VkRect2D) =
         rect.extent.width > 0u && rect.extent.height > 0u

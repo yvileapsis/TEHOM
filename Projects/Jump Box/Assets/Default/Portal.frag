@@ -15,13 +15,13 @@ layout(location = 0) out vec4 colorOut;
 
 void main()
 {
+    vec2 texCoords = gl_FragCoord.xy / portal.viewport.xy;
     if (portal.viewport.z > 0.5)
     {
         colorOut = vec4(portal.tint.rgb, 1.0);
         return;
     }
 
-    vec2 texCoords = gl_FragCoord.xy / portal.viewport.xy;
     vec3 portalColor = texture(portalTexture, texCoords).rgb;
     if (any(isnan(portalColor)) || dot(portalColor, portalColor) < 0.00001)
     {

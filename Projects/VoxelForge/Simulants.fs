@@ -30,7 +30,12 @@ module Simulants =
 
     let Gameplay = Game / "Gameplay"
     let GameplayGui = Gameplay / "Gui"
-    let GameplayQuit = GameplayGui / "Quit"
+    let GameplayPauseBackdrop = GameplayGui / "PauseBackdrop"
+    let GameplayPausePanel = GameplayGui / "PausePanel"
+    let GameplayPauseTitle = GameplayPausePanel / "Title"
+    let GameplayResume = GameplayPausePanel / "Resume"
+    let GameplayMainMenu = GameplayPausePanel / "MainMenu"
+    let GameplayQuit = GameplayPausePanel / "Quit"
     let GameplayScene = Gameplay / "Scene"
     let GameplayEnvironment = GameplayScene / "GeneratedEnvironment"
     let GameplaySkyBox = GameplayScene / "GeneratedSkyBox"

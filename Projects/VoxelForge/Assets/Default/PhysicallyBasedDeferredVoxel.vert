@@ -60,7 +60,8 @@ void main()
     uint paletteIndex;
     if (instance.voxelSize.w > 0.0)
     {
-        uint face = faces[gl_InstanceIndex];
+        uint faceOffset = uint(gl_InstanceIndex);
+        uint face = faces[faceOffset];
         x = face & 63u;
         y = (face >> 6) & 63u;
         z = (face >> 12) & 63u;
@@ -69,8 +70,9 @@ void main()
     }
     else
     {
-        uint packedPosition = faces[gl_InstanceIndex * 2];
-        uint packedAttributes = faces[gl_InstanceIndex * 2 + 1];
+        uint faceOffset = uint(gl_InstanceIndex) * 2u;
+        uint packedPosition = faces[faceOffset];
+        uint packedAttributes = faces[faceOffset + 1u];
         x = packedPosition & 1023u;
         y = (packedPosition >> 10) & 1023u;
         z = (packedPosition >> 20) & 1023u;

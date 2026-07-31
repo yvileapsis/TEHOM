@@ -607,6 +607,7 @@ type RenderVoxelModel =
       Presence : Presence
       MaterialProperties : MaterialProperties
       VoxelModel : VoxelModel AssetTag
+      FirstPerson : bool
       RenderPass : RenderPass }
 
 /// Describes how to render a portal aperture.
@@ -1114,6 +1115,7 @@ type [<ReferenceEquality>] private RenderTasks =
       DeferredStaticClippedPreBatches : Dictionary<Guid, struct (PhysicallyBasedSurface * (Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Box3) array)>
       DeferredAnimated : Dictionary<AnimatedModelSurfaceKey, struct (Matrix4x4 * bool * Presence * Box2 * MaterialProperties) List>
       DeferredVoxels : struct (Matrix4x4 * bool * Presence * MaterialProperties * VoxelModelGpu) List
+      FirstPersonVoxels : struct (Matrix4x4 * Presence * MaterialProperties * VoxelModelGpu) List
       Portals : RenderPortal3d List
       DeferredTerrains : struct (TerrainDescriptor * TerrainPatchDescriptor * PhysicallyBasedGeometry) List
       Forward : struct (single * single * Matrix4x4 * bool * Presence * Box2 * MaterialProperties * Matrix4x4 array voption * PhysicallyBasedSurface * DepthTest) List
@@ -1135,6 +1137,7 @@ type [<ReferenceEquality>] private RenderTasks =
           DeferredStaticClippedPreBatches = dictPlus HashIdentity.Structural []
           DeferredAnimated = dictPlus AnimatedModelSurfaceKey.comparer []
           DeferredVoxels = List ()
+          FirstPersonVoxels = List ()
           Portals = List ()
           DeferredTerrains = List ()
           Forward = List ()
@@ -1160,6 +1163,7 @@ type [<ReferenceEquality>] private RenderTasks =
 
         for entry in renderTasks.DeferredAnimated do entry.Value.Clear ()
         renderTasks.DeferredVoxels.Clear ()
+        renderTasks.FirstPersonVoxels.Clear ()
         renderTasks.Portals.Clear ()
         renderTasks.DeferredAnimatedRemovals.Clear ()
 
@@ -1332,6 +1336,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
           VoxelModelsToDestroy : VoxelModel AssetTag SList
           PortalPipeline : PortalPipeline
           PortalTextures : Texture array
+          FirstPersonDepthAttachment : Texture
           ShadowMatricesFlipped : Matrix4x4 array
           LightShadowIndices : Dictionary<uint64, int>
           LightsDesiringShadows : Dictionary<uint64, SortableLight>
@@ -3094,22 +3099,27 @@ type [<ReferenceEquality>] VulkanRenderer3d =
          presence,
          properties,
          voxelModel,
-         renderPass,
+         firstPerson,
+         renderPass : RenderPass,
          renderTasks : RenderTasks,
          renderer) =
         match renderer.VoxelModels.TryGetValue voxelModel with
         | (true, voxelModelGpu) ->
-            let bounds = voxelModelGpu.Bounds.Transform modelMatrix
-            let visible =
-                match renderPass with
-                | LightMapPass _ -> true
-                | ShadowPass _ -> false
-                | ReflectionPass (_, reflectionFrustum) ->
-                    Presence.intersects3d ValueNone reflectionFrustum reflectionFrustum false presence bounds
-                | NormalPass ->
-                    Presence.intersects3d (ValueSome frustumInterior) frustumExterior frustumImposter false presence bounds
-            if visible then
-                renderTasks.DeferredVoxels.Add struct (modelMatrix, castShadow, presence, properties, voxelModelGpu)
+            if firstPerson then
+                if renderPass.IsNormalPass then
+                    renderTasks.FirstPersonVoxels.Add struct (modelMatrix, presence, properties, voxelModelGpu)
+            else
+                let bounds = voxelModelGpu.Bounds.Transform modelMatrix
+                let visible =
+                    match renderPass with
+                    | LightMapPass _ -> true
+                    | ShadowPass _ -> false
+                    | ReflectionPass (_, reflectionFrustum) ->
+                        Presence.intersects3d ValueNone reflectionFrustum reflectionFrustum false presence bounds
+                    | NormalPass ->
+                        Presence.intersects3d (ValueSome frustumInterior) frustumExterior frustumImposter false presence bounds
+                if visible then
+                    renderTasks.DeferredVoxels.Add struct (modelMatrix, castShadow, presence, properties, voxelModelGpu)
         | (false, _) ->
             Log.infoOnce ("Cannot render voxel model due to an unavailable asset '" + scstring voxelModel + "'.")
 
@@ -3230,7 +3240,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 VulkanRenderer3d.categorizeVoxelModel
                     (frustumInterior, frustumExterior, frustumImposter,
                      rvm.ModelMatrix, rvm.CastShadow, rvm.Presence, rvm.MaterialProperties,
-                     rvm.VoxelModel, rvm.RenderPass, renderTasks, renderer)
+                     rvm.VoxelModel, rvm.FirstPerson, rvm.RenderPass, renderTasks, renderer)
             | RenderPortal3d rp ->
                 let renderTasks = VulkanRenderer3d.getRenderTasks rp.RenderPass renderer
                 renderTasks.Portals.Add rp
@@ -4513,6 +4523,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 descriptor renderer.MaterialSampler geometry terrainTextureViews zTexture
                 geometryResolution renderer.RenderPassIndex renderer.PhysicallyBasedPipelines.DeferredTerrainPipeline renderer
 
+
         // transition geometry attachments (except zTexture) back to reading
         Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead depthTexture renderer.VulkanContext.RenderCommandBuffer
         Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead albedoTexture renderer.VulkanContext.RenderCommandBuffer
@@ -4733,9 +4744,12 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         // end forward (static and animated) surface rendering to composition attachment
         endBatch ()
 
-        // end rendering to composition attachment as well as zTexture
+        // finish the linear world pass, then composite recursive portal views against world depth
         Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead compositionTexture renderer.VulkanContext.RenderCommandBuffer
         Texture.recordTransitionLayout DepthAttachmentWrite DepthAttachmentRead zTexture renderer.VulkanContext.RenderCommandBuffer
+        VulkanRenderer3d.drawPortalComposites
+            (view * geometryProjection.Flipped) geometryResolution portalComposites
+            compositionTexture zTexture renderer
 
         (*// apply bloom filter when desired
         if topLevelRender && renderer.RendererConfig.BloomEnabled && renderer.LightingConfig.BloomEnabled then
@@ -4846,20 +4860,66 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             Texture.recordTransitionLayout TransferSrc ColorAttachmentRead colorFull0Texture renderer.VulkanContext.RenderCommandBuffer
             Texture.recordTransitionLayout TransferDst ColorAttachmentRead compositionTexture renderer.VulkanContext.RenderCommandBuffer
 
-        // run tone-mapping pass when appropriate
-        let toneMappingTexture = renderer.PhysicallyBasedAttachments.ToneMappingAttachment
-        Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite toneMappingTexture renderer.VulkanContext.RenderCommandBuffer
-        PhysicallyBased.drawFilterToneMappingSurface
-            renderer.LightingConfig.LightExposure renderer.LightingConfig.ToneMapType renderer.LightingConfig.ToneMapSlope renderer.LightingConfig.ToneMapOffset
-            renderer.LightingConfig.ToneMapPower renderer.LightingConfig.ToneMapSaturation renderer.LightingConfig.ToneMapWhitePoint
-            compositionTexture renderer.UnfilteredSampler toneMappingTexture geometryResolution
-            renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterToneMappingPipeline renderer.VulkanContext
-        Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead toneMappingTexture renderer.VulkanContext.RenderCommandBuffer
+        // render the viewmodel over the finished world and portals, before tone mapping
+        if topLevelRender && renderTasks.FirstPersonVoxels.Count > 0 then
+            let ambientLight =
+                v3 lightAmbientColor.R lightAmbientColor.G lightAmbientColor.B * lightAmbientBrightness
+            let mutable keyLightDirection = (v3 -0.35f 0.75f 0.85f).Normalized
+            let mutable keyLightColor = v3One
+            let mutable keyLightFound = false
+            let mutable lightIndex = 0
+            let lightsCount = min lightIds.Length renderTasks.Lights.Count
+            while not keyLightFound && lightIndex < lightsCount do
+                if lightTypes[lightIndex] >= 2 && lightBrightnesses[lightIndex] > 0.0f then
+                    let direction = Vector3.TransformNormal (-lightDirections[lightIndex], view)
+                    if direction.LengthSquared () > 0.000001f then
+                        keyLightDirection <- direction.Normalized
+                    let color = lightColors[lightIndex]
+                    keyLightColor <-
+                        v3 color.R color.G color.B * lightBrightnesses[lightIndex]
+                    keyLightFound <- true
+                lightIndex <- inc lightIndex
+            let firstPersonDepthTexture = renderer.FirstPersonDepthAttachment
+            Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite compositionTexture renderer.VulkanContext.RenderCommandBuffer
+            Texture.recordTransitionLayout DepthAttachmentRead DepthAttachmentWrite firstPersonDepthTexture renderer.VulkanContext.RenderCommandBuffer
+            let voxelPass =
+                Voxel.beginFirstPerson
+                    geometryProjection ambientLight keyLightDirection keyLightColor
+                    compositionTexture firstPersonDepthTexture geometryResolution
+                    renderer.VulkanContext
+            for struct (modelMatrix, _, properties, voxelModel) in renderTasks.FirstPersonVoxels do
+                let voxelMaterial : VoxelMaterial =
+                    { Albedo = properties.Albedo
+                      Roughness = properties.Roughness
+                      Metallic = properties.Metallic
+                      AmbientOcclusion = properties.AmbientOcclusion
+                      Emission = properties.Emission
+                      Height = properties.Height
+                      IgnoreLightMaps = properties.IgnoreLightMaps
+                      FinenessOffset = properties.FinenessOffset
+                      ScatterType = properties.ScatterType.Enumerate
+                      ClearCoat = properties.ClearCoat
+                      ClearCoatRoughness = properties.ClearCoatRoughness }
+                Voxel.drawFirstPerson
+                    modelMatrix voxelMaterial voxelModel voxelPass
+                    renderer.VoxelPipeline renderer.VulkanContext
+            Voxel.endDeferred renderer.VulkanContext
+            Texture.recordTransitionLayout DepthAttachmentWrite DepthAttachmentRead firstPersonDepthTexture renderer.VulkanContext.RenderCommandBuffer
+            Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead compositionTexture renderer.VulkanContext.RenderCommandBuffer
 
-        // composite recursively rendered portal views into the tone-mapped scene.
-        VulkanRenderer3d.drawPortalComposites
-            (view * geometryProjection.Flipped) geometryResolution portalComposites
-            toneMappingTexture zTexture renderer
+        // tone-map only the top-level view; recursive portal textures remain linear until composition
+        let toneMappingTexture =
+            if topLevelRender then
+                let toneMappingTexture = renderer.PhysicallyBasedAttachments.ToneMappingAttachment
+                Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite toneMappingTexture renderer.VulkanContext.RenderCommandBuffer
+                PhysicallyBased.drawFilterToneMappingSurface
+                    renderer.LightingConfig.LightExposure renderer.LightingConfig.ToneMapType renderer.LightingConfig.ToneMapSlope renderer.LightingConfig.ToneMapOffset
+                    renderer.LightingConfig.ToneMapPower renderer.LightingConfig.ToneMapSaturation renderer.LightingConfig.ToneMapWhitePoint
+                    compositionTexture renderer.UnfilteredSampler toneMappingTexture geometryResolution
+                    renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterToneMappingPipeline renderer.VulkanContext
+                Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead toneMappingTexture renderer.VulkanContext.RenderCommandBuffer
+                toneMappingTexture
+            else compositionTexture
 
         // apply fxaa filter when desired
         if renderer.RendererConfig.FxaaEnabled then
@@ -5069,6 +5129,9 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             Attachment.updateColorAttachmentSize
                 geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y
                 portalTexture renderer.VulkanContext
+        Attachment.updateDepthAttachmentSize
+            geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y
+            renderer.FirstPersonDepthAttachment renderer.VulkanContext
 
         // delete textures as requested on previous frame
         TextureDumpster.dump renderer.TextureDumpster renderer.VulkanContext
@@ -5192,11 +5255,18 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         // create voxel splat pipeline
         let voxelPipeline = Voxel.createPipeline physicallyBasedAttachments context
 
+        // create isolated first-person depth attachment
+        let firstPersonDepthAttachment =
+            Attachment.createDepthAttachment
+                VkImageUsageFlags.None
+                geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y
+                context
+
         // create recursive portal compositor and render targets
         let (_, _, _, _, _, _, _, geometryDepth) = physicallyBasedAttachments.GeometryAttachments
         let portalPipeline =
             Portal.createPipeline
-                physicallyBasedAttachments.ToneMappingAttachment.VkFormat
+                physicallyBasedAttachments.CompositionAttachment.VkFormat
                 geometryDepth.VkFormat
                 context
         let portalTextures =
@@ -5400,6 +5470,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
               VoxelModelsToDestroy = SList.make ()
               PortalPipeline = portalPipeline
               PortalTextures = portalTextures
+              FirstPersonDepthAttachment = firstPersonDepthAttachment
               ShadowMatricesFlipped = shadowMatricesFlipped
               LightShadowIndices = dictPlus HashIdentity.Structural []
               LightsDesiringShadows = dictPlus HashIdentity.Structural []
@@ -5463,6 +5534,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 Voxel.destroyModel voxelModel renderer.VulkanContext
             renderer.VoxelModels.Clear ()
             Voxel.destroyPipeline renderer.VoxelPipeline renderer.VulkanContext
+            Attachment.destroyDepthAttachment renderer.FirstPersonDepthAttachment renderer.VulkanContext
 
             // destroy recursive portal resources
             for portalTexture in renderer.PortalTextures do

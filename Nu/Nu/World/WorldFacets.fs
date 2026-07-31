@@ -3790,7 +3790,7 @@ type VoxelFacet () =
             let presence = transform.Presence
             let properties = entity.GetMaterialProperties world
             let voxelModel = entity.GetVoxelModel world
-            World.renderVoxelModelFast (&affineMatrix, castShadow, presence, &properties, voxelModel, renderPass, world)
+            World.renderVoxelModelFast (&affineMatrix, castShadow, presence, &properties, voxelModel, false, renderPass, world)
 
     override this.GetAttributesInferred (entity, world) =
         AttributesInferred.important (entity.GetSize world) v3Zero

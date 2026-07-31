@@ -39,7 +39,7 @@ type RendererProcess =
         abstract RenderStaticModelSurfaceFast : Matrix4x4 inref * bool * Presence * Box2 voption * MaterialProperties inref * Material inref * StaticModel AssetTag * int * DepthTest * RenderType * RenderPass -> unit
 
         /// Potential fast-path for rendering a voxel model.
-        abstract RenderVoxelModelFast : Matrix4x4 inref * bool * Presence * MaterialProperties inref * VoxelModel AssetTag * RenderPass -> unit
+        abstract RenderVoxelModelFast : Matrix4x4 inref * bool * Presence * MaterialProperties inref * VoxelModel AssetTag * bool * RenderPass -> unit
         
         /// Potential fast-path for rendering animated models.
         abstract RenderAnimatedModelFast : Matrix4x4 inref * bool * Presence * Box2 voption * MaterialProperties inref * Matrix4x4 array * AnimatedModel AssetTag * Map<int, single> * int Set * DepthTest * RenderType * RenderPass -> unit
@@ -163,7 +163,7 @@ type RendererInline (windowProperties) =
             | Some _ -> messages3d.Add (RenderStaticModelSurface { ModelMatrix = modelMatrix; CastShadow = castShadow; Presence = presence; InsetOpt = Option.ofValueOption insetOpt; MaterialProperties = materialProperties; Material = material; StaticModel = staticModel; SurfaceIndex = surfaceIndex; DepthTest = depthTest; RenderType = renderType; RenderPass = renderPass })
             | None -> raise (InvalidOperationException "Renderers are not yet or are no longer valid.")
 
-        member ri.RenderVoxelModelFast (modelMatrix, castShadow, presence, materialProperties, voxelModel, renderPass) =
+        member ri.RenderVoxelModelFast (modelMatrix, castShadow, presence, materialProperties, voxelModel, firstPerson, renderPass) =
             match dependenciesOpt with
             | Some _ ->
                 messages3d.Add
@@ -173,6 +173,7 @@ type RendererInline (windowProperties) =
                           Presence = presence
                           MaterialProperties = materialProperties
                           VoxelModel = voxelModel
+                          FirstPerson = firstPerson
                           RenderPass = renderPass })
             | None -> raise (InvalidOperationException "Renderers are not yet or are no longer valid.")
 
@@ -640,7 +641,7 @@ type RendererThread (windowProperties) =
                 messageBuffers3d[messageBufferIndex].Add cachedStaticModelSurfaceMessage
             | _ -> failwithumf ()
 
-        member rt.RenderVoxelModelFast (modelMatrix, castShadow, presence, materialProperties, voxelModel, renderPass) =
+        member rt.RenderVoxelModelFast (modelMatrix, castShadow, presence, materialProperties, voxelModel, firstPerson, renderPass) =
             if Option.isNone threadOpt then raise (InvalidOperationException "Render process not yet started or already terminated.")
             messageBuffers3d[messageBufferIndex].Add
                 (RenderVoxelModel
@@ -649,6 +650,7 @@ type RendererThread (windowProperties) =
                       Presence = presence
                       MaterialProperties = materialProperties
                       VoxelModel = voxelModel
+                      FirstPerson = firstPerson
                       RenderPass = renderPass })
 
         member rt.RenderAnimatedModelFast (modelMatrix, castShadow, presence, insetOpt, materialProperties, boneTransforms, animatedModel, subsortOffsets, drsIndices, depthTest, renderType, renderPass) =

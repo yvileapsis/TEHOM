@@ -1088,14 +1088,14 @@ module VoxelWorld =
                 (level.BlockSideVoxels - 1)
         let minCoord =
             v3i
-                (max 0 (start.X - 1))
-                (max 0 (start.Y - 1))
-                (max 0 (start.Z - 1))
+                (max 0 (dec start.X))
+                (max 0 (dec start.Y))
+                (max 0 (dec start.Z))
         let maxCoord =
             v3i
-                (min (level.SourceSizeVoxels.X - 1) (finish.X + 1))
-                (min (level.SourceSizeVoxels.Y - 1) (finish.Y + 1))
-                (min (level.SourceSizeVoxels.Z - 1) (finish.Z + 1))
+                (min (dec level.SourceSizeVoxels.X) (inc finish.X))
+                (min (dec level.SourceSizeVoxels.Y) (inc finish.Y))
+                (min (dec level.SourceSizeVoxels.Z) (inc finish.Z))
         let minChunkCoord = sourceCoordToChunkCoord level minCoord
         let maxChunkCoord = sourceCoordToChunkCoord level maxCoord
         [|for z in minChunkCoord.Z .. maxChunkCoord.Z do

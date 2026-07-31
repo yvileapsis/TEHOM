@@ -528,6 +528,7 @@ type Pipeline =
     static member writeDescriptorCombinedTextureSampler binding descriptorIndex (texture : Texture) sampler vkDescriptorSet =
         Pipeline.writeDescriptorCombinedImageViewSampler binding descriptorIndex texture.ImageView sampler vkDescriptorSet
 
+
     ///
     static member writeDescriptorSampler (binding : int) (descriptorIndex : int) (sampler : Sampler) vkDescriptorSet =
         

@@ -5,5 +5,5 @@ open Nu
 [<RequireQualifiedAccess>]
 module Events =
 
-    let QuitEvent = stoa<unit> "Quit/Event"
+    let MainMenuEvent = stoa<unit> "MainMenu/Event"
     let WorldGeneratedEvent = stoa<GeneratedWorldPackage> "WorldGenerated/Event"

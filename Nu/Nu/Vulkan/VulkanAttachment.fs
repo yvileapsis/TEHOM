@@ -31,7 +31,7 @@ module Attachment =
         Texture.destroy color context
 
     /// Create depth attachment.
-    let private createDepthAttachment optionalUsages resolutionX resolutionY (context : VulkanContext) =
+    let createDepthAttachment optionalUsages resolutionX resolutionY (context : VulkanContext) =
         let metadata = TextureMetadata.make resolutionX resolutionY
         let textureInternal =
             TextureInternal.create

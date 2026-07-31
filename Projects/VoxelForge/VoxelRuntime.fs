@@ -236,6 +236,7 @@ module VoxelRuntime =
         | Grass | Dirt | Stone | Sand | Wood | Ore | Brick | Crafted -> true
         | Leaves | Glass | Water | Lava -> false
 
+
     let private isLocalBlockCoord (side : int) (coord : Vector3i) =
         coord.X >= 0 && coord.X < side &&
         coord.Y >= 0 && coord.Y < side &&
@@ -767,30 +768,29 @@ module VoxelRuntime =
                                 let blockStart = VoxelWorld.blockStartCoord level blockCoord
                                 for struct (localCoord, cell) in template.Voxels do
                                     occupiedVoxels.Add (struct (blockStart + localCoord - globalMinCoord, cell.Albedo))
+                                let isNeighborOccupied localNeighbor =
+                                    if isLocalBlockCoord side localNeighbor then
+                                        template.Cells.ContainsKey localNeighbor
+                                    else
+                                        let blockOffset =
+                                            v3i
+                                                (if localNeighbor.X < 0 then -1 elif localNeighbor.X >= side then 1 else 0)
+                                                (if localNeighbor.Y < 0 then -1 elif localNeighbor.Y >= side then 1 else 0)
+                                                (if localNeighbor.Z < 0 then -1 elif localNeighbor.Z >= side then 1 else 0)
+                                        let wrappedLocal =
+                                            v3i
+                                                (if localNeighbor.X < 0 then dec side elif localNeighbor.X >= side then 0 else localNeighbor.X)
+                                                (if localNeighbor.Y < 0 then dec side elif localNeighbor.Y >= side then 0 else localNeighbor.Y)
+                                                (if localNeighbor.Z < 0 then dec side elif localNeighbor.Z >= side then 0 else localNeighbor.Z)
+                                        match tryGetBlockTemplate (blockCoord + blockOffset) with
+                                        | Some neighborTemplate -> neighborTemplate.Cells.ContainsKey wrappedLocal
+                                        | None -> false
                                 for surfaceVoxel in info.SurfaceVoxels do
                                     let mutable exposed = false
                                     let mutable normal = v3Zero
                                     let mutable faces = VoxelFaces.NoFaces
                                     for struct (offset, direction, face) in voxelDirections do
-                                        let localNeighbor = surfaceVoxel.LocalCoord + offset
-                                        let neighborOccupied =
-                                            if isLocalBlockCoord side localNeighbor then
-                                                template.Cells.ContainsKey localNeighbor
-                                            else
-                                                let blockOffset =
-                                                    v3i
-                                                        (if localNeighbor.X < 0 then -1 elif localNeighbor.X >= side then 1 else 0)
-                                                        (if localNeighbor.Y < 0 then -1 elif localNeighbor.Y >= side then 1 else 0)
-                                                        (if localNeighbor.Z < 0 then -1 elif localNeighbor.Z >= side then 1 else 0)
-                                                let wrappedLocal =
-                                                    v3i
-                                                        (if localNeighbor.X < 0 then dec side elif localNeighbor.X >= side then 0 else localNeighbor.X)
-                                                        (if localNeighbor.Y < 0 then dec side elif localNeighbor.Y >= side then 0 else localNeighbor.Y)
-                                                        (if localNeighbor.Z < 0 then dec side elif localNeighbor.Z >= side then 0 else localNeighbor.Z)
-                                                match tryGetBlockTemplate (blockCoord + blockOffset) with
-                                                | Some neighborTemplate -> neighborTemplate.Cells.ContainsKey wrappedLocal
-                                                | None -> false
-                                        if not neighborOccupied then
+                                        if not (isNeighborOccupied (surfaceVoxel.LocalCoord + offset)) then
                                             exposed <- true
                                             normal <- normal + direction
                                             faces <- faces ||| face

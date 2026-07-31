@@ -30,6 +30,7 @@ type VoxelFaces =
     | BackFace = 32
     | AllFaces = 63
 
+
 /// Describes a single voxel splat in local model space.
 type [<Struct>] VoxelSplat =
     { Position : Vector3
