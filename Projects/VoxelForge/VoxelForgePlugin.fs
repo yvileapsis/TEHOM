@@ -2,17 +2,24 @@
 open System
 open Nu
 
-type VoxelForgePlugin (profileStartupModeOpt : VoxelForgeMode option) =
+type VoxelForgePlugin (profileStartupModeOpt : VoxelForgeMode option, voxelRenderModeOpt : VoxelRenderMode option) =
     inherit NuPlugin ()
 
     let mutable profileStartupModeApplied = false
 
     new () =
-        VoxelForgePlugin None
+        VoxelForgePlugin (None, None)
 
     override this.PreProcess world =
         if not profileStartupModeApplied then
             profileStartupModeApplied <- true
+            match voxelRenderModeOpt with
+            | Some voxelRenderMode ->
+                let renderer3dConfig =
+                    { World.getRenderer3dConfig world with
+                        VoxelRenderMode = voxelRenderMode }
+                World.configureRenderer3d renderer3dConfig world
+            | None -> ()
             match profileStartupModeOpt with
             | Some Splash -> Game.SetVoxelForge VoxelForge.splash world
             | Some Title -> Game.SetVoxelForge VoxelForge.title world

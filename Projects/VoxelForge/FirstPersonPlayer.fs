@@ -1,6 +1,7 @@
 namespace VoxelForge
 open System
 open System.Numerics
+open SDL
 open Prime
 open Nu
 
@@ -77,7 +78,11 @@ module FirstPersonPlayerLogic =
         Math.Clamp (pitch, -pitchLimit, pitchLimit)
 
     let private computeLook (player : FirstPersonPlayer) (world : World) =
-        if world.Advancing then
+        let inputFocused =
+            World.tryGetWindowFlags world
+            |> Option.exists (fun flags ->
+                flags &&& SDL_WindowFlags.SDL_WINDOW_INPUT_FOCUS <> LanguagePrimitives.EnumOfValue 0UL)
+        if world.Advancing && inputFocused then
             World.trySetMouseGrabbed true world
             World.setCursorVisible false world
             let mouseCenter = World.getMouseCenter world

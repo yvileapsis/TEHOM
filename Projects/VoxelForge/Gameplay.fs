@@ -1078,15 +1078,15 @@ module GameplayLogic =
                         found <- chunkCoords[i] = chunkCoord
                         i <- inc i
                     found
-                let struct (voxelChunks, chunksToDestroy) = VoxelRuntime.rebuildChunks chunkCoords level gameplay.VoxelChunks world
+                let struct (voxelChunks, chunksReplaced, voxelAssetsToDestroy) = VoxelRuntime.rebuildChunks chunkCoords level gameplay.VoxelChunks world
                 let chunksToAdd =
                     voxelChunks
                     |> Array.filter (fun (chunk : VoxelChunk) -> isTargetChunk chunk.ChunkCoord)
-                let occlusionBlockCoords = replaceOcclusionBlockCoords gameplay.OcclusionBlockCoords chunksToDestroy chunksToAdd
+                let occlusionBlockCoords = replaceOcclusionBlockCoords gameplay.OcclusionBlockCoords chunksReplaced chunksToAdd
                 let syncDelta =
                     { VoxelChunkSyncDelta.Empty with
                         ChunksUpdated = chunksToAdd
-                        VoxelAssetsToDestroy = chunksToDestroy }
+                        VoxelAssetsToDestroy = voxelAssetsToDestroy }
                 struct ({ gameplay with VoxelChunks = voxelChunks; OcclusionBlockCoords = occlusionBlockCoords }, syncDelta)
         | None -> struct (gameplay, VoxelChunkSyncDelta.Empty)
 
@@ -1617,7 +1617,7 @@ type GameplayDispatcher () =
                      Entity.Position == v3Zero
                      Entity.Size == v3One
                      Entity.Scale == v3One
-                     Entity.Presence == Omnipresent
+                     Entity.Presence == Imposter
                      Entity.AlwaysRender == true
                      Entity.Static == true
                      Entity.Pickable == false

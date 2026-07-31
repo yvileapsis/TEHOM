@@ -18,12 +18,72 @@ type VoxelVolumeDescriptor =
 module VoxelBake =
 
     let private directions =
-        [|struct (v3iRight, v3Right)
-          struct (v3iLeft, v3Left)
-          struct (v3iUp, v3Up)
-          struct (v3iDown, v3Down)
-          struct (v3iForward, v3Forward)
-          struct (v3iBack, v3Back)|]
+        [|struct (v3iRight, v3Right, VoxelFaces.RightFace)
+          struct (v3iLeft, v3Left, VoxelFaces.LeftFace)
+          struct (v3iUp, v3Up, VoxelFaces.UpFace)
+          struct (v3iDown, v3Down, VoxelFaces.DownFace)
+          struct (v3iForward, v3Forward, VoxelFaces.ForwardFace)
+          struct (v3iBack, v3Back, VoxelFaces.BackFace)|]
+
+    let makeGridDescriptor (size : Vector3i) (origin : Vector3) (voxelSize : Vector3) (occupiedVoxels : struct (Vector3i * Color) seq) : VoxelGridDescriptor =
+        if size.X <= 0 || size.Y <= 0 || size.Z <= 0 || size.X > 64 || size.Y > 64 || size.Z > 64 then
+            invalidArg (nameof size) "Voxel grid dimensions must each be between 1 and 64."
+        let occupiedVoxels = occupiedVoxels |> Seq.toArray
+        if occupiedVoxels.Length = 0 then
+            invalidArg (nameof occupiedVoxels) "A voxel grid must contain at least one occupied voxel."
+        let mutable minX = size.X
+        let mutable minY = size.Y
+        let mutable minZ = size.Z
+        let mutable maxX = -1
+        let mutable maxY = -1
+        let mutable maxZ = -1
+        for struct (coord, _) in occupiedVoxels do
+            if coord.X < 0 || coord.X >= size.X ||
+               coord.Y < 0 || coord.Y >= size.Y ||
+               coord.Z < 0 || coord.Z >= size.Z then
+                invalidArg (nameof occupiedVoxels) "Voxel grid coordinates must lie within its dimensions."
+            minX <- min minX coord.X
+            minY <- min minY coord.Y
+            minZ <- min minZ coord.Z
+            maxX <- max maxX coord.X
+            maxY <- max maxY coord.Y
+            maxZ <- max maxZ coord.Z
+        let croppedSize = v3i (inc maxX - minX) (inc maxY - minY) (inc maxZ - minZ)
+        let croppedOrigin =
+            origin +
+            v3
+                (single minX * voxelSize.X)
+                (single minY * voxelSize.Y)
+                (single minZ * voxelSize.Z)
+        let volume = croppedSize.X * croppedSize.Y * croppedSize.Z
+        let paletteIndices = Dictionary<Color, int> ()
+        let palette = ResizeArray<Color> ()
+        let values = Array.zeroCreate<uint> volume
+        for struct (coord, albedo) in occupiedVoxels do
+            let mutable paletteIndex = 0
+            if not (paletteIndices.TryGetValue (albedo, &paletteIndex)) then
+                if palette.Count >= 65535 then
+                    invalidArg (nameof occupiedVoxels) "A voxel grid palette cannot exceed 65535 colors."
+                paletteIndex <- palette.Count
+                paletteIndices[albedo] <- paletteIndex
+                palette.Add albedo
+            let x = coord.X - minX
+            let y = coord.Y - minY
+            let z = coord.Z - minZ
+            let linearIndex = x + croppedSize.X * (y + croppedSize.Y * z)
+            values[linearIndex] <- uint (inc paletteIndex)
+        let indexBits = if palette.Count <= 255 then 8 else 16
+        let indicesPerWord = 32 / indexBits
+        let packed = Array.zeroCreate<uint> ((volume + dec indicesPerWord) / indicesPerWord)
+        let mask = if indexBits = 8 then 0xFFu else 0xFFFFu
+        for i in 0 .. dec values.Length do
+            let value = values[i] &&& mask
+            packed[i / indicesPerWord] <- packed[i / indicesPerWord] ||| (value <<< ((i % indicesPerWord) * indexBits))
+        { Size = croppedSize
+          Origin = croppedOrigin
+          IndexBits = indexBits
+          Indices = packed
+          Palette = palette.ToArray () }
 
     let private tryInferCubeSide width height =
         let volume = width * height
@@ -77,10 +137,12 @@ module VoxelBake =
                     let coord : Vector3i = entry.Key
                     let mutable exposed = false
                     let mutable normal = v3Zero
-                    for struct (offset, direction) in directions do
+                    let mutable faces = VoxelFaces.NoFaces
+                    for struct (offset, direction, face) in directions do
                         if not (occupied.ContainsKey (coord + offset)) then
                             exposed <- true
                             normal <- normal + direction
+                            faces <- faces ||| face
                     if exposed then
                         let normal = if normal.LengthSquared () > 0.0f then normal.Normalized else v3Up
                         let position =
@@ -91,14 +153,25 @@ module VoxelBake =
                         splats.Add
                             { Position = position
                               Albedo = entry.Value
-                              Normal = normal }
+                              Normal = normal
+                              Faces = faces }
+                let occupiedVoxels =
+                    occupied
+                    |> Seq.map (fun entry -> struct (entry.Key, entry.Value))
+                    |> Seq.toArray
+                let gridOrigin = size * -0.5f + voxelSize * 0.5f
+                let gridOpt =
+                    if side <= 64
+                    then Some (makeGridDescriptor (v3i side side side) gridOrigin voxelSize occupiedVoxels)
+                    else None
                 Some
                     { VoxelModel =
                         { Splats = splats.ToArray ()
+                          Grid = gridOpt
                           Bounds = box3 (size * -0.5f) size
                           VoxelSize = voxelSize }
                       OccupiedCoords = occupied.Keys |> Seq.toArray
-                      OccupiedVoxels = occupied |> Seq.map (fun entry -> struct (entry.Key, entry.Value)) |> Seq.toArray }
+                      OccupiedVoxels = occupiedVoxels }
             | None -> None
 
     let tryDecodeSliceAtlasBytes byteOrder width height bytes voxelSize =
@@ -141,6 +214,7 @@ module VoxelBake =
                     i <- inc i
         { descriptor with
             Splats = splats
+            Grid = None
             Bounds =
                 box3
                     (descriptor.Bounds.Min + baseOffset)
@@ -182,6 +256,7 @@ module VoxelBake =
                  center,
                  { descriptor with
                     Splats = splats
+                    Grid = None
                     Bounds = box3 (min - center) size })|]
 
     let occupiedDictionary (volume : VoxelVolumeDescriptor) =
@@ -220,6 +295,7 @@ module VoxelBake =
                 (single globalMinCoord.Z * voxelSize.Z)
         let chunkCenter = chunkMin + chunkWorldSize * 0.5f
         let splats = List ()
+        let occupiedVoxels = ResizeArray<struct (Vector3i * Color)> ()
         let mutable occupiedAny = false
         for y in globalMinCoord.Y .. globalMinCoord.Y + chunkSize.Y - 1 do
             for z in globalMinCoord.Z .. globalMinCoord.Z + chunkSize.Z - 1 do
@@ -228,45 +304,41 @@ module VoxelBake =
                     match tryGetCell coord with
                     | ValueSome cell ->
                         occupiedAny <- true
+                        occupiedVoxels.Add (struct (coord - globalMinCoord, cell.Albedo))
                         let mutable exposed = false
                         let mutable normal = v3Zero
-                        for struct (offset, direction) in directions do
+                        let mutable faces = VoxelFaces.NoFaces
+                        for struct (offset, direction, face) in directions do
                             match tryGetCell (coord + offset) with
                             | ValueSome _ -> ()
                             | ValueNone ->
                                 exposed <- true
                                 normal <- normal + direction
+                                faces <- faces ||| face
                         if exposed then
                             let normal = if normal.LengthSquared () > 0.0f then normal.Normalized else v3Up
                             splats.Add
                                 { Position = coordCenter origin voxelSize coord
                                   Albedo = cell.Albedo
-                                  Normal = normal }
+                                  Normal = normal
+                                  Faces = faces }
                     | ValueNone -> ()
         if occupiedAny then
-            let halfVoxelSize = voxelSize * 0.5f
-            let struct (center, descriptorBounds) =
-                if splats.Count > 0 then
-                    let mutable min = v3Dup Single.MaxValue
-                    let mutable max = v3Dup Single.MinValue
-                    for splat in splats do
-                        min <- Vector3.Min (min, splat.Position - halfVoxelSize)
-                        max <- Vector3.Max (max, splat.Position + halfVoxelSize)
-                    let size = max - min
-                    let center = min + size * 0.5f
-                    struct (center, box3 (min - center) size)
-                else
-                    struct (chunkCenter, box3 (chunkWorldSize * -0.5f) chunkWorldSize)
+            let center = chunkCenter
+            let descriptorBounds = box3 (chunkWorldSize * -0.5f) chunkWorldSize
             let splats =
                 let splatsArray = Array.zeroCreate splats.Count
                 for i in 0 .. dec splats.Count do
                     let splat = splats[i]
                     splatsArray[i] <- { splat with Position = splat.Position - center }
                 splatsArray
+            let gridOrigin = descriptorBounds.Min + voxelSize * 0.5f
+            let grid = makeGridDescriptor chunkSize gridOrigin voxelSize occupiedVoxels
             Some
                 struct
                     (center,
                      { Splats = splats
+                       Grid = Some grid
                        Bounds = descriptorBounds
                        VoxelSize = voxelSize })
         else None

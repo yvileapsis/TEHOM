@@ -11,6 +11,15 @@ module Program =
         elif Array.exists ((=) "--profile-start-title") args then Some Title
         else None
 
+    let private tryGetVoxelRenderMode (args : string array) =
+        if Array.exists ((=) "--voxel-splats") args then Some VoxelRenderMode.Splats
+        elif Array.exists ((=) "--voxel-faces") args then Some VoxelRenderMode.Faces
+        else
+            match Environment.GetEnvironmentVariable "VOXELFORGE_VOXEL_RENDER_MODE" with
+            | mode when String.Equals (mode, "splats", StringComparison.OrdinalIgnoreCase) -> Some VoxelRenderMode.Splats
+            | mode when String.Equals (mode, "faces", StringComparison.OrdinalIgnoreCase) -> Some VoxelRenderMode.Faces
+            | _ -> None
+
     let [<EntryPoint; STAThread>] main args =
 
         Directory.SetCurrentDirectory AppContext.BaseDirectory
@@ -18,4 +27,4 @@ module Program =
         let sdlWindowConfig = { SdlWindowConfig.defaultConfig with WindowTitle = "VoxelForge" }
         let sdlConfig = { SdlConfig.defaultConfig with WindowConfig = sdlWindowConfig }
         let worldConfig = { WorldConfig.defaultConfig with SdlConfig = sdlConfig }
-        World.run ignore worldConfig (VoxelForgePlugin (tryGetProfileStartupMode args))
+        World.run ignore worldConfig (VoxelForgePlugin (tryGetProfileStartupMode args, tryGetVoxelRenderMode args))

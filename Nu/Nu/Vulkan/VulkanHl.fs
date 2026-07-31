@@ -831,6 +831,7 @@ module Hl =
             VkAccessFlags.ShaderRead
             vkBuffer
 
+
     /// Try get surface capabilities.
     let tryGetSurfaceCapabilities vkPhysicalDevice =
         let mutable capabilities = Unchecked.defaultof<VkSurfaceCapabilitiesKHR>

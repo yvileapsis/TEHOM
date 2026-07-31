@@ -176,6 +176,10 @@ type VulkanBuffer =
     member this.VkBuffer =
         this.BufferWrapper.VkBuffer
 
+    /// Get the size of the vulkan buffer currently at the cursor.
+    member this.Size =
+        this.BufferWrapper.Size
+
     static member private ensureHeight (buffer : VulkanBuffer) context =
         while buffer.BufferWrappersCursor_ >= buffer.BufferWrappers_.Count do
             let bufferWrappers = Array.init buffer.BufferWrappers_.Count (fun _ -> BufferWrapper.create buffer.BufferType_ buffer.BufferWrappers_[0].Size context)

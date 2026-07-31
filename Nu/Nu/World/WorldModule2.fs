@@ -1156,6 +1156,9 @@ module WorldModule2 =
                 World.publishPlus () Nu.Game.Handle.ExitRequestEvent eventTrace Nu.Game.Handle true true world
             | SDL_EventType.SDL_EVENT_WINDOW_RESIZED | SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ->
                 World.processWindowResized world
+            | SDL_EventType.SDL_EVENT_WINDOW_FOCUS_LOST ->
+                World.trySetMouseGrabbed false world
+                World.setCursorVisible true world
             | SDL_EventType.SDL_EVENT_MOUSE_MOTION ->
                 let io = ImGui.GetIO ()
                 let pixelDensity = World.tryGetWindowPixelDensity world |> Option.defaultValue 1.0f

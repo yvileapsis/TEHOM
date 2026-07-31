@@ -456,6 +456,11 @@ type CreateUserDefinedVoxelModel =
     { VoxelModelDescriptor : VoxelModelDescriptor
       VoxelModel : VoxelModel AssetTag }
 
+/// Describes how to update a user-defined voxel model.
+type UpdateUserDefinedVoxelModel =
+    { VoxelModelDescriptor : VoxelModelDescriptor
+      VoxelModel : VoxelModel AssetTag }
+
 /// Describes how to destroy a user-defined voxel model.
 type DestroyUserDefinedVoxelModel =
     { VoxelModel : VoxelModel AssetTag }
@@ -817,7 +822,8 @@ type [<SymbolicExpansion>] Lighting3dConfig =
 
 /// Configures 3d renderer.
 type [<SymbolicExpansion>] Renderer3dConfig =
-    { LightMappingEnabled : bool
+    { VoxelRenderMode : VoxelRenderMode
+      LightMappingEnabled : bool
       LightShadowingEnabled : bool
       SssEnabled : bool
       SsaoEnabled : bool
@@ -834,7 +840,8 @@ type [<SymbolicExpansion>] Renderer3dConfig =
       FxaaReduceMulDivisor : single }
 
     static member val defaultConfig =
-        { LightMappingEnabled = Constants.Render.LightMappingEnabledDefault
+        { VoxelRenderMode = VoxelRenderMode.Faces
+          LightMappingEnabled = Constants.Render.LightMappingEnabledDefault
           LightShadowingEnabled = Constants.Render.LightShadowingEnabledDefault
           SssEnabled = Constants.Render.SssEnabledGlobalDefault
           SsaoEnabled = Constants.Render.SsaoEnabledGlobalDefault
@@ -855,6 +862,7 @@ type RenderMessage3d =
     | CreateUserDefinedStaticModel of CreateUserDefinedStaticModel
     | DestroyUserDefinedStaticModel of DestroyUserDefinedStaticModel
     | CreateUserDefinedVoxelModel of CreateUserDefinedVoxelModel
+    | UpdateUserDefinedVoxelModel of UpdateUserDefinedVoxelModel
     | DestroyUserDefinedVoxelModel of DestroyUserDefinedVoxelModel
     | RenderSkyBox of RenderSkyBox
     | RenderLightProbe3d of RenderLightProbe3d
@@ -1997,6 +2005,15 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             Log.info ("Cannot replace a loaded voxel model asset '" + scstring assetTag + "'.")
         else renderer.VoxelModels[assetTag] <- Voxel.createModel descriptor renderer.VulkanContext
 
+    static member private tryUpdateUserDefinedVoxelModel descriptor assetTag renderer =
+        match renderer.VoxelModels.TryGetValue assetTag with
+        | (true, model) ->
+            let struct (updated, reallocated) = Voxel.updateModel descriptor model renderer.VulkanContext
+            renderer.VoxelModels[assetTag] <- updated
+            if reallocated then Voxel.destroyModel model renderer.VulkanContext
+        | (false, _) ->
+            Log.info ("Cannot update an unavailable voxel model asset '" + scstring assetTag + "'.")
+
     static member private tryDestroyUserDefinedVoxelModel assetTag renderer =
         match renderer.VoxelModels.TryGetValue assetTag with
         | (true, model) ->
@@ -3114,6 +3131,8 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                 renderer.UserDefinedStaticModelsToDestroy.Add dudsm.StaticModel
             | CreateUserDefinedVoxelModel cudvm ->
                 VulkanRenderer3d.tryCreateUserDefinedVoxelModel cudvm.VoxelModelDescriptor cudvm.VoxelModel renderer
+            | UpdateUserDefinedVoxelModel uudvm ->
+                VulkanRenderer3d.tryUpdateUserDefinedVoxelModel uudvm.VoxelModelDescriptor uudvm.VoxelModel renderer
             | DestroyUserDefinedVoxelModel dudvm ->
                 renderer.VoxelModelsToDestroy.Add dudvm.VoxelModel
             | RenderSkyBox rsb ->
@@ -4456,11 +4475,19 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         VulkanRenderer3d.endPhysicallyBasedDeferredSurfaces
             renderer.PhysicallyBasedPipelines.DeferredAnimatedPipeline renderer.VulkanContext
 
-        // render voxel splats directly into the deferred geometry attachments
+        // render voxel models directly into the deferred geometry attachments
         if renderTasks.DeferredVoxels.Count > 0 then
-            let eyeDescriptorSet =
+            let voxelComparison =
+                Comparison<struct (Matrix4x4 * bool * Presence * MaterialProperties * VoxelModelGpu)>
+                    (fun (struct (modelMatrix, _, _, _, voxelModel)) (struct (modelMatrix2, _, _, _, voxelModel2)) ->
+                        let center = Vector3.Transform (voxelModel.Bounds.Center, modelMatrix)
+                        let center2 = Vector3.Transform (voxelModel2.Bounds.Center, modelMatrix2)
+                        (Vector3.DistanceSquared (eyeCenter, center)).CompareTo (Vector3.DistanceSquared (eyeCenter, center2)))
+            renderTasks.DeferredVoxels.Sort voxelComparison
+            let voxelRenderMode = renderer.RendererConfig.VoxelRenderMode
+            let voxelPass =
                 Voxel.beginDeferred
-                    eyeCenter view geometryProjection geometryTextureViews zTexture
+                    voxelRenderMode eyeCenter view geometryProjection geometryTextureViews zTexture
                     geometryResolution renderer.RenderPassIndex renderer.VoxelPipeline renderer.VulkanContext
             for struct (modelMatrix, _, presence, properties, voxelModel) in renderTasks.DeferredVoxels do
                 let voxelMaterial : VoxelMaterial =
@@ -4476,8 +4503,8 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                       ClearCoat = properties.ClearCoat
                       ClearCoatRoughness = properties.ClearCoatRoughness }
                 Voxel.drawDeferred
-                    modelMatrix presence.DepthCutoff voxelMaterial geometryResolution clipPlane voxelModel
-                    eyeDescriptorSet renderer.VoxelPipeline renderer.VulkanContext
+                    modelMatrix presence.DepthCutoff voxelMaterial clipPlane voxelModel
+                    voxelPass renderer.VoxelPipeline renderer.VulkanContext
             Voxel.endDeferred renderer.VulkanContext
 
         // render terrains deferred
@@ -4834,7 +4861,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
 
         // composite recursively rendered portal views into the tone-mapped scene.
         VulkanRenderer3d.drawPortalComposites
-            (view * geometryProjection) geometryResolution portalComposites
+            (view * geometryProjection.Flipped) geometryResolution portalComposites
             toneMappingTexture zTexture renderer
 
         // apply fxaa filter when desired

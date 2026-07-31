@@ -88,6 +88,12 @@ vec2 encodeOctahedral(vec3 v)
 
 void main()
 {
+    // discard when depth out of range
+    float depthCutoff = heightPlus.z;
+    float depth = gl_FragCoord.z / gl_FragCoord.w;
+    if (depthCutoff >= 0.0) { if (depth > depthCutoff) discard; }
+    else if (depth <= -depthCutoff) discard;
+
     // write depth
     depthOut = gl_FragCoord.z;
 

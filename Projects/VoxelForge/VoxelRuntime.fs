@@ -63,12 +63,12 @@ module VoxelRuntime =
           OpaqueOccluder : bool }
 
     let private voxelDirections =
-        [|struct (v3iRight, v3Right)
-          struct (v3iLeft, v3Left)
-          struct (v3iUp, v3Up)
-          struct (v3iDown, v3Down)
-          struct (v3iForward, v3Forward)
-          struct (v3iBack, v3Back)|]
+        [|struct (v3iRight, v3Right, VoxelFaces.RightFace)
+          struct (v3iLeft, v3Left, VoxelFaces.LeftFace)
+          struct (v3iUp, v3Up, VoxelFaces.UpFace)
+          struct (v3iDown, v3Down, VoxelFaces.DownFace)
+          struct (v3iForward, v3Forward, VoxelFaces.ForwardFace)
+          struct (v3iBack, v3Back, VoxelFaces.BackFace)|]
 
     let private templateBlockInfoCache = ConcurrentDictionary<string, TemplateBlockInfo> ()
 
@@ -309,7 +309,7 @@ module VoxelRuntime =
                     let mutable surface = false
                     let mutable i = 0
                     while not surface && i < voxelDirections.Length do
-                        let struct (offset, _) = voxelDirections[i]
+                        let struct (offset, _, _) = voxelDirections[i]
                         let neighbor = localCoord + offset
                         surface <-
                             not (isLocalBlockCoord side neighbor) ||
@@ -746,6 +746,8 @@ module VoxelRuntime =
                 let solidBlockCoords = ResizeArray<Vector3i> ()
                 let opaqueBlockCoords = ResizeArray<Vector3i> ()
                 let splats = List<VoxelSplat> ()
+                let occupiedVoxels = ResizeArray<struct (Vector3i * Color)> ()
+                let globalMinCoord = chunkSourceMinCoord level chunkCoord
                 let mutable occupiedAny = false
                 let origin = level.Bounds.Min
                 for y in 0 .. dec blockCounts.Y do
@@ -763,10 +765,13 @@ module VoxelRuntime =
                                     opaque[x, y, z] <- true
                                     opaqueBlockCoords.Add blockCoord
                                 let blockStart = VoxelWorld.blockStartCoord level blockCoord
+                                for struct (localCoord, cell) in template.Voxels do
+                                    occupiedVoxels.Add (struct (blockStart + localCoord - globalMinCoord, cell.Albedo))
                                 for surfaceVoxel in info.SurfaceVoxels do
                                     let mutable exposed = false
                                     let mutable normal = v3Zero
-                                    for struct (offset, direction) in voxelDirections do
+                                    let mutable faces = VoxelFaces.NoFaces
+                                    for struct (offset, direction, face) in voxelDirections do
                                         let localNeighbor = surfaceVoxel.LocalCoord + offset
                                         let neighborOccupied =
                                             if isLocalBlockCoord side localNeighbor then
@@ -788,6 +793,7 @@ module VoxelRuntime =
                                         if not neighborOccupied then
                                             exposed <- true
                                             normal <- normal + direction
+                                            faces <- faces ||| face
                                     if exposed then
                                         let sourceCoord = blockStart + surfaceVoxel.LocalCoord
                                         splats.Add
@@ -798,10 +804,10 @@ module VoxelRuntime =
                                                     ((single sourceCoord.Y + 0.5f) * level.VoxelSize.Y)
                                                     ((single sourceCoord.Z + 0.5f) * level.VoxelSize.Z)
                                               Albedo = surfaceVoxel.Cell.Albedo
-                                              Normal = if normal.LengthSquared () > 0.0f then normal.Normalized else v3Up }
+                                              Normal = if normal.LengthSquared () > 0.0f then normal.Normalized else v3Up
+                                              Faces = faces }
                             | None -> ()
                 if occupiedAny then
-                    let globalMinCoord = chunkSourceMinCoord level chunkCoord
                     let chunkWorldSize =
                         v3
                             (single level.ChunkSizeVoxels.X * level.VoxelSize.X)
@@ -814,24 +820,17 @@ module VoxelRuntime =
                             (single globalMinCoord.Y * level.VoxelSize.Y)
                             (single globalMinCoord.Z * level.VoxelSize.Z)
                     let chunkCenter = chunkMin + chunkWorldSize * 0.5f
-                    let halfVoxelSize = level.VoxelSize * 0.5f
-                    let struct (renderCenter, descriptorBounds) =
-                        if splats.Count > 0 then
-                            let mutable min = v3Dup Single.MaxValue
-                            let mutable max = v3Dup Single.MinValue
-                            for splat in splats do
-                                min <- Vector3.Min (min, splat.Position - halfVoxelSize)
-                                max <- Vector3.Max (max, splat.Position + halfVoxelSize)
-                            let size = max - min
-                            let center = min + size * 0.5f
-                            struct (center, box3 (min - center) size)
-                        else struct (chunkCenter, box3 (chunkWorldSize * -0.5f) chunkWorldSize)
+                    let renderCenter = chunkCenter
+                    let descriptorBounds = box3 (chunkWorldSize * -0.5f) chunkWorldSize
                     let splatsArray = Array.zeroCreate<VoxelSplat> splats.Count
                     for i in 0 .. dec splats.Count do
                         let splat = splats[i]
                         splatsArray[i] <- { splat with Position = splat.Position - renderCenter }
+                    let gridOrigin = descriptorBounds.Min + level.VoxelSize * 0.5f
+                    let grid = VoxelBake.makeGridDescriptor level.ChunkSizeVoxels gridOrigin level.VoxelSize occupiedVoxels
                     let voxelModelDescriptor =
                         { Splats = splatsArray
+                          Grid = Some grid
                           Bounds = descriptorBounds
                           VoxelSize = level.VoxelSize }
                     let struct (bodyShape, boxCount, occlusionBoundsOpt, solidBlockCoords, opaqueBlockCoords, opaqueOccluderBoxes, opaqueFaceMask, fullOpaqueChunk) =
@@ -961,7 +960,7 @@ module VoxelRuntime =
         tryBuildChunkWithCellLookup level tryGetCell chunkCoord
 
     let private chunkBuildCacheMagic = "VFCB"
-    let private chunkBuildCacheVersion = 6
+    let private chunkBuildCacheVersion = 9
     let private chunkBuildCacheMaxBytes = 8L * 1024L * 1024L * 1024L
     let private chunkBuildCacheTrimEvery = 64
     let private chunkBuildCacheTrimLock = obj ()
@@ -1221,9 +1220,24 @@ module VoxelRuntime =
             let splat = descriptor.Splats[i]
             let struct (packed, splatPackingWarning) = packVoxelSplatPosition descriptor.Bounds descriptor.VoxelSize splat.Position colorIndices[i]
             writer.Write packed
+            writer.Write (byte splat.Faces)
             packingWarning <- packingWarning || splatPackingWarning
         if packingWarning then
             Log.warnOnce "A voxel chunk build cache entry exceeded the packed 64x64x64 / 16384-color splat format; cached splat keys were clamped."
+        match descriptor.Grid with
+        | Some grid ->
+            writer.Write true
+            writeVector3i writer grid.Size
+            writeVector3 writer grid.Origin
+            writer.Write grid.IndexBits
+            writer.Write grid.Palette.Length
+            for color in grid.Palette do writeColor writer color
+            writer.Write grid.Indices.Length
+            let bytes = Array.zeroCreate<byte> (grid.Indices.Length * sizeof<uint>)
+            Buffer.BlockCopy (grid.Indices, 0, bytes, 0, bytes.Length)
+            writer.Write bytes
+        | None ->
+            writer.Write false
 
     let private readVoxelModelDescriptor (reader : BinaryReader) =
         let bounds = readBox3 reader
@@ -1236,12 +1250,37 @@ module VoxelRuntime =
         let splats = Array.zeroCreate<VoxelSplat> splatCount
         for i in 0 .. dec splatCount do
             let packed = reader.ReadUInt32 ()
+            let faces = enum<VoxelFaces> (int (reader.ReadByte ()))
             let colorIndex = int (packed >>> 18)
             splats[i] <-
                 { Position = unpackVoxelSplatPosition bounds voxelSize packed
                   Albedo = if colorIndex < palette.Length then palette[colorIndex] else Color.White
-                  Normal = v3Up }
+                  Normal = v3Up
+                  Faces = faces }
+        let gridOpt =
+            if reader.ReadBoolean () then
+                let size = readVector3i reader
+                let origin = readVector3 reader
+                let indexBits = reader.ReadInt32 ()
+                let gridPaletteCount = reader.ReadInt32 ()
+                let gridPalette = Array.zeroCreate<Color> gridPaletteCount
+                for i in 0 .. dec gridPaletteCount do
+                    gridPalette[i] <- readColor reader
+                let indicesLength = reader.ReadInt32 ()
+                let bytes = reader.ReadBytes (indicesLength * sizeof<uint>)
+                if bytes.Length <> indicesLength * sizeof<uint> then
+                    raise (EndOfStreamException "Voxel grid cache data ended unexpectedly.")
+                let indices = Array.zeroCreate<uint> indicesLength
+                Buffer.BlockCopy (bytes, 0, indices, 0, bytes.Length)
+                Some
+                    { Size = size
+                      Origin = origin
+                      IndexBits = indexBits
+                      Indices = indices
+                      Palette = gridPalette }
+            else None
         { Splats = splats
+          Grid = gridOpt
           Bounds = bounds
           VoxelSize = voxelSize }
 
@@ -1414,15 +1453,7 @@ module VoxelRuntime =
         let tryGetCell coord = VoxelWorld.tryGetCellValue level coord
         tryBuildChunkWithCellLookupCached true level tryGetCell chunkCoord
 
-    let realizeChunk (level : VoxelLevel) (chunkBuild : VoxelChunkBuild) (world : World) =
-        let splatCount = chunkBuild.SplatCount
-        let voxelModelOpt =
-            if splatCount > 0 then
-                let revision = nextRevision level
-                let voxelModel = chunkAssetTag chunkBuild.ChunkCoord revision
-                World.createUserDefinedVoxelModel chunkBuild.VoxelModelDescriptor voxelModel world
-                Some voxelModel
-            else None
+    let private makeRealizedChunk voxelModelOpt (level : VoxelLevel) (chunkBuild : VoxelChunkBuild) =
         VoxelWorld.updateChunkManifestFromBuild (VoxelWorld.getEditRevision level) level chunkBuild
         { ChunkCoord = chunkBuild.ChunkCoord
           ChunkCenter = chunkBuild.ChunkCenter
@@ -1431,12 +1462,37 @@ module VoxelRuntime =
           BoxCount = chunkBuild.BoxCount
           OcclusionBoundsOpt = chunkBuild.OcclusionBoundsOpt
           SolidBlockCoords = chunkBuild.SolidBlockCoords
-          SplatCount = splatCount
+          SplatCount = chunkBuild.SplatCount
           VoxelModelOpt = voxelModelOpt
           OpaqueBlockCoords = chunkBuild.OpaqueBlockCoords
           OpaqueOccluderBoxes = chunkBuild.OpaqueOccluderBoxes
           OpaqueFaceMask = chunkBuild.OpaqueFaceMask
           FullOpaqueChunk = chunkBuild.FullOpaqueChunk }
+
+    let realizeChunk (level : VoxelLevel) (chunkBuild : VoxelChunkBuild) (world : World) =
+        let voxelModelOpt =
+            if chunkBuild.SplatCount > 0 then
+                let revision = nextRevision level
+                let voxelModel = chunkAssetTag chunkBuild.ChunkCoord revision
+                World.createUserDefinedVoxelModel chunkBuild.VoxelModelDescriptor voxelModel world
+                Some voxelModel
+            else None
+        makeRealizedChunk voxelModelOpt level chunkBuild
+
+    let private updateRealizedChunk (previous : VoxelChunk) (level : VoxelLevel) (chunkBuild : VoxelChunkBuild) (world : World) =
+        let voxelModelOpt, destroyPreviousAsset =
+            if chunkBuild.SplatCount > 0 then
+                match previous.VoxelModelOpt with
+                | Some voxelModel ->
+                    World.updateUserDefinedVoxelModel chunkBuild.VoxelModelDescriptor voxelModel world
+                    Some voxelModel, false
+                | None ->
+                    let revision = nextRevision level
+                    let voxelModel = chunkAssetTag chunkBuild.ChunkCoord revision
+                    World.createUserDefinedVoxelModel chunkBuild.VoxelModelDescriptor voxelModel world
+                    Some voxelModel, false
+            else None, previous.VoxelModelOpt.IsSome
+        makeRealizedChunk voxelModelOpt level chunkBuild, destroyPreviousAsset
 
     let rebuildChunk (level : VoxelLevel) (chunkCoord : Vector3i) (world : World) =
         match tryBuildChunk level chunkCoord with
@@ -1448,12 +1504,13 @@ module VoxelRuntime =
 
     let rebuildChunks (chunkCoords : Vector3i seq) (level : VoxelLevel) (currentChunks : VoxelChunk array) (world : World) =
         let targetCoords = chunkCoords |> Seq.toArray
-        if targetCoords.Length = 0 then struct (currentChunks, Array.empty)
+        if targetCoords.Length = 0 then struct (currentChunks, Array.empty, Array.empty)
         else
             let snapshot = VoxelWorld.snapshotEdits level
             let processedTargets = Array.zeroCreate<bool> targetCoords.Length
             let chunks = ResizeArray<VoxelChunk> (currentChunks.Length + targetCoords.Length)
-            let chunksToDestroy = ResizeArray<VoxelChunk> (targetCoords.Length)
+            let chunksReplaced = ResizeArray<VoxelChunk> (targetCoords.Length)
+            let voxelAssetsToDestroy = ResizeArray<VoxelChunk> ()
             let indexOfTarget coord =
                 let mutable index = -1
                 let mutable i = 0
@@ -1461,9 +1518,9 @@ module VoxelRuntime =
                     if targetCoords[i] = coord then index <- i
                     i <- inc i
                 index
-            let rebuildTarget chunkCoord =
+            let tryBuildTarget chunkCoord =
                 match tryBuildChunkWithEditSnapshotCached false level snapshot chunkCoord with
-                | Some chunkBuild -> Some (realizeChunk level chunkBuild world)
+                | Some chunkBuild -> Some chunkBuild
                 | None ->
                     VoxelWorld.markChunkManifestEmpty snapshot.Revision level chunkCoord
                     None
@@ -1471,22 +1528,26 @@ module VoxelRuntime =
                 let targetIndex = indexOfTarget chunk.ChunkCoord
                 if targetIndex >= 0 then
                     processedTargets[targetIndex] <- true
-                    chunksToDestroy.Add chunk
-                    match rebuildTarget chunk.ChunkCoord with
-                    | Some rebuiltChunk -> chunks.Add rebuiltChunk
-                    | None -> ()
+                    chunksReplaced.Add chunk
+                    match tryBuildTarget chunk.ChunkCoord with
+                    | Some chunkBuild ->
+                        let rebuiltChunk, destroyPreviousAsset = updateRealizedChunk chunk level chunkBuild world
+                        chunks.Add rebuiltChunk
+                        if destroyPreviousAsset then voxelAssetsToDestroy.Add chunk
+                    | None ->
+                        if chunk.VoxelModelOpt.IsSome then voxelAssetsToDestroy.Add chunk
                 else chunks.Add chunk
             let mutable appended = false
             for i in 0 .. dec targetCoords.Length do
                 if not processedTargets[i] then
-                    match rebuildTarget targetCoords[i] with
-                    | Some rebuiltChunk ->
-                        chunks.Add rebuiltChunk
+                    match tryBuildTarget targetCoords[i] with
+                    | Some chunkBuild ->
+                        chunks.Add (realizeChunk level chunkBuild world)
                         appended <- true
                     | None -> ()
             let chunksArray = chunks.ToArray ()
             let chunksArray = if appended then sortVoxelChunks chunksArray else chunksArray
-            struct (chunksArray, chunksToDestroy.ToArray ())
+            struct (chunksArray, chunksReplaced.ToArray (), voxelAssetsToDestroy.ToArray ())
 
     let destroyVoxelChunks (voxelChunks : VoxelChunk array) (world : World) =
         for chunk in voxelChunks do

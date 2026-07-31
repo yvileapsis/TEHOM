@@ -85,6 +85,14 @@ module WorldRender =
                       VoxelModel = voxelModel })
                 world
 
+        /// Send a message to the renderer to update a user-defined voxel model in place when capacity permits.
+        static member updateUserDefinedVoxelModel descriptor voxelModel world =
+            World.enqueueRenderMessage3d
+                (UpdateUserDefinedVoxelModel
+                    { VoxelModelDescriptor = descriptor
+                      VoxelModel = voxelModel })
+                world
+
         /// Send a message to the renderer to destroy a user-defined voxel model.
         static member destroyUserDefinedVoxelModel voxelModel world =
             World.enqueueRenderMessage3d (DestroyUserDefinedVoxelModel { VoxelModel = voxelModel }) world
