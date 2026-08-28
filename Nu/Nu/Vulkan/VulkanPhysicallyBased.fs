@@ -56,6 +56,24 @@ type FxaaStruct =
     [<FieldOffset(8)>] val mutable reduceMulDivisor : single
 
 [<Struct; StructLayout (LayoutKind.Explicit)>]
+type BloomExtractStruct =
+    [<FieldOffset(0)>] val mutable threshold : single
+
+[<Struct; StructLayout (LayoutKind.Explicit)>]
+type BloomDownSampleStruct =
+    [<FieldOffset(0)>] val mutable karisAverageEnabled : int
+    [<FieldOffset(4)>] val mutable sampleLevel : int
+    [<FieldOffset(8)>] val mutable sourceResolution : Vector2
+
+[<Struct; StructLayout (LayoutKind.Explicit)>]
+type BloomUpSampleStruct =
+    [<FieldOffset(0)>] val mutable radius : single
+
+[<Struct; StructLayout (LayoutKind.Explicit)>]
+type BloomApplyStruct =
+    [<FieldOffset(0)>] val mutable strength : single
+
+[<Struct; StructLayout (LayoutKind.Explicit)>]
 type ShadowVertStruct =
     [<FieldOffset(0)>] val mutable viewProjection : Matrix4x4
 
@@ -175,12 +193,18 @@ type SsaoStruct =
 
 /// A set of physically-based attachments that support a given viewport.
 type PhysicallyBasedAttachments =
-    { GaussianEsmAttachment : Texture
+    { DownSampleColorAttachment : Texture
+      DownSampleDepthAttachment : Texture
+      UpSampleColorAttachment : Texture
+      GaussianEsmAttachment : Texture
       GaussianEsmArrayAttachment : Texture
       ColorFull0Attachment : Texture
       ColorFull1Attachment : Texture
       ColorHalf0Attachment : Texture
       ColorHalf1Attachment : Texture
+      BloomExtractAttachment : Texture
+      BloomSampleAttachments : Texture array
+      BloomApplyAttachment : Texture
       ToneMappingAttachment : Texture
       GammaCorrectionAttachment : Texture
       ShadowTextureArrayAttachments : Texture * Texture
@@ -674,6 +698,14 @@ type FilterGaussianEsmPipeline =
     { GaussianEsmUniform : VulkanBuffer
       Pipeline : Pipeline }
 
+/// Describes a down-sample filter pipeline that's loaded into GPU.
+type FilterDownSamplePipeline =
+    { Pipeline : Pipeline }
+
+/// Describes an up-sample filter pipeline that's loaded into GPU.
+type FilterUpSamplePipeline =
+    { Pipeline : Pipeline }
+
 /// Describes a depth-of-field gaussian filter pipeline that's loaded into GPU.
 type FilterGaussianDofPipeline =
     { GaussianDofUniform : VulkanBuffer
@@ -683,6 +715,26 @@ type FilterGaussianDofPipeline =
 type FilterDepthOfFieldPipeline =
     { EyeUniform : VulkanBuffer
       DepthOfFieldUniform : VulkanBuffer
+      Pipeline : Pipeline }
+
+/// Describes a bloom extract filter pipeline that's loaded into GPU.
+type FilterBloomExtractPipeline =
+    { BloomExtractUniform : VulkanBuffer
+      Pipeline : Pipeline }
+
+/// Describes a bloom down-sample filter pipeline that's loaded into GPU.
+type FilterBloomDownSamplePipeline =
+    { BloomDownSampleUniform : VulkanBuffer
+      Pipeline : Pipeline }
+
+/// Describes a bloom up-sample filter pipeline that's loaded into GPU.
+type FilterBloomUpSamplePipeline =
+    { BloomUpSampleUniform : VulkanBuffer
+      Pipeline : Pipeline }
+
+/// Describes a bloom apply filter pipeline that's loaded into GPU.
+type FilterBloomApplyPipeline =
+    { BloomApplyUniform : VulkanBuffer
       Pipeline : Pipeline }
 
 /// Describes a tone-mapping filter pipeline that's loaded into GPU.
@@ -707,9 +759,15 @@ type FilterGammaCorrectionPipeline =
 /// Physically-based pipelines.
 type PhysicallyBasedPipelines =
     { FilterBox1dPipeline : FilterBoxPipeline
+      FilterBilateralDownSamplePipeline : FilterDownSamplePipeline
+      FilterBilateralUpSamplePipeline : FilterUpSamplePipeline
       FilterGaussianEsmPipeline : FilterGaussianEsmPipeline
       FilterGaussianDofPipeline : FilterGaussianDofPipeline
       FilterDepthOfFieldPipeline : FilterDepthOfFieldPipeline
+      FilterBloomExtractPipeline : FilterBloomExtractPipeline
+      FilterBloomDownSamplePipeline : FilterBloomDownSamplePipeline
+      FilterBloomUpSamplePipeline : FilterBloomUpSamplePipeline
+      FilterBloomApplyPipeline : FilterBloomApplyPipeline
       FilterToneMappingPipeline : FilterToneMappingPipeline
       FilterChromaticAberrationPipeline : FilterChromaticAberrationPipeline
       FilterFxaaPipeline : FilterFxaaPipeline
@@ -817,6 +875,12 @@ module PhysicallyBased =
     /// Create the attachments required for physically-based rendering.
     let createPhysicallyBasedAttachments (geometryViewport : Viewport) context =
 
+        // create down/up-sample attachments
+        let allUsageFlags = VkImageUsageFlags.Sampled ||| VkImageUsageFlags.TransferSrc ||| VkImageUsageFlags.TransferDst
+        let downSampleColorAttachment = Attachment.createColorAttachment Texture2d allUsageFlags Rgba16f Rgba (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) context
+        let downSampleDepthAttachment = Attachment.createColorAttachment Texture2d allUsageFlags R16f Red (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) context
+        let upSampleColorAttachment = Attachment.createColorAttachment Texture2d allUsageFlags Rgba16f Rgba geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y context
+
         // create gaussian esm attachment
         let gaussianEsmResolution = geometryViewport.ShadowTextureResolution
         let gaussianEsmAttachment = Attachment.createColorAttachment Texture2d VkImageUsageFlags.Sampled Rg32f Rg gaussianEsmResolution.X gaussianEsmResolution.Y context
@@ -826,14 +890,17 @@ module PhysicallyBased =
         let gaussianEsmArrayAttachment = Attachment.createColorAttachment (Texture2dArray Constants.Render.ShadowCascadeLevels) VkImageUsageFlags.Sampled Rg32f Rg gaussianEsmArrayResolution.X gaussianEsmArrayResolution.Y context
 
         // create color full attachments
-        let colorFullUsageFlags = VkImageUsageFlags.Sampled ||| VkImageUsageFlags.TransferSrc ||| VkImageUsageFlags.TransferDst
-        let colorFull0Attachment = Attachment.createColorAttachment Texture2d colorFullUsageFlags Rgb16f Rgb geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y context
-        let colorFull1Attachment = Attachment.createColorAttachment Texture2d colorFullUsageFlags Rgb16f Rgb geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y context
+        let colorFull0Attachment = Attachment.createColorAttachment Texture2d allUsageFlags Rgba16f Rgba geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y context
+        let colorFull1Attachment = Attachment.createColorAttachment Texture2d allUsageFlags Rgba16f Rgba geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y context
 
         // create color half attachments
-        let colorHalfUsageFlags = colorFullUsageFlags
-        let colorHalf0Attachment = Attachment.createColorAttachment Texture2d colorHalfUsageFlags Rgb16f Rgb (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) context
-        let colorHalf1Attachment = Attachment.createColorAttachment Texture2d colorHalfUsageFlags Rgb16f Rgb (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) context
+        let colorHalf0Attachment = Attachment.createColorAttachment Texture2d allUsageFlags Rgba16f Rgba (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) context
+        let colorHalf1Attachment = Attachment.createColorAttachment Texture2d allUsageFlags Rgba16f Rgba (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) context
+
+        // bloom attachments
+        let bloomExtractAttachment = Attachment.createColorAttachment Texture2d VkImageUsageFlags.Sampled Rgba16f Rgba geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y context
+        let bloomSampleAttachments = Attachment.createBloomSampleAttachments (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) context
+        let bloomApplyAttachment = Attachment.createColorAttachment Texture2d (VkImageUsageFlags.Sampled ||| VkImageUsageFlags.TransferSrc) Rgba16f Rgba geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y context
 
         // create tone-mapping attachments
         let toneMappingAttachment = Attachment.createToneMappingAttachments geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y context
@@ -891,12 +958,18 @@ module PhysicallyBased =
         let compositionAttachment = Attachment.createCompositionAttachment geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y context
 
         // make record
-        { GaussianEsmAttachment = gaussianEsmAttachment
+        { DownSampleColorAttachment = downSampleColorAttachment
+          DownSampleDepthAttachment = downSampleDepthAttachment
+          UpSampleColorAttachment = upSampleColorAttachment
+          GaussianEsmAttachment = gaussianEsmAttachment
           GaussianEsmArrayAttachment = gaussianEsmArrayAttachment
           ColorFull0Attachment = colorFull0Attachment
           ColorFull1Attachment = colorFull1Attachment
           ColorHalf0Attachment = colorHalf0Attachment
           ColorHalf1Attachment = colorHalf1Attachment
+          BloomExtractAttachment = bloomExtractAttachment
+          BloomSampleAttachments = bloomSampleAttachments
+          BloomApplyAttachment = bloomApplyAttachment
           ToneMappingAttachment = toneMappingAttachment
           GammaCorrectionAttachment = gammaCorrectionAttachment
           ShadowTextureArrayAttachments = shadowTextureArrayAttachments
@@ -916,6 +989,19 @@ module PhysicallyBased =
 
     /// Update the size of the attachments. Must be used every frame.
     let updatePhysicallyBasedAttachmentsSize (geometryViewport : Viewport) (attachments : PhysicallyBasedAttachments) context =
+        Attachment.updateColorAttachmentSize geometryViewport.ShadowTextureResolution.X geometryViewport.ShadowTextureResolution.Y attachments.GaussianEsmAttachment context
+        Attachment.updateColorAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.ColorFull0Attachment context
+        Attachment.updateColorAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.ColorFull1Attachment context
+        Attachment.updateColorAttachmentSize (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) attachments.ColorHalf0Attachment context
+        Attachment.updateColorAttachmentSize (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) attachments.ColorHalf1Attachment context
+        Attachment.updateColorAttachmentSize (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) attachments.DownSampleColorAttachment context
+        Attachment.updateColorAttachmentSize (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) attachments.DownSampleDepthAttachment context
+        Attachment.updateColorAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.UpSampleColorAttachment context
+        Attachment.updateColorAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.BloomExtractAttachment context
+        Attachment.updateBloomSampleAttachmentsSize (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) attachments.BloomSampleAttachments context
+        Attachment.updateColorAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.BloomApplyAttachment context
+        Attachment.updateToneMappingAttachmentsSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.ToneMappingAttachment context
+        Attachment.updateGammaCorrectionAttachmentsSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.GammaCorrectionAttachment context
         Attachment.updateShadowTextureArrayAttachmentsSize geometryViewport.ShadowTextureResolution.X geometryViewport.ShadowTextureResolution.Y attachments.ShadowTextureArrayAttachments context
         for i in 0 .. dec attachments.ShadowMapAttachmentsArray.Length do
             Attachment.updateShadowMapAttachmentsSize geometryViewport.ShadowMapResolution.X geometryViewport.ShadowMapResolution.Y attachments.ShadowMapAttachmentsArray[i] context
@@ -932,16 +1018,22 @@ module PhysicallyBased =
         Attachment.updateColorAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.SsaoFilteredAttachment context
         Attachment.updateColoringAttachmentsSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.ColoringAttachments context
         Attachment.updateCompositionAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.CompositionAttachment context
-        Attachment.updateColorAttachmentSize geometryViewport.ShadowTextureResolution.X geometryViewport.ShadowTextureResolution.Y attachments.GaussianEsmAttachment context
-        Attachment.updateColorAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.ColorFull0Attachment context
-        Attachment.updateColorAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.ColorFull1Attachment context
-        Attachment.updateColorAttachmentSize (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) attachments.ColorHalf0Attachment context
-        Attachment.updateColorAttachmentSize (geometryViewport.Bounds.Size.X / 2) (geometryViewport.Bounds.Size.Y / 2) attachments.ColorHalf1Attachment context
-        Attachment.updateToneMappingAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.ToneMappingAttachment context
-        Attachment.updateGammaCorrectionAttachmentSize geometryViewport.Bounds.Size.X geometryViewport.Bounds.Size.Y attachments.GammaCorrectionAttachment context
 
     /// Destroy the physically-based attachments.
     let destroyPhysicallyBasedAttachments (attachments : PhysicallyBasedAttachments) context =
+        Attachment.destroyColorAttachment attachments.GaussianEsmAttachment context
+        Attachment.destroyColorAttachment attachments.ColorFull0Attachment context
+        Attachment.destroyColorAttachment attachments.ColorFull1Attachment context
+        Attachment.destroyColorAttachment attachments.ColorHalf0Attachment context
+        Attachment.destroyColorAttachment attachments.ColorHalf1Attachment context
+        Attachment.destroyColorAttachment attachments.DownSampleColorAttachment context
+        Attachment.destroyColorAttachment attachments.DownSampleDepthAttachment context
+        Attachment.destroyColorAttachment attachments.UpSampleColorAttachment context
+        Attachment.destroyColorAttachment attachments.BloomExtractAttachment context
+        Attachment.destroyBloomSampleAttachments attachments.BloomSampleAttachments context
+        Attachment.destroyColorAttachment attachments.BloomApplyAttachment context
+        Attachment.destroyToneMappingAttachments attachments.ToneMappingAttachment context
+        Attachment.destroyGammaCorrectionAttachment attachments.GammaCorrectionAttachment context
         Attachment.destroyShadowTextureArrayAttachments attachments.ShadowTextureArrayAttachments context
         for i in 0 .. dec attachments.ShadowMapAttachmentsArray.Length do
             Attachment.destroyShadowMapAttachments attachments.ShadowMapAttachmentsArray[i] context
@@ -958,13 +1050,6 @@ module PhysicallyBased =
         Attachment.destroyColorAttachment attachments.SsaoFilteredAttachment context
         Attachment.destroyColoringAttachments attachments.ColoringAttachments context
         Attachment.destroyCompositionAttachment attachments.CompositionAttachment context
-        Attachment.destroyColorAttachment attachments.GaussianEsmAttachment context
-        Attachment.destroyColorAttachment attachments.ColorFull0Attachment context
-        Attachment.destroyColorAttachment attachments.ColorFull1Attachment context
-        Attachment.destroyColorAttachment attachments.ColorHalf0Attachment context
-        Attachment.destroyColorAttachment attachments.ColorHalf1Attachment context
-        Attachment.destroyToneMappingAttachment attachments.ToneMappingAttachment context
-        Attachment.destroyGammaCorrectionAttachment attachments.GammaCorrectionAttachment context
 
     /// Create a mesh for a physically-based quad.
     let createPhysicallyBasedQuadMesh () =
@@ -1875,7 +1960,7 @@ module PhysicallyBased =
         (pipeline : FilterBoxPipeline)
         (context : VulkanContext) =
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -1891,8 +1976,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -1909,6 +1995,198 @@ module PhysicallyBased =
 
             // bind descriptor sets
             DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 0u, 1u, &&textureDescriptorSet, 0u, nullPtr)
+            DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 1u, 1u, &&samplerDescriptorSet, 0u, nullPtr)
+
+            // draw
+            DeviceApi.vkCmdDrawIndexed (context.RenderCommandBuffer, uint geometry.ElementCount, 1u, 0u, 0, 0u)
+
+            // tear down render
+            DeviceApi.vkCmdEndRendering context.RenderCommandBuffer
+
+            // report drawing
+            Hl.reportDrawCall 1 true
+
+            // advance pipeline
+            Pipeline.advance pipeline.Pipeline
+
+            // advance rendering command buffer
+            VulkanContext.advanceRenderCommandBuffer context
+
+        // abort
+        | None -> Log.warnOnce ("Cannot draw " + getTypeName pipeline + " because VkPipeline does not exist.")
+
+    /// Create a down-sampler filter pipeline.
+    let createFilterDownSamplePipeline shaderFilePath colorAttachmentFormats =
+
+        // create pipeline
+        let pipeline =
+            Pipeline.create
+                shaderFilePath
+                [|VulkanUnblended|] [|false|] StaticVertices
+                [|Pipeline.descriptorSet<int>
+                    [|Pipeline.descriptor 0 SampledImage FragmentStage 1 // colorTexture
+                      Pipeline.descriptor 1 SampledImage FragmentStage 1|] // depthTexture
+                  Pipeline.descriptorSet<Unit>
+                    [|Pipeline.descriptor 0 Sampler FragmentStage 1|]|] // filteredSampler
+                [||] colorAttachmentFormats None
+                [||]
+
+        // make pipeline
+        let filterDownSamplePipeline =
+            { FilterDownSamplePipeline.Pipeline = pipeline }
+
+        // fin
+        filterDownSamplePipeline
+
+    /// Destroy a down-sample filter pipeline.
+    let destroyFilterDownSamplePipeline (downSamplePipeline : FilterDownSamplePipeline) context =
+        Pipeline.destroy downSamplePipeline.Pipeline context
+
+    /// Draw the down-sample filter pass of a physically-based surface.
+    let drawFilterDownSampleSurface
+        (colorTexture : Texture)
+        (depthTexture : Texture)
+        (filteredSampler : Sampler)
+        (colorAttachment : VkImageView)
+        (depthAttachment : VkImageView)
+        (resolution : Vector2i)
+        (geometry : PhysicallyBasedGeometry)
+        (pipeline : FilterDownSamplePipeline)
+        (context : VulkanContext) =
+
+        // only draw when required vkPipeline exists
+        match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
+        | Some vkPipeline ->
+
+            // specify textures
+            let mutable texturesDescriptorSet = Pipeline.specifyDescriptorSet 0 pipeline.Pipeline.DrawIndex pipeline.Pipeline $ fun vkSet ->
+                Pipeline.writeDescriptorSampledTexture 0 0 colorTexture vkSet
+                Pipeline.writeDescriptorSampledTexture 1 0 depthTexture vkSet
+
+            // specify sampler
+            let mutable samplerDescriptorSet = Pipeline.specifyDescriptorSet 1 Unit pipeline.Pipeline $ fun vkSet ->
+                Pipeline.writeDescriptorSampler 0 0 filteredSampler vkSet
+
+            // set up render
+            let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
+            let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
+            let mutable vkViewport = Hl.makeViewport false renderArea
+            Hl.withRenderingInfo [|colorAttachment; depthAttachment|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
+            DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
+
+            // set up pipeline
+            DeviceApi.vkCmdBindPipeline (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)
+
+            // bind vertex and index buffers
+            let vertexBuffers = [|geometry.VertexBuffer.VkBuffer; geometry.InstanceBuffer.VkBuffer|]
+            let vertexOffsets = [|0UL; 0UL|]
+            use vertexBuffersPin = new ArrayPin<_> (vertexBuffers)
+            use vertexOffsetsPin = new ArrayPin<_> (vertexOffsets)
+            DeviceApi.vkCmdBindVertexBuffers (context.RenderCommandBuffer, 0u, 2u, vertexBuffersPin.Pointer, vertexOffsetsPin.Pointer)
+            DeviceApi.vkCmdBindIndexBuffer (context.RenderCommandBuffer, geometry.IndexBuffer.VkBuffer, 0UL, VkIndexType.Uint32)
+
+            // bind descriptor sets
+            DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 0u, 1u, &&texturesDescriptorSet, 0u, nullPtr)
+            DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 1u, 1u, &&samplerDescriptorSet, 0u, nullPtr)
+
+            // draw
+            DeviceApi.vkCmdDrawIndexed (context.RenderCommandBuffer, uint geometry.ElementCount, 1u, 0u, 0, 0u)
+
+            // tear down render
+            DeviceApi.vkCmdEndRendering context.RenderCommandBuffer
+
+            // report drawing
+            Hl.reportDrawCall 1 true
+
+            // advance pipeline
+            Pipeline.advance pipeline.Pipeline
+
+            // advance rendering command buffer
+            VulkanContext.advanceRenderCommandBuffer context
+
+        // abort
+        | None -> Log.warnOnce ("Cannot draw " + getTypeName pipeline + " because VkPipeline does not exist.")
+
+    /// Create an up-sampler filter pipeline.
+    let createFilterUpSamplePipeline shaderFilePath colorAttachmentFormat =
+
+        // create pipeline
+        let pipeline =
+            Pipeline.create
+                shaderFilePath
+                [|VulkanUnblended|] [|false|] StaticVertices
+                [|Pipeline.descriptorSet<int>
+                    [|Pipeline.descriptor 0 SampledImage FragmentStage 1 // downSampledColorTexture
+                      Pipeline.descriptor 1 SampledImage FragmentStage 1 // downSampledDepthTexture
+                      Pipeline.descriptor 2 SampledImage FragmentStage 1|] // depthTexture
+                  Pipeline.descriptorSet<Unit>
+                    [|Pipeline.descriptor 0 Sampler FragmentStage 1|]|] // filteredSampler
+                [||] [|colorAttachmentFormat|] None
+                [||]
+
+        // make pipeline
+        let filterUpSamplePipeline =
+            { FilterUpSamplePipeline.Pipeline = pipeline }
+
+        // fin
+        filterUpSamplePipeline
+
+    /// Destroy a up-sample filter pipeline.
+    let destroyFilterUpSamplePipeline (upSamplePipeline : FilterUpSamplePipeline) context =
+        Pipeline.destroy upSamplePipeline.Pipeline context
+
+    /// Draw the up-sample filter pass of a physically-based surface.
+    let drawFilterUpSampleSurface
+        (downSampledColorTexture : Texture)
+        (downSampledDepthTexture : Texture)
+        (depthTexture : Texture)
+        (filteredSampler : Sampler)
+        (colorAttachment : VkImageView)
+        (resolution : Vector2i)
+        (geometry : PhysicallyBasedGeometry)
+        (pipeline : FilterUpSamplePipeline)
+        (context : VulkanContext) =
+
+        // only draw when required vkPipeline exists
+        match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
+        | Some vkPipeline ->
+
+            // specify textures
+            let mutable texturesDescriptorSet = Pipeline.specifyDescriptorSet 0 pipeline.Pipeline.DrawIndex pipeline.Pipeline $ fun vkSet ->
+                Pipeline.writeDescriptorSampledTexture 0 0 downSampledColorTexture vkSet
+                Pipeline.writeDescriptorSampledTexture 1 0 downSampledDepthTexture vkSet
+                Pipeline.writeDescriptorSampledTexture 2 0 depthTexture vkSet
+
+            // specify sampler
+            let mutable samplerDescriptorSet = Pipeline.specifyDescriptorSet 1 Unit pipeline.Pipeline $ fun vkSet ->
+                Pipeline.writeDescriptorSampler 0 0 filteredSampler vkSet
+
+            // set up render
+            let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
+            let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
+            let mutable vkViewport = Hl.makeViewport false renderArea
+            Hl.withRenderingInfo [|colorAttachment|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
+            DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
+
+            // set up pipeline
+            DeviceApi.vkCmdBindPipeline (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)
+
+            // bind vertex and index buffers
+            let vertexBuffers = [|geometry.VertexBuffer.VkBuffer; geometry.InstanceBuffer.VkBuffer|]
+            let vertexOffsets = [|0UL; 0UL|]
+            use vertexBuffersPin = new ArrayPin<_> (vertexBuffers)
+            use vertexOffsetsPin = new ArrayPin<_> (vertexOffsets)
+            DeviceApi.vkCmdBindVertexBuffers (context.RenderCommandBuffer, 0u, 2u, vertexBuffersPin.Pointer, vertexOffsetsPin.Pointer)
+            DeviceApi.vkCmdBindIndexBuffer (context.RenderCommandBuffer, geometry.IndexBuffer.VkBuffer, 0UL, VkIndexType.Uint32)
+
+            // bind descriptor sets
+            DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 0u, 1u, &&texturesDescriptorSet, 0u, nullPtr)
             DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 1u, 1u, &&samplerDescriptorSet, 0u, nullPtr)
 
             // draw
@@ -1967,13 +2245,13 @@ module PhysicallyBased =
         (radius : single)
         (esmImageView : VkImageView)
         (filteredSampler : Sampler)
-        (resolution : Vector2i)
         (colorAttachment : VkImageView)
+        (resolution : Vector2i)
         (geometry : PhysicallyBasedGeometry)
         (pipeline : FilterGaussianEsmPipeline)
         (context : VulkanContext) =
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -1995,8 +2273,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (1.0f, Single.MaxValue, 0.0f, 0.0f) // TODO: P1: make derived from constant.
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -2072,13 +2351,13 @@ module PhysicallyBased =
         (radius : single)
         (dofImageView : VkImageView)
         (filteredSampler : Sampler)
-        (resolution : Vector2i)
         (colorAttachment : VkImageView)
+        (resolution : Vector2i)
         (geometry : PhysicallyBasedGeometry)
         (pipeline : FilterGaussianDofPipeline)
         (context : VulkanContext) =
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -2100,8 +2379,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (1.0f, Single.MaxValue, 0.0f, 0.0f) // TODO: P1: make derived from constant.
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -2201,7 +2481,7 @@ module PhysicallyBased =
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -2212,7 +2492,7 @@ module PhysicallyBased =
                 let eye = EyeStruct (center = eyeCenter, view = view, viewInverse = viewInverse, projection = projection, projectionInverse = projectionInverse, viewProjection = viewProjection)
                 VulkanBuffer.uploadValue eye pipeline.EyeUniform context
                 Pipeline.writeDescriptorUniformBuffer 0 0 pipeline.EyeUniform vkSet
-                
+
                 // specify depth-of-field
                 let depthOfField =
                     DepthOfFieldStruct
@@ -2237,8 +2517,460 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
+            DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
+
+            // set up pipeline
+            DeviceApi.vkCmdBindPipeline (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)
+
+            // bind vertex and index buffers
+            let vertexBuffers = [|geometry.VertexBuffer.VkBuffer; geometry.InstanceBuffer.VkBuffer|]
+            let vertexOffsets = [|0UL; 0UL|]
+            use vertexBuffersPin = new ArrayPin<_> (vertexBuffers)
+            use vertexOffsetsPin = new ArrayPin<_> (vertexOffsets)
+            DeviceApi.vkCmdBindVertexBuffers (context.RenderCommandBuffer, 0u, 2u, vertexBuffersPin.Pointer, vertexOffsetsPin.Pointer)
+            DeviceApi.vkCmdBindIndexBuffer (context.RenderCommandBuffer, geometry.IndexBuffer.VkBuffer, 0UL, VkIndexType.Uint32)
+
+            // bind descriptor sets
+            DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 0u, 1u, &&uniformsDescriptorSet, 0u, nullPtr)
+            DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 1u, 1u, &&samplerDescriptorSet, 0u, nullPtr)
+
+            // draw
+            DeviceApi.vkCmdDrawIndexed (context.RenderCommandBuffer, uint geometry.ElementCount, 1u, 0u, 0, 0u)
+
+            // tear down render
+            DeviceApi.vkCmdEndRendering context.RenderCommandBuffer
+
+            // report drawing
+            Hl.reportDrawCall 1 true
+
+            // advance pipeline
+            Pipeline.advance pipeline.Pipeline
+
+            // advance rendering command buffer
+            VulkanContext.advanceRenderCommandBuffer context
+
+        // abort
+        | None -> Log.warnOnce ("Cannot draw " + getTypeName pipeline + " because VkPipeline does not exist.")
+
+    /// Create a bloom down-sample filter pipeline.
+    let createFilterBloomDownSamplePipeline colorAttachmentFormat context =
+
+        // create set 0 uniform buffers
+        let bloomDownSampleUniform = VulkanBuffer.create Uniform sizeof<BloomDownSampleStruct> context
+
+        // create pipeline
+        let pipeline =
+            Pipeline.create
+                Constants.Paths.FilterBloomDownSampleShaderFilePath
+                [|VulkanUnblended|] [|false|] StaticVertices
+                [|Pipeline.descriptorSet<int>
+                    [|Pipeline.descriptor 0 UniformBuffer FragmentStage 1 // bloomDownSample
+                      Pipeline.descriptor 1 SampledImage FragmentStage 1|] // inputTexture
+                  Pipeline.descriptorSet<Unit>
+                    [|Pipeline.descriptor 0 Sampler FragmentStage 1|]|] // inputSampler
+                [||] [|colorAttachmentFormat|] None
+                [|bloomDownSampleUniform|]
+
+        // make pipeline
+        let filterBloomDownSamplePipeline =
+            { BloomDownSampleUniform = bloomDownSampleUniform
+              Pipeline = pipeline }
+
+        // fin
+        filterBloomDownSamplePipeline
+
+    /// Destroy a bloom down-sample filter pipeline.
+    let destroyFilterBloomDownSamplePipeline (bloomDownSamplePipeline : FilterBloomDownSamplePipeline) context =
+        Pipeline.destroy bloomDownSamplePipeline.Pipeline context
+
+    /// Draw the bloom down-sample filter passes of a physically-based surface.
+    let drawFilterBloomDownSampleSurfaces
+        (karisAverageEnabled : bool)
+        (inputResolution : Vector2i)
+        (inputTexture : Texture)
+        (inputSampler : Sampler)
+        (colorAttachments : Texture array)
+        (resolution : Vector2i)
+        (geometry : PhysicallyBasedGeometry)
+        (pipeline : FilterBloomDownSamplePipeline)
+        (context : VulkanContext) =
+
+        // only draw when required vkPipeline exists
+        match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
+        | Some vkPipeline ->
+
+            // draw down-sample levels
+            for i in 0 .. dec Constants.Render.BloomSampleLevels do
+
+                // compute source resolution and texture
+                let sourceResolution = v2i (inputResolution.X >>> i) (inputResolution.Y >>> i)
+                let sourceTexture = if i = 0 then inputTexture else colorAttachments[dec i]
+
+                // compute target resolution and texture
+                let targetResolution = v2i (resolution.X >>> i) (resolution.Y >>> i)
+                let targetTexture = colorAttachments[i]
+
+                // transition target to write
+                Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite targetTexture context.RenderCommandBuffer
+
+                // specify uniforms
+                let mutable uniformsDescriptorSet = Pipeline.specifyDescriptorSet 0 pipeline.Pipeline.DrawIndex pipeline.Pipeline $ fun vkSet ->
+
+                    // specify bloom down-sample
+                    let karisAverageEnabledInt = if karisAverageEnabled then 1 else 0
+                    let bloomDownSample = BloomDownSampleStruct (karisAverageEnabled = karisAverageEnabledInt, sampleLevel = i, sourceResolution = sourceResolution.V2)
+                    VulkanBuffer.uploadValue bloomDownSample pipeline.BloomDownSampleUniform context
+                    Pipeline.writeDescriptorUniformBuffer 0 0 pipeline.BloomDownSampleUniform vkSet
+
+                    // specify input texture
+                    Pipeline.writeDescriptorSampledTexture 1 0 sourceTexture vkSet
+
+                // specify sampler
+                let mutable samplerDescriptorSet = Pipeline.specifyDescriptorSet 1 Unit pipeline.Pipeline $ fun vkSet ->
+                    Pipeline.writeDescriptorSampler 0 0 inputSampler vkSet
+
+                // set up render
+                let mutable renderArea = VkRect2D (0, 0, uint targetResolution.X, uint targetResolution.Y)
+                let mutable vkViewport = Hl.makeViewport false renderArea
+                Hl.withRenderingInfo [|targetTexture.ImageView|] None renderArea None $ fun renderingInfo ->
+                    let mutable renderingInfo = renderingInfo
+                    DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+                DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
+                DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
+
+                // set up pipeline
+                DeviceApi.vkCmdBindPipeline (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)
+
+                // bind vertex and index buffers
+                let vertexBuffers = [|geometry.VertexBuffer.VkBuffer; geometry.InstanceBuffer.VkBuffer|]
+                let vertexOffsets = [|0UL; 0UL|]
+                use vertexBuffersPin = new ArrayPin<_> (vertexBuffers)
+                use vertexOffsetsPin = new ArrayPin<_> (vertexOffsets)
+                DeviceApi.vkCmdBindVertexBuffers (context.RenderCommandBuffer, 0u, 2u, vertexBuffersPin.Pointer, vertexOffsetsPin.Pointer)
+                DeviceApi.vkCmdBindIndexBuffer (context.RenderCommandBuffer, geometry.IndexBuffer.VkBuffer, 0UL, VkIndexType.Uint32)
+
+                // bind descriptor sets
+                DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 0u, 1u, &&uniformsDescriptorSet, 0u, nullPtr)
+                DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 1u, 1u, &&samplerDescriptorSet, 0u, nullPtr)
+
+                // draw
+                DeviceApi.vkCmdDrawIndexed (context.RenderCommandBuffer, uint geometry.ElementCount, 1u, 0u, 0, 0u)
+
+                // tear down render
+                DeviceApi.vkCmdEndRendering context.RenderCommandBuffer
+
+                // report drawing
+                Hl.reportDrawCall 1 true
+
+                // advance pipeline
+                Pipeline.advance pipeline.Pipeline
+
+                // advance rendering command buffer
+                VulkanContext.advanceRenderCommandBuffer context
+
+                // transition target to read
+                Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead targetTexture context.RenderCommandBuffer
+
+        // abort
+        | None -> Log.warnOnce ("Cannot draw " + getTypeName pipeline + " because VkPipeline does not exist.")
+
+    /// Create a bloom up-sample filter pipeline.
+    let createFilterBloomUpSamplePipeline colorAttachmentFormat context =
+
+        // create set 0 uniform buffers
+        let bloomUpSampleUniform = VulkanBuffer.create Uniform sizeof<BloomUpSampleStruct> context
+
+        // create pipeline
+        let pipeline =
+            Pipeline.create
+                Constants.Paths.FilterBloomUpSampleShaderFilePath
+                [|VulkanSummation|] [|false|] StaticVertices
+                [|Pipeline.descriptorSet<int>
+                    [|Pipeline.descriptor 0 UniformBuffer FragmentStage 1 // bloomUpSample
+                      Pipeline.descriptor 1 SampledImage FragmentStage 1|] // inputTexture
+                  Pipeline.descriptorSet<Unit>
+                    [|Pipeline.descriptor 0 Sampler FragmentStage 1|]|] // inputSampler
+                [||] [|colorAttachmentFormat|] None
+                [|bloomUpSampleUniform|]
+
+        // make pipeline
+        let filterBloomUpSamplePipeline =
+            { BloomUpSampleUniform = bloomUpSampleUniform
+              Pipeline = pipeline }
+
+        // fin
+        filterBloomUpSamplePipeline
+
+    /// Destroy a bloom up-sample filter pipeline.
+    let destroyFilterBloomUpSamplePipeline (bloomUpSamplePipeline : FilterBloomUpSamplePipeline) context =
+        Pipeline.destroy bloomUpSamplePipeline.Pipeline context
+
+    /// Draw the bloom up-sample filter passes of a physically-based surface.
+    let drawFilterBloomUpSampleSurfaces
+        (radius : single)
+        (inputTextures : Texture array)
+        (inputSampler : Sampler)
+        (resolution : Vector2i)
+        (geometry : PhysicallyBasedGeometry)
+        (pipeline : FilterBloomUpSamplePipeline)
+        (context : VulkanContext) =
+
+        // only draw when required vkPipeline exists
+        match Pipeline.tryGetVkPipeline VulkanSummation false pipeline.Pipeline with
+        | Some vkPipeline ->
+
+            // draw up-sample levels
+            for i in dec Constants.Render.BloomSampleLevels .. -1 .. 1 do
+
+                // compute source texture
+                let sourceTexture = inputTextures[i]
+
+                // compute target resolution and texture
+                let targetResolution = v2i (resolution.X >>> i) (resolution.Y >>> i)
+                let targetTexture = inputTextures[dec i]
+
+                // transition target to write
+                Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite targetTexture context.RenderCommandBuffer
+
+                // specify uniforms
+                let mutable uniformsDescriptorSet = Pipeline.specifyDescriptorSet 0 pipeline.Pipeline.DrawIndex pipeline.Pipeline $ fun vkSet ->
+
+                    // specify bloom up-sample
+                    let bloomUpSample = BloomUpSampleStruct (radius = radius)
+                    VulkanBuffer.uploadValue bloomUpSample pipeline.BloomUpSampleUniform context
+                    Pipeline.writeDescriptorUniformBuffer 0 0 pipeline.BloomUpSampleUniform vkSet
+
+                    // specify input texture
+                    Pipeline.writeDescriptorSampledTexture 1 0 sourceTexture vkSet
+
+                // specify sampler
+                let mutable samplerDescriptorSet = Pipeline.specifyDescriptorSet 1 Unit pipeline.Pipeline $ fun vkSet ->
+                    Pipeline.writeDescriptorSampler 0 0 inputSampler vkSet
+
+                // set up render
+                let mutable renderArea = VkRect2D (0, 0, uint targetResolution.X, uint targetResolution.Y)
+                let mutable vkViewport = Hl.makeViewport false renderArea
+                Hl.withRenderingInfo [|targetTexture.ImageView|] None renderArea None $ fun renderingInfo ->
+                    let mutable renderingInfo = renderingInfo
+                    DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+                DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
+                DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
+
+                // set up pipeline
+                DeviceApi.vkCmdBindPipeline (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)
+
+                // bind vertex and index buffers
+                let vertexBuffers = [|geometry.VertexBuffer.VkBuffer; geometry.InstanceBuffer.VkBuffer|]
+                let vertexOffsets = [|0UL; 0UL|]
+                use vertexBuffersPin = new ArrayPin<_> (vertexBuffers)
+                use vertexOffsetsPin = new ArrayPin<_> (vertexOffsets)
+                DeviceApi.vkCmdBindVertexBuffers (context.RenderCommandBuffer, 0u, 2u, vertexBuffersPin.Pointer, vertexOffsetsPin.Pointer)
+                DeviceApi.vkCmdBindIndexBuffer (context.RenderCommandBuffer, geometry.IndexBuffer.VkBuffer, 0UL, VkIndexType.Uint32)
+
+                // bind descriptor sets
+                DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 0u, 1u, &&uniformsDescriptorSet, 0u, nullPtr)
+                DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 1u, 1u, &&samplerDescriptorSet, 0u, nullPtr)
+
+                // draw
+                DeviceApi.vkCmdDrawIndexed (context.RenderCommandBuffer, uint geometry.ElementCount, 1u, 0u, 0, 0u)
+
+                // tear down render
+                DeviceApi.vkCmdEndRendering context.RenderCommandBuffer
+
+                // report drawing
+                Hl.reportDrawCall 1 true
+
+                // advance pipeline
+                Pipeline.advance pipeline.Pipeline
+
+                // advance rendering command buffer
+                VulkanContext.advanceRenderCommandBuffer context
+
+                // transition target to read
+                Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead targetTexture context.RenderCommandBuffer
+
+        // abort
+        | None -> Log.warnOnce ("Cannot draw " + getTypeName pipeline + " because VkPipeline does not exist.")
+
+    /// Create a bloom extract filter pipeline.
+    let createFilterBloomExtractPipeline colorAttachmentFormat context =
+
+        // create set 0 uniform buffers
+        let bloomExtractUniform = VulkanBuffer.create Uniform sizeof<BloomExtractStruct> context
+
+        // create pipeline
+        let pipeline =
+            Pipeline.create
+                Constants.Paths.FilterBloomExtractShaderFilePath
+                [|VulkanUnblended|] [|false|] StaticVertices
+                [|Pipeline.descriptorSet<int>
+                    [|Pipeline.descriptor 0 UniformBuffer FragmentStage 1 // bloomExtract
+                      Pipeline.descriptor 1 SampledImage FragmentStage 1|] // inputTexture
+                  Pipeline.descriptorSet<Unit>
+                    [|Pipeline.descriptor 0 Sampler FragmentStage 1|]|] // inputSampler
+                [||] [|colorAttachmentFormat|] None
+                [|bloomExtractUniform|]
+
+        // make pipeline
+        let filterBloomExtractPipeline =
+            { BloomExtractUniform = bloomExtractUniform
+              Pipeline = pipeline }
+
+        // fin
+        filterBloomExtractPipeline
+
+    /// Destroy a bloom extract filter pipeline.
+    let destroyFilterBloomExtractPipeline (bloomExtractPipeline : FilterBloomExtractPipeline) context =
+        Pipeline.destroy bloomExtractPipeline.Pipeline context
+
+    /// Draw the bloom extract filter pass of a physically-based surface.
+    let drawFilterBloomExtractSurface
+        (threshold : single)
+        (inputTexture : Texture)
+        (inputSampler : Sampler)
+        (colorAttachment : Texture)
+        (resolution : Vector2i)
+        (geometry : PhysicallyBasedGeometry)
+        (pipeline : FilterBloomExtractPipeline)
+        (context : VulkanContext) =
+
+        // only draw when required vkPipeline exists
+        match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
+        | Some vkPipeline ->
+
+            // specify uniforms
+            let mutable uniformsDescriptorSet = Pipeline.specifyDescriptorSet 0 pipeline.Pipeline.DrawIndex pipeline.Pipeline $ fun vkSet ->
+
+                // specify bloom extract
+                let bloomExtract = BloomExtractStruct (threshold = threshold)
+                VulkanBuffer.uploadValue bloomExtract pipeline.BloomExtractUniform context
+                Pipeline.writeDescriptorUniformBuffer 0 0 pipeline.BloomExtractUniform vkSet
+
+                // specify input texture
+                Pipeline.writeDescriptorSampledTexture 1 0 inputTexture vkSet
+
+            // specify sampler
+            let mutable samplerDescriptorSet = Pipeline.specifyDescriptorSet 1 Unit pipeline.Pipeline $ fun vkSet ->
+                Pipeline.writeDescriptorSampler 0 0 inputSampler vkSet
+
+            // set up render
+            let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
+            let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
+            let mutable vkViewport = Hl.makeViewport false renderArea
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
+            DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
+
+            // set up pipeline
+            DeviceApi.vkCmdBindPipeline (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)
+
+            // bind vertex and index buffers
+            let vertexBuffers = [|geometry.VertexBuffer.VkBuffer; geometry.InstanceBuffer.VkBuffer|]
+            let vertexOffsets = [|0UL; 0UL|]
+            use vertexBuffersPin = new ArrayPin<_> (vertexBuffers)
+            use vertexOffsetsPin = new ArrayPin<_> (vertexOffsets)
+            DeviceApi.vkCmdBindVertexBuffers (context.RenderCommandBuffer, 0u, 2u, vertexBuffersPin.Pointer, vertexOffsetsPin.Pointer)
+            DeviceApi.vkCmdBindIndexBuffer (context.RenderCommandBuffer, geometry.IndexBuffer.VkBuffer, 0UL, VkIndexType.Uint32)
+
+            // bind descriptor sets
+            DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 0u, 1u, &&uniformsDescriptorSet, 0u, nullPtr)
+            DeviceApi.vkCmdBindDescriptorSets (context.RenderCommandBuffer, VkPipelineBindPoint.Graphics, pipeline.Pipeline.PipelineLayout, 1u, 1u, &&samplerDescriptorSet, 0u, nullPtr)
+
+            // draw
+            DeviceApi.vkCmdDrawIndexed (context.RenderCommandBuffer, uint geometry.ElementCount, 1u, 0u, 0, 0u)
+
+            // tear down render
+            DeviceApi.vkCmdEndRendering context.RenderCommandBuffer
+
+            // report drawing
+            Hl.reportDrawCall 1 true
+
+            // advance pipeline
+            Pipeline.advance pipeline.Pipeline
+
+            // advance rendering command buffer
+            VulkanContext.advanceRenderCommandBuffer context
+
+        // abort
+        | None -> Log.warnOnce ("Cannot draw " + getTypeName pipeline + " because VkPipeline does not exist.")
+
+    /// Create a bloom apply filter pipeline.
+    let createFilterBloomApplyPipeline colorAttachmentFormat context =
+
+        // create set 0 uniform buffers
+        let bloomApplyUniform = VulkanBuffer.create Uniform sizeof<BloomApplyStruct> context
+
+        // create pipeline
+        let pipeline =
+            Pipeline.create
+                Constants.Paths.FilterBloomApplyShaderFilePath
+                [|VulkanUnblended|] [|false|] StaticVertices
+                [|Pipeline.descriptorSet<int>
+                    [|Pipeline.descriptor 0 UniformBuffer FragmentStage 1 // bloomApply
+                      Pipeline.descriptor 1 SampledImage FragmentStage 1 // bloomFilterTexture
+                      Pipeline.descriptor 2 SampledImage FragmentStage 1|] // compositionTexture
+                  Pipeline.descriptorSet<Unit>
+                    [|Pipeline.descriptor 0 Sampler FragmentStage 1|]|] // inputSampler
+                [||] [|colorAttachmentFormat|] None
+                [|bloomApplyUniform|]
+
+        // make pipeline
+        let filterBloomApplyPipeline =
+            { BloomApplyUniform = bloomApplyUniform
+              Pipeline = pipeline }
+
+        // fin
+        filterBloomApplyPipeline
+
+    /// Destroy a bloom apply filter pipeline.
+    let destroyFilterBloomApplyPipeline (bloomApplyPipeline : FilterBloomApplyPipeline) context =
+        Pipeline.destroy bloomApplyPipeline.Pipeline context
+
+    /// Draw the bloom apply filter pass of a physically-based surface.
+    let drawFilterBloomApplySurface
+        (strength : single)
+        (bloomApplyTexture : Texture)
+        (compositionTexture : Texture)
+        (inputSampler : Sampler)
+        (colorAttachment : Texture)
+        (resolution : Vector2i)
+        (geometry : PhysicallyBasedGeometry)
+        (pipeline : FilterBloomApplyPipeline)
+        (context : VulkanContext) =
+
+        // only draw when required vkPipeline exists
+        match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
+        | Some vkPipeline ->
+
+            // specify uniforms
+            let mutable uniformsDescriptorSet = Pipeline.specifyDescriptorSet 0 pipeline.Pipeline.DrawIndex pipeline.Pipeline $ fun vkSet ->
+                
+                // specify bloom apply
+                let bloomApply = BloomApplyStruct (strength = strength)
+                VulkanBuffer.uploadValue bloomApply pipeline.BloomApplyUniform context
+                Pipeline.writeDescriptorUniformBuffer 0 0 pipeline.BloomApplyUniform vkSet
+
+                // specify textures
+                Pipeline.writeDescriptorSampledTexture 1 0 bloomApplyTexture vkSet
+                Pipeline.writeDescriptorSampledTexture 2 0 compositionTexture vkSet
+
+            // specify sampler
+            let mutable samplerDescriptorSet = Pipeline.specifyDescriptorSet 1 Unit pipeline.Pipeline $ fun vkSet ->
+                Pipeline.writeDescriptorSampler 0 0 inputSampler vkSet
+
+            // set up render
+            let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
+            let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
+            let mutable vkViewport = Hl.makeViewport false renderArea
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -2323,7 +3055,7 @@ module PhysicallyBased =
         (pipeline : FilterToneMappingPipeline)
         (context : VulkanContext) =
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -2354,8 +3086,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -2435,7 +3168,7 @@ module PhysicallyBased =
         (pipeline : FilterChromaticAberrationPipeline)
         (context : VulkanContext) =
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -2458,8 +3191,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -2540,7 +3274,7 @@ module PhysicallyBased =
         (pipeline : FilterFxaaPipeline)
         (context : VulkanContext) =
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -2563,8 +3297,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -2636,7 +3371,7 @@ module PhysicallyBased =
         (pipeline : FilterGammaCorrectionPipeline)
         (context : VulkanContext) =
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -2652,8 +3387,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -2750,8 +3486,9 @@ module PhysicallyBased =
         // set up render
         let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
         let mutable vkViewport = Hl.makeViewport false renderArea
-        let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment|] (Some depthAttachment.ImageView) renderArea colorClearValueOpt
-        DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+        Hl.withRenderingInfo [|colorAttachment|] (Some depthAttachment.ImageView) renderArea colorClearValueOpt $ fun renderingInfo ->
+            let mutable renderingInfo = renderingInfo
+            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
         DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
         DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -2785,7 +3522,7 @@ module PhysicallyBased =
         // ensure there is a surface to render to avoid potentially utilizing destroyed textures
         if surfacesCount > 0 then
 
-            // only draw if required vkPipeline exists
+            // only draw when required vkPipeline exists
             match Pipeline.tryGetVkPipeline VulkanUnblended (not material.TwoSided) pipeline.Pipeline with
             | Some vkPipeline ->
 
@@ -2900,8 +3637,8 @@ module PhysicallyBased =
                     [|Pipeline.descriptor 0 UniformBuffer VertexStage 1 // bone
                       Pipeline.descriptor 1 UniformBuffer FragmentStage 1 // lightMap
                       Pipeline.descriptor 2 UniformBuffer FragmentStage 1 // lightsGeneral
-                      Pipeline.descriptor 3 UniformBuffer FragmentStage 1 // light
-                      Pipeline.descriptor 4 UniformBuffer FragmentStage 1 // shadowMatrix
+                      Pipeline.descriptor 3 UniformBuffer FragmentStage 1 // lights
+                      Pipeline.descriptor 4 UniformBuffer FragmentStage 1 // shadowMatrices
                       Pipeline.descriptor 5 SampledImage FragmentStage lightMapsMax // irradianceMaps
                       Pipeline.descriptor 6 SampledImage FragmentStage lightMapsMax // environmentFilterMaps
                       Pipeline.descriptor 7 SampledImage FragmentStage 1 // shadowTextures
@@ -2976,8 +3713,9 @@ module PhysicallyBased =
         // set up render
         let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
         let mutable vkViewport = Hl.makeViewport false renderArea
-        let mutable renderingInfo = Hl.makeRenderingInfo colorAttachments (Some depthAttachment.ImageView) renderArea None
-        DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+        Hl.withRenderingInfo colorAttachments (Some depthAttachment.ImageView) renderArea None $ fun renderingInfo ->
+            let mutable renderingInfo = renderingInfo
+            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
         DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
         DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -2999,7 +3737,7 @@ module PhysicallyBased =
         // only set up when there is a surface to render to avoid potentially utilizing destroyed textures
         if surfacesCount > 0 then
 
-            // only draw if required vkPipeline exists
+            // only draw when required vkPipeline exists
             match Pipeline.tryGetVkPipeline VulkanUnblended (not material.TwoSided) pipeline.Pipeline with
             | Some vkPipeline ->
 
@@ -3093,7 +3831,7 @@ module PhysicallyBased =
                 [|VulkanUnblended|] [|true|] TerrainVertices
                 [|Pipeline.descriptorSet<int * int>
                     [|Pipeline.descriptor 0 UniformBuffer VertexAndFragmentStage 1 // eye
-                      Pipeline.descriptor 1 UniformBuffer FragmentStage 1|] // lighting3
+                      Pipeline.descriptor 1 UniformBuffer FragmentStage 1|] // terrainFrag
                   Pipeline.descriptorSet<PhysicallyBasedMaterial array>
                     [|Pipeline.descriptor 0 SampledImage FragmentStage Constants.Render.TerrainLayersMax // albedoTextures
                       Pipeline.descriptor 1 SampledImage FragmentStage Constants.Render.TerrainLayersMax // roughnessTextures
@@ -3152,12 +3890,13 @@ module PhysicallyBased =
         // set up render
         let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
         let mutable vkViewport = Hl.makeViewport false renderArea
-        let mutable renderingInfo = Hl.makeRenderingInfo colorAttachments (Some depthAttachment.ImageView) renderArea None
-        DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+        Hl.withRenderingInfo colorAttachments (Some depthAttachment.ImageView) renderArea None $ fun renderingInfo ->
+            let mutable renderingInfo = renderingInfo
+            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
         DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
         DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended true pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -3257,8 +3996,8 @@ module PhysicallyBased =
                 [|Pipeline.descriptorSet<int>
                     [|Pipeline.descriptor 0 UniformBuffer FragmentStage 1 // eye
                       Pipeline.descriptor 1 UniformBuffer FragmentStage 1 // lighting
-                      Pipeline.descriptor 2 UniformBuffer FragmentStage 1 // light
-                      Pipeline.descriptor 3 UniformBuffer FragmentStage 1 // shadowMatrix
+                      Pipeline.descriptor 2 UniformBuffer FragmentStage 1 // lights
+                      Pipeline.descriptor 3 UniformBuffer FragmentStage 1 // shadowMatrices
                       Pipeline.descriptor 4 SampledImage FragmentStage 1 // depth
                       Pipeline.descriptor 5 SampledImage FragmentStage 1 // albedo
                       Pipeline.descriptor 6 SampledImage FragmentStage 1 // material
@@ -3342,7 +4081,7 @@ module PhysicallyBased =
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -3418,8 +4157,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|lightAccumAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|lightAccumAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -3550,7 +4290,7 @@ module PhysicallyBased =
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -3623,8 +4363,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|foggingAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|foggingAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -3729,7 +4470,7 @@ module PhysicallyBased =
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -3776,8 +4517,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -3877,7 +4619,7 @@ module PhysicallyBased =
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -3919,8 +4661,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.AmbientClearColor.R, g = Constants.Render.AmbientClearColor.G, b = Constants.Render.AmbientClearColor.B, a = Constants.Render.AmbientClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -4018,7 +4761,7 @@ module PhysicallyBased =
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -4046,8 +4789,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.IrradianceClearColor.R, g = Constants.Render.IrradianceClearColor.G, b = Constants.Render.IrradianceClearColor.B, a = Constants.Render.IrradianceClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -4157,7 +4901,7 @@ module PhysicallyBased =
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -4202,8 +4946,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.EnvironmentClearColor.R, g = Constants.Render.EnvironmentClearColor.G, b = Constants.Render.EnvironmentClearColor.B, a = Constants.Render.EnvironmentClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -4301,7 +5046,7 @@ module PhysicallyBased =
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -4330,8 +5075,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.SsaoClearColor.R, g = Constants.Render.SsaoClearColor.G, b = Constants.Render.SsaoClearColor.B, a = Constants.Render.SsaoClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|colorAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -4463,7 +5209,7 @@ module PhysicallyBased =
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -4520,8 +5266,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|coloringAttachment.ImageView; depthAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|coloringAttachment.ImageView; depthAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -4623,7 +5370,7 @@ module PhysicallyBased =
         let projectionInverse = projection.Inverted
         let viewProjection = view * projection
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         match Pipeline.tryGetVkPipeline VulkanUnblended false pipeline.Pipeline with
         | Some vkPipeline ->
 
@@ -4659,8 +5406,9 @@ module PhysicallyBased =
             let clearValue = VkClearValue (r = Constants.Render.ViewportClearColor.R, g = Constants.Render.ViewportClearColor.G, b = Constants.Render.ViewportClearColor.B, a = Constants.Render.ViewportClearColor.A)
             let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
             let mutable vkViewport = Hl.makeViewport false renderArea
-            let mutable renderingInfo = Hl.makeRenderingInfo [|compositionAttachment.ImageView|] None renderArea (Some clearValue)
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|compositionAttachment.ImageView|] None renderArea (Some clearValue) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
             DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -4813,8 +5561,9 @@ module PhysicallyBased =
         // set up render
         let mutable renderArea = VkRect2D (0, 0, uint resolution.X, uint resolution.Y)
         let mutable vkViewport = Hl.makeViewport false renderArea
-        let mutable renderingInfo = Hl.makeRenderingInfo [|colorAttachment.ImageView|] (Some depthAttachment.ImageView) renderArea None
-        DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+        Hl.withRenderingInfo [|colorAttachment.ImageView|] (Some depthAttachment.ImageView) renderArea None $ fun renderingInfo ->
+            let mutable renderingInfo = renderingInfo
+            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
         DeviceApi.vkCmdSetViewport (context.RenderCommandBuffer, 0u, 1u, &&vkViewport)
         DeviceApi.vkCmdSetScissor (context.RenderCommandBuffer, 0u, 1u, &&renderArea)
 
@@ -4863,7 +5612,7 @@ module PhysicallyBased =
         (pipeline : PhysicallyBasedPipeline)
         (context : VulkanContext) =
 
-        // only draw if required vkPipeline exists
+        // only draw when required vkPipeline exists
         let blend = if blending then VulkanTransparent else VulkanUnblended
         match Pipeline.tryGetVkPipeline blend (not material.TwoSided) pipeline.Pipeline with
         | Some vkPipeline ->
@@ -5002,8 +5751,20 @@ module PhysicallyBased =
     let createPhysicallyBasedPipelines lightMapsMax lightsMax attachments context =
 
         // create 1d box filter pipeline
-        // TODO: P0: make this pipeline specialized to SSAO since it's 16f!
         let filterBox1dPipeline = createFilterBoxPipeline Constants.Paths.FilterBox1dShaderFilePath R16f.VkFormat
+
+        // create bilateral down-sample pipeline
+        let filterBilateralDownSamplePipeline =
+            createFilterDownSamplePipeline
+                Constants.Paths.FilterBilateralDownSample4dShaderFilePath
+                [|attachments.DownSampleColorAttachment.VkFormat
+                  attachments.DownSampleDepthAttachment.VkFormat|]
+
+        // create bilateral up-sample pipeline
+        let filterBilateralUpSamplePipeline =
+            createFilterUpSamplePipeline
+                Constants.Paths.FilterBilateralUpSample4dShaderFilePath
+                attachments.UpSampleColorAttachment.VkFormat
 
         // create esm gaussian filter pipeline
         let filterGaussianEsmPipeline = createFilterGaussianEsmPipeline Rg32f.VkFormat context
@@ -5013,6 +5774,18 @@ module PhysicallyBased =
 
         // create depth-of-field filter pipeline
         let filterDepthOfFieldPipeline = createFilterDepthOfFieldPipeline Rgba16f.VkFormat context
+
+        // create bloom extract filter pipeline
+        let filterBloomExtractPipeline = createFilterBloomExtractPipeline attachments.BloomExtractAttachment.VkFormat context
+
+        // create bloom down-sample filter pipeline
+        let filterBloomDownSamplePipeline = createFilterBloomDownSamplePipeline attachments.BloomSampleAttachments[0].VkFormat context
+
+        // create bloom up-sample filter pipeline
+        let filterBloomUpSamplePipeline = createFilterBloomUpSamplePipeline attachments.BloomSampleAttachments[0].VkFormat context
+
+        // create bloom apply filter pipeline
+        let filterBloomApplyPipeline = createFilterBloomApplyPipeline attachments.BloomApplyAttachment.VkFormat context
 
         // create tone-mapping filter pipeline
         let filterToneMappingPipeline = createFilterToneMappingPipeline attachments.ToneMappingAttachment.VkFormat context
@@ -5200,9 +5973,15 @@ module PhysicallyBased =
         // create PhysicallyBasedPipelines
         let physicallyBasedPipelines =
             { FilterBox1dPipeline = filterBox1dPipeline
+              FilterBilateralDownSamplePipeline = filterBilateralDownSamplePipeline
+              FilterBilateralUpSamplePipeline = filterBilateralUpSamplePipeline
               FilterGaussianEsmPipeline = filterGaussianEsmPipeline
               FilterGaussianDofPipeline = filterGaussianDofPipeline
               FilterDepthOfFieldPipeline = filterDepthOfFieldPipeline
+              FilterBloomExtractPipeline = filterBloomExtractPipeline
+              FilterBloomDownSamplePipeline = filterBloomDownSamplePipeline
+              FilterBloomUpSamplePipeline = filterBloomUpSamplePipeline
+              FilterBloomApplyPipeline = filterBloomApplyPipeline
               FilterToneMappingPipeline = filterToneMappingPipeline
               FilterChromaticAberrationPipeline = filterChromaticAberrationPipeline
               FilterFxaaPipeline = filterFxaaPipeline
@@ -5236,6 +6015,20 @@ module PhysicallyBased =
         physicallyBasedPipelines
 
     let beginPhysicallyBasedPipelines physicallyBasedPipelines =
+        Pipeline.beginFrame physicallyBasedPipelines.FilterBox1dPipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterBilateralDownSamplePipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterBilateralUpSamplePipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterGaussianEsmPipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterGaussianDofPipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterDepthOfFieldPipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterBloomExtractPipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterBloomDownSamplePipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterBloomUpSamplePipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterBloomApplyPipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterToneMappingPipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterChromaticAberrationPipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterFxaaPipeline.Pipeline
+        Pipeline.beginFrame physicallyBasedPipelines.FilterGammaCorrectionPipeline.Pipeline
         Pipeline.beginFrame physicallyBasedPipelines.ShadowStaticPointPipeline.Pipeline
         Pipeline.beginFrame physicallyBasedPipelines.ShadowStaticSpotPipeline.Pipeline
         Pipeline.beginFrame physicallyBasedPipelines.ShadowStaticDirectionalPipeline.Pipeline
@@ -5260,16 +6053,22 @@ module PhysicallyBased =
         Pipeline.beginFrame physicallyBasedPipelines.DeferredCompositionPipeline.Pipeline
         Pipeline.beginFrame physicallyBasedPipelines.ForwardStaticPipeline.Pipeline
         Pipeline.beginFrame physicallyBasedPipelines.ForwardAnimatedPipeline.Pipeline
-        Pipeline.beginFrame physicallyBasedPipelines.FilterBox1dPipeline.Pipeline
-        Pipeline.beginFrame physicallyBasedPipelines.FilterGaussianEsmPipeline.Pipeline
-        Pipeline.beginFrame physicallyBasedPipelines.FilterGaussianDofPipeline.Pipeline
-        Pipeline.beginFrame physicallyBasedPipelines.FilterDepthOfFieldPipeline.Pipeline
-        Pipeline.beginFrame physicallyBasedPipelines.FilterToneMappingPipeline.Pipeline
-        Pipeline.beginFrame physicallyBasedPipelines.FilterChromaticAberrationPipeline.Pipeline
-        Pipeline.beginFrame physicallyBasedPipelines.FilterFxaaPipeline.Pipeline
-        Pipeline.beginFrame physicallyBasedPipelines.FilterGammaCorrectionPipeline.Pipeline
 
     let destroyPhysicallyBasedPipelines physicallyBasedPipelines context =
+        destroyFilterBoxPipeline physicallyBasedPipelines.FilterBox1dPipeline context
+        destroyFilterDownSamplePipeline physicallyBasedPipelines.FilterBilateralDownSamplePipeline context
+        destroyFilterUpSamplePipeline physicallyBasedPipelines.FilterBilateralUpSamplePipeline context
+        destroyFilterGaussianEsmPipeline physicallyBasedPipelines.FilterGaussianEsmPipeline context
+        destroyFilterGaussianDofPipeline physicallyBasedPipelines.FilterGaussianDofPipeline context
+        destroyFilterDepthOfFieldPipeline physicallyBasedPipelines.FilterDepthOfFieldPipeline context
+        destroyFilterBloomExtractPipeline physicallyBasedPipelines.FilterBloomExtractPipeline context
+        destroyFilterBloomDownSamplePipeline physicallyBasedPipelines.FilterBloomDownSamplePipeline context
+        destroyFilterBloomUpSamplePipeline physicallyBasedPipelines.FilterBloomUpSamplePipeline context
+        destroyFilterBloomApplyPipeline physicallyBasedPipelines.FilterBloomApplyPipeline context
+        destroyFilterToneMappingPipeline physicallyBasedPipelines.FilterToneMappingPipeline context
+        destroyFilterChromaticAberrationPipeline physicallyBasedPipelines.FilterChromaticAberrationPipeline context
+        destroyFilterFxaaPipeline physicallyBasedPipelines.FilterFxaaPipeline context
+        destroyFilterGammaCorrectionPipeline physicallyBasedPipelines.FilterGammaCorrectionPipeline context
         destroyPhysicallyBasedShadowPipeline physicallyBasedPipelines.ShadowStaticPointPipeline context
         destroyPhysicallyBasedShadowPipeline physicallyBasedPipelines.ShadowStaticSpotPipeline context
         destroyPhysicallyBasedShadowPipeline physicallyBasedPipelines.ShadowStaticDirectionalPipeline context
@@ -5294,16 +6093,23 @@ module PhysicallyBased =
         destroyPhysicallyBasedDeferredCompositionPipeline physicallyBasedPipelines.DeferredCompositionPipeline context
         destroyPhysicallyBasedPipeline physicallyBasedPipelines.ForwardStaticPipeline context
         destroyPhysicallyBasedPipeline physicallyBasedPipelines.ForwardAnimatedPipeline context
-        destroyFilterBoxPipeline physicallyBasedPipelines.FilterBox1dPipeline context
-        destroyFilterGaussianEsmPipeline physicallyBasedPipelines.FilterGaussianEsmPipeline context
-        destroyFilterGaussianDofPipeline physicallyBasedPipelines.FilterGaussianDofPipeline context
-        destroyFilterDepthOfFieldPipeline physicallyBasedPipelines.FilterDepthOfFieldPipeline context
-        destroyFilterToneMappingPipeline physicallyBasedPipelines.FilterToneMappingPipeline context
-        destroyFilterChromaticAberrationPipeline physicallyBasedPipelines.FilterChromaticAberrationPipeline context
-        destroyFilterFxaaPipeline physicallyBasedPipelines.FilterFxaaPipeline context
-        destroyFilterGammaCorrectionPipeline physicallyBasedPipelines.FilterGammaCorrectionPipeline context
 
     let reloadPhysicallyBasedShaders physicallyBasedPipelines context =
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterBox1dPipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterBilateralDownSamplePipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterBilateralUpSamplePipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterGaussianEsmPipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterGaussianDofPipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterDepthOfFieldPipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterBloomExtractPipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterBloomDownSamplePipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterBloomUpSamplePipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterBloomApplyPipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterToneMappingPipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterChromaticAberrationPipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterFxaaPipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterGammaCorrectionPipeline.Pipeline context
+        Pipeline.reloadShaders physicallyBasedPipelines.FilterFxaaPipeline.Pipeline context
         Pipeline.reloadShaders physicallyBasedPipelines.ShadowStaticPointPipeline.Pipeline context
         Pipeline.reloadShaders physicallyBasedPipelines.ShadowStaticSpotPipeline.Pipeline context
         Pipeline.reloadShaders physicallyBasedPipelines.ShadowStaticDirectionalPipeline.Pipeline context
@@ -5327,14 +6133,6 @@ module PhysicallyBased =
         Pipeline.reloadShaders physicallyBasedPipelines.DeferredCompositionPipeline.Pipeline context
         Pipeline.reloadShaders physicallyBasedPipelines.ForwardStaticPipeline.Pipeline context
         Pipeline.reloadShaders physicallyBasedPipelines.ForwardAnimatedPipeline.Pipeline context
-        Pipeline.reloadShaders physicallyBasedPipelines.FilterBox1dPipeline.Pipeline context
-        Pipeline.reloadShaders physicallyBasedPipelines.FilterGaussianEsmPipeline.Pipeline context
-        Pipeline.reloadShaders physicallyBasedPipelines.FilterGaussianDofPipeline.Pipeline context
-        Pipeline.reloadShaders physicallyBasedPipelines.FilterDepthOfFieldPipeline.Pipeline context
-        Pipeline.reloadShaders physicallyBasedPipelines.FilterToneMappingPipeline.Pipeline context
-        Pipeline.reloadShaders physicallyBasedPipelines.FilterChromaticAberrationPipeline.Pipeline context
-        Pipeline.reloadShaders physicallyBasedPipelines.FilterFxaaPipeline.Pipeline context
-        Pipeline.reloadShaders physicallyBasedPipelines.FilterGammaCorrectionPipeline.Pipeline context
 
 /// Memoizes physically-based scene loads.
 type PhysicallyBasedSceneClient () =

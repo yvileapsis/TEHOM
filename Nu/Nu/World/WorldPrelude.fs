@@ -69,17 +69,6 @@ type TileMapDescriptor =
       TileMapSizeF : Vector2
       TileMapPosition : Vector2 }
 
-/// Describes a Spine animation for a given track.
-type [<DefaultValue "[idle Loop]">] SpineAnimation =
-    { SpineAnimationName : string
-      SpineAnimationPlayback : Playback }
-
-/// Represents the mutable backing state of an animating Spine skeleton.
-/// NOTE: this is inherently imperative and therefore currently unsupported by undo / redo.
-type SpineSkeletonState =
-    { SpineSkeleton : Spine.Skeleton
-      SpineAnimationState : Spine.AnimationState }
-
 /// The timing with which an effect should be evaluated in a frame.
 type RunMode =
     | RunEarly
@@ -461,11 +450,13 @@ type Timers =
 [<AutoOpen>]
 module internal AmbientState =
 
-    let [<Literal>] private ImperativeMask =            0b00001u
-    let [<Literal>] private AccompaniedMask =           0b00010u
-    let [<Literal>] private AdvancingMask =             0b00100u
-    let [<Literal>] private FramePacingMask =           0b01000u
-    let [<Literal>] private AdvancementClearedMask =    0b10000u
+    let [<Literal>] private ImperativeMask =            0b0000001u
+    let [<Literal>] private AccompaniedMask =           0b0000010u
+    let [<Literal>] private AdvanceRequestedMask =      0b0000100u
+    let [<Literal>] private HaltRequestedMask =         0b0001000u
+    let [<Literal>] private AdvancingMask =             0b0010000u
+    let [<Literal>] private FramePacingMask =           0b0100000u
+    let [<Literal>] private AdvancementClearedMask =    0b1000000u
 
     /// The 'ambient' state of the world (miscellaneous world state such as time).
     type [<ReferenceEquality>] internal 'w AmbientState =
@@ -501,6 +492,8 @@ module internal AmbientState =
         member this.Imperative = this.Flags &&& ImperativeMask <> 0u
         member this.Accompanied = this.Flags &&& AccompaniedMask <> 0u
         member this.Advancing = this.Flags &&& AdvancingMask <> 0u
+        member this.AdvanceRequested = this.Flags &&& AdvanceRequestedMask <> 0u
+        member this.HaltRequested = this.Flags &&& HaltRequestedMask <> 0u
         member this.FramePacing = this.Flags &&& FramePacingMask <> 0u
         member this.AdvancementCleared = this.Flags &&& AdvancementClearedMask <> 0u
 
@@ -509,8 +502,9 @@ module internal AmbientState =
 
     let internal setAdvancing advancing (state : _ AmbientState) =
         if advancing <> state.Advancing then
-            if advancing then state.TickWatch.Start () else state.TickWatch.Stop ()
-            { state with Flags = if advancing then state.Flags ||| AdvancingMask else state.Flags &&& ~~~AdvancingMask }
+            let state = { state with Flags = if advancing then state.Flags ||| AdvanceRequestedMask else state.Flags ||| HaltRequestedMask }
+            if state.AdvanceRequested && state.HaltRequested then Log.warn "Advance and Halt both requested in the same frame, but these will resolve in a statically-defined order."
+            state
         else state
 
     let internal setFramePacing framePacing (state : _ AmbientState) =
@@ -574,6 +568,16 @@ module internal AmbientState =
         state.Timers
 
     let internal updateTime (state : 'w AmbientState) =
+        let state =
+            if state.AdvanceRequested then
+                state.TickWatch.Start ()
+                { state with Flags = state.Flags ||| AdvancingMask &&& ~~~AdvanceRequestedMask }
+            else state
+        let state =
+            if state.HaltRequested then
+                state.TickWatch.Stop ()
+                { state with Flags = state.Flags &&& ~~~AdvancingMask &&& ~~~HaltRequestedMask }
+            else state
         let tickDeltaCurrent =
             if state.Advancing
             then min state.TickWatch.ElapsedTicks Constants.Engine.TickDeltaMax
@@ -679,11 +683,10 @@ module internal AmbientState =
 
     let internal tryGetWindowFullScreen state =
         match Option.flatten (Option.map SdlDeps.getWindowOpt state.SdlDepsOpt) with
-        | Some window ->            
-            let mutable width, height = 0, 0
-            SDL3.SDL_GetWindowSizeInPixels (window, &&width, &&height) |> ignore
-            let displayMode = SdlDeps.getDisplayModeInternal window
-            Some (width = displayMode.w || height = displayMode.h)
+        | Some window ->
+            let flags = SDL3.SDL_GetWindowFlags window
+            let fullScreen = flags &&& SDL_WindowFlags.SDL_WINDOW_FULLSCREEN <> LanguagePrimitives.EnumOfValue 0UL
+            Some fullScreen
         | _ -> None
 
     let internal trySetWindowFullScreen fullScreen state =
@@ -723,7 +726,8 @@ module internal AmbientState =
         match Option.flatten (Option.map SdlDeps.getWindowOpt state.SdlDepsOpt) with
         | Some window ->
             let pixelDensity = SDL3.SDL_GetWindowPixelDensity window
-            SDL3.SDL_SetWindowSize (window, int (single size.X / pixelDensity), int (single size.Y / pixelDensity)) |> ignore
+            SDL3.SDL_SetWindowSize (window, int (single size.X / pixelDensity), int (single size.Y / pixelDensity)) |> ignore<SDLBool>
+            SDL3.SDL_SyncWindow window |> ignore<SDLBool>
         | None -> ()
 
     let internal tryGetWindowProperties state =

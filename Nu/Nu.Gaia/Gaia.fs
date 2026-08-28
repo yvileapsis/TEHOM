@@ -23,21 +23,21 @@ open Prime
 open Nu
 open Nu.Gaia
 
-//////////////////////////////////////////////////////////////////////////////////////
-// TODO:                                                                            //
-// Custom properties in order of priority:                                          //
-//  Enums                                                                           //
-//  Flag Enums                                                                      //
-//  CollisionMask                                                                   //
-//  CollisionCategories                                                             //
-//  CollisionDetection                                                              //
-//  BodyShape                                                                       //
-//  BodyJoint                                                                       //
-//  BlendMaterial                                                                   //
-//  TerrainMaterial                                                                 //
-//  DateTimeOffset?                                                                 //
-//  SymbolicCompression                                                             //
-//////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////
+// TODO:                                    //
+// Custom properties in order of priority:  //
+//  Enums                                   //
+//  Flag Enums                              //
+//  CollisionMask                           //
+//  CollisionCategories                     //
+//  CollisionDetection                      //
+//  BodyShape                               //
+//  BodyJoint                               //
+//  BlendMaterial                           //
+//  TerrainMaterial                         //
+//  DateTimeOffset?                         //
+//  SymbolicCompression                     //
+//////////////////////////////////////////////
 
 [<RequireQualifiedAccess>]
 module Gaia =
@@ -1807,11 +1807,6 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                         let entity = createEntity true false (Some (nameof TileMapDispatcher)) None world
                         entity.SetTileMap (AssetTag.specialize assetTag) world
                         entity.AutoBounds world
-                    | SpineSkeletonMetadata _ ->
-                        RightClickPosition <- World.getMousePosition world
-                        let entity = createEntity true false (Some (nameof SpineSkeletonDispatcher)) None world
-                        entity.SetSpineSkeleton (AssetTag.specialize assetTag) world
-                        entity.AutoBounds world
                     | StaticModelMetadata _ ->
                         RightClickPosition <- World.getMousePosition world
                         let entity = createEntity true false (Some (nameof StaticModelDispatcher)) None world
@@ -3300,7 +3295,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
             FrameTimings.Dequeue () |> ignore<single>
             if ImPlot.BeginPlot ("FrameTimings", v2 -1.0f -1.0f, ImPlotFlags.NoTitle ||| ImPlotFlags.NoInputs) then
                 ImPlot.SetupLegend (ImPlotLocation.West, ImPlotLegendFlags.Outside)
-                ImPlot.SetupAxesLimits (0.0, double (dec TimingsArray.Length), 0.0, 40.0)
+                ImPlot.SetupAxesLimits (0.0, double (dec TimingsArray.Length), 0.0, 50.0)
                 ImPlot.SetupAxes ("Frame", "Time (ms)", ImPlotAxisFlags.NoLabel ||| ImPlotAxisFlags.NoTickLabels, ImPlotAxisFlags.None)
                 FrameTimings.CopyTo (TimingsArray, 0)
                 ImPlot.PlotLine ("Frame Time", &TimingsArray[0], TimingsArray.Length)
@@ -3663,7 +3658,6 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                 | RawMetadata -> Assets.Default.RawIconIcon
                                 | TextureMetadata _ -> asset<Image> packageName assetName
                                 | TileMapMetadata _ -> Assets.Default.TileMapIcon
-                                | SpineSkeletonMetadata _ -> Assets.Default.SpineSkeletonIcon
                                 | StaticModelMetadata _ -> Assets.Default.StaticModelIcon
                                 | AnimatedModelMetadata _ -> Assets.Default.AnimatedModelIcon
                                 | SoundMetadata -> Assets.Default.SoundIcon
@@ -3704,12 +3698,6 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                                     (fun parentOpt world ->
                                         let entity = createEntity false false (Some (nameof TileMapDispatcher)) parentOpt world
                                         entity.SetTileMap (asset packageName assetName) world
-                                        entity.AutoBounds world
-                                        entity) |> Some
-                                | SpineSkeletonMetadata _ ->
-                                    (fun parentOpt world ->
-                                        let entity = createEntity false false (Some (nameof SpineSkeletonDispatcher)) parentOpt world
-                                        entity.SetSpineSkeleton (asset packageName assetName) world
                                         entity.AutoBounds world
                                         entity) |> Some
                                 | StaticModelMetadata _ ->
@@ -3806,7 +3794,7 @@ DockSpace           ID=0x7C6B3D9B Window=0xA87D555D Pos=0,0 Size=1920,1080 Split
                     | "ImSim Game" -> (PathF.GetFullPath (programDir + "/../../../../Nu.Template.ImSim.Game"), "Title", "nu-template-imsim-game")
                     | _ -> failwithumf ()
                 // work around https://github.com/dotnet/sdk/pull/55105 by manual normalization of drive letter
-                let templateDir = if templateDir.Length > 1 && templateDir.[1] = ':' then string (Char.ToUpperInvariant templateDir.[0]) + templateDir.Substring 1 else templateDir
+                let templateDir = if templateDir.Length > 1 && templateDir[1] = ':' then string (Char.ToUpperInvariant templateDir[0]) + templateDir.Substring 1 else templateDir
                 if Directory.Exists templateDir then
 
                     // attempt to create project files

@@ -926,7 +926,8 @@ type private SortableLightMap =
         for lightMap in lightMapsFiltered do
             lightMap.SortableLightMapDistanceSquared <- SortableLightMap.distanceFromBounds position lightMap.SortableLightMapBounds
         let lightMapsSorted =
-            lightMapsFiltered |> Array.sortBy (fun lightMap -> lightMap.SortableLightMapDistanceSquared)
+            lightMapsFiltered
+            |> Array.sortWith (fun lightMap lightMap2 -> lightMap.SortableLightMapDistanceSquared.CompareTo lightMap2.SortableLightMapDistanceSquared)
         for i in 0 .. dec lightMapsMax do
             if i < lightMapsSorted.Length then
                 let lightMap = lightMapsSorted[i]
@@ -938,6 +939,53 @@ type private SortableLightMap =
                 lightMapIrradianceMaps[i] <- lightMap.SortableLightMapIrradianceMap
                 lightMapEnvironmentFilterMaps[i] <- lightMap.SortableLightMapEnvironmentFilterMap
         (lightMapOrigins, lightMapMins, lightMapSizes, lightMapAmbientColors, lightMapAmbientBrightnesses, lightMapIrradianceMaps, lightMapEnvironmentFilterMaps)
+
+/// A sortable light 'projection' used for sorting lights by desirability for rendering.
+[<CustomComparison; CustomEquality>]
+type private SortableLightProjection =
+    { DirectionalWeight : int
+      LightDistance : single
+      DesiredShadowsWeight : int }
+
+    /// Compare two sortable light projections for equality.
+    static member equals left right =
+        left.DirectionalWeight = right.DirectionalWeight &&
+        left.LightDistance = right.LightDistance &&
+        left.DesiredShadowsWeight = right.DesiredShadowsWeight
+
+    /// Compare two sortable light projections for ordering.
+    static member compare left right =
+        if left.DirectionalWeight < right.DirectionalWeight then -1
+        elif left.DirectionalWeight > right.DirectionalWeight then 1
+        elif left.LightDistance < right.LightDistance then -1
+        elif left.LightDistance > right.LightDistance then 1
+        elif left.DesiredShadowsWeight < right.DesiredShadowsWeight then -1
+        elif left.DesiredShadowsWeight > right.DesiredShadowsWeight then 1
+        else 0
+
+    /// Make a sortable light projection.
+    static member make directionalWeight lightDistance desiredShadowsWeight =
+        { DirectionalWeight = directionalWeight
+          LightDistance = lightDistance
+          DesiredShadowsWeight = desiredShadowsWeight }
+
+    override this.Equals that =
+        match that with
+        | :? SortableLightProjection as that -> SortableLightProjection.equals this that
+        | _ -> false
+
+    override this.GetHashCode () =
+        HashCode.Combine (this.DirectionalWeight, this.LightDistance, this.DesiredShadowsWeight)
+
+    interface IComparable<SortableLightProjection> with
+        member this.CompareTo that =
+            SortableLightProjection.compare this that
+
+    interface IComparable with
+        member this.CompareTo that =
+            match that with
+            | :? SortableLightProjection as that -> SortableLightProjection.compare this that
+            | _ -> failwithumf ()
 
 /// A sortable light.
 /// OPTIMIZATION: mutable field for caching distance squared.
@@ -961,7 +1009,7 @@ type private SortableLight =
     static member private project light =
         let directionalWeight = match light.SortableLightType with 2 -> -1 | _ -> 0
         let desiredShadowsWeight = -light.SortableLightDesireShadows
-        struct (directionalWeight, light.SortableLightDistance, desiredShadowsWeight)
+        SortableLightProjection.make directionalWeight light.SortableLightDistance desiredShadowsWeight
 
     /// Sort shadowing point lights.
     /// TODO: see if we can get rid of allocation here.
@@ -3902,7 +3950,8 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             Array.sortBy (fun struct (id, _, _, _, _) ->
                 renderer.RenderPasses2.Pairs
                 |> Seq.choose (fun (renderPass, renderTasks) -> match renderPass with ShadowPass (id2, indexInfoOpt, _, _, _, _) when id2 = id && indexInfoOpt.IsNone -> renderTasks.ShadowBufferIndexOpt | _ -> None)
-                |> Seq.headOrDefault Int32.MaxValue)
+                |> Seq.headOrDefault Int32.MaxValue
+                :> IComparable) // OPTIMIZATION: boxing here to avoid it downstream.
                 spotAndDirectionalLightsArray
 
         // shadow texture pre-passes
@@ -3963,7 +4012,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                             Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite gaussianEsmTexture renderer.VulkanContext.RenderCommandBuffer
                             PhysicallyBased.drawFilterGaussianEsmSurface
                                 (v2 (1.0f / single shadowResolution.X) 0.0f) renderer.LightingConfig.LightShadowRadius
-                                shadowColorTexture.LayerViews[shadowTextureIndex] renderer.FilteredSampler shadowResolution gaussianEsmTexture.ImageView
+                                shadowColorTexture.LayerViews[shadowTextureIndex] renderer.FilteredSampler gaussianEsmTexture.ImageView shadowResolution
                                 renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterGaussianEsmPipeline renderer.VulkanContext
                             Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead gaussianEsmTexture renderer.VulkanContext.RenderCommandBuffer
 
@@ -3971,7 +4020,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                             Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite shadowColorTexture renderer.VulkanContext.RenderCommandBuffer
                             PhysicallyBased.drawFilterGaussianEsmSurface
                                 (v2 0.0f (1.0f / single shadowResolution.Y)) renderer.LightingConfig.LightShadowRadius
-                                gaussianEsmTexture.ImageView renderer.FilteredSampler shadowResolution shadowColorTexture.LayerViews[shadowTextureIndex]
+                                gaussianEsmTexture.ImageView renderer.FilteredSampler shadowColorTexture.LayerViews[shadowTextureIndex] shadowResolution
                                 renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterGaussianEsmPipeline renderer.VulkanContext
                             Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead shadowColorTexture renderer.VulkanContext.RenderCommandBuffer
 
@@ -3996,7 +4045,8 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             Array.sortBy (fun struct (id, _, _, _, _) ->
                 renderer.RenderPasses2.Pairs
                 |> Seq.choose (fun (renderPass, renderTasks) -> match renderPass with ShadowPass (id2, indexInfoOpt, _, _, _, _) when id2 = id && indexInfoOpt.IsSome -> renderTasks.ShadowBufferIndexOpt | _ -> None)
-                |> Seq.headOrDefault Int32.MaxValue)
+                |> Seq.headOrDefault Int32.MaxValue
+                :> IComparable) // OPTIMIZATION: boxing here to avoid it downstream.
                 pointLightsArray
 
         // shadow map pre-passes
@@ -4056,7 +4106,8 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             Array.sortBy (fun struct (id, _, _, _, _) ->
                 renderer.RenderPasses2.Pairs
                 |> Seq.choose (fun (renderPass, renderTasks) -> match renderPass with ShadowPass (id2, indexInfoOpt, _, _, _, _) when id2 = id && indexInfoOpt.IsSome -> renderTasks.ShadowBufferIndexOpt | _ -> None)
-                |> Seq.headOrDefault Int32.MaxValue)
+                |> Seq.headOrDefault Int32.MaxValue
+                :> IComparable) // OPTIMIZATION: boxing here to avoid it downstream.
                 cascadedLightsArray
 
         // shadow cascade pre-passes
@@ -4094,7 +4145,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                                 Hl.recordTransitionLayout true 1 shadowCascadeLevel 1 VkImageAspectFlags.Color ColorAttachmentRead ColorAttachmentWrite gaussianEsmArrayTexture.Image renderer.VulkanContext.RenderCommandBuffer
                                 PhysicallyBased.drawFilterGaussianEsmSurface
                                     (v2 (1.0f / single shadowResolution.X) 0.0f) renderer.LightingConfig.LightShadowRadius
-                                    shadowCascadeArray.LayerViews[shadowCascadeLevel] renderer.FilteredSampler shadowResolution gaussianEsmArrayTexture.LayerViews[shadowCascadeLevel]
+                                    shadowCascadeArray.LayerViews[shadowCascadeLevel] renderer.FilteredSampler gaussianEsmArrayTexture.LayerViews[shadowCascadeLevel] shadowResolution
                                     renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterGaussianEsmPipeline renderer.VulkanContext
                                 Hl.recordTransitionLayout true 1 shadowCascadeLevel 1 VkImageAspectFlags.Color ColorAttachmentWrite ColorAttachmentRead gaussianEsmArrayTexture.Image renderer.VulkanContext.RenderCommandBuffer
 
@@ -4102,7 +4153,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                                 Hl.recordTransitionLayout true 1 shadowCascadeLevel 1 VkImageAspectFlags.Color ColorAttachmentRead ColorAttachmentWrite shadowCascadeArray.Image renderer.VulkanContext.RenderCommandBuffer
                                 PhysicallyBased.drawFilterGaussianEsmSurface
                                     (v2 0.0f (1.0f / single shadowResolution.Y)) renderer.LightingConfig.LightShadowRadius
-                                    gaussianEsmArrayTexture.LayerViews[shadowCascadeLevel] renderer.FilteredSampler shadowResolution shadowCascadeArray.LayerViews[shadowCascadeLevel]
+                                    gaussianEsmArrayTexture.LayerViews[shadowCascadeLevel] renderer.FilteredSampler shadowCascadeArray.LayerViews[shadowCascadeLevel] shadowResolution
                                     renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterGaussianEsmPipeline renderer.VulkanContext
                                 Hl.recordTransitionLayout true 1 shadowCascadeLevel 1 VkImageAspectFlags.Color ColorAttachmentWrite ColorAttachmentRead shadowCascadeArray.Image renderer.VulkanContext.RenderCommandBuffer
 
@@ -4390,8 +4441,9 @@ type [<ReferenceEquality>] VulkanRenderer3d =
         Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite clearCoatPlusTexture renderer.VulkanContext.RenderCommandBuffer
         Texture.recordTransitionLayout DepthAttachmentRead DepthAttachmentWrite zTexture renderer.VulkanContext.RenderCommandBuffer
         let geometryTextureViews = [|depthTexture.ImageView; albedoTexture.ImageView; materialTexture.ImageView; normalPlusTexture.ImageView; subdermalPlusTexture.ImageView; scatterPlusTexture.ImageView; clearCoatPlusTexture.ImageView|]
-        let mutable renderingInfo = Hl.makeRenderingInfo geometryTextureViews (Some zTexture.ImageView) renderArea (Some clearColor)
-        DeviceApi.vkCmdBeginRendering (renderer.VulkanContext.RenderCommandBuffer, &&renderingInfo)
+        Hl.withRenderingInfo geometryTextureViews (Some zTexture.ImageView) renderArea (Some clearColor) $ fun renderingInfo ->
+            let mutable renderingInfo = renderingInfo
+            DeviceApi.vkCmdBeginRendering (renderer.VulkanContext.RenderCommandBuffer, &&renderingInfo)
         DeviceApi.vkCmdEndRendering renderer.VulkanContext.RenderCommandBuffer
         Hl.reportDrawScope ()
 
@@ -4550,14 +4602,14 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             geometryResolution renderer.RenderPassIndex renderer.QuadGeometry lightAccumTexture renderer.PhysicallyBasedPipelines.DeferredLightingPipeline renderer.VulkanContext
         Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead lightAccumTexture renderer.VulkanContext.RenderCommandBuffer
 
-        // setup fogging buffers and viewport
+        // setup fogging textures and viewport
         let ssvfEnabled = if renderer.RendererConfig.SsvfEnabled && renderer.LightingConfig.SsvfEnabled then 1 else 0
         let fogAccumTexture =
 
             // but only when desired
             if topLevelRender && ssvfEnabled = 1 then
 
-                // deferred render quad to fogging buffers
+                // deferred render quad to fogging textures
                 let fogAccumTexture = renderer.PhysicallyBasedAttachments.FoggingAttachment
                 Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite fogAccumTexture renderer.VulkanContext.RenderCommandBuffer
                 PhysicallyBased.drawPhysicallyBasedDeferredFoggingSurface
@@ -4567,6 +4619,34 @@ type [<ReferenceEquality>] VulkanRenderer3d =
                     renderer.ShadowMatricesFlipped renderer.UnfilteredSampler renderer.FilteredSampler fogAccumTexture
                     geometryResolution renderer.RenderPassIndex renderer.QuadGeometry renderer.PhysicallyBasedPipelines.DeferredFoggingPipeline renderer.VulkanContext
                 Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead fogAccumTexture renderer.VulkanContext.RenderCommandBuffer
+
+                // deferred render down-sample filter quad to down-sample texture
+                let downSampleColorTexture = renderer.PhysicallyBasedAttachments.DownSampleColorAttachment
+                let downSampleDepthTexture = renderer.PhysicallyBasedAttachments.DownSampleDepthAttachment
+                Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite downSampleColorTexture renderer.VulkanContext.RenderCommandBuffer
+                Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite downSampleDepthTexture renderer.VulkanContext.RenderCommandBuffer
+                PhysicallyBased.drawFilterDownSampleSurface
+                    fogAccumTexture depthTexture renderer.FilteredSampler downSampleColorTexture.ImageView downSampleDepthTexture.ImageView
+                    (geometryResolution / 2) renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterBilateralDownSamplePipeline renderer.VulkanContext
+                Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead downSampleColorTexture renderer.VulkanContext.RenderCommandBuffer
+                Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead downSampleDepthTexture renderer.VulkanContext.RenderCommandBuffer
+
+                // deferred render up-sample filter quad to up-sample texture
+                let upSampleColorTexture = renderer.PhysicallyBasedAttachments.UpSampleColorAttachment
+                Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite upSampleColorTexture renderer.VulkanContext.RenderCommandBuffer
+                PhysicallyBased.drawFilterUpSampleSurface
+                    downSampleColorTexture downSampleDepthTexture depthTexture renderer.FilteredSampler upSampleColorTexture.ImageView
+                    geometryResolution renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterBilateralUpSamplePipeline renderer.VulkanContext
+                Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead upSampleColorTexture renderer.VulkanContext.RenderCommandBuffer
+
+                // blit up-sample texture to fog accum texture
+                Texture.recordTransitionLayout ColorAttachmentRead TransferSrc upSampleColorTexture renderer.VulkanContext.RenderCommandBuffer
+                Texture.recordTransitionLayout ColorAttachmentRead TransferDst fogAccumTexture renderer.VulkanContext.RenderCommandBuffer
+                let bounds = VkRect2D (0, 0, uint geometryResolution.X, uint geometryResolution.Y)
+                let mutable region = Hl.makeBlit 0 0 0 0 bounds bounds
+                DeviceApi.vkCmdBlitImage (renderer.VulkanContext.RenderCommandBuffer, upSampleColorTexture.Image, TransferSrc.VkImageLayout, fogAccumTexture.Image, TransferDst.VkImageLayout, 1u, &&region, VkFilter.Nearest)
+                Texture.recordTransitionLayout TransferSrc ColorAttachmentRead upSampleColorTexture renderer.VulkanContext.RenderCommandBuffer
+                Texture.recordTransitionLayout TransferDst ColorAttachmentRead fogAccumTexture renderer.VulkanContext.RenderCommandBuffer
                 fogAccumTexture
 
             // just use black texture
@@ -4751,64 +4831,44 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             (view * geometryProjection.Flipped) geometryResolution portalComposites
             compositionTexture zTexture renderer
 
-        (*// apply bloom filter when desired
+        // apply bloom filter when desired
         if topLevelRender && renderer.RendererConfig.BloomEnabled && renderer.LightingConfig.BloomEnabled then
 
-            // setup bloom extract buffers and viewport
-            let (bloomExtractTexture, bloomExtractRenderbuffer, bloomExtractFramebuffer) = renderer.PhysicallyBasedBuffers.BloomExtractBuffers
-            OpenGL.Gl.BindRenderbuffer (OpenGL.RenderbufferTarget.Renderbuffer, bloomExtractRenderbuffer)
-            OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.Framebuffer, bloomExtractFramebuffer)
-            OpenGL.Gl.ClearColor (Constants.Render.ViewportClearColor.R, Constants.Render.ViewportClearColor.G, Constants.Render.ViewportClearColor.B, Constants.Render.ViewportClearColor.A)
-            OpenGL.Gl.Clear (OpenGL.ClearBufferMask.ColorBufferBit ||| OpenGL.ClearBufferMask.DepthBufferBit ||| OpenGL.ClearBufferMask.StencilBufferBit)
-            OpenGL.Gl.Viewport (0, 0, geometryResolution.X, geometryResolution.Y)
-            OpenGL.Hl.Assert ()
+            // render bloom extract texture
+            let bloomExtractTexture = renderer.PhysicallyBasedAttachments.BloomExtractAttachment
+            Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite bloomExtractTexture renderer.VulkanContext.RenderCommandBuffer
+            PhysicallyBased.drawFilterBloomExtractSurface
+                renderer.LightingConfig.BloomThreshold compositionTexture renderer.FilteredSampler bloomExtractTexture geometryResolution
+                renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterBloomExtractPipeline renderer.VulkanContext
+            Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead bloomExtractTexture renderer.VulkanContext.RenderCommandBuffer
 
-            // render bloom extract buffers
-            OpenGL.PhysicallyBased.DrawFilterBloomExtractSurface (renderer.LightingConfig.BloomThreshold, compositionTexture, renderer.PhysicallyBasedQuad, renderer.FilterShaders.FilterBloomExtractShader, renderer.PhysicallyBasedStaticVao)
-            OpenGL.Hl.Assert ()
+            // down-sample bloom textures
+            let bloomSampleTextures = renderer.PhysicallyBasedAttachments.BloomSampleAttachments
+            PhysicallyBased.drawFilterBloomDownSampleSurfaces
+                renderer.LightingConfig.BloomKarisAverageEnabled geometryResolution bloomExtractTexture renderer.FilteredSampler bloomSampleTextures (geometryResolution / 2)
+                renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterBloomDownSamplePipeline renderer.VulkanContext
 
-            // setup bloom sample buffers and viewport (no clearing or viewport config needed)
-            let (bloomSampleTextures, bloomSampleRenderbuffer, bloomSampleFramebuffer) = renderer.PhysicallyBasedBuffers.BloomSampleBuffers
-            OpenGL.Gl.BindRenderbuffer (OpenGL.RenderbufferTarget.Renderbuffer, bloomSampleRenderbuffer)
-            OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.Framebuffer, bloomSampleFramebuffer)
-            OpenGL.Hl.Assert ()
+            // up-sample bloom textures
+            PhysicallyBased.drawFilterBloomUpSampleSurfaces
+                renderer.LightingConfig.BloomFilterRadius bloomSampleTextures renderer.FilteredSampler geometryResolution
+                renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterBloomUpSamplePipeline renderer.VulkanContext
 
-            // down-sample bloom buffers
-            OpenGL.PhysicallyBased.DrawBloomDownSamplesSurface
-                (geometryResolution.X, geometryResolution.Y, Constants.Render.BloomSampleLevels, renderer.LightingConfig.BloomKarisAverageEnabled, bloomExtractTexture, bloomSampleTextures,
-                 renderer.PhysicallyBasedQuad, renderer.FilterShaders.FilterBloomDownSampleShader, renderer.PhysicallyBasedStaticVao)
-            OpenGL.Hl.Assert ()
+            // render bloom apply texture
+            let bloomApplyTexture = renderer.PhysicallyBasedAttachments.BloomApplyAttachment
+            Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite bloomApplyTexture renderer.VulkanContext.RenderCommandBuffer
+            PhysicallyBased.drawFilterBloomApplySurface
+                renderer.LightingConfig.BloomStrength bloomSampleTextures[0] compositionTexture renderer.FilteredSampler bloomApplyTexture geometryResolution
+                renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterBloomApplyPipeline renderer.VulkanContext
+            Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead bloomApplyTexture renderer.VulkanContext.RenderCommandBuffer
 
-            // up-sample bloom buffers
-            OpenGL.PhysicallyBased.DrawBloomUpSamplesSurface
-                (geometryResolution.X, geometryResolution.Y, Constants.Render.BloomSampleLevels, renderer.LightingConfig.BloomFilterRadius, bloomSampleTextures,
-                 renderer.PhysicallyBasedQuad, renderer.FilterShaders.FilterBloomUpSampleShader, renderer.PhysicallyBasedStaticVao)
-            OpenGL.Hl.Assert ()
-
-            // setup bloom apply buffer and viewport
-            let (_, bloomApplyRenderbuffer, bloomApplyFramebuffer) = renderer.PhysicallyBasedBuffers.BloomApplyBuffers
-            OpenGL.Gl.BindRenderbuffer (OpenGL.RenderbufferTarget.Renderbuffer, bloomApplyRenderbuffer)
-            OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.Framebuffer, bloomApplyFramebuffer)
-            OpenGL.Gl.ClearColor (Constants.Render.ViewportClearColor.R, Constants.Render.ViewportClearColor.G, Constants.Render.ViewportClearColor.B, Constants.Render.ViewportClearColor.A)
-            OpenGL.Gl.Clear (OpenGL.ClearBufferMask.ColorBufferBit ||| OpenGL.ClearBufferMask.DepthBufferBit ||| OpenGL.ClearBufferMask.StencilBufferBit)
-            OpenGL.Gl.Viewport (0, 0, geometryResolution.X, geometryResolution.Y)
-            OpenGL.Hl.Assert ()
-
-            // render bloom apply pass
-            OpenGL.PhysicallyBased.DrawBloomApplySurface
-                (renderer.LightingConfig.BloomStrength, bloomSampleTextures[0], compositionTexture,
-                 renderer.PhysicallyBasedQuad, renderer.FilterShaders.FilterBloomApplyShader, renderer.PhysicallyBasedStaticVao)
-            OpenGL.Hl.Assert ()
-
-            // blit bloom apply buffer to composition buffer
-            OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.ReadFramebuffer, bloomApplyFramebuffer)
-            OpenGL.Gl.BindFramebuffer (OpenGL.FramebufferTarget.DrawFramebuffer, compositionFramebuffer)
-            OpenGL.Gl.BlitFramebuffer
-                (0, 0, geometryResolution.X, geometryResolution.Y,
-                 0, 0, geometryResolution.X, geometryResolution.Y,
-                 OpenGL.ClearBufferMask.ColorBufferBit,
-                 OpenGL.BlitFramebufferFilter.Nearest)
-            OpenGL.Hl.Assert ()*)
+            // blit bloom apply texture to composition texture
+            Texture.recordTransitionLayout ColorAttachmentRead TransferSrc bloomApplyTexture renderer.VulkanContext.RenderCommandBuffer
+            Texture.recordTransitionLayout ColorAttachmentRead TransferDst compositionTexture renderer.VulkanContext.RenderCommandBuffer
+            let bounds = VkRect2D (0, 0, uint geometryResolution.X, uint geometryResolution.Y)
+            let mutable region = Hl.makeBlit 0 0 0 0 bounds bounds
+            DeviceApi.vkCmdBlitImage (renderer.VulkanContext.RenderCommandBuffer, bloomApplyTexture.Image, TransferSrc.VkImageLayout, compositionTexture.Image, TransferDst.VkImageLayout, 1u, &&region, VkFilter.Nearest)
+            Texture.recordTransitionLayout TransferSrc ColorAttachmentRead bloomApplyTexture renderer.VulkanContext.RenderCommandBuffer
+            Texture.recordTransitionLayout TransferDst ColorAttachmentRead compositionTexture renderer.VulkanContext.RenderCommandBuffer
 
         // apply depth of field when desired
         if topLevelRender && renderer.RendererConfig.DepthOfFieldEnabled && renderer.LightingConfig.DepthOfFieldEnabled then
@@ -4829,7 +4889,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite colorHalf1Texture renderer.VulkanContext.RenderCommandBuffer
             PhysicallyBased.drawFilterGaussianDofSurface
                 (v2 (1.0f / single geometryResolution.X / 2.0f) 0.0f) renderer.LightingConfig.DepthOfFieldRadius
-                colorHalf0Texture.ImageView renderer.FilteredSampler (geometryResolution / 2) colorHalf1Texture.ImageView
+                colorHalf0Texture.ImageView renderer.FilteredSampler colorHalf1Texture.ImageView (geometryResolution / 2)
                 renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterGaussianDofPipeline renderer.VulkanContext
             Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead colorHalf1Texture renderer.VulkanContext.RenderCommandBuffer
 
@@ -4837,7 +4897,7 @@ type [<ReferenceEquality>] VulkanRenderer3d =
             Texture.recordTransitionLayout ColorAttachmentRead ColorAttachmentWrite colorHalf0Texture renderer.VulkanContext.RenderCommandBuffer
             PhysicallyBased.drawFilterGaussianDofSurface
                 (v2 0.0f (1.0f / single geometryResolution.Y / 2.0f)) renderer.LightingConfig.DepthOfFieldRadius
-                colorHalf1Texture.ImageView renderer.FilteredSampler (geometryResolution / 2) colorHalf0Texture.ImageView
+                colorHalf1Texture.ImageView renderer.FilteredSampler colorHalf0Texture.ImageView (geometryResolution / 2)
                 renderer.QuadGeometry renderer.PhysicallyBasedPipelines.FilterGaussianDofPipeline renderer.VulkanContext
             Texture.recordTransitionLayout ColorAttachmentWrite ColorAttachmentRead colorHalf0Texture renderer.VulkanContext.RenderCommandBuffer
 

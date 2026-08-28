@@ -167,7 +167,8 @@ type VulkanBuffer =
     private
         { mutable BufferWrappersCursor_ : int
           BufferWrappers_ : BufferWrapper List
-          BufferType_ : BufferType }
+          BufferType_ : BufferType
+          BufferSize_ : int }
 
     member private this.BufferWrapper =
         this.BufferWrappers_[this.BufferWrappersCursor_]
@@ -182,18 +183,57 @@ type VulkanBuffer =
 
     static member private ensureHeight (buffer : VulkanBuffer) context =
         while buffer.BufferWrappersCursor_ >= buffer.BufferWrappers_.Count do
-            let bufferWrappers = Array.init buffer.BufferWrappers_.Count (fun _ -> BufferWrapper.create buffer.BufferType_ buffer.BufferWrappers_[0].Size context)
+            let bufferWrappers = Array.init buffer.BufferWrappers_.Count (fun _ -> BufferWrapper.create buffer.BufferType_ buffer.BufferSize_ context)
             buffer.BufferWrappers_.AddRange bufferWrappers
 
-    /// Expand buffer width as necessary, disregarding all existing content.
+    /// Expand current buffer width as necessary.
+    /// OPTIMIZATION: this may swap unutilized buffers around to best utilize existing buffers.
     static member ensureWidth size (buffer : VulkanBuffer) context =
+
+        // ensure height before attempt to ensure width
         VulkanBuffer.ensureHeight buffer context
-        let bufferWrapperOld = buffer.BufferWrappers_[buffer.BufferWrappersCursor_]
-        if bufferWrapperOld.Size < size then
-            let bufferWrapperNew = BufferWrapper.create buffer.BufferType_ size context
-            VulkanBuffer.copyData bufferWrapperOld.Size bufferWrapperOld.VkBuffer_ bufferWrapperNew.VkBuffer_ context
-            buffer.BufferWrappers_[buffer.BufferWrappersCursor_] <- bufferWrapperNew
-            BufferWrapper.destroy bufferWrapperOld context
+
+        // ensure current buffer is wide enough
+        let cursor = buffer.BufferWrappersCursor_
+        if buffer.BufferWrappers_[cursor].Size < size then
+
+            // when too narrow, find the best fit buffer as well as largest buffer and...
+            let mutable bestFitIndex = -1
+            let mutable bestFitSize = Int32.MaxValue
+            let mutable largestIndex = cursor
+            let mutable largestSize = buffer.BufferWrappers_[cursor].Size
+            for i in inc cursor .. dec buffer.BufferWrappers_.Count do
+                let candidate = buffer.BufferWrappers_[i]
+                if candidate.Size >= size && candidate.Size < bestFitSize then
+                    bestFitIndex <- i
+                    bestFitSize <- candidate.Size
+                if candidate.Size > largestSize then
+                    largestIndex <- i
+                    largestSize <- candidate.Size
+
+            // when a fit is found...
+            if bestFitIndex > -1 then
+
+                // swap buffer into current buffer
+                let tmp = buffer.BufferWrappers_[cursor]
+                buffer.BufferWrappers_[cursor] <- buffer.BufferWrappers_[bestFitIndex]
+                buffer.BufferWrappers_[bestFitIndex] <- tmp
+
+            // otherwise when no fit is found...
+            else
+
+                // increase the width of the largest buffer found
+                let bufferWrapperOld = buffer.BufferWrappers_[largestIndex]
+                let bufferWrapperNew = BufferWrapper.create buffer.BufferType_ size context
+                VulkanBuffer.copyData bufferWrapperOld.Size bufferWrapperOld.VkBuffer_ bufferWrapperNew.VkBuffer_ context
+                buffer.BufferWrappers_[largestIndex] <- bufferWrapperNew
+                BufferWrapper.destroy bufferWrapperOld context
+
+                // ...and swap it if it's not already the current buffer
+                if largestIndex <> cursor then
+                    let tmp = buffer.BufferWrappers_[cursor]
+                    buffer.BufferWrappers_[cursor] <- buffer.BufferWrappers_[largestIndex]
+                    buffer.BufferWrappers_[largestIndex] <- tmp
 
     /// Copy data from the source buffer to the destination buffer.
     static member private copyData size source destination (context : VulkanContext) =
@@ -210,23 +250,24 @@ type VulkanBuffer =
     static member advance buffer =
         buffer.BufferWrappersCursor_ <- inc buffer.BufferWrappersCursor_
 
-    /// Create a new Buffer.
+    /// Create a new buffer.
     static member create (bufferType : BufferType) bufferSize context =
         { BufferWrappersCursor_ = 0
           BufferWrappers_ = List [BufferWrapper.create bufferType bufferSize context]
-          BufferType_ = bufferType }
+          BufferType_ = bufferType
+          BufferSize_ = bufferSize }
 
-    /// Write subdata to Buffer. Caller is reponsible for ensuring buffer width and height.
+    /// Write subdata to buffer. Caller is reponsible for ensuring buffer width and height.
     static member writeSubdata offset alignment size count data (buffer : VulkanBuffer) context =
         VulkanBuffer.ensureHeight buffer context
         BufferWrapper.write offset alignment size count data buffer.BufferWrapper context
 
-    /// Flush subdata from Buffer. Caller is reponsible for ensuring buffer width and height.
+    /// Flush subdata from buffer. Caller is reponsible for ensuring buffer width and height.
     static member flushSubdata offset alignment size count (buffer : VulkanBuffer) context =
         VulkanBuffer.ensureHeight buffer context
         BufferWrapper.flush offset alignment size count buffer.BufferWrapper context
 
-    /// Upload data to Buffer.
+    /// Upload data to buffer.
     static member uploadData size count data (buffer : VulkanBuffer) context =
         let bufferSize = size * count
         VulkanBuffer.ensureHeight buffer context
@@ -234,12 +275,12 @@ type VulkanBuffer =
         BufferWrapper.write 0 0 size count data buffer.BufferWrapper context
         BufferWrapper.flush 0 0 size count buffer.BufferWrapper context
 
-    /// Upload a value to Buffer.
+    /// Upload a value to buffer.
     static member uploadValue (value : 'a) buffer context =
         let mutable value = value
         VulkanBuffer.uploadData sizeof<'a> 1 (asNativeInt &value) buffer context
 
-    /// Upload an array to Buffer.
+    /// Upload an array to buffer.
     static member uploadArray (array : 'a array) buffer context =
         use arrayPin = new ArrayPin<_> (array)
         VulkanBuffer.uploadData sizeof<'a> array.Length arrayPin.NativeInt buffer context
@@ -297,7 +338,7 @@ type VulkanBuffer =
         use arrayPin = new ArrayPin<_> (memory)
         VulkanBuffer.createIndexStaged size arrayPin.NativeInt context
     
-    /// Destroy Buffer.
+    /// Destroy buffer.
     static member destroy (buffer : VulkanBuffer) context =
         for i in 0 .. dec buffer.BufferWrappers_.Count do
             BufferWrapper.destroy buffer.BufferWrappers_[i] context

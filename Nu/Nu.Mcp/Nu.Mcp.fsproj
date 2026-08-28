@@ -17,6 +17,9 @@
 
   <ItemGroup>
     <ProjectReference Include="../Nu/Nu.fsproj" />
+    <Reference Include="TiledSharp">
+      <HintPath>../Nu.Dependencies/TiledSharp/lib/netstandard2.0/TiledSharp.dll</HintPath>
+    </Reference>
     <PackageReference Include="FSharp.Core" Version="10.1.204" />
   </ItemGroup>
 

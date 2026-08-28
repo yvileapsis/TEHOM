@@ -30,9 +30,6 @@ type VoxelModel = private { __ : unit }
 /// A phantom type to denote the type of an asset as a tile map.
 type TileMap = private { __ : unit }
 
-/// A phantom type to denote the type of an asset as a spine skeleton.
-type SpineSkeleton = private { __ : unit }
-
 /// A phantom type to denote the type of an asset as a cursor.
 type Cursor = private { __ : unit }
 

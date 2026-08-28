@@ -9,6 +9,8 @@ open System
 open System.Numerics
 open System.Reflection
 open System.Runtime.InteropServices
+open System.Security.Cryptography
+open System.Text
 open System.Threading
 open System.IO
 open FSharp.NativeInterop
@@ -314,8 +316,8 @@ module Vulkan =
 [<RequireQualifiedAccess>]
 module Hl =
 
-    // TODO: P0: these free-floating bindings have become a bit of a mess and need to be reordered or moved into vulkan
-    // context.
+    // TODO: P0: these free-floating bindings have become a bit of a mess and need to be reordered or moved into
+    // VulkanContext.
     let mutable internal ValidationLayersActivated = false
 
     let mutable internal DrawCountersLock = obj ()
@@ -579,9 +581,8 @@ module Hl =
         blit.dstOffsets <- NativePtr.writeArrayToFixedBuffer [|dstOffsetMin; dstOffsetMax|] blit.dstOffsets
         blit
 
-    /// Make a VkRenderingInfo.
-    /// NOTE: this function MUST be declared inline to keep its pointers valid!
-    let inline makeRenderingInfo (colorAttachments : VkImageView array) depthAttachmentOpt renderArea clearValueOpt =
+    /// Make a VkRenderingInfo and utilize within the given scope for memory safety.
+    let withRenderingInfo (colorAttachments : VkImageView array) depthAttachmentOpt renderArea clearValueOpt action =
 
         // color attachment infos
         let colorInfos = Array.zeroCreate colorAttachments.Length
@@ -597,7 +598,7 @@ module Hl =
             | None ->
                 colorInfo.loadOp <- VkAttachmentLoadOp.Load
             colorInfos[i] <- colorInfo
-        use cInfosPin = new ArrayPin<_> (colorInfos)
+        use colorInfosPin = new ArrayPin<_> (colorInfos)
 
         // depth attachment info
         let mutable depthInfo = VkRenderingAttachmentInfo ()
@@ -619,9 +620,11 @@ module Hl =
         renderingInfo.renderArea <- renderArea
         renderingInfo.layerCount <- 1u
         renderingInfo.colorAttachmentCount <- uint colorInfos.Length
-        renderingInfo.pColorAttachments <- cInfosPin.Pointer
+        renderingInfo.pColorAttachments <- colorInfosPin.Pointer
         if depthAttachmentOpt.IsSome then renderingInfo.pDepthAttachment <- &&depthInfo
-        renderingInfo
+
+        // invoke action
+        action renderingInfo
 
     /// Make a VkRenderingInfo that preserves color while clearing depth.
     /// NOTE: this function MUST be declared inline to keep its pointers valid!
@@ -739,15 +742,24 @@ module Hl =
 
     /// Try to compile GLSL file to SPIR-V code.
     let tryCompileShader shaderPath shaderKind =
-        use shaderStream = new StreamReader (File.OpenRead shaderPath)
-        let shaderStr = shaderStream.ReadToEnd ()
-        use compiler = new Compiler ()
-        let options = CompilerOptions ()
-        options.ShaderStage <- shaderKind
-        let result = compiler.Compile (shaderStr, shaderPath, options)
-        if result.Status = CompilationStatus.Success
-        then Right result.Bytecode
-        else Left ("Vulkan shader compilation failed due to:\n" + result.ErrorMessage)
+        let shaderStr = File.ReadAllText shaderPath
+        let optimizationLevel = if Constants.Render.RenderDebug then OptimizationLevel.Zero else OptimizationLevel.Performance
+        let generatedDebug = Constants.Engine.EngineDebug
+        let cacheKey = shaderStr + scstring shaderKind + "|" + scstring optimizationLevel + "|" + scstring generatedDebug
+        let cacheHash = Convert.ToHexString (SHA256.HashData (Encoding.UTF8.GetBytes cacheKey))
+        try Directory.CreateDirectory "ShaderCache" |> ignore<DirectoryInfo>
+        with exn -> Log.warn ("Failed to create ./ShaderCache directory due to: " + scstring exn)
+        let cachePath = PathF.Combine ("ShaderCache", cacheHash + ".spv")
+        if not (File.Exists cachePath) then
+            use compiler = new Compiler ()
+            let options = CompilerOptions (ShaderStage = shaderKind, OptimizationLevel = optimizationLevel, GeneratedDebug = generatedDebug)
+            let result = compiler.Compile (shaderStr, shaderPath, options)
+            if result.Status = CompilationStatus.Success then
+                try File.WriteAllBytes (cachePath, result.Bytecode)
+                with exn -> Log.warn ("Failed to save SPIR-V bytecode for shader '" + shaderPath + "' due to: " + scstring exn)
+                Right result.Bytecode
+            else Left ("Vulkan shader compilation failed due to:\n" + result.ErrorMessage)
+        else Right (File.ReadAllBytes cachePath)
 
     /// Try to create a shader module from a GLSL file.
     /// TODO: create matching destroy fn and use that?

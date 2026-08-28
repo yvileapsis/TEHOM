@@ -8,7 +8,6 @@ namespace Nu.Vulkan
 open System
 open System.Runtime.InteropServices
 open System.Collections.Generic
-open System.Numerics
 open System.Reflection
 open System.Runtime.CompilerServices
 open FSharp.NativeInterop
@@ -31,11 +30,7 @@ type [<ReferenceEquality>] ConcurrentCommandQueue =
 
     /// Perform an arbitrary operation on the internal vulkan queue.
     static member withLock<'a> queue (op : VkQueue -> 'a) : 'a =
-        //let sw = System.Diagnostics.Stopwatch.StartNew ()
-        lock queue.Lock_ (fun () ->
-            //sw.Stop ()
-            //Log.info ("ConcurrentCommandQueue.withLock: " + string sw.ElapsedTicks)
-            op queue.VkQueue_)
+        lock queue.Lock_ (fun () -> op queue.VkQueue_)
 
     /// Wait for Queue to finish execution.
     static member waitIdle queue =
@@ -284,7 +279,7 @@ type SwapchainWrapper =
     /// Create render finished semaphores.
     static member private createRenderFinishedSemaphores imageCount =
         let semaphores = Array.zeroCreate<VkSemaphore> imageCount
-        for i in 0 .. dec semaphores.Length do semaphores.[i] <- Hl.createSemaphore ()
+        for i in 0 .. dec semaphores.Length do semaphores[i] <- Hl.createSemaphore ()
         semaphores
     
     /// Try create a SwapchainWrapper.
@@ -327,7 +322,7 @@ type SwapchainWrapper =
         // destroy vulkan resources
         for i in 0 .. dec swapchainWrapper.ImageViews.Length do DeviceApi.vkDestroyImageView (swapchainWrapper.ImageViews[i], nullPtr)
         DeviceApi.vkDestroySwapchainKHR (swapchainWrapper.VkSwapchain, nullPtr)
-        for i in 0 .. dec swapchainWrapper.RenderFinishedSemaphores.Length do DeviceApi.vkDestroySemaphore (swapchainWrapper.RenderFinishedSemaphores.[i], nullPtr)
+        for i in 0 .. dec swapchainWrapper.RenderFinishedSemaphores.Length do DeviceApi.vkDestroySemaphore (swapchainWrapper.RenderFinishedSemaphores[i], nullPtr)
 
 /// A swapchain and its assets that may be refreshed for a different screen size.
 type Swapchain =
@@ -353,7 +348,7 @@ type Swapchain =
     member this.ImageView = (Option.get this.SwapchainWrapperOpts_[this.SwapchainIndex_]).ImageViews[int Hl.ImageIndex]
 
     /// The render finished semaphore for the current swapchain image.
-    member this.RenderFinishedSemaphore = (Option.get this.SwapchainWrapperOpts_.[this.SwapchainIndex_]).RenderFinishedSemaphores.[int Hl.ImageIndex]
+    member this.RenderFinishedSemaphore = (Option.get this.SwapchainWrapperOpts_[this.SwapchainIndex_]).RenderFinishedSemaphores[int Hl.ImageIndex]
 
     /// The swap extent of the current vkSwapchain.
     member this.SwapExtent = (Option.get this.SwapchainWrapperOpts_[this.SwapchainIndex_]).SwapExtent
@@ -600,28 +595,20 @@ type [<ReferenceEquality>] VulkanContext =
         let callbackData = NativePtr.toByRef (NativePtr.ofNativeInt<VkDebugUtilsMessengerCallbackDataEXT> pCallbackData)
         let message = NativePtr.unmanagedToString callbackData.pMessage
 
-        // construct log header
-        let typeLabel =
-            match messageType with
-            | VkDebugUtilsMessageTypeFlagsEXT.General -> "General"
-            | VkDebugUtilsMessageTypeFlagsEXT.Validation -> "Validation"
-            | VkDebugUtilsMessageTypeFlagsEXT.Performance -> "Performance"
-            | _ -> ""
-        let severityLabel =
-            match messageSeverity with
-            | VkDebugUtilsMessageSeverityFlagsEXT.Verbose -> "Verbose"
-            | VkDebugUtilsMessageSeverityFlagsEXT.Info -> "Info"
-            | VkDebugUtilsMessageSeverityFlagsEXT.Warning -> "Warning"
-            | VkDebugUtilsMessageSeverityFlagsEXT.Error -> "Error"
-            | _ -> ""
-        let header = "Vulkan" + typeLabel + severityLabel
-
-        // log when appropriate
+        // determine when to log
         let shouldLog =
             if messageType = VkDebugUtilsMessageTypeFlagsEXT.Performance
             then messageSeverity > VkDebugUtilsMessageSeverityFlagsEXT.Warning
             else messageSeverity > VkDebugUtilsMessageSeverityFlagsEXT.Info
-        if shouldLog then Log.custom header message
+
+        // construct log header
+        if shouldLog then
+            match messageSeverity with
+            | VkDebugUtilsMessageSeverityFlagsEXT.Verbose -> Log.info message
+            | VkDebugUtilsMessageSeverityFlagsEXT.Info -> Log.info message
+            | VkDebugUtilsMessageSeverityFlagsEXT.Warning -> Log.warn message
+            | VkDebugUtilsMessageSeverityFlagsEXT.Error -> Log.error message
+            | _ -> Log.info message
 
         // finish passively
         ignore pUserData
@@ -660,9 +647,9 @@ type [<ReferenceEquality>] VulkanContext =
         // check whether validation layer exists
         // TODO: try to automatically prevent validation from interfering with Nsight, starting with VK_VALIDATION_FEATURE_DISABLE_UNIQUE_HANDLES_EXT.
         let validationLayerName = "VK_LAYER_KHRONOS_validation"
-        let validationLayerExists = Array.exists (fun x -> Hl.getLayerName x = validationLayerName) layers
+        let validationLayerExists = Array.exists (fun layer -> Hl.getLayerName layer = validationLayerName) layers
         if Constants.Render.RenderDebug && not validationLayerExists then
-            Log.info (validationLayerName + " is not available. Vulkan programmers must install the Vulkan SDK to enable validation.")
+            Log.info (validationLayerName + " is not available. The Vulkan SDK must be installed to enable validation.")
 
         // attempt to use validation layer when desired
         Hl.ValidationLayersActivated <- Constants.Render.RenderDebug && validationLayerExists
@@ -903,7 +890,7 @@ type [<ReferenceEquality>] VulkanContext =
         commandPool
 
     /// Handle changes in window size, and check for minimization.
-    static member private handleWindowSize context =
+    static member private handleWindowSizing context =
         
         // query minimization status. This both detects the beginning of minimization and checks for the end.
         context.WaitingForWindowRestore_ <- Swapchain.getWindowMinimized ()
@@ -911,8 +898,9 @@ type [<ReferenceEquality>] VulkanContext =
         // update the swapchain if window is not minimized, which happens a) when the window size simply changes
         // and b) when minimization ends as detected above; must also check for backgrounding in case minimization
         // occurs first so backgrounding can still be handled straight away
-        if not context.WaitingForWindowRestore_ || Hl.getBackgroundingRequested ()
-        then Swapchain.update context.PhysicalDevice_ context.RenderQueue_ context.PresentQueue_ context.Swapchain_ context.Instance_
+        if  not context.WaitingForWindowRestore_ ||
+            Hl.getBackgroundingRequested () then
+            Swapchain.update context.PhysicalDevice_ context.RenderQueue_ context.PresentQueue_ context.Swapchain_ context.Instance_
 
     /// Wait for app to return to foreground.
     static member private handleBackgrounding context =
@@ -973,12 +961,8 @@ type [<ReferenceEquality>] VulkanContext =
     static member beginFrame (windowViewport : Viewport) context =
 
         // wait for current frame to be ready
-        //let sw = System.Diagnostics.Stopwatch.StartNew ()
         let mutable renderFence = context.RenderFence_
         DeviceApi.vkWaitForFences (1u, &&renderFence, true, UInt64.MaxValue) |> Hl.check
-
-        //sw.Stop ()
-        //Log.info ("Hl.awaitFence: " + string sw.ElapsedTicks)
 
         // reset render command buffers cursor
         context.RenderCommandBuffersCursor_ <- 0
@@ -988,34 +972,32 @@ type [<ReferenceEquality>] VulkanContext =
         if Option.isNone context.Swapchain_.SwapchainWrapperOpt then VulkanContext.handleBackgrounding context
         else
             // check for handling of minimized window from previous frame(s); if *still* minimized then do nothing; if restored then refresh swapchain
-            if context.WaitingForWindowRestore_ then VulkanContext.handleWindowSize context
+            if context.WaitingForWindowRestore_ then VulkanContext.handleWindowSizing context
             else
                 // check if app backgrounding has been triggered, if so then teardown the surface and swapchain
                 if Hl.getBackgroundingRequested () then Swapchain.update context.PhysicalDevice_ context.RenderQueue_ context.PresentQueue_ context.Swapchain_ context.Instance_
                 else
                     // check if screen *has become* minimized, if so then set WaitingForWindowRestore_ and don't render
-                    if Swapchain.getWindowMinimized () then VulkanContext.handleWindowSize context
+                    if Swapchain.getWindowMinimized () then VulkanContext.handleWindowSizing context
                     else
                         // check if screen size changed (or surface lost), if so then refresh swapchain
-                        if Swapchain.isWindowResizedOrSurfaceLost context.PhysicalDevice.VkPhysicalDevice context.Swapchain_ then VulkanContext.handleWindowSize context
+                        if Swapchain.isWindowResizedOrSurfaceLost context.PhysicalDevice.VkPhysicalDevice context.Swapchain_ then VulkanContext.handleWindowSizing context
                         else
                             // try to acquire image from swapchain to draw onto
                             // NOTE: due to semaphore flow, when this is successful, the render *must* proceed!
-                            //let sw = System.Diagnostics.Stopwatch.StartNew ()
-                            let result = DeviceApi.vkAcquireNextImageKHR (context.Swapchain_.VkSwapchain, UInt64.MaxValue, context.ImageAvailableSemaphore_, VkFence.Null, &Hl.ImageIndex)
-                            //sw.Stop ()
-                            //Log.info ("VulkanDevice.vkAcquireNextImageKHR: " + string sw.ElapsedTicks)
-                            match result with
+                            match DeviceApi.vkAcquireNextImageKHR (context.Swapchain_.VkSwapchain, UInt64.MaxValue, context.ImageAvailableSemaphore_, VkFence.Null, &Hl.ImageIndex) with
                             | VkResult.ErrorOutOfDateKHR ->
-                                VulkanContext.handleWindowSize context // refresh swapchain if out of date
+                                Log.info "Swapchain out of date; handling window sizing."
+                                VulkanContext.handleWindowSizing context // refresh swapchain if out of date
                             | VkResult.ErrorSurfaceLostKHR ->
+                                Log.info "Swapchain surface lost; updating swapchain."
                                 Hl.SurfaceState <- SurfaceLost
                                 Swapchain.update context.PhysicalDevice_ context.RenderQueue_ context.PresentQueue_ context.Swapchain_ context.Instance_
-                            | _ ->
+                            | result ->
                                 context.RenderAllowed_ <- true // permit rendering
                                 Hl.check result // NOTE: this will report a suboptimal swapchain image.
 
-        //
+        // set up rendering when permitted
         if context.RenderAllowed_ then
 
             // reset draw counters
@@ -1024,19 +1006,20 @@ type [<ReferenceEquality>] VulkanContext =
             // begin render command recording
             VulkanContext.beginRenderCommandBuffer context
 
-            // make swapchain image is ready to be rendered to
-            let renderArea = VkRect2D (0, 0, uint windowViewport.Bounds.Size.X, uint windowViewport.Bounds.Size.Y)
+            // make swapchain image ready for rendering
+            let renderArea = VkRect2D (windowViewport.Bounds.Min.X, windowViewport.Bounds.Min.Y, uint windowViewport.Bounds.Size.X, uint windowViewport.Bounds.Size.Y)
             let clearColor = VkClearValue (Constants.Render.WindowClearColor.R, Constants.Render.WindowClearColor.G, Constants.Render.WindowClearColor.B, Constants.Render.WindowClearColor.A)
-            let mutable renderingInfo = Hl.makeRenderingInfo [|context.SwapchainImageView|] None renderArea (Some clearColor)
             Hl.recordTransitionLayout true 1 0 1 VkImageAspectFlags.Color Undefined ColorAttachmentWrite context.SwapchainImage context.RenderCommandBuffer
-            DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
+            Hl.withRenderingInfo [|context.SwapchainImageView|] None renderArea (Some clearColor) $ fun renderingInfo ->
+                let mutable renderingInfo = renderingInfo
+                DeviceApi.vkCmdBeginRendering (context.RenderCommandBuffer, &&renderingInfo)
             DeviceApi.vkCmdEndRendering context.RenderCommandBuffer
             Hl.reportDrawScope ()
 
     /// End the frame.
     static member endFrame context =
 
-        //
+        // tear down rendering when rendering pemitted
         if context.RenderAllowed_ then
 
             // transition swapchain image layout to presentation
@@ -1052,7 +1035,7 @@ type [<ReferenceEquality>] VulkanContext =
     /// Present the image back to the swapchain to appear on screen.
     static member present (context : VulkanContext) =
 
-        //
+        // present the swapchain image when rendering permitted
         if context.RenderAllowed_ then
 
             // lock to get access to vulkan queue
@@ -1070,17 +1053,21 @@ type [<ReferenceEquality>] VulkanContext =
                     info.swapchainCount <- 1u
                     info.pSwapchains <- &&vkSwapchain
                     info.pImageIndices <- &&Hl.ImageIndex
-                    //let sw = System.Diagnostics.Stopwatch.StartNew ()
-                    //sw.Stop ()
-                    let result = DeviceApi.vkQueuePresentKHR (vkQueue, &&info)
-                    //Log.info ("VulkanDevice.vkQueuePresentKHR: " + string sw.ElapsedTicks)
-                    match result with
-                    | VkResult.ErrorOutOfDateKHR | VkResult.SuboptimalKHR ->
-                        VulkanContext.handleWindowSize context
+                    match DeviceApi.vkQueuePresentKHR (vkQueue, &&info) with
+                    | VkResult.ErrorOutOfDateKHR ->
+                        Log.info "Swapchain out of date; handling window sizing."
+                        VulkanContext.handleWindowSizing context
                     | VkResult.ErrorSurfaceLostKHR ->
+                        Log.info "Swapchain surface lost; updating swapchain."
                         Hl.SurfaceState <- SurfaceLost
                         Swapchain.update context.PhysicalDevice_ context.RenderQueue_ context.PresentQueue_ context.Swapchain_ context.Instance_
-                    | _ -> Hl.check result
+                    | VkResult.SuboptimalKHR ->
+                        // NOTE: commented this code out because it always happens on Android because we haven't yet
+                        // implemented support for pre-transform as described in - https://github.com/bryanedds/Nu/issues/1380
+                        //Log.info "Swapchain suboptimal; handling window sizing."
+                        //VulkanContext.handleWindowSizing context
+                        ()
+                    | result -> Hl.check result
 
                 // still need to update the swapchain even if we haven't rendered
                 else Swapchain.update context.PhysicalDevice_ context.RenderQueue_ context.PresentQueue_ context.Swapchain_ context.Instance_)

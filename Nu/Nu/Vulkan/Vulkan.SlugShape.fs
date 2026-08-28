@@ -525,8 +525,9 @@ module SlugShape =
                     ComputePipeline.dispatch commandBuffer groups 1u 1u env.ComputePipeline
                     Hl.recordComputeWritesToGraphics commandBuffer layerBuffer
                 let mutable vkViewport = Hl.makeViewport true renderArea
-                let mutable renderingInfo = Hl.makeRenderingInfo [|context.SwapchainImageView|] None renderArea None
-                DeviceApi.vkCmdBeginRendering (commandBuffer, &&renderingInfo)
+                Hl.withRenderingInfo [|context.SwapchainImageView|] None renderArea None $ fun renderingInfo ->
+                    let mutable renderingInfo = renderingInfo
+                    DeviceApi.vkCmdBeginRendering (commandBuffer, &&renderingInfo)
                 DeviceApi.vkCmdSetViewport (commandBuffer, 0u, 1u, &&vkViewport)
                 DeviceApi.vkCmdSetScissor (commandBuffer, 0u, 1u, &&scissor)
                 DeviceApi.vkCmdBindPipeline (commandBuffer, VkPipelineBindPoint.Graphics, vkPipeline)

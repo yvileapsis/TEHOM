@@ -48,14 +48,7 @@ module WorldModule2 =
 
         /// Set whether the world state is advancing.
         static member setAdvancing advancing (world : World) =
-            if world.ContextImSim.Names.Length = 0 then
-                World.defer (World.mapAmbientState (AmbientState.setAdvancing advancing)) Nu.Game.Handle world
-            else
-
-                // HACK: in order to avoid unintentional interaction with the ImSim hack that clears and restores
-                // advancement state ImSim contexts, we schedule the advancement change outside of the normal workflow.
-                let time = if WorldModuleInternal.EndFrameProcessingStarted && world.Advancing then GameTime.epsilon else GameTime.zero
-                World.addTasklet Nu.Game.Handle { ScheduledTime = time; ScheduledOp = World.mapAmbientState (AmbientState.setAdvancing advancing) } world
+            World.mapAmbientState (AmbientState.setAdvancing advancing) world
 
         /// Select the given screen without transitioning, even if another transition is taking place.
         static member internal selectScreenOpt transitionStateAndScreenOpt world =
@@ -1733,19 +1726,19 @@ module WorldModule2 =
                                 | Omnipresent -> true
                             if shadowInView then
                                 let distanceSquared = eyeCenter.DistanceSquared (light.GetPosition world)
-                                struct (distanceSquared, struct (shadowFrustum, light))|]
+                                (distanceSquared :> IComparable, (shadowFrustum, light))|] // OPTIMIZATION: boxing here to avoid it downstream.
 
                 // sort shadow pass descriptors
                 let shadowPassDescriptors =
                     shadowPassDescriptorsSortable
-                    |> Array.sortBy fst'
-                    |> Array.map snd'
+                    |> Array.sortWith (fun (frustum, _) (frustum2, _) -> frustum.CompareTo frustum2)
+                    |> Array.map snd
 
                 // render simulant shadows
                 let mutable shadowTexturesCount = 0
                 let mutable shadowMapsCount = 0
                 let mutable shadowCascadesCount = 0
-                for struct (shadowFrustum, light : Entity) in shadowPassDescriptors do
+                for (shadowFrustum, light : Entity) in shadowPassDescriptors do
                     let lightType = light.GetLightType world
                     let dynamicShadows = light.GetDynamicShadows world
                     match lightType with
