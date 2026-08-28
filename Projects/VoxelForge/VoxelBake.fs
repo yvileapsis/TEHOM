@@ -347,7 +347,7 @@ module VoxelBake =
     let chunkModelFromOccupied (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (occupied : Dictionary<Vector3i, Color>) (chunkCoord : Vector3i) =
         let tryGetCell coord =
             match occupied.TryGetValue coord with
-            | (true, albedo) -> ValueSome { Albedo = albedo; Solid = true; Material = Crafted }
+            | (true, albedo) -> ValueSome { Albedo = albedo; Solid = true; Material = Concrete }
             | (false, _) -> ValueNone
         chunkModelFromCells chunkSize bounds voxelSize tryGetCell chunkCoord
 
@@ -436,7 +436,7 @@ module VoxelBake =
     let chunkBodyShapeFromOccupied (chunkSize : Vector3i) (bounds : Box3) (voxelSize : Vector3) (occupied : Dictionary<Vector3i, Color>) (chunkCoord : Vector3i) =
         let tryGetCell coord =
             match occupied.TryGetValue coord with
-            | (true, albedo) -> Some { Albedo = albedo; Solid = true; Material = Crafted }
+            | (true, albedo) -> Some { Albedo = albedo; Solid = true; Material = Concrete }
             | (false, _) -> None
         chunkBodyShapeFromCells chunkSize bounds voxelSize tryGetCell chunkCoord
 

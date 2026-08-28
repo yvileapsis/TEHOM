@@ -3,26 +3,4 @@
   [Name Scene]
   [Persistent True]
   [Visible True]]
- [[SkyBoxDispatcher
-   [[AmbientBrightness 0.5]
-    [Name SkyBox]
-    [Position [0 -2.5 0]]]
-   []]
-  [Light3dDispatcher
-   [[LightCutoff 8]
-    [LightType [DirectionalLight 0]]
-    [Name Light3d]
-    [Position [0 2.5 0]]
-    [Presence Omnipresent]]
-   []]
-  [LightProbe3dDispatcher
-   [[AmbientBrightness 0.5]
-    [AmbientColor [1 1 1 1]]
-    [Name LightProbe3d]
-    [Position [0 8 0]]
-    [Presence Omnipresent]
-    [ProbeBounds
-     [[-9 -1 -9] [18 18 18]]]
-    [Size [0.25 0.25 0.25]]
-    [Static True]]
-   []]]]
+[]]

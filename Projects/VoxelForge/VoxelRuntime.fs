@@ -42,7 +42,7 @@ module VoxelRuntime =
         | EmptyShape -> EmptyShape
 
     let chunkAssetTag (chunkCoord : Vector3i) revision =
-        Assets.Voxels.MinecraftLevelChunkRevision chunkCoord.X chunkCoord.Y chunkCoord.Z revision
+        Assets.Voxels.FacilityLevelChunkRevision chunkCoord.X chunkCoord.Y chunkCoord.Z revision
 
     let sortVoxelChunks chunks =
         chunks
@@ -210,31 +210,41 @@ module VoxelRuntime =
                     else ValueNone)
         else None
 
+    let private materialForcesBlockCollision material =
+        match material with
+        | SpalledConcrete | FluorescentFixture | PipeAssembly -> true
+        | _ -> false
+
     let private blockHasCollision (tryGetCell : Vector3i -> VoxelCell voption) (level : VoxelLevel) (blockCoord : Vector3i) =
         let side = max 1 level.BlockSideVoxels
         let solidTarget =
             max 1 (int (MathF.Ceiling (single (side * side * side) * collisionSolidThreshold)))
         let start = VoxelWorld.blockStartCoord level blockCoord
         let mutable solidCount = 0
+        let mutable forcedCollision = false
         let mutable y = 0
-        while solidCount < solidTarget && y < side do
+        while not forcedCollision && solidCount < solidTarget && y < side do
             let mutable z = 0
-            while solidCount < solidTarget && z < side do
+            while not forcedCollision && solidCount < solidTarget && z < side do
                 let mutable x = 0
-                while solidCount < solidTarget && x < side do
+                while not forcedCollision && solidCount < solidTarget && x < side do
                     match tryGetCell (v3i (start.X + x) (start.Y + y) (start.Z + z)) with
-                    | ValueSome cell when cell.Solid -> solidCount <- inc solidCount
+                    | ValueSome cell when cell.Solid ->
+                        solidCount <- inc solidCount
+                        forcedCollision <- materialForcesBlockCollision cell.Material
                     | ValueSome _ | ValueNone -> ()
                     x <- inc x
                 z <- inc z
             y <- inc y
-        solidCount >= solidTarget
+        forcedCollision || solidCount >= solidTarget
 
     let private isOpaqueCell (cell : VoxelCell) =
         cell.Solid &&
         match cell.Material with
-        | Grass | Dirt | Stone | Sand | Wood | Ore | Brick | Crafted -> true
-        | Leaves | Glass | Water | Lava -> false
+        | Concrete | SpalledConcrete | Ceramic | Enamel | CeilingPanel | ServiceMetal | StairTread | StairRail
+        | ContainmentBrick | HydroponicBed | Terminal | WoodVeneer | Upholstery | MachineCasing
+        | HazardStripe | InstrumentPanel -> true
+        | ReinforcedGlass | Vegetation | ProcessWater | FluorescentFixture | PipeAssembly | FacilityPlacard -> false
 
 
     let private isLocalBlockCoord (side : int) (coord : Vector3i) =
@@ -328,7 +338,10 @@ module VoxelRuntime =
                     blockFaceOpaqueInTemplate side template 4 &&
                     blockFaceOpaqueInTemplate side template 5
                 { SurfaceVoxels = surfaceVoxels.ToArray ()
-                  HasCollision = template.Solid && template.Voxels.Length >= solidTarget
+                  HasCollision =
+                    template.Solid &&
+                    (template.Voxels.Length >= solidTarget ||
+                     materialForcesBlockCollision template.Material)
                   OpaqueOccluder = opaqueOccluder }))
 
     let private blockFaceOpaque (tryGetCell : Vector3i -> VoxelCell voption) (level : VoxelLevel) (blockCoord : Vector3i) faceIndex =
@@ -888,7 +901,7 @@ module VoxelRuntime =
                         let voxels = Array.zeroCreate<struct (Vector3i * VoxelCell)> cells.Count
                         let mutable i = 0
                         let mutable solid = false
-                        let mutable material = Crafted
+                        let mutable material = Concrete
                         let mutable first = true
                         for entry in cells do
                             let cell = entry.Value
@@ -960,7 +973,7 @@ module VoxelRuntime =
         tryBuildChunkWithCellLookup level tryGetCell chunkCoord
 
     let private chunkBuildCacheMagic = "VFCB"
-    let private chunkBuildCacheVersion = 9
+    let private chunkBuildCacheVersion = 31
     let private chunkBuildCacheMaxBytes = 8L * 1024L * 1024L * 1024L
     let private chunkBuildCacheTrimEvery = 64
     let private chunkBuildCacheTrimLock = obj ()
@@ -1014,13 +1027,9 @@ module VoxelRuntime =
                    string level.BlockGridOffsetVoxels.X; string level.BlockGridOffsetVoxels.Y; string level.BlockGridOffsetVoxels.Z
                    string level.VoxelSize.X; string level.VoxelSize.Y; string level.VoxelSize.Z
                    string generation.Seed
-                   string generation.SeaLevelBlocks
-                   string generation.LavaLevelBlocks
-                   string generation.TerrainScale
-                   string generation.MountainStrength
-                   string generation.CaveThreshold
-                   string generation.OreRate
-                   string generation.TreeRate|])
+                   string generation.FacilityFloorHeight
+                   string generation.FacilityModulePitch
+                   string generation.FacilityCorridorWidth|])
         | None -> String.Empty
 
     let private safePathPart (value : string) =

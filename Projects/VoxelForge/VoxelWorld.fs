@@ -7,18 +7,39 @@ open Prime
 open Nu
 
 type VoxelMaterialKind =
-    | Grass
-    | Dirt
-    | Stone
-    | Sand
-    | Wood
-    | Leaves
-    | Glass
-    | Water
-    | Lava
-    | Ore
-    | Brick
-    | Crafted
+    | Concrete
+    | SpalledConcrete
+    | Ceramic
+    | Enamel
+    | CeilingPanel
+    | ReinforcedGlass
+    | ServiceMetal
+    | StairTread
+    | StairRail
+    | ContainmentBrick
+    | HydroponicBed
+    | Vegetation
+    | ProcessWater
+    | Terminal
+    | WoodVeneer
+    | Upholstery
+    | MachineCasing
+    | HazardStripe
+    | FluorescentFixture
+    | PipeAssembly
+    | InstrumentPanel
+    | FacilityPlacard
+
+type FacilityZone =
+    | Administration
+    | Research
+    | Hydroponics
+    | Utilities
+    | Auditorium
+    | Containment
+    | Atrium
+    | Pool
+    | Decontamination
 
 type VoxelCell =
     { Albedo : Color
@@ -96,25 +117,34 @@ type VoxelBlockTemplate =
       Cells : Dictionary<Vector3i, VoxelCell> }
 
 type VoxelGeneratedTemplates =
-    { Grass : VoxelBlockTemplate
-      Dirt : VoxelBlockTemplate
-      Stone : VoxelBlockTemplate
-      Sand : VoxelBlockTemplate
-      Log : VoxelBlockTemplate
-      Leaves : VoxelBlockTemplate
-      Water : VoxelBlockTemplate
-      Ore : VoxelBlockTemplate
-      Lava : VoxelBlockTemplate }
+    { Concrete : VoxelBlockTemplate
+      SpalledConcrete : VoxelBlockTemplate
+      Ceramic : VoxelBlockTemplate
+      Enamel : VoxelBlockTemplate
+      CeilingPanel : VoxelBlockTemplate
+      ReinforcedGlass : VoxelBlockTemplate
+      ServiceMetal : VoxelBlockTemplate
+      ContainmentBrick : VoxelBlockTemplate
+      StairTread : VoxelBlockTemplate
+      StairRail : VoxelBlockTemplate
+      HydroponicBed : VoxelBlockTemplate
+      Vegetation : VoxelBlockTemplate
+      ProcessWater : VoxelBlockTemplate
+      Terminal : VoxelBlockTemplate
+      WoodVeneer : VoxelBlockTemplate
+      Upholstery : VoxelBlockTemplate
+      MachineCasing : VoxelBlockTemplate
+      HazardStripe : VoxelBlockTemplate
+      FluorescentFixture : VoxelBlockTemplate
+      PipeAssembly : VoxelBlockTemplate
+      InstrumentPanel : VoxelBlockTemplate
+      FacilityPlacard : VoxelBlockTemplate }
 
 type VoxelGeneration =
     { Seed : int
-      SeaLevelBlocks : int
-      LavaLevelBlocks : int
-      TerrainScale : single
-      MountainStrength : single
-      CaveThreshold : single
-      OreRate : single
-      TreeRate : single
+      FacilityFloorHeight : int
+      FacilityModulePitch : int
+      FacilityCorridorWidth : int
       Templates : VoxelGeneratedTemplates }
 
 type VoxelEditSnapshot =
@@ -159,21 +189,15 @@ type WorldGenSettings =
       BlockSideVoxels : int
       BlockGridOffsetVoxels : Vector3i
       VoxelSize : Vector3
-      SeaLevelBlocks : int
-      LavaLevelBlocks : int
-      TerrainScale : single
-      MountainStrength : single
-      CaveThreshold : single
-      OreRate : single
-      TreeRate : single
+      FacilityFloorHeight : int
+      FacilityModulePitch : int
+      FacilityCorridorWidth : int
       ChunksPerUpdate : int }
 
 type GeneratedWorldStats =
-    { SourceVoxelCount : int
-      SolidVoxelCount : int
-      FluidVoxelCount : int
-      TreeCount : int
-      OreVoxelCount : int
+    { FacilityModuleCount : int
+      FacilityFloorCount : int
+      TerminalCount : int
       ChunkCount : int
       BodyShapeCount : int }
 
@@ -188,21 +212,17 @@ module WorldGenSettings =
 
     let defaultSettings =
         { Seed = 8675309
-          WorldSizeBlocks = v3i 1024 16 1024
+          WorldSizeBlocks = v3i 1536 20 640
           ActiveBlockOrigin = v3i -1 0 -1
-          ChunkCounts = v3i 256 4 256
+          ChunkCounts = v3i 384 5 160
           ChunkSizeVoxels = v3i 64 64 64
           BlockSideVoxels = 16
           BlockGridOffsetVoxels = v3iZero
           VoxelSize = v3Dup (1.0f / 16.0f)
-          SeaLevelBlocks = 6
-          LavaLevelBlocks = 2
-          TerrainScale = 0.135f
-          MountainStrength = 0.85f
-          CaveThreshold = 0.70f
-          OreRate = 0.035f
-          TreeRate = 0.025f
-          ChunksPerUpdate = 32 }
+          FacilityFloorHeight = 4
+          FacilityModulePitch = 16
+          FacilityCorridorWidth = 3
+          ChunksPerUpdate = 16 }
 
 [<RequireQualifiedAccess>]
 module VoxelWorld =
@@ -595,58 +615,16 @@ module VoxelWorld =
         h <- h * 1274126177u
         h ^^^ (h >>> 16)
 
-    let private hash01 seed x y z =
-        single (hash3 seed x y z &&& 0x00FFFFFFu) / single 0x01000000
+    let private hashPercent seed x y z =
+        int (hash3 seed x y z % 100u)
 
-    let private fade t =
-        t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f)
+    let private positiveRemainder value divisor =
+        let remainder = value % divisor
+        if remainder < 0 then remainder + divisor else remainder
 
-    let private lerp a b t =
-        a + (b - a) * t
-
-    let private valueNoise3 seed x y z =
-        let xi = int (MathF.Floor x)
-        let yi = int (MathF.Floor y)
-        let zi = int (MathF.Floor z)
-        let tx = fade (x - single xi)
-        let ty = fade (y - single yi)
-        let tz = fade (z - single zi)
-        let c000 = hash01 seed xi yi zi
-        let c100 = hash01 seed (xi + 1) yi zi
-        let c010 = hash01 seed xi (yi + 1) zi
-        let c110 = hash01 seed (xi + 1) (yi + 1) zi
-        let c001 = hash01 seed xi yi (zi + 1)
-        let c101 = hash01 seed (xi + 1) yi (zi + 1)
-        let c011 = hash01 seed xi (yi + 1) (zi + 1)
-        let c111 = hash01 seed (xi + 1) (yi + 1) (zi + 1)
-        let x00 = lerp c000 c100 tx
-        let x10 = lerp c010 c110 tx
-        let x01 = lerp c001 c101 tx
-        let x11 = lerp c011 c111 tx
-        let y0 = lerp x00 x10 ty
-        let y1 = lerp x01 x11 ty
-        lerp y0 y1 tz
-
-    let private fbm3 seed octaves x y z =
-        let mutable amplitude = 1.0f
-        let mutable frequency = 1.0f
-        let mutable total = 0.0f
-        let mutable value = 0.0f
-        for octave in 0 .. dec octaves do
-            value <- value + valueNoise3 (seed + octave * 1013) (x * frequency) (y * frequency) (z * frequency) * amplitude
-            total <- total + amplitude
-            amplitude <- amplitude * 0.5f
-            frequency <- frequency * 2.0f
-        if total > 0.0f then value / total else 0.0f
-
-    let private fbm2 seed octaves x z =
-        fbm3 seed octaves x 0.0f z
-
-    let private ridged2 seed octaves x z =
-        1.0f - abs (fbm2 seed octaves x z * 2.0f - 1.0f)
-
-    let private ridged3 seed octaves x y z =
-        1.0f - abs (fbm3 seed octaves x y z * 2.0f - 1.0f)
+    let private floorDivide value divisor =
+        let quotient = value / divisor
+        if value < 0 && value % divisor <> 0 then dec quotient else quotient
 
     let generatedBlockCounts (level : VoxelLevel) =
         let side = max 1 level.BlockSideVoxels
@@ -655,139 +633,696 @@ module VoxelWorld =
             (max 1 ((level.SourceSizeVoxels.Y - level.BlockGridOffsetVoxels.Y) / side))
             (max 1 ((level.SourceSizeVoxels.Z - level.BlockGridOffsetVoxels.Z * 2) / side))
 
-    let generatedHeightAt (level : VoxelLevel) (generation : VoxelGeneration) (x : int) (z : int) =
-        let macroCounts = generatedBlockCounts level
-        let worldBlockCoord = blockCoordToWorldBlockCoord level (v3i x 0 z)
-        let nx = single worldBlockCoord.X * generation.TerrainScale
-        let nz = single worldBlockCoord.Z * generation.TerrainScale
-        let warpX = (fbm2 (generation.Seed + 17) 3 (nx * 0.45f) (nz * 0.45f) - 0.5f) * 1.8f
-        let warpZ = (fbm2 (generation.Seed + 23) 3 (nx * 0.45f + 19.0f) (nz * 0.45f - 7.0f) - 0.5f) * 1.8f
-        let baseNoise = fbm2 generation.Seed 5 (nx + warpX) (nz + warpZ)
-        let mountainNoise = ridged2 (generation.Seed + 41) 4 (nx * 0.55f - warpZ) (nz * 0.55f + warpX)
-        let centerX = single level.WorldSizeBlocks.X * 0.5f
-        let centerZ = single level.WorldSizeBlocks.Z * 0.5f
-        let edgeX = abs (single worldBlockCoord.X - centerX) / max 1.0f centerX
-        let edgeZ = abs (single worldBlockCoord.Z - centerZ) / max 1.0f centerZ
-        let edgeFalloff = 1.0f - clamp01 ((max edgeX edgeZ - 0.72f) / 0.28f)
-        let height =
-            single generation.SeaLevelBlocks +
-            (baseNoise - 0.38f) * 5.0f +
-            mountainNoise * generation.MountainStrength * 4.0f
-        int (MathF.Round height) |> max 2 |> min (macroCounts.Y - 3) |> fun value -> int (single value * edgeFalloff + single generation.SeaLevelBlocks * (1.0f - edgeFalloff))
+    let private facilityModuleCoord (generation : VoxelGeneration) (worldBlockCoord : Vector3i) =
+        let pitch = max 8 generation.FacilityModulePitch
+        v3i
+            (floorDivide worldBlockCoord.X pitch)
+            (worldBlockCoord.Y / max 3 generation.FacilityFloorHeight)
+            (floorDivide worldBlockCoord.Z pitch)
 
-    let private chooseTerrainTemplate (generation : VoxelGeneration) (worldX : int) (worldY : int) (worldZ : int) (localY : int) (height : int) =
-        let templates = generation.Templates
-        if localY = height then
-            if height <= generation.SeaLevelBlocks + 1 then templates.Sand else templates.Grass
-        elif localY >= height - 2 then templates.Dirt
+    let private facilitySuperCoord (generation : VoxelGeneration) (worldBlockCoord : Vector3i) =
+        let superPitch = max 16 generation.FacilityModulePitch * 2
+        let floorHeight = max 3 generation.FacilityFloorHeight
+        v3i
+            (floorDivide worldBlockCoord.X superPitch)
+            ((worldBlockCoord.Y / floorHeight) / 2)
+            (floorDivide worldBlockCoord.Z superPitch)
+    let private dnaCourtyardCount = 3
+    let private dnaSegmentCount = dnaCourtyardCount * 2
+    let private dnaDistrictCount = 4
+
+    let private facilityDnaParameters (level : VoxelLevel) (generation : VoxelGeneration) =
+        let counts = generatedBlockCounts level
+        let superPitch = max 16 generation.FacilityModulePitch * 2
+        let marginX = max (superPitch * 7) (counts.X / 9)
+        let startX = level.ActiveBlockOrigin.X + marginX
+        let endX = level.ActiveBlockOrigin.X + counts.X - marginX
+        let segmentPitch = max (superPitch * 4) ((endX - startX) / dnaSegmentCount)
+        let centerZ = level.ActiveBlockOrigin.Z + counts.Z / 2
+        let strandHalfWidth = max 8 (min superPitch (counts.Z / 16))
+        let maximumOffset = max (strandHalfWidth + 2) (counts.Z / 2 - strandHalfWidth - 1)
+        let strandOffset = min (superPitch * 5) maximumOffset
+        let strandAmplitude =
+            max 0 (min (superPitch * 2) (strandOffset - strandHalfWidth * 2))
+        struct (startX, endX, segmentPitch, centerZ, strandHalfWidth, strandOffset, strandAmplitude)
+
+    let private facilityDnaVertexZ centerZ strandOffset strandAmplitude upper vertex =
+        let deviation = if vertex % 2 = 0 then -strandAmplitude else strandAmplitude
+        if upper
+        then centerZ + strandOffset + deviation
+        else centerZ - strandOffset - deviation
+
+    let private pointSegmentDistanceSquared px pz ax az bx bz =
+        let dx = single (bx - ax)
+        let dz = single (bz - az)
+        let lengthSquared = dx * dx + dz * dz
+        if lengthSquared <= 0.0f then
+            let ox = single (px - ax)
+            let oz = single (pz - az)
+            ox * ox + oz * oz
         else
-            let oreNoise = hash01 (generation.Seed + 79) worldX worldY worldZ
-            if localY < generation.SeaLevelBlocks + 4 && oreNoise < generation.OreRate then templates.Ore
-            else templates.Stone
+            let t =
+                Math.Clamp
+                    ((single (px - ax) * dx + single (pz - az) * dz) / lengthSquared,
+                     0.0f,
+                     1.0f)
+            let ox = single px - (single ax + dx * t)
+            let oz = single pz - (single az + dz * t)
+            ox * ox + oz * oz
 
-    let private hasTreeAt (level : VoxelLevel) (generation : VoxelGeneration) (x : int) (z : int) =
-        let macroCounts = generatedBlockCounts level
-        if x > 0 && z > 0 && x < dec macroCounts.X && z < dec macroCounts.Z then
-            let height = generatedHeightAt level generation x z
-            let worldBlockCoord = blockCoordToWorldBlockCoord level (v3i x height z)
-            height > generation.SeaLevelBlocks + 1 &&
-            height + 5 < macroCounts.Y &&
-            hash01 (generation.Seed + 307) worldBlockCoord.X worldBlockCoord.Y worldBlockCoord.Z < generation.TreeRate &&
-            worldBlockCoord.X % 3 <> 1 &&
-            worldBlockCoord.Z % 3 <> 1
-        else false
-
-    let private tryTreeTemplateAt (level : VoxelLevel) (generation : VoxelGeneration) (blockCoord : Vector3i) =
-        let templates = generation.Templates
-        let height = generatedHeightAt level generation blockCoord.X blockCoord.Z
-        if hasTreeAt level generation blockCoord.X blockCoord.Z &&
-           blockCoord.Y >= height + 1 &&
-           blockCoord.Y <= height + 3 then Some templates.Log
+    let private facilityDnaContainsWorld
+        (level : VoxelLevel)
+        (generation : VoxelGeneration)
+        (worldBlockCoord : Vector3i) =
+        let struct (startX, endX, segmentPitch, centerZ, strandHalfWidth, strandOffset, strandAmplitude) =
+            facilityDnaParameters level generation
+        let radiusSquared = single (strandHalfWidth * strandHalfWidth)
+        let mutable inside = false
+        let mutable segment = 0
+        while not inside && segment < dnaSegmentCount do
+            let leftX = startX + segment * segmentPitch
+            let rightX = if segment = dec dnaSegmentCount then endX else startX + inc segment * segmentPitch
+            let upperLeftZ =
+                facilityDnaVertexZ centerZ strandOffset strandAmplitude true segment
+            let upperRightZ =
+                facilityDnaVertexZ centerZ strandOffset strandAmplitude true (inc segment)
+            let lowerLeftZ =
+                facilityDnaVertexZ centerZ strandOffset strandAmplitude false segment
+            let lowerRightZ =
+                facilityDnaVertexZ centerZ strandOffset strandAmplitude false (inc segment)
+            inside <-
+                pointSegmentDistanceSquared
+                    worldBlockCoord.X worldBlockCoord.Z
+                    leftX upperLeftZ rightX upperRightZ <= radiusSquared ||
+                pointSegmentDistanceSquared
+                    worldBlockCoord.X worldBlockCoord.Z
+                    leftX lowerLeftZ rightX lowerRightZ <= radiusSquared
+            segment <- inc segment
+        if inside then true
         else
-            let mutable templateOpt = None
-            let mutable dz = -2
-            while templateOpt.IsNone && dz <= 2 do
-                let mutable dx = -2
-                while templateOpt.IsNone && dx <= 2 do
-                    let treeX = blockCoord.X - dx
-                    let treeZ = blockCoord.Z - dz
-                    if hasTreeAt level generation treeX treeZ then
-                        let treeHeight = generatedHeightAt level generation treeX treeZ
-                        let dy = blockCoord.Y - treeHeight
-                        if dy >= 3 && dy <= 5 then
-                            let radius = if dy = 5 then 1 else 2
-                            if abs dx + abs dz <= radius + 1 then templateOpt <- Some templates.Leaves
-                    dx <- inc dx
-                dz <- inc dz
-            templateOpt
+            let connectorHalfWidth = strandHalfWidth
+            let connectorRadiusSquared = single (connectorHalfWidth * connectorHalfWidth)
+            let mutable atConnector = false
+            let mutable courtyard = 0
+            while not atConnector && courtyard <= dnaCourtyardCount do
+                let vertex = courtyard * 2
+                let connectorX =
+                    if vertex = dnaSegmentCount then endX
+                    else startX + vertex * segmentPitch
+                let upperZ =
+                    facilityDnaVertexZ centerZ strandOffset strandAmplitude true vertex
+                let lowerZ =
+                    facilityDnaVertexZ centerZ strandOffset strandAmplitude false vertex
+                atConnector <-
+                    pointSegmentDistanceSquared
+                        worldBlockCoord.X worldBlockCoord.Z
+                        connectorX lowerZ connectorX upperZ <= connectorRadiusSquared
+                courtyard <- inc courtyard
+            if atConnector then true
+            else
+                let leftEndZ =
+                    facilityDnaVertexZ centerZ strandOffset strandAmplitude false 0
+                let rightEndZ =
+                    facilityDnaVertexZ centerZ strandOffset strandAmplitude true dnaSegmentCount
+                let terminalRadiusSquared =
+                    single (strandHalfWidth * 2 * (strandHalfWidth * 2))
+                let leftTerminal =
+                    pointSegmentDistanceSquared
+                        worldBlockCoord.X worldBlockCoord.Z
+                        (startX - strandHalfWidth * 4) leftEndZ
+                        startX leftEndZ <= terminalRadiusSquared
+                let rightTerminal =
+                    pointSegmentDistanceSquared
+                        worldBlockCoord.X worldBlockCoord.Z
+                        endX rightEndZ
+                        (endX + strandHalfWidth * 3) rightEndZ <= terminalRadiusSquared
+                leftTerminal || rightTerminal
 
-    let private generatedBlockRemovedByCave (level : VoxelLevel) (generation : VoxelGeneration) (blockCoord : Vector3i) (template : VoxelBlockTemplate) =
-        if template.Solid && template.Material <> Wood && template.Material <> Leaves then
-            let blockCounts = generatedBlockCounts level
-            let sourceCenter = v3 (single blockCounts.X * 0.5f) 0.0f (single blockCounts.Z * 0.5f)
-            let horizontal = v3 (single blockCoord.X) 0.0f (single blockCoord.Z) - sourceCenter
-            let spawnSafe = horizontal.LengthSquared () < 9.0f && blockCoord.Y < generation.SeaLevelBlocks + 4
-            let caveCeiling = generation.SeaLevelBlocks + 8
-            if not spawnSafe && blockCoord.Y < caveCeiling then
-                let worldBlockCoord = blockCoordToWorldBlockCoord level blockCoord
-                let scale = 0.18f
-                let density =
-                    fbm3 (generation.Seed + 131) 4 (single worldBlockCoord.X * scale) (single worldBlockCoord.Y * scale * 1.25f) (single worldBlockCoord.Z * scale) * 0.62f +
-                    ridged3 (generation.Seed + 197) 3 (single worldBlockCoord.X * scale * 1.75f) (single worldBlockCoord.Y * scale) (single worldBlockCoord.Z * scale * 1.75f) * 0.38f
-                let depthGate = clamp01 (single (caveCeiling - blockCoord.Y) / 7.0f)
-                density * depthGate > generation.CaveThreshold
-            else false
-        else false
+    let facilityFootprintContains (level : VoxelLevel) (generation : VoxelGeneration) (blockCoord : Vector3i) =
+        facilityDnaContainsWorld level generation (blockCoordToWorldBlockCoord level blockCoord)
+
+    let private facilityDnaSpineContainsWorld
+        (level : VoxelLevel)
+        (generation : VoxelGeneration)
+        corridorHalfWidth
+        (worldBlockCoord : Vector3i) =
+        let struct (startX, endX, segmentPitch, centerZ, _, strandOffset, strandAmplitude) =
+            facilityDnaParameters level generation
+        let radiusSquared = single (corridorHalfWidth * corridorHalfWidth)
+        let mutable inside = false
+        let mutable segment = 0
+        while not inside && segment < dnaSegmentCount do
+            let leftX = startX + segment * segmentPitch
+            let rightX = if segment = dec dnaSegmentCount then endX else startX + inc segment * segmentPitch
+            let upperLeftZ =
+                facilityDnaVertexZ centerZ strandOffset strandAmplitude true segment
+            let upperRightZ =
+                facilityDnaVertexZ centerZ strandOffset strandAmplitude true (inc segment)
+            let lowerLeftZ =
+                facilityDnaVertexZ centerZ strandOffset strandAmplitude false segment
+            let lowerRightZ =
+                facilityDnaVertexZ centerZ strandOffset strandAmplitude false (inc segment)
+            inside <-
+                pointSegmentDistanceSquared
+                    worldBlockCoord.X worldBlockCoord.Z
+                    leftX upperLeftZ rightX upperRightZ <= radiusSquared ||
+                pointSegmentDistanceSquared
+                    worldBlockCoord.X worldBlockCoord.Z
+                    leftX lowerLeftZ rightX lowerRightZ <= radiusSquared
+            segment <- inc segment
+        if inside then true
+        else
+            let mutable atConnector = false
+            let mutable courtyard = 0
+            while not atConnector && courtyard <= dnaCourtyardCount do
+                let vertex = courtyard * 2
+                let connectorX =
+                    if vertex = dnaSegmentCount then endX
+                    else startX + vertex * segmentPitch
+                let upperZ =
+                    facilityDnaVertexZ centerZ strandOffset strandAmplitude true vertex
+                let lowerZ =
+                    facilityDnaVertexZ centerZ strandOffset strandAmplitude false vertex
+                atConnector <-
+                    pointSegmentDistanceSquared
+                        worldBlockCoord.X worldBlockCoord.Z
+                        connectorX lowerZ connectorX upperZ <= radiusSquared
+                courtyard <- inc courtyard
+            atConnector
+
+    let private facilityDnaSpineBoundary
+        (level : VoxelLevel)
+        (generation : VoxelGeneration)
+        corridorHalfWidth
+        (worldBlockCoord : Vector3i) =
+        facilityDnaSpineContainsWorld level generation corridorHalfWidth worldBlockCoord &&
+        (not (facilityDnaSpineContainsWorld level generation corridorHalfWidth (worldBlockCoord + v3iLeft)) ||
+         not (facilityDnaSpineContainsWorld level generation corridorHalfWidth (worldBlockCoord + v3iRight)) ||
+         not (facilityDnaSpineContainsWorld level generation corridorHalfWidth (worldBlockCoord + v3iForward)) ||
+         not (facilityDnaSpineContainsWorld level generation corridorHalfWidth (worldBlockCoord + v3iBack)))
+
+    let private facilityDnaCellIndex (level : VoxelLevel) (generation : VoxelGeneration) worldX =
+        let struct (startX, endX, _, _, _, _, _) = facilityDnaParameters level generation
+        let span = max 1 (endX - startX)
+        Math.Clamp (floorDivide ((worldX - startX) * dnaDistrictCount) span, 0, dec dnaDistrictCount)
+
+    let private facilityDnaCourtyardSide
+        (level : VoxelLevel)
+        (generation : VoxelGeneration)
+        (worldBlockCoord : Vector3i) =
+        let struct (startX, endX, _, centerZ, _, strandOffset, _) = facilityDnaParameters level generation
+        worldBlockCoord.X > startX &&
+        worldBlockCoord.X < endX &&
+        abs (worldBlockCoord.Z - centerZ) < strandOffset
+
+    let private facilityDnaBoundary
+        (level : VoxelLevel)
+        (generation : VoxelGeneration)
+        (worldBlockCoord : Vector3i) =
+        let outside offset =
+            not (facilityDnaContainsWorld level generation (worldBlockCoord + offset))
+        outside v3iLeft || outside v3iRight || outside v3iForward || outside v3iBack
+
+    let facilityZoneAt (level : VoxelLevel) (generation : VoxelGeneration) (blockCoord : Vector3i) =
+        let worldBlockCoord = blockCoordToWorldBlockCoord level blockCoord
+        let superCoord = facilitySuperCoord generation worldBlockCoord
+        let counts = generatedBlockCounts level
+        let centerWorld = level.ActiveBlockOrigin + v3i (counts.X / 2 + 1) 0 (counts.Z / 2 + 1)
+        let centerSuper = facilitySuperCoord generation centerWorld
+        if superCoord.X = centerSuper.X && superCoord.Z = centerSuper.Z && superCoord.Y = 0 then Research
+        elif superCoord.X = centerSuper.X + 1 && superCoord.Z = centerSuper.Z + 1 && superCoord.Y = 1 then Containment
+        else
+            let cell = facilityDnaCellIndex level generation worldBlockCoord.X
+            let roll = hashPercent generation.Seed superCoord.X superCoord.Y superCoord.Z
+            match cell with
+            | 0 ->
+                if roll < 38 then Administration
+                elif roll < 63 then Auditorium
+                elif roll < 83 then Atrium
+                else Research
+            | 1 ->
+                if roll < 36 then Research
+                elif roll < 66 then Hydroponics
+                elif roll < 86 then Atrium
+                else Administration
+            | 2 ->
+                if roll < 31 then Research
+                elif roll < 61 then Containment
+                elif roll < 86 then Decontamination
+                else Utilities
+            | _ ->
+                if roll < 36 then Utilities
+                elif roll < 61 then Decontamination
+                elif roll < 81 then Containment
+                else Pool
+
+
+    let private isLargeFacilityRoom zone =
+        match zone with
+        | Hydroponics | Auditorium | Atrium | Pool -> true
+        | Administration | Research | Utilities | Containment | Decontamination -> false
+
+    let private isSmallFacilityRoom zone =
+        match zone with
+        | Administration | Utilities | Decontamination -> true
+        | Research | Hydroponics | Auditorium | Containment | Atrium | Pool -> false
+
+    let private isTallFacilityRoom zone =
+        match zone with
+        | Auditorium | Atrium -> true
+        | Administration | Research | Hydroponics | Utilities | Containment | Pool | Decontamination -> false
+
+    let private isFacilityTerminalLocation
+        (level : VoxelLevel)
+        (generation : VoxelGeneration)
+        (blockCoord : Vector3i)
+        (localBaseX : int)
+        (localFloorY : int)
+        (localBaseZ : int) =
+        let pitch = max 8 generation.FacilityModulePitch
+        let moduleCoord = facilityModuleCoord generation (blockCoordToWorldBlockCoord level blockCoord)
+        let counts = generatedBlockCounts level
+        let centerWorld = level.ActiveBlockOrigin + v3i (counts.X / 2 + 1) 0 (counts.Z / 2 + 1)
+        let centerModule = facilityModuleCoord generation centerWorld
+        let forcedTerminal =
+            moduleCoord.X = centerModule.X && moduleCoord.Z = centerModule.Z && moduleCoord.Y = 0 ||
+            moduleCoord.X = centerModule.X + 2 && moduleCoord.Z = centerModule.Z + 2 && moduleCoord.Y = 1
+        localFloorY = 1 &&
+        localBaseX = pitch / 2 &&
+        localBaseZ = dec pitch - 2 &&
+        (forcedTerminal || hashPercent (generation.Seed + 911) moduleCoord.X moduleCoord.Y moduleCoord.Z < 8)
+
+    let private facilityWallTemplate zone (templates : VoxelGeneratedTemplates) =
+        match zone with
+        | Administration -> templates.WoodVeneer
+        | Research -> templates.Enamel
+        | Hydroponics -> templates.ReinforcedGlass
+        | Utilities -> templates.Concrete
+        | Auditorium -> templates.WoodVeneer
+        | Containment -> templates.ContainmentBrick
+        | Atrium -> templates.Concrete
+        | Pool -> templates.Ceramic
+        | Decontamination -> templates.Enamel
+
+    let private facilityFloorTemplate zone (templates : VoxelGeneratedTemplates) =
+        match zone with
+        | Utilities -> templates.ServiceMetal
+        | Auditorium | Administration -> templates.WoodVeneer
+        | Containment | Atrium -> templates.Concrete
+        | Research | Hydroponics | Pool | Decontamination -> templates.Ceramic
+
+    let private tryFacilityRoomFeature
+        zone
+        (templates : VoxelGeneratedTemplates)
+        localBaseX
+        localSuperX
+        localY
+        localBaseZ
+        localSuperZ =
+        let between minimum maximum value = value >= minimum && value <= maximum
+        let debrisLocation =
+            (localSuperX = 5 && between 9 11 localSuperZ) ||
+            (localSuperX = 6 && localSuperZ = 10) ||
+            (localSuperX = 8 && between 10 11 localSuperZ) ||
+            (localSuperX = 25 && between 20 22 localSuperZ)
+        let debris = localY = 1 && debrisLocation
+        match zone with
+        | Research ->
+            if debris then Some templates.SpalledConcrete
+            elif localY = 1 && localBaseZ = 13 && (localBaseX = 5 || localBaseX = 11)
+            then Some templates.InstrumentPanel
+            elif localY = 2 && localBaseX = 13 && between 6 12 localBaseZ
+            then Some templates.PipeAssembly
+            elif localY = 1 &&
+                 ((between 6 13 localBaseX && (localBaseZ = 5 || localBaseZ = 13)) ||
+                  (between 6 13 localBaseZ && localBaseX = 13))
+            then Some templates.Enamel
+            elif (localY = 1 || localY = 2) &&
+                 localBaseX = 11 &&
+                 between 6 12 localBaseZ &&
+                 not (between 8 10 localBaseZ)
+            then Some templates.ReinforcedGlass
+            else None
+        | Hydroponics ->
+            if debris then Some templates.SpalledConcrete
+            elif localY = 1 &&
+               (localSuperX = 7 || localSuperX = 13 || localSuperX = 19 || localSuperX = 25) &&
+               between 6 26 localSuperZ
+            then Some templates.HydroponicBed
+            elif localY = 2 &&
+                 not debrisLocation &&
+                 (localSuperX = 7 || localSuperX = 13 || localSuperX = 19 || localSuperX = 25) &&
+                 between 6 26 localSuperZ
+            then Some templates.Vegetation
+            elif localY = 1 && (localSuperX = 10 || localSuperX = 22) && between 6 26 localSuperZ
+            then Some templates.ProcessWater
+            else None
+        | Utilities ->
+            if debris then Some templates.SpalledConcrete
+            elif localY = 2 && localBaseX = 13 && between 5 13 localBaseZ
+            then Some templates.PipeAssembly
+            elif localY = 1 && localBaseX = 13 && localBaseZ = 9
+            then Some templates.InstrumentPanel
+            elif (localY = 1 || localY = 2) &&
+                 ((localBaseX = 5 || localBaseX = 13) && (localBaseZ = 5 || localBaseZ = 13))
+            then Some templates.MachineCasing
+            elif localY = 1 &&
+                 ((localBaseX = 4 && between 5 13 localBaseZ) ||
+                  (localBaseZ = 4 && between 5 13 localBaseX))
+            then Some templates.HazardStripe
+            else None
+        | Auditorium ->
+            let seatRow =
+                localSuperZ = 7 || localSuperZ = 10 || localSuperZ = 13 ||
+                localSuperZ = 16 || localSuperZ = 19 || localSuperZ = 22
+            let seatColumn =
+                between 5 27 localSuperX &&
+                localSuperX <> 10 && localSuperX <> 21
+            let seatHeight =
+                if localSuperZ >= 19 then 3
+                elif localSuperZ >= 13 then 2
+                else 1
+            if debris then Some templates.SpalledConcrete
+            elif seatRow && seatColumn && localY = seatHeight
+            then Some templates.Upholstery
+            elif seatRow && seatColumn && localY >= 1 && localY < seatHeight
+            then Some templates.WoodVeneer
+            elif localY = 1 && between 25 28 localSuperZ && between 5 27 localSuperX
+            then Some templates.WoodVeneer
+            elif localY = 4 &&
+                 (localSuperX = 4 || localSuperX = 28) &&
+                 between 5 27 localSuperZ
+            then Some templates.WoodVeneer
+            elif localY = 5 &&
+                 (localSuperX = 4 || localSuperX = 28) &&
+                 between 5 27 localSuperZ
+            then Some templates.ServiceMetal
+            else None
+        | Containment ->
+            if debris then Some templates.SpalledConcrete
+            elif (localY = 1 || localY = 2) &&
+               localBaseX = 10 &&
+               between 5 13 localBaseZ &&
+               not (between 8 10 localBaseZ)
+            then Some templates.ReinforcedGlass
+            elif localY = 1 && localBaseX = 12 && localBaseZ = 9
+            then Some templates.InstrumentPanel
+            elif localY = 1 && localBaseZ = 4 && between 5 13 localBaseX
+            then Some templates.HazardStripe
+            else None
+        | Administration ->
+            if debris then Some templates.SpalledConcrete
+            elif localY = 1 &&
+               ((localBaseX = 13 && between 5 13 localBaseZ) ||
+                (localBaseZ = 13 && between 5 13 localBaseX))
+            then Some templates.WoodVeneer
+            elif localY = 1 && localBaseX = 6 && localBaseZ = 6
+            then Some templates.Upholstery
+            else None
+        | Atrium ->
+            let centralPlanter = between 13 18 localSuperX && between 13 18 localSuperZ
+            if debris then Some templates.SpalledConcrete
+            elif localY = 1 && centralPlanter then Some templates.HydroponicBed
+            elif localY = 2 && not debrisLocation && centralPlanter then Some templates.Vegetation
+            elif localY = 1 &&
+                 ((localSuperX = 10 || localSuperX = 21) && between 11 20 localSuperZ ||
+                  (localSuperZ = 10 || localSuperZ = 21) && between 11 20 localSuperX)
+            then Some templates.WoodVeneer
+            elif localY = 4 &&
+                 (((localSuperX = 4 || localSuperX = 28) && between 5 27 localSuperZ) ||
+                  (between 4 28 localSuperX && between 15 16 localSuperZ))
+            then Some templates.ServiceMetal
+            elif localY = 5 &&
+                 (localSuperZ = 14 || localSuperZ = 17) &&
+                 between 4 28 localSuperX
+            then Some templates.PipeAssembly
+            else None
+        | Pool ->
+            if debris then Some templates.SpalledConcrete
+            elif localY = 1 && between 8 24 localSuperX && between 8 24 localSuperZ
+            then Some templates.ProcessWater
+            elif localY = 1 &&
+                 ((localSuperX = 6 || localSuperX = 26) && between 7 25 localSuperZ)
+            then Some templates.HazardStripe
+            elif localY = 1 && localSuperX = 27 && between 10 22 localSuperZ
+            then Some templates.MachineCasing
+            else None
+        | Decontamination ->
+            if debris then Some templates.SpalledConcrete
+            elif localY = 1 && localBaseX = 12 && localBaseZ = 12
+            then Some templates.InstrumentPanel
+            elif localY = 2 && localBaseX = 12 && between 6 12 localBaseZ
+            then Some templates.PipeAssembly
+            elif (localY = 1 || localY = 2) &&
+                 (localBaseX = 6 || localBaseX = 12) &&
+                 (localBaseZ = 6 || localBaseZ = 12)
+            then Some templates.MachineCasing
+            elif localY = 1 &&
+                 ((localBaseX = 4 && between 5 13 localBaseZ) ||
+                  (localBaseZ = 4 && between 5 13 localBaseX))
+            then Some templates.HazardStripe
+            else None
 
     let private computeGeneratedBlockTemplate (level : VoxelLevel) (generation : VoxelGeneration) (blockCoord : Vector3i) =
         if not (isBlockCoordInBounds level blockCoord) then None
+        elif not (facilityFootprintContains level generation blockCoord) then None
         else
-            let height = generatedHeightAt level generation blockCoord.X blockCoord.Z
+            let counts = generatedBlockCounts level
+            let templates = generation.Templates
+            let pitch = max 8 generation.FacilityModulePitch
+            let superPitch = pitch * 2
+            let floorHeight = max 3 generation.FacilityFloorHeight
+            let corridorWidth = Math.Clamp (generation.FacilityCorridorWidth, 2, pitch - 5)
             let worldBlockCoord = blockCoordToWorldBlockCoord level blockCoord
-            let templateOpt =
-                if blockCoord.Y <= height then
-                    Some (chooseTerrainTemplate generation worldBlockCoord.X worldBlockCoord.Y worldBlockCoord.Z blockCoord.Y height)
-                elif blockCoord.Y <= generation.SeaLevelBlocks then Some generation.Templates.Water
-                elif blockCoord.Y <= generation.LavaLevelBlocks &&
-                     hash01 (generation.Seed + 211) worldBlockCoord.X worldBlockCoord.Y worldBlockCoord.Z < 0.35f then Some generation.Templates.Lava
-                else tryTreeTemplateAt level generation blockCoord
-            match templateOpt with
-            | Some template when generatedBlockRemovedByCave level generation blockCoord template -> None
-            | _ -> templateOpt
+            let localBaseX = positiveRemainder worldBlockCoord.X pitch
+            let localBaseZ = positiveRemainder worldBlockCoord.Z pitch
+            let localSuperX = positiveRemainder worldBlockCoord.X superPitch
+            let localSuperZ = positiveRemainder worldBlockCoord.Z superPitch
+            let localFloorY = positiveRemainder worldBlockCoord.Y floorHeight
+            let zone = facilityZoneAt level generation blockCoord
+            let roomHeight = if isTallFacilityRoom zone then floorHeight * 2 else floorHeight
+            let localY = positiveRemainder worldBlockCoord.Y roomHeight
+            let superCoord = facilitySuperCoord generation worldBlockCoord
+            let layoutRoll =
+                hashPercent
+                    (generation.Seed + 2381)
+                    superCoord.X
+                    superCoord.Y
+                    superCoord.Z
+            let stairRoom =
+                zone = Atrium ||
+                zone = Auditorium && layoutRoll < 65
+            let largeRoom =
+                isLargeFacilityRoom zone ||
+                layoutRoll < 18
+            let smallRoom =
+                not largeRoom &&
+                (isSmallFacilityRoom zone || layoutRoll >= 78)
+            let angularRoom =
+                not largeRoom &&
+                not smallRoom &&
+                layoutRoll >= 42 &&
+                layoutRoll < 70
+            let footprintBoundary = facilityDnaBoundary level generation worldBlockCoord
+            let courtyardSide = facilityDnaCourtyardSide level generation worldBlockCoord
+            let circulationSpine =
+                facilityDnaSpineContainsWorld level generation corridorWidth worldBlockCoord
+            let circulationBoundary =
+                facilityDnaSpineBoundary level generation corridorWidth worldBlockCoord
+            let corridorDoor =
+                abs (localBaseX - (pitch / 2 + 1)) <= 1 ||
+                abs (localBaseZ - (pitch / 2 + 1)) <= 1
+            let roof = blockCoord.Y = dec counts.Y
+            if roof then Some templates.Concrete
+            elif footprintBoundary then
+                if courtyardSide then Some templates.ReinforcedGlass
+                else Some templates.Concrete
+            elif circulationSpine && localFloorY = 0 then
+                Some templates.Ceramic
+            elif circulationSpine then
+                if circulationBoundary && not (corridorDoor && localFloorY <= 2) then
+                    Some (facilityWallTemplate zone templates)
+                elif localFloorY = dec floorHeight &&
+                     hashPercent
+                        (generation.Seed + 1777)
+                        worldBlockCoord.X
+                        (worldBlockCoord.Y / floorHeight)
+                        worldBlockCoord.Z < 6
+                then Some templates.FluorescentFixture
+                elif localFloorY = dec floorHeight then
+                    Some templates.CeilingPanel
+                else None
+            elif localY = 0 then
+                Some (facilityFloorTemplate zone templates)
+            else
+                let wallX, wallZ, door =
+                    if largeRoom then
+                        let wallX =
+                            (localSuperX = corridorWidth || localSuperX = dec superPitch) &&
+                            localSuperZ >= corridorWidth
+                        let wallZ =
+                            (localSuperZ = corridorWidth || localSuperZ = dec superPitch) &&
+                            localSuperX >= corridorWidth
+                        let transverseDoor value =
+                            abs (value - (pitch / 2 + 1)) <= 1 ||
+                            abs (value - (pitch + pitch / 2 + 1)) <= 1
+                        wallX, wallZ,
+                        (wallX && transverseDoor localSuperZ ||
+                         wallZ && transverseDoor localSuperX)
+                    else
+                        let wallX =
+                            (localBaseX = corridorWidth || localBaseX = dec pitch) &&
+                            localBaseZ >= corridorWidth
+                        let wallZ =
+                            (localBaseZ = corridorWidth || localBaseZ = dec pitch) &&
+                            localBaseX >= corridorWidth
+                        let doorCenter = pitch / 2 + 1
+                        wallX, wallZ,
+                        (wallX && abs (localBaseZ - doorCenter) <= 1 ||
+                         wallZ && abs (localBaseX - doorCenter) <= 1)
+                let subdivisionWallX =
+                    smallRoom && localBaseX = pitch / 2 + 1 && localBaseZ > corridorWidth
+                let subdivisionWallZ =
+                    smallRoom && localBaseZ = pitch / 2 + 1 && localBaseX > corridorWidth
+                let subdivisionDoor =
+                    subdivisionWallX && (localBaseZ = 6 || localBaseZ = 12) ||
+                    subdivisionWallZ && (localBaseX = 6 || localBaseX = 12)
+                let angularWallX =
+                    angularRoom &&
+                    localBaseX = pitch / 2 + 2 &&
+                    localBaseZ >= pitch / 2
+                let angularWallZ =
+                    angularRoom &&
+                    localBaseZ = pitch / 2 + 2 &&
+                    localBaseX >= pitch / 2
+                let angularDoor =
+                    angularWallX && abs (localBaseZ - (pitch - 3)) <= 1 ||
+                    angularWallZ && abs (localBaseX - (pitch - 3)) <= 1
+                let placardAgainstWall =
+                    if largeRoom
+                    then localSuperZ = dec (dec superPitch)
+                    else localBaseZ = dec (dec pitch)
+                let placardSupportWorldCoord = worldBlockCoord + v3i 0 0 1
+                let placard =
+                    localY = 2 &&
+                    localBaseX = corridorWidth + 2 &&
+                    placardAgainstWall &&
+                    facilityDnaContainsWorld level generation placardSupportWorldCoord &&
+                    (facilityDnaBoundary level generation placardSupportWorldCoord ||
+                     not (facilityDnaSpineContainsWorld level generation corridorWidth placardSupportWorldCoord))
+                let structuralWall =
+                    ((wallX || wallZ) && not (door && localY <= 2)) ||
+                    ((subdivisionWallX || subdivisionWallZ) &&
+                     not (subdivisionDoor && localY <= 2)) ||
+                    ((angularWallX || angularWallZ) &&
+                     not (angularDoor && localY <= 2))
+                if structuralWall then
+                    Some (facilityWallTemplate zone templates)
+                elif isFacilityTerminalLocation level generation blockCoord localBaseX localFloorY localBaseZ then
+                    Some templates.Terminal
+                elif placard then
+                    Some templates.FacilityPlacard
+                elif localY = 2 &&
+                     (zone = Utilities || zone = Decontamination) &&
+                     localBaseX = 2 && localBaseZ >= 4 && localBaseZ <= 14 then
+                    Some templates.PipeAssembly
+                else
+                    let interior =
+                        if largeRoom then
+                            localSuperX > corridorWidth && localSuperX < dec superPitch &&
+                            localSuperZ > corridorWidth && localSuperZ < dec superPitch
+                        else
+                            localBaseX > corridorWidth && localBaseX < dec pitch &&
+                            localBaseZ > corridorWidth && localBaseZ < dec pitch
+                    let fixture =
+                        localY = dec roomHeight &&
+                        ((interior &&
+                          if largeRoom
+                          then localSuperX % 8 = 0 && localSuperZ % 8 = 0
+                          else localBaseX = pitch / 2 && (localBaseZ = 6 || localBaseZ = 12)) ||
+                         (not interior &&
+                          ((localBaseX = 1 && localBaseZ = pitch / 2) ||
+                           (localBaseZ = 1 && localBaseX = pitch / 2))))
+                    let stairRise = localSuperZ - 8
+                    let stairSupport =
+                        stairRoom &&
+                        localSuperX >= 7 && localSuperX <= 10 &&
+                        localSuperZ >= 9 && localSuperZ <= 11 &&
+                        localY >= 1 &&
+                        localY < stairRise
+                    let stairStep =
+                        stairRoom &&
+                        localSuperX >= 7 && localSuperX <= 10 &&
+                        localSuperZ >= 9 && localSuperZ <= 11 &&
+                        localY = stairRise
+                    let stairLanding =
+                        stairRoom &&
+                        localY = 4 &&
+                        localSuperX >= 7 && localSuperX <= 12 &&
+                        localSuperZ >= 11 && localSuperZ <= 15
+                    let stairRail =
+                        stairRoom &&
+                        localSuperX = 11 &&
+                        localSuperZ >= 9 && localSuperZ <= 15 &&
+                        localY = min 4 (localSuperZ - 8)
+                    if fixture then Some templates.FluorescentFixture
+                    elif localY = dec roomHeight then Some templates.CeilingPanel
+                    elif stairStep then Some templates.StairTread
+                    elif stairSupport then Some templates.Concrete
+                    elif stairLanding then Some templates.ServiceMetal
+                    elif stairRail then Some templates.StairRail
+                    elif interior then
+                        tryFacilityRoomFeature
+                            zone
+                            templates
+                            localBaseX
+                            localSuperX
+                            localY
+                            localBaseZ
+                            localSuperZ
+                    else None
 
     let private tryGetGeneratedBlockTemplate (level : VoxelLevel) blockCoord =
         match level.GenerationOpt with
         | Some generation ->
-            level.GeneratedBlockTemplateCache.GetOrAdd (blockCoord, Func<Vector3i, VoxelBlockTemplate option> (fun coord -> computeGeneratedBlockTemplate level generation coord))
+            level.GeneratedBlockTemplateCache.GetOrAdd
+                (blockCoord,
+                 Func<Vector3i, VoxelBlockTemplate option>
+                    (fun coord -> computeGeneratedBlockTemplate level generation coord))
         | None -> None
 
     let tryGetGeneratedBlockTemplateValue (level : VoxelLevel) (blockCoord : Vector3i) =
         tryGetGeneratedBlockTemplate level blockCoord
 
-    let private generatedCellRemovedByCave (_level : VoxelLevel) (_generation : VoxelGeneration) (_coord : Vector3i) (_cell : VoxelCell) =
-        false
-
-    let tryGetGeneratedCellValueFromTemplateLocal (level : VoxelLevel) (coord : Vector3i) (localCoord : Vector3i) (template : VoxelBlockTemplate) =
+    let tryGetGeneratedCellValueFromTemplateLocal
+        (level : VoxelLevel)
+        (_coord : Vector3i)
+        (localCoord : Vector3i)
+        (template : VoxelBlockTemplate) =
         match level.GenerationOpt with
-        | Some generation ->
+        | Some _ ->
             match template.Cells.TryGetValue localCoord with
-            | (true, cell) when not (generatedCellRemovedByCave level generation coord cell) -> ValueSome cell
-            | (true, _) | (false, _) -> ValueNone
+            | (true, cell) -> ValueSome cell
+            | (false, _) -> ValueNone
         | None -> ValueNone
 
-    let tryGetGeneratedCellValueFromTemplate (level : VoxelLevel) (coord : Vector3i) (blockCoord : Vector3i) (template : VoxelBlockTemplate) =
+    let tryGetGeneratedCellValueFromTemplate
+        (level : VoxelLevel)
+        (coord : Vector3i)
+        (blockCoord : Vector3i)
+        (template : VoxelBlockTemplate) =
         tryGetGeneratedCellValueFromTemplateLocal level coord (coord - blockStartCoord level blockCoord) template
 
     let private tryGetGeneratedCellValue (level : VoxelLevel) (coord : Vector3i) =
         match level.GenerationOpt with
-        | Some generation ->
+        | Some _ ->
             let blockCoord = sourceCoordToBlockCoord level coord
             match tryGetGeneratedBlockTemplate level blockCoord with
             | Some template ->
                 let localCoord = coord - blockStartCoord level blockCoord
                 match template.Cells.TryGetValue localCoord with
-                | (true, cell) when not (generatedCellRemovedByCave level generation coord cell) -> ValueSome cell
-                | (true, _) | (false, _) -> ValueNone
+                | (true, cell) -> ValueSome cell
+                | (false, _) -> ValueNone
             | None -> ValueNone
         | None -> ValueNone
 
@@ -796,115 +1331,73 @@ module VoxelWorld =
         | ValueSome cell -> Some cell
         | ValueNone -> None
 
-    let private spawnSearchRadiusMax = 192
-    let private spawnLakeSearchRadius = 20
-    let private spawnCandidatesMax = 256
-
-    let pickGeneratedSpawn (level : VoxelLevel) =
+    let pickGeneratedZoneSpawn desiredZone (level : VoxelLevel) =
         match level.GenerationOpt with
         | Some generation ->
-            let macroCounts = generatedBlockCounts level
-            let centerX = macroCounts.X / 2
-            let centerZ = macroCounts.Z / 2
-            let heightCache = Dictionary<int, int> ()
-            let getHeight x z =
-                let key = z * macroCounts.X + x
-                let mutable height = 0
-                if heightCache.TryGetValue (key, &height) then height
-                else
-                    height <- generatedHeightAt level generation x z
-                    heightCache[key] <- height
-                    height
-            let tryNearestWaterDistance x z =
-                let mutable found = false
-                let mutable foundDistance = 0
-                let mutable radius = 1
-                let tryWater wx wz =
-                    wx >= 0 && wx < macroCounts.X &&
-                    wz >= 0 && wz < macroCounts.Z &&
-                    getHeight wx wz < generation.SeaLevelBlocks
-                while not found && radius <= spawnLakeSearchRadius do
-                    let zMin = z - radius
-                    let zMax = z + radius
-                    let xMin = x - radius
-                    let xMax = x + radius
-                    let mutable dx = -radius
-                    while not found && dx <= radius do
-                        if tryWater (x + dx) zMin || tryWater (x + dx) zMax then
-                            found <- true
-                            foundDistance <- radius
-                        dx <- inc dx
-                    let mutable dz = -radius + 1
-                    while not found && dz <= radius - 1 do
-                        if tryWater xMin (z + dz) || tryWater xMax (z + dz) then
-                            found <- true
-                            foundDistance <- radius
-                        dz <- inc dz
-                    radius <- inc radius
-                if found then ValueSome foundDistance else ValueNone
-            let isSpawnSafe x z height =
-                let feet = v3i x (height + 1) z
-                let head = v3i x (height + 2) z
-                let terrainBlock = v3i x height z
-                height >= generation.SeaLevelBlocks &&
-                isBlockCoordInBounds level feet &&
-                isBlockCoordInBounds level head &&
-                (match tryGetGeneratedBlockTemplate level terrainBlock with Some template -> template.Solid | None -> false) &&
-                Option.isNone (tryGetGeneratedBlockTemplate level feet) &&
-                Option.isNone (tryGetGeneratedBlockTemplate level head)
-            let searchRadius = min spawnSearchRadiusMax (max macroCounts.X macroCounts.Z / 2)
-            let candidates = ResizeArray<struct (single * int * int * int)> ()
-            for z in max 0 (centerZ - searchRadius) .. min (dec macroCounts.Z) (centerZ + searchRadius) do
-                for x in max 0 (centerX - searchRadius) .. min (dec macroCounts.X) (centerX + searchRadius) do
-                    let height = getHeight x z
-                    if height >= generation.SeaLevelBlocks then
-                        let heightAboveSea = height - generation.SeaLevelBlocks
-                        let waterScore =
-                            match tryNearestWaterDistance x z with
-                            | ValueSome distance -> 90.0f + single (spawnLakeSearchRadius - distance) * 3.0f
-                            | ValueNone -> 0.0f
-                        let mountainScore =
-                            single heightAboveSea * 14.0f +
-                            if heightAboveSea >= 4 then 36.0f else 0.0f
-                        let dx = x - centerX
-                        let dz = z - centerZ
-                        let centerPenalty = single (dx * dx + dz * dz) * 0.00025f
-                        let score = mountainScore + waterScore - centerPenalty
-                        candidates.Add (struct (score, x, z, height))
-            let candidates = candidates.ToArray ()
-            Array.sortInPlaceWith
-                (fun (struct (leftScore, leftX, leftZ, _)) (struct (rightScore, rightX, rightZ, _)) ->
-                    let scoreCompare = compare rightScore leftScore
-                    if scoreCompare <> 0 then scoreCompare
-                    else
-                        let leftDistance = (leftX - centerX) * (leftX - centerX) + (leftZ - centerZ) * (leftZ - centerZ)
-                        let rightDistance = (rightX - centerX) * (rightX - centerX) + (rightZ - centerZ) * (rightZ - centerZ)
-                        compare leftDistance rightDistance)
-                candidates
-            let mutable spawnOpt = None
-            let mutable i = 0
-            while spawnOpt.IsNone && i < min spawnCandidatesMax candidates.Length do
-                let struct (_, x, z, height) = candidates[i]
-                if isSpawnSafe x z height then
-                    spawnOpt <- Some (blockTopPosition level (v3i x height z))
-                i <- inc i
-            match spawnOpt with
-            | Some spawn -> spawn
-            | None ->
-                let mutable fallbackOpt = None
-                let mutable radius = 0
-                while fallbackOpt.IsNone && radius < max macroCounts.X macroCounts.Z do
-                    for z in max 0 (centerZ - radius) .. min (dec macroCounts.Z) (centerZ + radius) do
-                        for x in max 0 (centerX - radius) .. min (dec macroCounts.X) (centerX + radius) do
-                            if fallbackOpt.IsNone then
-                                let height = getHeight x z
-                                if isSpawnSafe x z height then
-                                    fallbackOpt <- Some (blockTopPosition level (v3i x height z))
-                    radius <- inc radius
-                match fallbackOpt with
-                | Some spawn -> spawn
-                | None -> blockTopPosition level (v3i centerX generation.SeaLevelBlocks centerZ)
+            let counts = generatedBlockCounts level
+            let pitch = max 8 generation.FacilityModulePitch
+            let floorHeight = max 3 generation.FacilityFloorHeight
+            let roomCenter = pitch / 2
+            let firstWorldX =
+                level.ActiveBlockOrigin.X +
+                positiveRemainder
+                    (roomCenter - positiveRemainder level.ActiveBlockOrigin.X pitch)
+                    pitch
+            let firstWorldZ =
+                level.ActiveBlockOrigin.Z +
+                positiveRemainder
+                    (roomCenter - positiveRemainder level.ActiveBlockOrigin.Z pitch)
+                    pitch
+            let lastWorldX = level.ActiveBlockOrigin.X + counts.X - 1
+            let lastWorldZ = level.ActiveBlockOrigin.Z + counts.Z - 1
+            let centerWorldX = level.ActiveBlockOrigin.X + counts.X / 2
+            let centerWorldZ = level.ActiveBlockOrigin.Z + counts.Z / 2
+            let expectedFloor = facilityFloorTemplate desiredZone generation.Templates
+            let mutable bestDistance = Int64.MaxValue
+            let mutable bestBlockCoordOpt = None
+            for worldZ in firstWorldZ .. pitch .. lastWorldZ do
+                for worldX in firstWorldX .. pitch .. lastWorldX do
+                    let blockCoord =
+                        v3i
+                            (worldX - level.ActiveBlockOrigin.X)
+                            0
+                            (worldZ - level.ActiveBlockOrigin.Z)
+                    let hasRequiredGeometry =
+                        if desiredZone <> Atrium then true
+                        else
+                            match
+                                tryGetGeneratedBlockTemplate
+                                    level
+                                    (blockCoord + v3i 4 (floorHeight) 4),
+                                tryGetGeneratedBlockTemplate
+                                    level
+                                    (blockCoord + v3i 0 (floorHeight) 7)
+                            with
+                            | Some landing, Some bridge ->
+                                landing.Name = generation.Templates.ServiceMetal.Name &&
+                                bridge.Name = generation.Templates.ServiceMetal.Name
+                            | _ -> false
+                    if hasRequiredGeometry &&
+                       facilityFootprintContains level generation blockCoord &&
+                       facilityZoneAt level generation blockCoord = desiredZone then
+                        match tryGetGeneratedBlockTemplate level blockCoord with
+                        | Some floor when floor.Name = expectedFloor.Name &&
+                                          Option.isNone (tryGetGeneratedBlockTemplate level (blockCoord + v3iUp)) &&
+                                          Option.isNone (tryGetGeneratedBlockTemplate level (blockCoord + v3iUp * 2)) ->
+                            let dx = int64 (worldX - centerWorldX)
+                            let dz = int64 (worldZ - centerWorldZ)
+                            let distance = dx * dx + dz * dz
+                            if distance < bestDistance then
+                                bestDistance <- distance
+                                bestBlockCoordOpt <- Some blockCoord
+                        | Some _ | None -> ()
+            match bestBlockCoordOpt with
+            | Some spawnBlockCoord -> blockTopPosition level spawnBlockCoord
+            | None -> failwithf "VoxelForge facility generated no clear %A room." desiredZone
         | None -> level.SpawnPosition
+
+    let pickGeneratedSpawn (level : VoxelLevel) =
+        pickGeneratedZoneSpawn Research level
 
     let getEditRevision (level : VoxelLevel) =
         level.EditRevision.Value
@@ -1016,6 +1509,7 @@ module VoxelWorld =
         for struct (localCoord, cell) in template.Voxels do
             let coord = v3i (start.X + localCoord.X) (start.Y + localCoord.Y) (start.Z + localCoord.Z)
             setSourceCell level coord cell
+
 
     let blockContainsCell (level : VoxelLevel) (blockCoord : Vector3i) =
         match tryGetBlockEditValue level.BlockEdits blockCoord with
